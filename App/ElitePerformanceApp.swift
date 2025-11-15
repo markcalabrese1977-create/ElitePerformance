@@ -1,19 +1,7 @@
 import SwiftUI
 import SwiftData
 
-@main
-struct ElitePerformanceApp: App {
-    @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
-
-    var body: some Scene {
-        WindowGroup {
-            RootView()
-        }
-        .modelContainer(sharedModelContainer)
-    }
-}
-
-// MARK: - RootView
+// MARK: - Root View
 
 struct RootView: View {
     @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
@@ -22,30 +10,59 @@ struct RootView: View {
     var body: some View {
         Group {
             if hasOnboarded {
-                HomeView()
+                MainTabView()
             } else {
-                OnboardingView(onComplete: { goal, days, units in
-                    // Create user
-                    let user = User(units: units, coachVoice: .casual, progressionEnabled: true)
+                OnboardingView { goal, days, units in
+                    // Create user record
+                    let user = User(
+                        units: units,
+                        coachVoice: .casual,
+                        progressionEnabled: true
+                    )
                     context.insert(user)
-                    // Seed starter exercises + session
-                    ProgramGenerator.seedInitialProgram(goal: goal, daysPerWeek: days, context: context)
+
+                    // Seed initial program based on onboarding answers
+                    ProgramGenerator.seedInitialProgram(
+                        goal: goal,
+                        daysPerWeek: days,
+                        context: context
+                    )
+
                     try? context.save()
                     hasOnboarded = true
-                })
+                }
             }
         }
     }
 }
 
-// MARK: - SwiftData Container
+// MARK: - App Entry
 
-fileprivate var sharedModelContainer: ModelContainer = {
-    let schema = Schema([User.self, Exercise.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self])
-    let config = ModelConfiguration(isStoredInMemoryOnly: false)
-    do {
-        return try ModelContainer(for: schema, configurations: [config])
-    } catch {
-        fatalError("Could not create ModelContainer: \(error)")
+@main
+struct ElitePerformanceApp: App {
+
+    private var sharedModelContainer: ModelContainer = {
+        let schema = Schema([
+            User.self,
+            Session.self,
+            SessionItem.self,
+            SetLog.self,
+            PRIndex.self
+        ])
+
+        let config = ModelConfiguration(isStoredInMemoryOnly: false)
+
+        do {
+            return try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            fatalError("Could not create ModelContainer: \(error)")
+        }
+    }()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .modelContainer(sharedModelContainer)
+        }
     }
-}()
+}

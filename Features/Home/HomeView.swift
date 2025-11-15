@@ -3,45 +3,54 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \Session.date, order: .forward, animation: .default) private var sessions: [Session]
+    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if let today = sessions.first(where: { Calendar.current.isDateInToday($0.date) }) {
-                    SessionCard(session: today)
-                } else if let first = sessions.first {
-                    SessionCard(session: first)
-                } else {
-                    Text("No session yet — pull down to refresh or add via Onboarding.")
+            List {
+                ForEach(sessions) { session in
+                    NavigationLink {
+                        SessionView(session: session)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(session.date, style: .date)
+                                .font(.headline)
+
+                            Text(session.status.displayTitle)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                            if let firstItem = session.items.sorted(by: { $0.order < $1.order }).first {
+                                let ex = ExerciseCatalog.all.first { $0.id == firstItem.exerciseId }
+                                Text(ex?.name ?? "No exercises yet")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
                 }
-                Spacer()
             }
-            .padding()
-            .navigationTitle("Do This Today")
+            .navigationTitle("Sessions")
         }
     }
 }
 
-struct SessionCard: View {
-    @Environment(\.modelContext) private var context
-    @State var session: Session
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Today's Session").font(.title2).bold()
-            if let first = session.items.sorted(by: { $0.order < $1.order }).first, let ex = first.exercise {
-                Text("\(ex.name)").font(.headline)
-                Text("Target: \(first.targetSets) × \(first.targetReps) @ RIR \(first.targetRIR)")
-                    .foregroundStyle(.secondary)
-            }
-            NavigationLink("Start / Resume") {
-                SessionView(session: session)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
-    }
+#Preview {
+    HomeView()
+        .modelContainer(previewContainer)
 }
+
+// Simple preview container to keep Xcode happy.
+// Adjust or remove if you already have one elsewhere.
+private var previewContainer: ModelContainer = {
+    let schema = Schema([
+        User.self,
+        Session.self,
+        SessionItem.self,
+        SetLog.self,
+        PRIndex.self
+    ])
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    // We’ll swallow the error for preview-only container.
+    return try! ModelContainer(for: schema, configurations: [config])
+}()

@@ -1,48 +1,87 @@
 import Foundation
 import SwiftData
 
+enum SessionStatus: String, Codable, CaseIterable { case planned, inProgress, completed }
+
 @Model
 final class Session {
-    enum Status: String, Codable, CaseIterable, Identifiable { case planned, inProgress, completed; var id: String { rawValue } }
     var date: Date
-    var statusRaw: String
+    var status: SessionStatus
     var readinessStars: Int
     @Relationship(deleteRule: .cascade) var items: [SessionItem]
 
-    init(date: Date = Date(), status: Status = .planned, readinessStars: Int = 0, items: [SessionItem] = []) {
+    init(date: Date,
+         status: SessionStatus = .planned,
+         readinessStars: Int = 0,
+         items: [SessionItem] = []) {
         self.date = date
-        self.statusRaw = status.rawValue
+        self.status = status
         self.readinessStars = readinessStars
         self.items = items
-    }
-
-    var status: Status {
-        get { Status(rawValue: statusRaw) ?? .planned }
-        set { statusRaw = newValue.rawValue }
     }
 }
 
 @Model
 final class SessionItem {
     var order: Int
-    @Relationship var exercise: Exercise?
+
+    /// ID of the exercise in `ExerciseCatalog` / `CatalogExercise`.
+    var exerciseId: String
+
+    // Planned targets (aggregate)
     var targetReps: Int
     var targetSets: Int
     var targetRIR: Int
     var suggestedLoad: Double
+
     @Relationship(deleteRule: .cascade) var logs: [SetLog]
 
-    init(order: Int, exercise: Exercise?, targetReps: Int, targetSets: Int, targetRIR: Int, suggestedLoad: Double, logs: [SetLog] = []) {
+    // Planned pattern per set (v1)
+    /// Planned reps per set (index 0 = Set 1).
+    var plannedRepsBySet: [Int]
+    /// Planned load per set (same index as plannedRepsBySet).
+    var plannedLoadsBySet: [Double]
+
+    // Simple inline logging for v1
+    /// Logged reps per set (index 0 = Set 1, etc.).
+    var actualReps: [Int]
+    /// Logged load per set (same indexing as actualReps).
+    var actualLoads: [Double]
+    /// Whether this exercise has any logged work.
+    var isCompleted: Bool
+    /// Whether this session hit a new PR for this exercise.
+    var isPR: Bool
+    
+    init(
+        order: Int,
+        exerciseId: String,
+        targetReps: Int,
+        targetSets: Int,
+        targetRIR: Int,
+        suggestedLoad: Double,
+        plannedRepsBySet: [Int] = [],
+        plannedLoadsBySet: [Double] = [],
+        logs: [SetLog] = [],
+        actualReps: [Int] = [],
+        actualLoads: [Double] = [],
+        isCompleted: Bool = false,
+        isPR: Bool = false
+    ) {
         self.order = order
-        self.exercise = exercise
+        self.exerciseId = exerciseId
         self.targetReps = targetReps
         self.targetSets = targetSets
         self.targetRIR = targetRIR
         self.suggestedLoad = suggestedLoad
+        self.plannedRepsBySet = plannedRepsBySet
+        self.plannedLoadsBySet = plannedLoadsBySet
         self.logs = logs
+        self.actualReps = actualReps
+        self.actualLoads = actualLoads
+        self.isCompleted = isCompleted
+        self.isPR = isPR
     }
 }
-
 @Model
 final class SetLog {
     var setNumber: Int
@@ -52,12 +91,14 @@ final class SetLog {
     var actualReps: Int
     var actualRIR: Int
     var actualLoad: Double
-    var notes: String
-    var isPR: Bool
 
-    init(setNumber: Int, targetReps: Int, targetRIR: Int, targetLoad: Double,
-         actualReps: Int = 0, actualRIR: Int = 3, actualLoad: Double = 0,
-         notes: String = "", isPR: Bool = false) {
+    init(setNumber: Int,
+         targetReps: Int,
+         targetRIR: Int,
+         targetLoad: Double,
+         actualReps: Int,
+         actualRIR: Int,
+         actualLoad: Double) {
         self.setNumber = setNumber
         self.targetReps = targetReps
         self.targetRIR = targetRIR
@@ -65,20 +106,5 @@ final class SetLog {
         self.actualReps = actualReps
         self.actualRIR = actualRIR
         self.actualLoad = actualLoad
-        self.notes = notes
-        self.isPR = isPR
-    }
-}
-
-@Model
-final class PRIndex {
-    var exerciseName: String
-    var bestReps: Int
-    var bestE1RM: Double
-
-    init(exerciseName: String, bestReps: Int = 0, bestE1RM: Double = 0) {
-        self.exerciseName = exerciseName
-        self.bestReps = bestReps
-        self.bestE1RM = bestE1RM
     }
 }
