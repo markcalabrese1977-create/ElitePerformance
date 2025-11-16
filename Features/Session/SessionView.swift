@@ -5,6 +5,7 @@ import SwiftData
 
 struct SessionView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @Bindable var session: Session
 
     @State private var selectedItemForLogging: SessionItem?
@@ -25,14 +26,10 @@ struct SessionView: View {
             Text(session.date, style: .date)
                 .font(.headline)
 
-            HStack(spacing: 8) {
-                Text(session.status.displayTitle)
-                if session.weekIndex > 0 {
-                    Text("Week \(session.weekIndex)")
-                }
-            }
-            .font(.subheadline)
-            .foregroundColor(.secondary)
+            // SessionStatus.displayTitle is defined elsewhere in the project.
+            Text(session.status.displayTitle)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -72,15 +69,9 @@ struct SessionView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Complete") {
-                        // 1) Mark the session completed and persist
                         session.status = .completed
                         try? context.save()
-
-                        // 2) Defer navigation to the next run loop turn
-                        //    so SwiftUI builds SessionRecapView off the updated model.
-                        DispatchQueue.main.async {
-                            navigateToRecap = true
-                        }
+                        navigateToRecap = true
                     }
                 }
             }
@@ -89,6 +80,13 @@ struct SessionView: View {
             }
             .sheet(item: $selectedItemForSwap) { item in
                 ExerciseSwapSheet(item: item)
+            }
+            .onChange(of: navigateToRecap) { isActive in
+                // When recap is dismissed after a completed session,
+                // pop SessionView and return to Today.
+                if !isActive && session.status == .completed {
+                    dismiss()
+                }
             }
         }
     }
@@ -182,7 +180,7 @@ struct SessionItemRow: View {
     }
 }
 
-// MARK: - Log Sheet (Plan vs Actual per set, 0.5 lb loads + RIR + coaching + propagation)
+// MARK: - Log Sheet (Stepper-based, with load profiling)
 
 struct ExerciseLogSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -190,11 +188,10 @@ struct ExerciseLogSheet: View {
 
     @Bindable var item: SessionItem
 
-    @State private var actualLoads: [Double]
-    @State private var actualReps: [Int]
-    @State private var actualRIRs: [Int]
-
     private let maxSets = 5
+
+    @State private var loads: [Double]
+    @State private var reps: [Int]
 
     private var exercise: CatalogExercise? {
         ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
@@ -203,41 +200,26 @@ struct ExerciseLogSheet: View {
     init(item: SessionItem) {
         self._item = Bindable(wrappedValue: item)
 
-        var loads = Array(repeating: 0.0, count: maxSets)
-        var reps  = Array(repeating: 0, count: maxSets)
-        var rirs  = Array(repeating: item.targetRIR, count: maxSets)
+        var initialLoads = Array(repeating: 0.0, count: maxSets)
+        var initialReps  = Array(repeating: 0, count: maxSets)
 
-        // Seed from existing actuals first
-        for idx in 0..<min(maxSets, item.actualLoads.count) {
-            loads[idx] = item.actualLoads[idx]
-        }
+        // Seed from existing actuals if they exist
         for idx in 0..<min(maxSets, item.actualReps.count) {
-            reps[idx] = item.actualReps[idx]
+            initialReps[idx] = item.actualReps[idx]
         }
-        for idx in 0..<min(maxSets, item.actualRIRs.count) {
-            rirs[idx] = item.actualRIRs[idx]
+        for idx in 0..<min(maxSets, item.actualLoads.count) {
+            initialLoads[idx] = item.actualLoads[idx]
         }
 
-        // Where actuals are zero, fall back to planned loads/reps/targetRIR
-        for idx in 0..<min(maxSets, item.plannedLoadsBySet.count) {
-            if loads[idx] == 0 {
-                loads[idx] = item.plannedLoadsBySet[idx]
-            }
-        }
+        // Where no actual reps, fall back to planned reps
         for idx in 0..<min(maxSets, item.plannedRepsBySet.count) {
-            if reps[idx] == 0 {
-                reps[idx] = item.plannedRepsBySet[idx]
-            }
-        }
-        for idx in 0..<maxSets {
-            if rirs[idx] <= 0 {
-                rirs[idx] = item.targetRIR
+            if initialReps[idx] == 0 {
+                initialReps[idx] = item.plannedRepsBySet[idx]
             }
         }
 
-        _actualLoads = State(initialValue: loads)
-        _actualReps = State(initialValue: reps)
-        _actualRIRs = State(initialValue: rirs)
+        _loads = State(initialValue: initialLoads)
+        _reps  = State(initialValue: initialReps)
     }
 
     var body: some View {
@@ -252,38 +234,19 @@ struct ExerciseLogSheet: View {
 
                 Section(header: Text("Log sets")) {
                     ForEach(0..<maxSets, id: \.self) { index in
-                        // Planned values with safe fallbacks
-                        let plannedLoad: Double = {
-                            if index < item.plannedLoadsBySet.count {
-                                return item.plannedLoadsBySet[index]
-                            } else {
-                                return item.suggestedLoad
-                            }
-                        }()
-
-                        let plannedReps: Int = {
-                            if index < item.plannedRepsBySet.count {
-                                return item.plannedRepsBySet[index]
-                            } else {
-                                return item.targetReps
-                            }
-                        }()
-
-                        let plannedRIR = item.targetRIR
-
                         SessionSetRowView(
                             index: index,
-                            plannedLoad: plannedLoad,
-                            plannedReps: plannedReps,
-                            plannedRIR: plannedRIR,
-                            actualLoad: $actualLoads[index],
-                            actualReps: $actualReps[index],
-                            actualRIR: $actualRIRs[index]
+                            plannedLoad: plannedLoad(for: index),
+                            plannedReps: plannedReps(for: index),
+                            actualLoad: $loads[index],
+                            actualReps: $reps[index]
                         )
                     }
 
-                    // No add/remove buttons in this version.
-                    // Use as many of the 5 rows as you actually do.
+                    Text("Tip: if you only set the first set's load, the app will copy it to later sets when saving.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
                 }
             }
             .navigationTitle("Log Exercise")
@@ -303,76 +266,59 @@ struct ExerciseLogSheet: View {
         }
     }
 
-    private func saveLogs() {
-        // 1) Autopopulate loads:
-        // When you log your first non-zero load, use it for later sets
-        // that have reps but still zero load.
-        var normalizedLoads = actualLoads
-
-        if let baseIndex = normalizedLoads.firstIndex(where: { $0 > 0.0 }) {
-            let baseLoad = normalizedLoads[baseIndex]
-            for idx in 0..<normalizedLoads.count {
-                if normalizedLoads[idx] == 0.0 && actualReps[idx] > 0 {
-                    normalizedLoads[idx] = baseLoad
-                }
-            }
+    private func plannedReps(for index: Int) -> Int {
+        if index < item.plannedRepsBySet.count {
+            return item.plannedRepsBySet[index]
         }
-
-        // 2) Persist back to the SessionItem
-        item.actualReps = actualReps
-        item.actualLoads = normalizedLoads
-        item.actualRIRs = actualRIRs
-
-        // 3) Run the coaching engine on this execution
-        if let rec = CoachingEngine.recommend(for: item),
-           let nextLoad = rec.nextSuggestedLoad {
-            // Store note + next load on this item (for debugging / future use).
-            item.coachNote = rec.message
-            item.nextSuggestedLoad = nextLoad
-
-            // Push that next load into the next occurrence of this exercise.
-            propagateNextLoad(for: item, nextLoad: nextLoad)
-        }
-
-        // 4) Save to SwiftData
-        try? context.save()
+        return item.targetReps
     }
 
-    /// Find the next SessionItem with the same exercise on a later date
-    /// and seed its planned loads with the recommended nextLoad.
-    private func propagateNextLoad(for currentItem: SessionItem, nextLoad: Double) {
-        let descriptor = FetchDescriptor<Session>()
-
-        guard let sessions = try? context.fetch(descriptor),
-              !sessions.isEmpty else {
-            return
+    private func plannedLoad(for index: Int) -> Double {
+        if index < item.plannedLoadsBySet.count {
+            return item.plannedLoadsBySet[index]
         }
-
-        // Find the session that owns the current item.
-        guard let currentSession = sessions.first(where: { session in
-            session.items.contains(where: { $0.id == currentItem.id })
-        }) else {
-            return
+        if item.suggestedLoad > 0 {
+            return item.suggestedLoad
         }
+        return 0
+    }
 
-        let currentDate = currentSession.date
+    private func saveLogs() {
+        var newReps: [Int] = []
+        var newLoads: [Double] = []
 
-        // Sort sessions by date so "next" is chronological.
-        let sortedSessions = sessions.sorted { $0.date < $1.date }
+        var lastNonZeroLoad: Double = 0
 
-        // Find the next SessionItem with the same exerciseId on a later date.
-        for session in sortedSessions {
-            guard session.date > currentDate else { continue }
+        for idx in 0..<maxSets {
+            let r = reps[idx]
+            var l = loads[idx]
 
-            if let nextItem = session.items.first(where: { $0.exerciseId == currentItem.exerciseId }) {
-                let setCount = max(nextItem.targetSets, 1)
-
-                nextItem.suggestedLoad = nextLoad
-                nextItem.plannedLoadsBySet = Array(repeating: nextLoad, count: setCount)
-
-                break // only update the first future occurrence
+            // If load is zero but we have a previous non-zero load, profile it forward
+            if l <= 0, lastNonZeroLoad > 0 {
+                l = lastNonZeroLoad
             }
+
+            if l > 0 {
+                lastNonZeroLoad = l
+            }
+
+            newReps.append(r)
+            newLoads.append(l)
         }
+
+        item.actualReps = newReps
+        item.actualLoads = newLoads
+
+        // Run coaching engine for this execution (optional next load)
+        if let rec = CoachingEngine.recommend(for: item),
+           let next = rec.nextSuggestedLoad,
+           next > 0 {
+
+            // Store the next suggested load on this item so future sessions can seed from it.
+            item.suggestedLoad = next
+        }
+
+        try? context.save()
     }
 }
 
@@ -445,7 +391,7 @@ struct ExerciseSwapSheet: View {
     }
 }
 
-// MARK: - Per-set row (Plan vs Actual with 0.5 lb increments + RIR)
+// MARK: - Per-set row with Steppers
 
 struct SessionSetRowView: View {
     /// Index of the set (0-based here, but will display as 1-based)
@@ -454,15 +400,13 @@ struct SessionSetRowView: View {
     /// Planned values
     let plannedLoad: Double
     let plannedReps: Int
-    let plannedRIR: Int
 
-    /// Bindings into the actual values stored on SessionItem
+    /// Bindings into the actual values stored on the parent sheet
     @Binding var actualLoad: Double
     @Binding var actualReps: Int
-    @Binding var actualRIR: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Set \(index + 1)")
                 .font(.caption)
                 .fontWeight(.semibold)
@@ -473,50 +417,39 @@ struct SessionSetRowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps) @ RIR \(plannedRIR)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if plannedLoad > 0 {
+                    Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("\(plannedReps) reps")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             // ACTUAL row
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("Actual:")
-                        .font(.subheadline)
+            HStack(spacing: 8) {
+                Text("Actual:")
+                    .font(.subheadline)
 
-                    // Load with 0.5 lb increments
-                    Stepper(
-                        value: $actualLoad,
-                        in: 0...1000,
-                        step: 2.5
-                    ) {
-                        Text("\(actualLoad, specifier: "%.1f") lb")
-                            .frame(minWidth: 70, alignment: .leading)
-                    }
-
-                    // Reps
-                    Stepper(
-                        value: $actualReps,
-                        in: 0...50
-                    ) {
-                        Text("\(actualReps) reps")
-                            .frame(minWidth: 60, alignment: .leading)
-                    }
+                // Load with 0.5 lb increments
+                Stepper(
+                    value: $actualLoad,
+                    in: 0...1000,
+                    step: 0.5
+                ) {
+                    Text("\(actualLoad, specifier: "%.1f") lb")
+                        .frame(minWidth: 70, alignment: .leading)
                 }
 
-                // RIR
-                HStack(spacing: 8) {
-                    Text("RIR:")
-                        .font(.caption)
-
-                    Stepper(
-                        value: $actualRIR,
-                        in: 0...5
-                    ) {
-                        Text("\(actualRIR)")
-                            .font(.caption)
-                            .frame(minWidth: 24, alignment: .leading)
-                    }
+                // Reps
+                Stepper(
+                    value: $actualReps,
+                    in: 0...50
+                ) {
+                    Text("\(actualReps) reps")
+                        .frame(minWidth: 60, alignment: .leading)
                 }
             }
         }

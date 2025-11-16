@@ -1,280 +1,166 @@
 import Foundation
-import SwiftData
 
-/// Simple coaching output for a single exercise in a session.
+/// What the coach says and does for a single exercise:
+/// - `message`: text shown in recap / coaching note
+/// - `nextSuggestedLoad`: what to seed as the next-session planned load (if any)
 struct CoachingRecommendation {
-    /// Human-readable guidance for the *next* time you do this lift.
     let message: String
-    /// Next suggested working-set load. If `nil`, keep the current plan.
     let nextSuggestedLoad: Double?
 }
 
-/// Engine that compares planned vs actual performance and suggests what to do next time.
+/// Central decision-maker for how to progress or hold load on a single exercise
+/// based on the most recent session's performance.
 ///
-/// v1.1 focuses on:
-/// - 3 working sets ("3 to grow")
-/// - An optional 4th diagnostic set ("1 to know")
-/// - Load progression / hold / repeat decisions
-/// - Using RIR to scale how big a jump you take when you overperform
-enum CoachingEngine {
+/// v2 rules:
+/// - 0 RIR + big rep crash = DO NOT auto-increase
+/// - Under target reps = fix reps first, no increase
+/// - Over-target reps without failure = small load bump
+/// - On-target = repeat once, then consider bump
+struct CoachingEngine {
 
     static func recommend(for item: SessionItem) -> CoachingRecommendation? {
-        let loggedSets = item.loggedSetsCount
-        let plannedSets = item.plannedSetCount
-        let plannedTopReps = item.plannedTopReps
+        let reps = item.actualReps
+        let loads = item.actualLoads
 
-        // If literally nothing meaningful was logged, don't change future plans.
-        guard loggedSets > 0 else {
-            return CoachingRecommendation(
-                message: "No meaningful work logged on this lift. Repeat this prescription next time before progressing.",
-                nextSuggestedLoad: nil
-            )
+        let count = min(reps.count, loads.count)
+        guard count > 0 else { return nil }
+
+        // Only treat sets with both reps and load as "working" sets.
+        var workingIndices: [Int] = []
+        for idx in 0..<count {
+            if reps[idx] > 0 && loads[idx] > 0 {
+                workingIndices.append(idx)
+            }
+        }
+        guard !workingIndices.isEmpty else { return nil }
+
+        // Base load anchor: last working set's load
+        let baseLoad: Double = {
+            if let lastIdx = workingIndices.last {
+                return loads[lastIdx]
+            }
+            return 0
+        }()
+
+        // Planned targets
+        let plannedTopReps = item.plannedRepsBySet.max() ?? item.targetReps
+        let targetReps = item.targetReps
+        let targetRIR = item.targetRIR
+
+        // Actual performance metrics
+        let firstIndex = workingIndices.first!
+        let lastIndex  = workingIndices.last!
+        let firstReps  = reps[firstIndex]
+        let lastReps   = reps[lastIndex]
+        let repDrop    = firstReps - lastReps
+        let bestReps   = workingIndices.map { reps[$0] }.max() ?? 0
+
+        // RIR metrics if your model has actualRIRs (optional but supported).
+        var avgRIR: Double? = nil
+        var minRIR: Int? = nil
+        if let actualRIRs = getActualRIRs(from: item),
+           actualRIRs.count == reps.count {
+
+            let workingRIRs: [Int] = workingIndices.compactMap { idx in
+                idx < actualRIRs.count ? actualRIRs[idx] : nil
+            }
+
+            if !workingRIRs.isEmpty {
+                let sum = workingRIRs.reduce(0, +)
+                avgRIR = Double(sum) / Double(workingRIRs.count)
+                minRIR = workingRIRs.min()
+            }
         }
 
-        // Determine "working" vs "diagnostic" sets based on your 3-to-grow-1-to-know rule.
-        let workingSetIndices = workingSetsIndices(loggedSets: loggedSets)
-        let diagnosticIndex = diagnosticSetIndex(loggedSets: loggedSets)
-
-        // Pull reps for working sets.
-        let workingReps: [Int] = workingSetIndices.compactMap { idx in
-            idx < item.actualReps.count ? item.actualReps[idx] : nil
+        func nextLoad(from base: Double, step: Double) -> Double? {
+            guard base > 0 else { return nil }
+            return max(0, base + step)
         }
 
-        let bestWorkingReps = workingReps.max() ?? 0
-        let firstWorkingReps = workingReps.first ?? 0
-        let lastWorkingReps = workingReps.last ?? 0
+        // ---- RULESET ----
+        // We check the strongest signals first.
 
-        // Baseline load = what you actually used on working sets, or fallbacks.
-        guard let baselineLoad = baselineLoad(for: item) else {
-            // If we can't infer a load, this is basically a calibration session.
-            return CoachingRecommendation(
-                message: "Calibration-only data for this lift. Establish a stable working weight across 3 sets before progressing.",
-                nextSuggestedLoad: nil
-            )
-        }
-
-        // Detect major fatigue crash across working sets.
-        let fatigueCrash = detectFatigueCrash(
-            firstReps: firstWorkingReps,
-            lastReps: lastWorkingReps,
-            plannedTopReps: plannedTopReps
-        )
-
-        // If you didn't complete the planned number of working sets, fix that first.
-        if workingSetIndices.count < min(plannedSets, 3) {
+        // 1) If you hit FAILURE (0 RIR) and reps crashed by ≥3 → DO NOT increase.
+        if let minRIR = minRIR, minRIR <= 0, repDrop >= 3 {
             let msg = """
-            You logged fewer working sets than planned (\(workingSetIndices.count)/\(min(plannedSets, 3))). \
-            Keep the load around \(formatLoad(baselineLoad)) and focus on hitting all 3 quality working sets before increasing weight.
+            You pushed at least one set to 0 RIR and reps dropped from \(firstReps) to \(lastReps). Hold this load next session and focus on more even performance before increasing.
             """
-            return CoachingRecommendation(
-                message: msg,
-                nextSuggestedLoad: baselineLoad
-            )
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // At this point, you've done at least 3 working sets.
-        // Evaluate performance vs target reps.
-        if fatigueCrash {
+        // 2) Under-repped relative to target → fix reps first, no load increase.
+        if bestReps < targetReps {
             let msg = """
-            Strong first set but reps dropped off hard across working sets. \
-            Hold the load at \(formatLoad(baselineLoad)) and aim for more even reps across your 3 sets before progressing.
+            Your best set was below the target of \(targetReps) reps. Keep this load the same next session and aim to hit at least \(targetReps) clean reps before increasing.
             """
-            return CoachingRecommendation(
-                message: msg,
-                nextSuggestedLoad: baselineLoad
-            )
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // Use the optional 4th set ("1 to know") as diagnostic for volume tolerance.
-        let diagnosticMessage = diagnosticSetMessage(
-            item: item,
-            diagnosticIndex: diagnosticIndex,
-            plannedTopReps: plannedTopReps
-        )
-
-        // Strong overperformance: clearly above rep target on working sets.
-        if bestWorkingReps >= plannedTopReps + 2 {
-            let baseIncrement = loadIncrement(for: baselineLoad)
-            let (multiplier, rirNote) = overperformanceMultiplierAndNote(
-                item: item,
-                workingIndices: workingSetIndices
-            )
-
-            let adjustedIncrement = baseIncrement * multiplier
-            let nextLoad = baselineLoad + adjustedIncrement
-
-            var msg = """
-            You exceeded the rep target on this load across your working sets. \
-            Increase weight next session to about \(formatLoad(nextLoad)) and keep 3 quality working sets.
+        // 3) You hit or beat reps, but sets were MUCH harder than planned (RIR too low)
+        if let avgRIR = avgRIR, avgRIR < Double(targetRIR) - 0.5 {
+            let msg = """
+            You hit or nearly hit the rep target, but sets were harder than planned (average RIR below target). Repeat this load next session and focus on leaving a bit more in the tank.
             """
-
-            if let rirNote {
-                msg += " " + rirNote
-            }
-            if let diagMsg = diagnosticMessage {
-                msg += " " + diagMsg
-            }
-
-            return CoachingRecommendation(
-                message: msg,
-                nextSuggestedLoad: nextLoad
-            )
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // On target: you hit the reps without big crash, but not massively over.
-        if bestWorkingReps >= plannedTopReps {
-            var msg = """
-            You hit the planned sets and reps at \(formatLoad(baselineLoad)). \
-            Repeat this load once more to consolidate, then consider a small increase if it continues to feel strong.
-            """
-
-            if let diagMsg = diagnosticMessage {
-                msg += " " + diagMsg
+        // 4) Clearly over-performing with room in the tank:
+        //    best reps ≥ planned top + 2, and not taken to failure.
+        if bestReps >= plannedTopReps + 2 {
+            if let minRIR = minRIR, minRIR <= 0 {
+                // Over-performed but also hit 0 RIR somewhere → be conservative.
+                let msg = """
+                You exceeded the rep target but also hit 0 RIR on at least one set. Keep this load and aim for more stable sets rather than increasing weight yet.
+                """
+                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
             }
 
-            return CoachingRecommendation(
-                message: msg,
-                nextSuggestedLoad: baselineLoad
-            )
+            // Conservative, plate-friendly jumps.
+            let step: Double
+            if baseLoad >= 200 {
+                step = 5.0
+            } else if baseLoad >= 100 {
+                step = 2.5
+            } else {
+                step = 2.0
+            }
+
+            let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            let msg = """
+            You exceeded the rep target of \(plannedTopReps) by a comfortable margin without going to failure. Increase the load by about \(step) next session and keep the same number of sets.
+            """
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
         }
 
-        // Under target reps but not a total collapse.
-        var msg = """
-        Reps came in below the target range on your working sets. \
-        Keep the load at \(formatLoad(baselineLoad)) and focus on hitting the full rep target before progressing.
+        // 5) Hit target reps at roughly target difficulty → repeat once more.
+        if bestReps >= plannedTopReps {
+            let msg = """
+            You hit the planned sets and reps at roughly the intended difficulty. Repeat this load once more; if it still feels solid next time, consider a small weight increase.
+            """
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // 6) Catch-all conservative guidance.
+        let msg = """
+        Solid work. Repeat this load next session and aim for slightly better rep quality or more even performance across sets before increasing.
         """
-        if let diagMsg = diagnosticMessage {
-            msg += " " + diagMsg
-        }
-
-        return CoachingRecommendation(
-            message: msg,
-            nextSuggestedLoad: baselineLoad
-        )
+        return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
     }
 
-    // MARK: - Helpers
+    // MARK: - Helper to read RIR safely
 
-    /// Indices for the 3 "growth" working sets, capped by actual logged sets.
-    private static func workingSetsIndices(loggedSets: Int) -> [Int] {
-        let count = min(loggedSets, 3)
-        return Array(0..<count)
-    }
-
-    /// Index for the optional 4th diagnostic set, if it exists.
-    private static func diagnosticSetIndex(loggedSets: Int) -> Int? {
-        return loggedSets >= 4 ? 3 : nil
-    }
-
-    /// Determine a baseline working load for this item:
-    /// - Prefer actual working-set loads (non-zero)
-    /// - Then fall back to planned loads
-    /// - Finally to suggestedLoad if necessary
-    private static func baselineLoad(for item: SessionItem) -> Double? {
-        let nonZeroActuals = item.actualLoads.filter { abs($0) > 0.1 }
-        if let first = nonZeroActuals.first {
-            return first
-        }
-
-        let nonZeroPlanned = item.plannedLoadsBySet.filter { abs($0) > 0.1 }
-        if let first = nonZeroPlanned.first {
-            return first
-        }
-
-        return item.suggestedLoad > 0 ? item.suggestedLoad : nil
-    }
-
-    /// Decide if there's a clear fatigue crash pattern (first set at/above target,
-    /// last working set 3+ reps below target).
-    private static func detectFatigueCrash(firstReps: Int, lastReps: Int, plannedTopReps: Int) -> Bool {
-        guard firstReps > 0 else { return false }
-        guard lastReps >= 0 else { return false }
-
-        // Example: target 10, first set 10–12, last set 6–7 → crash.
-        if firstReps >= plannedTopReps && lastReps <= plannedTopReps - 3 {
-            return true
-        }
-
-        return false
-    }
-
-    /// Use the 4th set as a diagnostic for volume tolerance.
-    private static func diagnosticSetMessage(
-        item: SessionItem,
-        diagnosticIndex: Int?,
-        plannedTopReps: Int
-    ) -> String? {
-        guard let idx = diagnosticIndex,
-              idx < item.actualReps.count else {
-            return nil
-        }
-
-        let diagReps = item.actualReps[idx]
-
-        if diagReps >= plannedTopReps {
-            return "Your 4th (diagnostic) set stayed strong, so you likely tolerate this volume well. If recovery and joints feel good, you can keep a 4th set in the mix for this lift."
-        } else if diagReps <= plannedTopReps - 3 {
-            return "The 4th (diagnostic) set dropped off, so treat it as an occasional test rather than a permanent 4th set. Keep your base volume at 3 solid working sets."
-        } else {
-            return "Your 4th (diagnostic) set was okay but not dominant. Keep 3 working sets as your baseline and only add the 4th when recovery is excellent."
-        }
-    }
-
-    /// Very simple load increment rule for now.
-    private static func loadIncrement(for current: Double) -> Double {
-        // Could later branch on exercise type (compound vs isolation).
-        if current < 50 {
-            return 2.5
-        } else if current < 200 {
-            return 2.5
-        } else {
-            return 5.0
-        }
-    }
-
-    /// Use RIR to scale how big a jump we take when you overperform.
-    ///
-    /// - If we don't have RIR logged → multiplier 1.0, no extra note.
-    /// - If avg RIR >= plannedRIR + 2 → 2x jump (very easy).
-    /// - If avg RIR >= plannedRIR + 1 → 1.5x jump (easy).
-    private static func overperformanceMultiplierAndNote(
-        item: SessionItem,
-        workingIndices: [Int]
-    ) -> (multiplier: Double, note: String?) {
-        let plannedRIR = item.targetRIR
-
-        let workingRIRs: [Int] = workingIndices.compactMap { idx in
-            idx < item.actualRIRs.count ? item.actualRIRs[idx] : nil
-        }
-
-        guard !workingRIRs.isEmpty else {
-            return (1.0, nil)
-        }
-
-        let total = workingRIRs.reduce(0, +)
-        let avg = Double(total) / Double(workingRIRs.count)
-
-        // If there's no real planned RIR, don't overcomplicate it.
-        if plannedRIR <= 0 {
-            return (1.0, nil)
-        }
-
-        if avg >= Double(plannedRIR + 2) {
-            return (
-                2.0,
-                "You also reported RIR around \(Int(round(avg))) on your working sets, so we're taking a larger jump than usual."
-            )
-        } else if avg >= Double(plannedRIR + 1) {
-            return (
-                1.5,
-                "You reported RIR higher than planned on your working sets, so we're taking a slightly larger jump than usual."
-            )
-        } else {
-            return (1.0, nil)
-        }
-    }
-
-    private static func formatLoad(_ load: Double) -> String {
-        String(format: "%.1f lb", load)
+    /// If your SessionItem model has `actualRIRs: [Int]`, this will return it.
+    /// If not, we just return nil and the engine behaves as a reps-only coach.
+    private static func getActualRIRs(from item: SessionItem) -> [Int]? {
+        // If you have `actualRIRs` as a stored property, this line will compile:
+        //    return item.actualRIRs
+        //
+        // If not, comment the line above out and leave `return nil`.
+        #if compiler(>=5.9)
+        // Adjust this if your property name is different.
+        return item.actualRIRs
+        #else
+        return nil
+        #endif
     }
 }

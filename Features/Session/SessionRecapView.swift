@@ -6,6 +6,8 @@ struct SessionRecapView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var session: Session
 
+
+
     var body: some View {
         List {
             Section {
@@ -185,7 +187,7 @@ struct SessionRecapView: View {
     }
 
     /// Baseline working load used this session, based on actuals.
-    /// Falls back to suggestedLoad if actuals are all zero.
+    /// Falls back to suggestedLoad or plannedLoadsBySet if needed.
     private func baselineLoad(for item: SessionItem) -> Double? {
         let nonZeroActuals = item.actualLoads.filter { abs($0) > 0.1 }
         if let first = nonZeroActuals.first {
@@ -196,7 +198,6 @@ struct SessionRecapView: View {
             return item.suggestedLoad
         }
 
-        // As last resort, check planned loads
         let nonZeroPlanned = item.plannedLoadsBySet.filter { abs($0) > 0.1 }
         return nonZeroPlanned.first
     }
@@ -324,7 +325,8 @@ struct ExerciseRecapRow: View {
                     .padding(.top, 4)
 
                 if let next = rec.nextSuggestedLoad {
-                    Text("Next time target: \(next, specifier: "%.1f") lb")                        .font(.caption2)
+                    Text("Next time target: \(next, specifier: "%.1f") lb")
+                        .font(.caption2)
                         .foregroundColor(.blue)
                 }
             }
@@ -372,7 +374,8 @@ extension SessionItem {
         var logged = 0
         for i in 0..<count {
             let reps = actualReps[i]
-            if reps > 0 {
+            let load = actualLoads[i]
+            if reps > 0 && load > 0 {
                 logged += 1
             }
         }
