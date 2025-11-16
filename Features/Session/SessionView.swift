@@ -25,9 +25,14 @@ struct SessionView: View {
             Text(session.date, style: .date)
                 .font(.headline)
 
-            Text(session.status.displayTitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                Text(session.status.displayTitle)
+                if session.weekIndex > 0 {
+                    Text("Week \(session.weekIndex)")
+                }
+            }
+            .font(.subheadline)
+            .foregroundColor(.secondary)
         }
     }
 
@@ -67,9 +72,15 @@ struct SessionView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Complete") {
+                        // 1) Mark the session completed and persist
                         session.status = .completed
                         try? context.save()
-                        navigateToRecap = true
+
+                        // 2) Defer navigation to the next run loop turn
+                        //    so SwiftUI builds SessionRecapView off the updated model.
+                        DispatchQueue.main.async {
+                            navigateToRecap = true
+                        }
                     }
                 }
             }
@@ -171,7 +182,7 @@ struct SessionItemRow: View {
     }
 }
 
-// MARK: - Log Sheet (static 5 rows)
+// MARK: - Log Sheet (Plan vs Actual per set, 0.5 lb loads + RIR + coaching + propagation)
 
 struct ExerciseLogSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -179,8 +190,9 @@ struct ExerciseLogSheet: View {
 
     @Bindable var item: SessionItem
 
-    @State private var loadText: [String]
-    @State private var repsText: [String]
+    @State private var actualLoads: [Double]
+    @State private var actualReps: [Int]
+    @State private var actualRIRs: [Int]
 
     private let maxSets = 5
 
@@ -191,27 +203,41 @@ struct ExerciseLogSheet: View {
     init(item: SessionItem) {
         self._item = Bindable(wrappedValue: item)
 
-        // Always keep exactly 5 editable rows in memory
-        var loads = Array(repeating: "", count: maxSets)
-        var reps  = Array(repeating: "", count: maxSets)
+        var loads = Array(repeating: 0.0, count: maxSets)
+        var reps  = Array(repeating: 0, count: maxSets)
+        var rirs  = Array(repeating: item.targetRIR, count: maxSets)
 
-        // Seed from actuals if they exist
-        for idx in 0..<min(maxSets, item.actualReps.count) {
-            reps[idx] = "\(item.actualReps[idx])"
-        }
+        // Seed from existing actuals first
         for idx in 0..<min(maxSets, item.actualLoads.count) {
-            loads[idx] = String(format: "%.0f", item.actualLoads[idx])
+            loads[idx] = item.actualLoads[idx]
+        }
+        for idx in 0..<min(maxSets, item.actualReps.count) {
+            reps[idx] = item.actualReps[idx]
+        }
+        for idx in 0..<min(maxSets, item.actualRIRs.count) {
+            rirs[idx] = item.actualRIRs[idx]
         }
 
-        // Where no actuals, fall back to planned reps
+        // Where actuals are zero, fall back to planned loads/reps/targetRIR
+        for idx in 0..<min(maxSets, item.plannedLoadsBySet.count) {
+            if loads[idx] == 0 {
+                loads[idx] = item.plannedLoadsBySet[idx]
+            }
+        }
         for idx in 0..<min(maxSets, item.plannedRepsBySet.count) {
-            if reps[idx].isEmpty {
-                reps[idx] = "\(item.plannedRepsBySet[idx])"
+            if reps[idx] == 0 {
+                reps[idx] = item.plannedRepsBySet[idx]
+            }
+        }
+        for idx in 0..<maxSets {
+            if rirs[idx] <= 0 {
+                rirs[idx] = item.targetRIR
             }
         }
 
-        _loadText = State(initialValue: loads)
-        _repsText = State(initialValue: reps)
+        _actualLoads = State(initialValue: loads)
+        _actualReps = State(initialValue: reps)
+        _actualRIRs = State(initialValue: rirs)
     }
 
     var body: some View {
@@ -226,26 +252,34 @@ struct ExerciseLogSheet: View {
 
                 Section(header: Text("Log sets")) {
                     ForEach(0..<maxSets, id: \.self) { index in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Set \(index + 1)")
-                                Spacer()
-                                if index < item.plannedRepsBySet.count {
-                                    Text("Plan: \(item.plannedRepsBySet[index]) reps")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
+                        // Planned values with safe fallbacks
+                        let plannedLoad: Double = {
+                            if index < item.plannedLoadsBySet.count {
+                                return item.plannedLoadsBySet[index]
+                            } else {
+                                return item.suggestedLoad
                             }
+                        }()
 
-                            HStack {
-                                TextField("Load", text: $loadText[index])
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 80)
-                                TextField("Reps", text: $repsText[index])
-                                    .keyboardType(.numberPad)
-                                    .frame(width: 60)
+                        let plannedReps: Int = {
+                            if index < item.plannedRepsBySet.count {
+                                return item.plannedRepsBySet[index]
+                            } else {
+                                return item.targetReps
                             }
-                        }
+                        }()
+
+                        let plannedRIR = item.targetRIR
+
+                        SessionSetRowView(
+                            index: index,
+                            plannedLoad: plannedLoad,
+                            plannedReps: plannedReps,
+                            plannedRIR: plannedRIR,
+                            actualLoad: $actualLoads[index],
+                            actualReps: $actualReps[index],
+                            actualRIR: $actualRIRs[index]
+                        )
                     }
 
                     // No add/remove buttons in this version.
@@ -270,23 +304,75 @@ struct ExerciseLogSheet: View {
     }
 
     private func saveLogs() {
-        var newReps: [Int] = []
-        var newLoads: [Double] = []
+        // 1) Autopopulate loads:
+        // When you log your first non-zero load, use it for later sets
+        // that have reps but still zero load.
+        var normalizedLoads = actualLoads
 
-        // Persist all 5; recap logic only treats non-zero sets as “logged”.
-        for idx in 0..<maxSets {
-            let reps = Int(repsText[idx]) ?? 0
-            let load = Double(loadText[idx]) ?? 0
-            newReps.append(reps)
-            newLoads.append(load)
+        if let baseIndex = normalizedLoads.firstIndex(where: { $0 > 0.0 }) {
+            let baseLoad = normalizedLoads[baseIndex]
+            for idx in 0..<normalizedLoads.count {
+                if normalizedLoads[idx] == 0.0 && actualReps[idx] > 0 {
+                    normalizedLoads[idx] = baseLoad
+                }
+            }
         }
 
-        item.actualReps = newReps
-        item.actualLoads = newLoads
+        // 2) Persist back to the SessionItem
+        item.actualReps = actualReps
+        item.actualLoads = normalizedLoads
+        item.actualRIRs = actualRIRs
 
-        // IMPORTANT: do NOT touch item.targetSets here.
-        // It represents the planned number of sets from the program.
+        // 3) Run the coaching engine on this execution
+        if let rec = CoachingEngine.recommend(for: item),
+           let nextLoad = rec.nextSuggestedLoad {
+            // Store note + next load on this item (for debugging / future use).
+            item.coachNote = rec.message
+            item.nextSuggestedLoad = nextLoad
+
+            // Push that next load into the next occurrence of this exercise.
+            propagateNextLoad(for: item, nextLoad: nextLoad)
+        }
+
+        // 4) Save to SwiftData
         try? context.save()
+    }
+
+    /// Find the next SessionItem with the same exercise on a later date
+    /// and seed its planned loads with the recommended nextLoad.
+    private func propagateNextLoad(for currentItem: SessionItem, nextLoad: Double) {
+        let descriptor = FetchDescriptor<Session>()
+
+        guard let sessions = try? context.fetch(descriptor),
+              !sessions.isEmpty else {
+            return
+        }
+
+        // Find the session that owns the current item.
+        guard let currentSession = sessions.first(where: { session in
+            session.items.contains(where: { $0.id == currentItem.id })
+        }) else {
+            return
+        }
+
+        let currentDate = currentSession.date
+
+        // Sort sessions by date so "next" is chronological.
+        let sortedSessions = sessions.sorted { $0.date < $1.date }
+
+        // Find the next SessionItem with the same exerciseId on a later date.
+        for session in sortedSessions {
+            guard session.date > currentDate else { continue }
+
+            if let nextItem = session.items.first(where: { $0.exerciseId == currentItem.exerciseId }) {
+                let setCount = max(nextItem.targetSets, 1)
+
+                nextItem.suggestedLoad = nextLoad
+                nextItem.plannedLoadsBySet = Array(repeating: nextLoad, count: setCount)
+
+                break // only update the first future occurrence
+            }
+        }
     }
 }
 
@@ -359,12 +445,81 @@ struct ExerciseSwapSheet: View {
     }
 }
 
-// MARK: - SessionStatus display helper
+// MARK: - Per-set row (Plan vs Actual with 0.5 lb increments + RIR)
 
-extension SessionStatus {
-    var displayTitle: String {
-        String(describing: self)
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
+struct SessionSetRowView: View {
+    /// Index of the set (0-based here, but will display as 1-based)
+    let index: Int
+
+    /// Planned values
+    let plannedLoad: Double
+    let plannedReps: Int
+    let plannedRIR: Int
+
+    /// Bindings into the actual values stored on SessionItem
+    @Binding var actualLoad: Double
+    @Binding var actualReps: Int
+    @Binding var actualRIR: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Set \(index + 1)")
+                .font(.caption)
+                .fontWeight(.semibold)
+
+            // PLAN row
+            HStack(spacing: 4) {
+                Text("Planned:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps) @ RIR \(plannedRIR)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // ACTUAL row
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("Actual:")
+                        .font(.subheadline)
+
+                    // Load with 0.5 lb increments
+                    Stepper(
+                        value: $actualLoad,
+                        in: 0...1000,
+                        step: 2.5
+                    ) {
+                        Text("\(actualLoad, specifier: "%.1f") lb")
+                            .frame(minWidth: 70, alignment: .leading)
+                    }
+
+                    // Reps
+                    Stepper(
+                        value: $actualReps,
+                        in: 0...50
+                    ) {
+                        Text("\(actualReps) reps")
+                            .frame(minWidth: 60, alignment: .leading)
+                    }
+                }
+
+                // RIR
+                HStack(spacing: 8) {
+                    Text("RIR:")
+                        .font(.caption)
+
+                    Stepper(
+                        value: $actualRIR,
+                        in: 0...5
+                    ) {
+                        Text("\(actualRIR)")
+                            .font(.caption)
+                            .frame(minWidth: 24, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

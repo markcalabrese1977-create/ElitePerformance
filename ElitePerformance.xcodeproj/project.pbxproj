@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
+		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
 		D5E293662EC410DD00034D78 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293512EC410DD00034D78 /* User.swift */; };
 		D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */; };
 		D5E293682EC410DD00034D78 /* Progression.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934C2EC410DD00034D78 /* Progression.swift */; };
@@ -47,6 +49,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
+		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
 		D5E2931D2EC4102800034D78 /* ElitePerformance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElitePerformance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E2932C2EC4102900034D78 /* ElitePerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ElitePerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElitePerformanceApp.swift; sourceTree = "<group>"; };
@@ -158,6 +162,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D5D7DB662EC94F150058D515 /* CoachingEngine.swift */,
 				D5E293872EC6BDB400034D78 /* PRService.swift */,
 				D5E293832EC6B59700034D78 /* SwapMap.swift */,
 				D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */,
@@ -203,6 +208,7 @@
 		D5E293572EC410DD00034D78 /* Home */ = {
 			isa = PBXGroup;
 			children = (
+				D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */,
 				D5E293562EC410DD00034D78 /* HomeView.swift */,
 			);
 			path = Home;
@@ -428,6 +434,8 @@
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
 				D5E293702EC410DD00034D78 /* OnboardingView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
+				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
+				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
 				D5E293722EC410DD00034D78 /* Haptics.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,

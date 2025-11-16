@@ -21,6 +21,10 @@ struct SessionRecapView: View {
                     ExerciseRecapRow(item: item)
                 }
             }
+
+            Section(header: Text("Next session adjustments")) {
+                nextAdjustmentsSection
+            }
         }
         .navigationTitle("Session Recap")
         .toolbar {
@@ -62,6 +66,17 @@ struct SessionRecapView: View {
     private var completionPercent: Double {
         guard plannedSetsTotal > 0 else { return 0 }
         return (Double(loggedSetsTotal) / Double(plannedSetsTotal)) * 100.0
+    }
+
+    /// Items for which the coaching engine has a concrete next-load suggestion.
+    private var itemsWithRecommendations: [SessionItem] {
+        sortedItems.filter {
+            if let rec = CoachingEngine.recommend(for: $0),
+               rec.nextSuggestedLoad != nil {
+                return true
+            }
+            return false
+        }
     }
 
     // MARK: - UI pieces
@@ -109,12 +124,81 @@ struct SessionRecapView: View {
         }
     }
 
+    private var nextAdjustmentsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if itemsWithRecommendations.isEmpty {
+                Text("No load changes suggested. Repeat today’s prescription next time.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(itemsWithRecommendations) { item in
+                    if let rec = CoachingEngine.recommend(for: item),
+                       let next = rec.nextSuggestedLoad {
+
+                        let exerciseName = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
+                            ?? "Unknown exercise"
+
+                        let baseline = baselineLoad(for: item)
+
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(exerciseName)
+                                    .font(.subheadline)
+
+                                // Shortened coach message for quick scan
+                                Text(rec.message)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 2) {
+                                if let base = baseline, base > 0 {
+                                    Text(String(format: "%.1f → %.1f", base, next))
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                } else {
+                                    Text(String(format: "Next: %.1f lb", next))
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+
+                                Text("Next session target")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func formattedVolume(_ volume: Double) -> String {
         if volume >= 10_000 {
             return String(format: "%.1fk", volume / 1000.0)
         } else {
             return String(format: "%.0f", volume)
         }
+    }
+
+    /// Baseline working load used this session, based on actuals.
+    /// Falls back to suggestedLoad if actuals are all zero.
+    private func baselineLoad(for item: SessionItem) -> Double? {
+        let nonZeroActuals = item.actualLoads.filter { abs($0) > 0.1 }
+        if let first = nonZeroActuals.first {
+            return first
+        }
+
+        if item.suggestedLoad > 0 {
+            return item.suggestedLoad
+        }
+
+        // As last resort, check planned loads
+        let nonZeroPlanned = item.plannedLoadsBySet.filter { abs($0) > 0.1 }
+        return nonZeroPlanned.first
     }
 }
 
@@ -162,6 +246,11 @@ struct ExerciseRecapRow: View {
         } else {
             return ("Low reps", .orange)
         }
+    }
+
+    /// CoachingEngine-driven recommendation for this exercise, based on plan vs actual.
+    private var coachingRecommendation: CoachingRecommendation? {
+        CoachingEngine.recommend(for: item)
     }
 
     var body: some View {
@@ -228,10 +317,17 @@ struct ExerciseRecapRow: View {
 
             // MARK: Recommendation / "what should I do next?"
 
-            Text(item.recommendationNote)
-                .font(.caption)
-                .foregroundColor(.blue)
-                .padding(.top, 4)
+            if let rec = coachingRecommendation {
+                Text(rec.message)
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                    .padding(.top, 4)
+
+                if let next = rec.nextSuggestedLoad {
+                    Text("Next time target: \(next, specifier: "%.1f") lb")                        .font(.caption2)
+                        .foregroundColor(.blue)
+                }
+            }
         }
         .padding(.vertical, 6)
     }
@@ -245,7 +341,7 @@ struct ExerciseRecapRow: View {
     }
 }
 
-// MARK: - SessionItem helpers for recap & recommendations
+// MARK: - SessionItem helpers for recap
 
 extension SessionItem {
 
@@ -276,8 +372,7 @@ extension SessionItem {
         var logged = 0
         for i in 0..<count {
             let reps = actualReps[i]
-            let load = actualLoads[i]
-            if reps > 0 && load > 0 {
+            if reps > 0 {
                 logged += 1
             }
         }
@@ -303,54 +398,5 @@ extension SessionItem {
     /// Best reps across logged sets.
     var bestReps: Int {
         actualReps.max() ?? 0
-    }
-
-    /// Simple text recommendation for the *next* session, based on planned vs logged.
-    ///
-    /// This is the first real "coach brain" – it doesn't change data yet,
-    /// but it tells you how to shape your next session.
-    var recommendationNote: String {
-        // 1) No work → repeat prescription
-        if loggedSetsCount == 0 {
-            return "No meaningful work logged. Repeat this prescription next time before progressing."
-        }
-
-        // 2) Fewer sets than planned → fix sets before anything else
-        if loggedSetsCount < plannedSetCount {
-            return "You didn’t complete all \(plannedSetCount) planned sets. Keep the same load and aim to hit every set before increasing weight."
-        }
-
-        // 3) Same or more sets than planned – now check reps and fatigue pattern
-        let top = plannedTopReps
-        let best = bestReps
-
-        // Detect obvious fatigue crash: first set at/near target, last set well below.
-        var fatigueCrash = false
-        if actualReps.count >= 2 {
-            let first = actualReps[0]
-            let lastIndex = min(loggedSetsCount, actualReps.count) - 1
-            let last = actualReps[lastIndex]
-
-            if first >= top && last <= top - 3 {
-                fatigueCrash = true
-            }
-        }
-
-        if fatigueCrash {
-            return "Reps dropped hard on later sets from fatigue. Hold the load and work toward more even reps across all sets before progressing."
-        }
-
-        // Strong overperformance: clearly above rep target
-        if best >= top + 2 {
-            return "You exceeded the rep target at this load. Increase weight slightly next session (about 2.5–5%) and keep the same number of sets."
-        }
-
-        // On target, but not massively over – repeat once more, then consider volume
-        if best >= top {
-            return "You hit the planned sets and reps. Repeat this load once more; if it feels easier, consider adding an extra set."
-        }
-
-        // Under reps but not a full crash – fix rep quality first
-        return "Reps were below the target range. Keep the same load and focus on hitting the full rep target before progressing."
     }
 }

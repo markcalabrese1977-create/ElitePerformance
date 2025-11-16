@@ -1,22 +1,34 @@
 import Foundation
 import SwiftData
 
-enum SessionStatus: String, Codable, CaseIterable { case planned, inProgress, completed }
+enum SessionStatus: String, Codable, CaseIterable {
+    case planned
+    case inProgress
+    case completed
+}
 
 @Model
 final class Session {
     var date: Date
     var status: SessionStatus
     var readinessStars: Int
+
+    /// Which week of the block this session belongs to (1-based).
+    var weekIndex: Int
+
     @Relationship(deleteRule: .cascade) var items: [SessionItem]
 
-    init(date: Date,
-         status: SessionStatus = .planned,
-         readinessStars: Int = 0,
-         items: [SessionItem] = []) {
+    init(
+        date: Date,
+        status: SessionStatus = .planned,
+        readinessStars: Int = 0,
+        weekIndex: Int = 1,
+        items: [SessionItem] = []
+    ) {
         self.date = date
         self.status = status
         self.readinessStars = readinessStars
+        self.weekIndex = weekIndex
         self.items = items
     }
 }
@@ -47,11 +59,19 @@ final class SessionItem {
     var actualReps: [Int]
     /// Logged load per set (same indexing as actualReps).
     var actualLoads: [Double]
+    /// Logged RIR per set (same indexing as actualReps).
+    var actualRIRs: [Int]
+
     /// Whether this exercise has any logged work.
     var isCompleted: Bool
     /// Whether this session hit a new PR for this exercise.
     var isPR: Bool
-    
+
+    /// Coach note summarizing what to do next time on this exercise.
+    var coachNote: String?
+    /// Next suggested load for the main working sets (if the coach has a strong opinion).
+    var nextSuggestedLoad: Double?
+
     init(
         order: Int,
         exerciseId: String,
@@ -64,8 +84,11 @@ final class SessionItem {
         logs: [SetLog] = [],
         actualReps: [Int] = [],
         actualLoads: [Double] = [],
+        actualRIRs: [Int] = [],
         isCompleted: Bool = false,
-        isPR: Bool = false
+        isPR: Bool = false,
+        coachNote: String? = nil,
+        nextSuggestedLoad: Double? = nil
     ) {
         self.order = order
         self.exerciseId = exerciseId
@@ -78,10 +101,14 @@ final class SessionItem {
         self.logs = logs
         self.actualReps = actualReps
         self.actualLoads = actualLoads
+        self.actualRIRs = actualRIRs
         self.isCompleted = isCompleted
         self.isPR = isPR
+        self.coachNote = coachNote
+        self.nextSuggestedLoad = nextSuggestedLoad
     }
 }
+
 @Model
 final class SetLog {
     var setNumber: Int
@@ -92,13 +119,15 @@ final class SetLog {
     var actualRIR: Int
     var actualLoad: Double
 
-    init(setNumber: Int,
-         targetReps: Int,
-         targetRIR: Int,
-         targetLoad: Double,
-         actualReps: Int,
-         actualRIR: Int,
-         actualLoad: Double) {
+    init(
+        setNumber: Int,
+        targetReps: Int,
+        targetRIR: Int,
+        targetLoad: Double,
+        actualReps: Int,
+        actualRIR: Int,
+        actualLoad: Double
+    ) {
         self.setNumber = setNumber
         self.targetReps = targetReps
         self.targetRIR = targetRIR
@@ -106,5 +135,20 @@ final class SetLog {
         self.actualReps = actualReps
         self.actualRIR = actualRIR
         self.actualLoad = actualLoad
+    }
+}
+
+// MARK: - SessionStatus display helper
+
+extension SessionStatus {
+    var displayTitle: String {
+        switch self {
+        case .planned:
+            return "Planned"
+        case .inProgress:
+            return "In Progress"
+        case .completed:
+            return "Completed"
+        }
     }
 }

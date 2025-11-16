@@ -8,30 +8,66 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sessions) { session in
-                    NavigationLink {
-                        SessionView(session: session)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(session.date, style: .date)
-                                .font(.headline)
-
-                            Text(session.status.displayTitle)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-
-                            if let firstItem = session.items.sorted(by: { $0.order < $1.order }).first {
-                                let ex = ExerciseCatalog.all.first { $0.id == firstItem.exerciseId }
-                                Text(ex?.name ?? "No exercises yet")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
+                if sessions.isEmpty {
+                    Text("No sessions yet. Complete onboarding to create your first block.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(sessions) { session in
+                        NavigationLink {
+                            SessionView(session: session)
+                        } label: {
+                            SessionRow(session: session)
                         }
                     }
                 }
             }
             .navigationTitle("Sessions")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if !sessions.isEmpty {
+                        NavigationLink {
+                            ProgramPlanView()
+                        } label: {
+                            Text("Plan Loads")
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+private struct SessionRow: View {
+    let session: Session
+
+    private var firstExerciseName: String {
+        if let firstItem = session.items.sorted(by: { $0.order < $1.order }).first,
+           let ex = ExerciseCatalog.all.first(where: { $0.id == firstItem.exerciseId }) {
+            return ex.name
+        }
+        return "No exercises yet"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.date, style: .date)
+                .font(.headline)
+
+            HStack(spacing: 8) {
+                Text(session.status.displayTitle)
+                if session.weekIndex > 0 {
+                    Text("Week \(session.weekIndex)")
+                }
+            }
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+
+            Text(firstExerciseName)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -41,7 +77,6 @@ struct HomeView: View {
 }
 
 // Simple preview container to keep Xcode happy.
-// Adjust or remove if you already have one elsewhere.
 private var previewContainer: ModelContainer = {
     let schema = Schema([
         User.self,
@@ -51,6 +86,5 @@ private var previewContainer: ModelContainer = {
         PRIndex.self
     ])
     let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    // We’ll swallow the error for preview-only container.
     return try! ModelContainer(for: schema, configurations: [config])
 }()
