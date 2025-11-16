@@ -13,7 +13,8 @@ struct RootView: View {
                 MainTabView()
             } else {
                 OnboardingView { goal, days, units in
-                    // Create user record
+                    // Create user record only – program seeding is handled
+                    // inside OnboardingView via ProgramGenerator.seedInitialProgram.
                     let user = User(
                         units: units,
                         coachVoice: .casual,
@@ -21,13 +22,7 @@ struct RootView: View {
                     )
                     context.insert(user)
 
-                    // Seed initial program based on onboarding answers
-                    ProgramGenerator.seedInitialProgram(
-                        goal: goal,
-                        daysPerWeek: days,
-                        context: context
-                    )
-
+                    // Persist user and mark onboarding complete
                     try? context.save()
                     hasOnboarded = true
                 }

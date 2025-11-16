@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
+		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
 		D5E293662EC410DD00034D78 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293512EC410DD00034D78 /* User.swift */; };
 		D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */; };
@@ -50,6 +51,7 @@
 
 /* Begin PBXFileReference section */
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
+		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
 		D5E2931D2EC4102800034D78 /* ElitePerformance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElitePerformance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E2932C2EC4102900034D78 /* ElitePerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ElitePerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -175,6 +177,7 @@
 		D5E293522EC410DD00034D78 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */,
 				D5E2939F2EC7C4E900034D78 /* Goal.swift */,
 				D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */,
 				D5E293932EC7BBD500034D78 /* PlannedBlock.swift */,
@@ -436,6 +439,7 @@
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
+				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */,
 				D5E293722EC410DD00034D78 /* Haptics.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,

@@ -5,7 +5,6 @@ import SwiftData
 
 struct SessionView: View {
     @Environment(\.modelContext) private var context
-    @Environment(\.dismiss) private var dismiss
     @Bindable var session: Session
 
     @State private var selectedItemForLogging: SessionItem?
@@ -26,7 +25,6 @@ struct SessionView: View {
             Text(session.date, style: .date)
                 .font(.headline)
 
-            // SessionStatus.displayTitle is defined elsewhere in the project.
             Text(session.status.displayTitle)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -34,60 +32,51 @@ struct SessionView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack {
-                List {
-                    Section(header: header) {
-                        ForEach(sortedItems) { item in
-                            SessionItemRow(
-                                item: item,
-                                canLog: canLogCurrentSession,
-                                onLogTapped: { selectedItemForLogging = item },
-                                onSwapTapped: { selectedItemForSwap = item }
-                            )
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    deleteItem(item)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+        VStack {
+            List {
+                Section(header: header) {
+                    ForEach(sortedItems) { item in
+                        SessionItemRow(
+                            item: item,
+                            canLog: canLogCurrentSession,
+                            onLogTapped: { selectedItemForLogging = item },
+                            onSwapTapped: { selectedItemForSwap = item }
+                        )
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                deleteItem(item)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
                 }
+            }
 
-                // Hidden navigation link to recap
-                NavigationLink(
-                    destination: SessionRecapView(session: session),
-                    isActive: $navigateToRecap
-                ) {
-                    EmptyView()
-                }
-                .hidden()
+            // Hidden navigation link to recap
+            NavigationLink(
+                destination: SessionRecapView(session: session),
+                isActive: $navigateToRecap
+            ) {
+                EmptyView()
             }
-            .navigationTitle("Session")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Complete") {
-                        session.status = .completed
-                        try? context.save()
-                        navigateToRecap = true
-                    }
-                }
-            }
-            .sheet(item: $selectedItemForLogging) { item in
-                ExerciseLogSheet(item: item)
-            }
-            .sheet(item: $selectedItemForSwap) { item in
-                ExerciseSwapSheet(item: item)
-            }
-            .onChange(of: navigateToRecap) { isActive in
-                // When recap is dismissed after a completed session,
-                // pop SessionView and return to Today.
-                if !isActive && session.status == .completed {
-                    dismiss()
+            .hidden()
+        }
+        .navigationTitle("Session")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Complete") {
+                    session.status = .completed
+                    try? context.save()
+                    navigateToRecap = true
                 }
             }
+        }
+        .sheet(item: $selectedItemForLogging) { item in
+            ExerciseLogSheet(item: item)
+        }
+        .sheet(item: $selectedItemForSwap) { item in
+            ExerciseSwapSheet(item: item)
         }
     }
 
@@ -101,7 +90,6 @@ struct SessionView: View {
         try? context.save()
     }
 }
-
 // MARK: - Row for a single exercise in the session
 
 struct SessionItemRow: View {
@@ -188,10 +176,12 @@ struct ExerciseLogSheet: View {
 
     @Bindable var item: SessionItem
 
+    /// We’re still using a fixed 5-set editor.
     private let maxSets = 5
 
-    @State private var loads: [Double]
-    @State private var reps: [Int]
+    /// Working copies for the sheet UI. These drive SessionSetRowView bindings.
+    @State private var workingLoads: [Double]
+    @State private var workingReps: [Int]
 
     private var exercise: CatalogExercise? {
         ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
@@ -200,27 +190,31 @@ struct ExerciseLogSheet: View {
     init(item: SessionItem) {
         self._item = Bindable(wrappedValue: item)
 
-        var initialLoads = Array(repeating: 0.0, count: maxSets)
-        var initialReps  = Array(repeating: 0, count: maxSets)
+        var loads = Array(repeating: 0.0, count: maxSets)
+        var reps  = Array(repeating: 0, count: maxSets)
 
-        // Seed from existing actuals if they exist
-        for idx in 0..<min(maxSets, item.actualReps.count) {
-            initialReps[idx] = item.actualReps[idx]
-        }
-        for idx in 0..<min(maxSets, item.actualLoads.count) {
-            initialLoads[idx] = item.actualLoads[idx]
+        // Seed from actuals if they exist
+        let actualCount = min(
+            maxSets,
+            min(item.actualLoads.count, item.actualReps.count)
+        )
+        for idx in 0..<actualCount {
+            loads[idx] = item.actualLoads[idx]
+            reps[idx]  = item.actualReps[idx]
         }
 
-        // Where no actual reps, fall back to planned reps
+        // Where no actual reps yet, fall back to planned reps
         for idx in 0..<min(maxSets, item.plannedRepsBySet.count) {
-            if initialReps[idx] == 0 {
-                initialReps[idx] = item.plannedRepsBySet[idx]
+            if reps[idx] == 0 {
+                reps[idx] = item.plannedRepsBySet[idx]
             }
         }
 
-        _loads = State(initialValue: initialLoads)
-        _reps  = State(initialValue: initialReps)
+        _workingLoads = State(initialValue: loads)
+        _workingReps  = State(initialValue: reps)
     }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
@@ -238,15 +232,10 @@ struct ExerciseLogSheet: View {
                             index: index,
                             plannedLoad: plannedLoad(for: index),
                             plannedReps: plannedReps(for: index),
-                            actualLoad: $loads[index],
-                            actualReps: $reps[index]
+                            actualLoad: $workingLoads[index],
+                            actualReps: $workingReps[index]
                         )
                     }
-
-                    Text("Tip: if you only set the first set's load, the app will copy it to later sets when saving.")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
                 }
             }
             .navigationTitle("Log Exercise")
@@ -266,6 +255,8 @@ struct ExerciseLogSheet: View {
         }
     }
 
+    // MARK: - Planning helpers
+
     private func plannedReps(for index: Int) -> Int {
         if index < item.plannedRepsBySet.count {
             return item.plannedRepsBySet[index]
@@ -283,44 +274,34 @@ struct ExerciseLogSheet: View {
         return 0
     }
 
+    // MARK: - Save with auto-prefill
+
     private func saveLogs() {
-        var newReps: [Int] = []
-        var newLoads: [Double] = []
+        var newReps  = workingReps
+        var newLoads = workingLoads
 
-        var lastNonZeroLoad: Double = 0
-
-        for idx in 0..<maxSets {
-            let r = reps[idx]
-            var l = loads[idx]
-
-            // If load is zero but we have a previous non-zero load, profile it forward
-            if l <= 0, lastNonZeroLoad > 0 {
-                l = lastNonZeroLoad
+        // Auto-prefill loads for later sets:
+        // If Set 1 has a load, and a later set has load == 0,
+        // copy Set 1's load into that slot.
+        if newLoads.indices.contains(0), newLoads[0] > 0 {
+            let baseLoad = newLoads[0]
+            for idx in 1..<maxSets where newLoads[idx] == 0 {
+                newLoads[idx] = baseLoad
             }
-
-            if l > 0 {
-                lastNonZeroLoad = l
-            }
-
-            newReps.append(r)
-            newLoads.append(l)
         }
 
-        item.actualReps = newReps
+        item.actualReps  = newReps
         item.actualLoads = newLoads
 
-        // Run coaching engine for this execution (optional next load)
-        if let rec = CoachingEngine.recommend(for: item),
-           let next = rec.nextSuggestedLoad,
-           next > 0 {
-
-            // Store the next suggested load on this item so future sessions can seed from it.
-            item.suggestedLoad = next
-        }
-
+        // IMPORTANT: do NOT touch item.targetSets here.
+        // It represents the planned number of sets from the program.
         try? context.save()
     }
 }
+
+
+
+
 
 // MARK: - Swap sheet
 
@@ -401,12 +382,13 @@ struct SessionSetRowView: View {
     let plannedLoad: Double
     let plannedReps: Int
 
-    /// Bindings into the actual values stored on the parent sheet
+    /// Bindings into the actual values stored on SessionItem
     @Binding var actualLoad: Double
     @Binding var actualReps: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
+            // Set label
             Text("Set \(index + 1)")
                 .font(.caption)
                 .fontWeight(.semibold)
@@ -417,39 +399,58 @@ struct SessionSetRowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                if plannedLoad > 0 {
-                    Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("\(plannedReps) reps")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
-            // ACTUAL row
-            HStack(spacing: 8) {
-                Text("Actual:")
-                    .font(.subheadline)
+            // ACTUAL controls
+            HStack(spacing: 16) {
+                // LOAD: typeable field backed by the Double binding
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Load")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
 
-                // Load with 0.5 lb increments
-                Stepper(
-                    value: $actualLoad,
-                    in: 0...1000,
-                    step: 0.5
-                ) {
-                    Text("\(actualLoad, specifier: "%.1f") lb")
-                        .frame(minWidth: 70, alignment: .leading)
+                    TextField(
+                        "0",
+                        text: Binding(
+                            get: {
+                                actualLoad == 0
+                                    ? ""
+                                    : String(format: "%.1f", actualLoad)
+                            },
+                            set: { newValue in
+                                let trimmed = newValue
+                                    .trimmingCharacters(in: .whitespaces)
+                                if let value = Double(trimmed) {
+                                    actualLoad = value
+                                } else if trimmed.isEmpty {
+                                    actualLoad = 0
+                                }
+                                // If you want: we can later hook a callback here
+                                // so changing set 1 can prefill other sets live.
+                            }
+                        )
+                    )
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
                 }
 
-                // Reps
-                Stepper(
-                    value: $actualReps,
-                    in: 0...50
-                ) {
-                    Text("\(actualReps) reps")
-                        .frame(minWidth: 60, alignment: .leading)
+                // REPS: keep as a Stepper (this is usually fine UX-wise)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Reps")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Stepper(
+                        value: $actualReps,
+                        in: 0...50
+                    ) {
+                        Text("\(actualReps) reps")
+                            .frame(minWidth: 60, alignment: .leading)
+                    }
                 }
             }
         }
