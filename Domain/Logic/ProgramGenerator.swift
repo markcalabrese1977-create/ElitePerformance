@@ -110,6 +110,7 @@ struct ProgramGenerator {
                     date: date,
                     status: .planned,
                     readinessStars: 0,
+                    weekIndex: weekIndex + 1,   // store human-friendly week numbers (1-based)
                     items: []
                 )
 

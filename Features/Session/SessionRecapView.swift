@@ -1,17 +1,22 @@
 import SwiftUI
 import SwiftData
 
-/// Detailed recap of a single session: planned vs logged, volume, and per-exercise status.
+/// Detailed recap of a single session: planned vs logged, volume, per-exercise status,
+/// end-of-session readiness + notes, and per-set breakdowns.
 struct SessionRecapView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var session: Session
-
-
 
     var body: some View {
         List {
             Section {
                 header
+            }
+
+            // Readiness rating + notes
+            Section(header: Text("Readiness & Notes")) {
+                readinessSection
+                notesSection
             }
 
             Section(header: Text("Summary")) {
@@ -81,6 +86,20 @@ struct SessionRecapView: View {
         }
     }
 
+    /// Binding to session.sessionNotes, treating nil as empty string.
+    private var notesBinding: Binding<String> {
+        Binding(
+            get: { session.sessionNotes ?? "" },
+            set: { newValue in
+                session.sessionNotes = newValue.isEmpty ? nil : newValue
+            }
+        )
+    }
+
+    private var clampedStars: Int {
+        max(0, min(session.readinessStars, 5))
+    }
+
     // MARK: - UI pieces
 
     private var header: some View {
@@ -92,6 +111,64 @@ struct SessionRecapView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
+    }
+
+    // Readiness stars + labels
+    private var readinessSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("How ready did you feel today?")
+                    .font(.subheadline)
+                Spacer()
+                if clampedStars > 0 {
+                    Text("\(clampedStars) ★")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                } else {
+                    Text("Not set")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                ForEach(1...5, id: \.self) { star in
+                    Button {
+                        session.readinessStars = star
+                    } label: {
+                        Image(systemName: star <= clampedStars ? "star.fill" : "star")
+                            .imageScale(.large)
+                            .foregroundColor(star <= clampedStars ? .yellow : .gray)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack {
+                Text("1 = Drained")
+                    .font(.caption2)
+                Spacer()
+                Text("5 = Locked in")
+                    .font(.caption2)
+            }
+            .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // Notes editor
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Notes for next time")
+                .font(.subheadline)
+
+            TextEditor(text: notesBinding)
+                .frame(minHeight: 100)
+                .padding(6)
+                .background(Color.secondary.opacity(0.08))
+                .cornerRadius(8)
+        }
+        .padding(.vertical, 4)
     }
 
     private var summaryRows: some View {
@@ -256,6 +333,7 @@ struct ExerciseRecapRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Header + status
             HStack(spacing: 8) {
                 Text(exercise?.name ?? "Unknown exercise")
                     .font(.headline)
@@ -287,7 +365,7 @@ struct ExerciseRecapRow: View {
                     .foregroundColor(.secondary)
             }
 
-            // Debug / clarity: show what the logic is actually using
+            // Planned vs logged overview
             VStack(alignment: .leading, spacing: 2) {
                 Text("Planned: \(plannedSets) sets · top reps \(plannedTopReps)")
                     .font(.caption2)
@@ -295,6 +373,13 @@ struct ExerciseRecapRow: View {
                 Text("Logged: \(item.loggedSetsCount) sets · best reps \(item.bestReps)")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
+                // Top set with RP pattern if used
+                if let top = item.bestSetDescription {
+                    Text("Top set: \(top)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             HStack {
@@ -316,8 +401,47 @@ struct ExerciseRecapRow: View {
                     .fontWeight(.semibold)
             }
 
-            // MARK: Recommendation / "what should I do next?"
+            // 🔹 Per-set breakdown
+            if !item.loggedSetIndices.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sets")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
+                    ForEach(item.loggedSetIndices, id: \.self) { idx in
+                        // Manual safe indexing so we don't rely on subscript(safe:)
+                        let load: Double = idx < item.actualLoads.count ? item.actualLoads[idx] : 0
+                        let reps: Int    = idx < item.actualReps.count  ? item.actualReps[idx]  : 0
+                        let rir: Int?    = idx < item.actualRIRs.count  ? item.actualRIRs[idx]  : nil
+
+                        HStack(spacing: 6) {
+                            Text("Set \(idx + 1)")
+                                .font(.caption2)
+                                .frame(width: 46, alignment: .leading)
+
+                            Text(String(format: "%.1f x %d", load, reps))
+                                .font(.caption2)
+
+                            if let rir {
+                                Text("RIR \(rir)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            if let rp = item.restPauseDescription(forSetAt: idx) {
+                                Text(rp)
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                            }
+
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+
+            // Recommendation / "what should I do next?"
             if let rec = coachingRecommendation {
                 Text(rec.message)
                     .font(.caption)
@@ -382,6 +506,16 @@ extension SessionItem {
         return logged
     }
 
+    /// Indices of sets that have non-zero work logged.
+    var loggedSetIndices: [Int] {
+        let count = min(actualReps.count, actualLoads.count)
+        guard count > 0 else { return [] }
+
+        return (0..<count).filter { i in
+            actualReps[i] > 0 && actualLoads[i] > 0
+        }
+    }
+
     /// Total volume = sum(load * reps) across logged sets.
     var totalVolume: Double {
         let count = min(actualReps.count, actualLoads.count)
@@ -402,4 +536,60 @@ extension SessionItem {
     var bestReps: Int {
         actualReps.max() ?? 0
     }
+
+    /// Index of the best (highest reps) set with non-zero load/reps.
+    var bestSetIndex: Int? {
+        let count = min(actualReps.count, actualLoads.count)
+        guard count > 0 else { return nil }
+
+        var bestIdx: Int?
+        var bestRepsValue = -1
+
+        for i in 0..<count {
+            let reps = actualReps[i]
+            let load = actualLoads[i]
+            if reps > 0 && load > 0 && reps > bestRepsValue {
+                bestRepsValue = reps
+                bestIdx = i
+            }
+        }
+        return bestIdx
+    }
+
+    /// Human-readable description of the top set, including RP pattern if used.
+    /// e.g. "120.0 x 17 (RP: 10+4+3)"
+    var bestSetDescription: String? {
+        guard let idx = bestSetIndex else { return nil }
+        guard idx < actualLoads.count, idx < actualReps.count else { return nil }
+
+        let load = actualLoads[idx]
+        let reps = actualReps[idx]
+        guard reps > 0, load > 0 else { return nil }
+
+        let base = String(format: "%.1f x %d", load, reps)
+
+        let usedRP = idx < usedRestPauseFlags.count ? usedRestPauseFlags[idx] : false
+        let pattern = idx < restPausePatternsBySet.count ? restPausePatternsBySet[idx] : ""
+
+        if usedRP && !pattern.isEmpty {
+            return base + " (RP: \(pattern))"
+        } else {
+            return base
+        }
+    }
+
+    /// Description of rest-pause for a specific set index, e.g. "RP: 10+4+3".
+    func restPauseDescription(forSetAt index: Int) -> String? {
+        guard index < usedRestPauseFlags.count, usedRestPauseFlags[index] else {
+            return nil
+        }
+        let pattern = index < restPausePatternsBySet.count ? restPausePatternsBySet[index] : ""
+        if pattern.isEmpty {
+            return "RP"
+        } else {
+            return "RP: \(pattern)"
+        }
+    }
 }
+
+

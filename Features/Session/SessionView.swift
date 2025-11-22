@@ -1,459 +1,682 @@
 import SwiftUI
 import SwiftData
+import Combine
 
-// MARK: - Main Session View
+#if canImport(UIKit)
+import UIKit
+#endif
+
+// MARK: - Persistent Rest Timer
+
+final class RestTimer: ObservableObject {
+    @Published var isActive: Bool = false
+    @Published var elapsedSeconds: Int = 0
+    @Published var targetSeconds: Int = 120
+
+    private var startedAt: Date?
+    private var timerCancellable: AnyCancellable?
+    private var hasNotifiedAtTarget: Bool = false
+
+    func start(targetSeconds: Int) {
+        self.targetSeconds = targetSeconds
+        self.startedAt = Date()
+        self.isActive = true
+        self.hasNotifiedAtTarget = false
+
+        timerCancellable?.cancel()
+
+        timerCancellable = Timer
+            .publish(every: 1.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.tick()
+            }
+    }
+
+    func stop() {
+        timerCancellable?.cancel()
+        timerCancellable = nil
+        isActive = false
+        elapsedSeconds = 0
+        startedAt = nil
+        targetSeconds = 0
+        hasNotifiedAtTarget = false
+    }
+
+    func resumeIfNeeded() {
+        guard let startedAt = startedAt else { return }
+        let diff = Int(Date().timeIntervalSince(startedAt))
+        elapsedSeconds = max(diff, 0)
+        isActive = true
+    }
+
+    private func tick() {
+        guard let startedAt = startedAt else { return }
+        let diff = Int(Date().timeIntervalSince(startedAt))
+        elapsedSeconds = max(diff, 0)
+
+        // Fire a one-time haptic when we hit the target rest time.
+        if targetSeconds > 0,
+           elapsedSeconds >= targetSeconds,
+           !hasNotifiedAtTarget {
+
+            hasNotifiedAtTarget = true
+
+            #if canImport(UIKit)
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+            #endif
+        }
+    }
+
+    /// Seconds remaining until target is reached (never negative).
+    var remainingSeconds: Int {
+        guard targetSeconds > 0 else { return 0 }
+        return max(targetSeconds - elapsedSeconds, 0)
+    }
+}
+
+// MARK: - Session View
 
 struct SessionView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
     @Bindable var session: Session
 
-    @State private var selectedItemForLogging: SessionItem?
-    @State private var selectedItemForSwap: SessionItem?
-    @State private var navigateToRecap: Bool = false
+    @StateObject private var restTimer = RestTimer()
+    @State private var showingRecap = false
 
-    // DEV PHASE: allow logging any session regardless of date
-    private var canLogCurrentSession: Bool {
-        true
+    // Which exercise we’re swapping right now
+    @State private var itemToSwap: SessionItem?
+
+    // Add exercise sheet
+    @State private var showingAddExerciseSheet = false
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            content
+
+            if restTimer.isActive {
+                restBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .navigationTitle(formattedTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Close
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") {
+                    dismiss()
+                }
+            }
+
+            // End Workout
+            ToolbarItem(placement: .confirmationAction) {
+                Button("End Workout") {
+                    finishAndShowRecap()
+                }
+                .disabled(session.items.isEmpty)
+            }
+
+            // Add exercise
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingAddExerciseSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+        // Recap sheet
+        .sheet(isPresented: $showingRecap) {
+            NavigationStack {
+                SessionRecapView(session: session)
+            }
+        }
+        // Swap sheet
+        .sheet(item: $itemToSwap) { item in
+            NavigationStack {
+                swapExerciseSheet(for: item)
+            }
+        }
+        // Add exercise sheet
+        .sheet(isPresented: $showingAddExerciseSheet) {
+            NavigationStack {
+                addExerciseSheet
+            }
+        }
+        .onAppear {
+            restTimer.resumeIfNeeded()
+
+            #if canImport(UIKit)
+            // Keep screen awake while this session view is on-screen
+            UIApplication.shared.isIdleTimerDisabled = true
+            #endif
+        }
+        .onDisappear {
+            #if canImport(UIKit)
+            // Restore normal screen sleep behavior when leaving the session
+            UIApplication.shared.isIdleTimerDisabled = false
+            #endif
+        }
+    }
+
+    // MARK: - Main content
+
+    private var content: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.date, style: .date)
+                        .font(.headline)
+
+                    Text(session.status.displayTitle)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    if session.readinessStars > 0 {
+                        HStack(spacing: 4) {
+                            Text("Readiness:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(String(repeating: "★", count: session.readinessStars))
+                                .font(.caption)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            ForEach(sortedItems, id: \.persistentModelID) { item in
+                Section(header: exerciseHeader(for: item)) {
+                    exerciseBody(for: item)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        deleteExercise(item)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
     }
 
     private var sortedItems: [SessionItem] {
         session.items.sorted { $0.order < $1.order }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(session.date, style: .date)
-                .font(.headline)
-
-            Text(session.status.displayTitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
+    private var formattedTitle: String {
+        "Session – Week \(session.weekIndex)"
     }
 
-    var body: some View {
-        VStack {
-            List {
-                Section(header: header) {
-                    ForEach(sortedItems) { item in
-                        SessionItemRow(
-                            item: item,
-                            canLog: canLogCurrentSession,
-                            onLogTapped: { selectedItemForLogging = item },
-                            onSwapTapped: { selectedItemForSwap = item }
-                        )
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                deleteItem(item)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
+    // MARK: - Rest bar
+
+    private var restBar: some View {
+        HStack {
+            let elapsed   = restTimer.elapsedSeconds
+            let remaining = restTimer.remainingSeconds
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Rest timer")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                // Show countdown + total target
+                Text("Remaining: \(timeString(remaining))  ·  Target: \(timeString(restTimer.targetSeconds))")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+
+                // Also show how long you've actually been resting (for awareness)
+                Text("Elapsed: \(timeString(elapsed))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
 
-            // Hidden navigation link to recap
-            NavigationLink(
-                destination: SessionRecapView(session: session),
-                isActive: $navigateToRecap
-            ) {
-                EmptyView()
+            Spacer()
+
+            Button("Reset") {
+                restTimer.stop()
             }
-            .hidden()
+            .font(.footnote)
         }
-        .navigationTitle("Session")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Complete") {
-                    session.status = .completed
-                    try? context.save()
-                    navigateToRecap = true
-                }
-            }
-        }
-        .sheet(item: $selectedItemForLogging) { item in
-            ExerciseLogSheet(item: item)
-        }
-        .sheet(item: $selectedItemForSwap) { item in
-            ExerciseSwapSheet(item: item)
-        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .padding()
+        .shadow(radius: 4)
     }
 
-    // MARK: - Helpers
-
-    private func deleteItem(_ item: SessionItem) {
-        if let index = session.items.firstIndex(where: { $0.id == item.id }) {
-            session.items.remove(at: index)
-        }
-        context.delete(item)
-        try? context.save()
-    }
-}
-// MARK: - Row for a single exercise in the session
-
-struct SessionItemRow: View {
-    let item: SessionItem
-    let canLog: Bool
-    let onLogTapped: () -> Void
-    let onSwapTapped: () -> Void
-
-    private var exercise: CatalogExercise? {
-        ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
+    private func timeString(_ seconds: Int) -> String {
+        guard seconds > 0 else { return "00:00" }
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%02d:%02d", m, s)
     }
 
-    private var loggedSummary: String {
-        let count = min(item.actualReps.count, item.actualLoads.count)
-        guard count > 0 else { return "Not logged" }
+    // MARK: - Exercise sections
 
-        let nonZero = (0..<count).filter { idx in
-            item.actualReps[idx] > 0 && item.actualLoads[idx] > 0
-        }.count
+    private func exerciseHeader(for item: SessionItem) -> some View {
+        let exerciseName = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
+            ?? "Unknown exercise"
 
-        return "\(nonZero) set\(nonZero == 1 ? "" : "s") logged"
-    }
+        // Planned load from program
+        let plannedLoad = plannedLoad(for: item)
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(exercise?.name ?? "Unknown exercise")
+        return HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(exerciseName)
                     .font(.headline)
 
-                Spacer()
+                if let load = plannedLoad {
+                    Text("Planned: \(item.plannedSetCount)x\(item.plannedTopReps) @ \(load, specifier: "%.1f") · RIR \(item.targetRIR)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Planned: \(item.plannedSetCount)x\(item.plannedTopReps) · RIR \(item.targetRIR)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
-                if item.isPR {
-                    Text("PR")
+                // Last completed session’s top set + readiness, if available
+                if let (prevSession, prevItem) = lastCompletedSessionItem(for: item.exerciseId),
+                   let top = prevItem.bestSetDescription {
+                    HStack(spacing: 4) {
+                        Text("Last: \(top)")
+                        if prevSession.readinessStars > 0 {
+                            Text("· \(prevSession.readinessStars)★")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Button("Swap") {
+                    itemToSwap = item
+                }
+                .font(.caption2)
+
+                if item.isCompleted {
+                    Text("Done")
                         .font(.caption2)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.2))
-                        .foregroundColor(.purple)
+                        .background(Color.green.opacity(0.2))
+                        .foregroundColor(.green)
                         .cornerRadius(6)
                 }
             }
+        }
+    }
+
+    private func exerciseBody(for item: SessionItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+
+            // Column labels
+            HStack(spacing: 8) {
+                Text("Set")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 52, alignment: .leading)
+
+                Text("Load")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 70, alignment: .leading)
+
+                Text("Reps")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .leading)
+
+                Text("RP")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 40, alignment: .leading)
+
+                Text("Pattern")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 90, alignment: .leading)
+
+                Spacer()
+            }
+
+            ForEach(0..<item.plannedSetCount, id: \.self) { index in
+                setRow(for: item, index: index)
+            }
 
             HStack {
-                Text("Planned: \(item.targetSets)x\(item.targetReps) · RIR \(item.targetRIR)")
+                Text("Logged sets: \(item.loggedSetsCount)/\(item.plannedSetCount)")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 Spacer()
 
-                Text(loggedSummary)
+                Button(item.isCompleted ? "Mark Not Done" : "Mark Done") {
+                    item.isCompleted.toggle()
+                    saveContext()
+                }
+                .font(.caption)
+            }
+            .padding(.top, 4)
+
+            HStack {
+                Text("Logged sets: \(item.loggedSetsCount)/\(item.plannedSetCount)")
                     .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button(item.isCompleted ? "Mark Not Done" : "Mark Done") {
+                    item.isCompleted.toggle()
+                    saveContext()
+                }
+                .font(.caption)
+            }
+             .padding(.top, 4)
+            }
+            .padding(.vertical, 4)
+        }
+
+
+    // MARK: - Per-set row (simple, direct bindings)
+
+    private func setRow(for item: SessionItem, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Set \(index + 1)")
+                    .font(.subheadline)
+                    .frame(width: 52, alignment: .leading)
+
+                TextField("0",
+                          value: bindingLoad(for: item, index: index),
+                          format: .number)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+
+                TextField("0",
+                          value: bindingReps(for: item, index: index),
+                          format: .number)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 60)
+
+                Toggle("RP", isOn: bindingRestPauseFlag(for: item, index: index))
+                    .labelsHidden()
+
+                TextField("RP patt…", text: bindingRestPausePattern(for: item, index: index))
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+
+                Spacer()
             }
 
             HStack {
-                Button {
-                    if canLog {
-                        onLogTapped()
-                    }
-                } label: {
-                    Text(canLog ? "Log sets" : "Locked")
-                        .frame(maxWidth: .infinity)
+                Spacer()
+                Button("Save") {
+                    handleSetSaved(for: item, setIndex: index)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canLog)
-
-                Button {
-                    onSwapTapped()
-                } label: {
-                    Text("Swap")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
+                .font(.caption)
             }
         }
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Log Sheet (Stepper-based, with load profiling)
-
-struct ExerciseLogSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-
-    @Bindable var item: SessionItem
-
-    /// We’re still using a fixed 5-set editor.
-    private let maxSets = 5
-
-    /// Working copies for the sheet UI. These drive SessionSetRowView bindings.
-    @State private var workingLoads: [Double]
-    @State private var workingReps: [Int]
-
-    private var exercise: CatalogExercise? {
-        ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
     }
 
-    init(item: SessionItem) {
-        self._item = Bindable(wrappedValue: item)
+    // MARK: - Bindings for per-set arrays
 
-        var loads = Array(repeating: 0.0, count: maxSets)
-        var reps  = Array(repeating: 0, count: maxSets)
+    private func ensureCapacity(for item: SessionItem, upTo index: Int) {
+        while item.actualLoads.count <= index {
+            item.actualLoads.append(0)
+        }
+        while item.actualReps.count <= index {
+            item.actualReps.append(0)
+        }
+        while item.actualRIRs.count <= index {
+            item.actualRIRs.append(item.targetRIR)
+        }
+        while item.usedRestPauseFlags.count <= index {
+            item.usedRestPauseFlags.append(false)
+        }
+        while item.restPausePatternsBySet.count <= index {
+            item.restPausePatternsBySet.append("")
+        }
+    }
 
-        // Seed from actuals if they exist
-        let actualCount = min(
-            maxSets,
-            min(item.actualLoads.count, item.actualReps.count)
+    private func bindingLoad(for item: SessionItem, index: Int) -> Binding<Double> {
+        Binding(
+            get: {
+                ensureCapacity(for: item, upTo: index)
+                return item.actualLoads[index]
+            },
+            set: { newValue in
+                ensureCapacity(for: item, upTo: index)
+                item.actualLoads[index] = newValue
+            }
         )
-        for idx in 0..<actualCount {
-            loads[idx] = item.actualLoads[idx]
-            reps[idx]  = item.actualReps[idx]
+    }
+
+    private func bindingReps(for item: SessionItem, index: Int) -> Binding<Int> {
+        Binding(
+            get: {
+                ensureCapacity(for: item, upTo: index)
+                return item.actualReps[index]
+            },
+            set: { newValue in
+                ensureCapacity(for: item, upTo: index)
+                item.actualReps[index] = newValue
+            }
+        )
+    }
+
+    private func bindingRestPauseFlag(for item: SessionItem, index: Int) -> Binding<Bool> {
+        Binding(
+            get: {
+                ensureCapacity(for: item, upTo: index)
+                return item.usedRestPauseFlags[index]
+            },
+            set: { newValue in
+                ensureCapacity(for: item, upTo: index)
+                item.usedRestPauseFlags[index] = newValue
+            }
+        )
+    }
+
+    private func bindingRestPausePattern(for item: SessionItem, index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                ensureCapacity(for: item, upTo: index)
+                return item.restPausePatternsBySet[index]
+            },
+            set: { newValue in
+                ensureCapacity(for: item, upTo: index)
+                item.restPausePatternsBySet[index] = newValue
+            }
+        )
+    }
+
+    // MARK: - Set save → rest timer (no auto-finish)
+
+    private func handleSetSaved(for item: SessionItem, setIndex: Int) {
+        // Mark the session as "in progress" once any work is logged
+        if session.status == .planned {
+            session.status = .inProgress
         }
 
-        // Where no actual reps yet, fall back to planned reps
-        for idx in 0..<min(maxSets, item.plannedRepsBySet.count) {
-            if reps[idx] == 0 {
-                reps[idx] = item.plannedRepsBySet[idx]
+        // If this exercise now has all its sets logged, you *can* mark it done.
+        if item.loggedSetsCount >= item.plannedSetCount {
+            item.isCompleted = true
+        }
+
+        // Start / restart rest timer whenever you save a set.
+        restTimer.start(targetSeconds: 120) // tweak default as you like
+
+        // Just save changes — DO NOT auto-complete the whole session here.
+        saveContext()
+    }
+
+    private func finishAndShowRecap() {
+        session.status = .completed
+        saveContext()
+        restTimer.stop()
+        showingRecap = true
+    }
+
+    private func saveContext() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save session: \(error)")
+        }
+    }
+
+    // MARK: - Last completed session lookup
+
+    /// Returns the most recent *completed* session before this one that has a
+    /// logged item for the given exerciseId, plus that SessionItem.
+    private func lastCompletedSessionItem(for exerciseId: String) -> (Session, SessionItem)? {
+        let thisDate = session.date
+
+        // Fetch all sessions, newest first; filter in memory.
+        var descriptor = FetchDescriptor<Session>()
+        descriptor.sortBy = [SortDescriptor(\Session.date, order: .reverse)]
+
+        guard let sessions = try? modelContext.fetch(descriptor) else {
+            return nil
+        }
+
+        for s in sessions {
+            guard s.status == .completed, s.date < thisDate else { continue }
+
+            if let item = s.items.first(where: { $0.exerciseId == exerciseId && $0.loggedSetsCount > 0 }) {
+                return (s, item)
             }
         }
 
-        _workingLoads = State(initialValue: loads)
-        _workingReps  = State(initialValue: reps)
+        return nil
     }
 
-    // MARK: - Body
+    // MARK: - Planned load helper
 
-    var body: some View {
-        NavigationStack {
-            List {
-                if let exercise {
-                    Section {
-                        Text(exercise.name)
-                            .font(.headline)
-                    }
-                }
-
-                Section(header: Text("Log sets")) {
-                    ForEach(0..<maxSets, id: \.self) { index in
-                        SessionSetRowView(
-                            index: index,
-                            plannedLoad: plannedLoad(for: index),
-                            plannedReps: plannedReps(for: index),
-                            actualLoad: $workingLoads[index],
-                            actualReps: $workingReps[index]
-                        )
-                    }
-                }
-            }
-            .navigationTitle("Log Exercise")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveLogs()
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Planning helpers
-
-    private func plannedReps(for index: Int) -> Int {
-        if index < item.plannedRepsBySet.count {
-            return item.plannedRepsBySet[index]
-        }
-        return item.targetReps
-    }
-
-    private func plannedLoad(for index: Int) -> Double {
-        if index < item.plannedLoadsBySet.count {
-            return item.plannedLoadsBySet[index]
+    /// Planned working load from the program for display in the header.
+    /// Prefers per-set planned loads; falls back to suggestedLoad.
+    private func plannedLoad(for item: SessionItem) -> Double? {
+        let nonZeroPlanned = item.plannedLoadsBySet.filter { abs($0) > 0.1 }
+        if let first = nonZeroPlanned.first {
+            return first
         }
         if item.suggestedLoad > 0 {
             return item.suggestedLoad
         }
-        return 0
+        return nil
     }
 
-    // MARK: - Save with auto-prefill
+    // MARK: - Swap exercise sheet
 
-    private func saveLogs() {
-        var newReps  = workingReps
-        var newLoads = workingLoads
-
-        // Auto-prefill loads for later sets:
-        // If Set 1 has a load, and a later set has load == 0,
-        // copy Set 1's load into that slot.
-        if newLoads.indices.contains(0), newLoads[0] > 0 {
-            let baseLoad = newLoads[0]
-            for idx in 1..<maxSets where newLoads[idx] == 0 {
-                newLoads[idx] = baseLoad
-            }
-        }
-
-        item.actualReps  = newReps
-        item.actualLoads = newLoads
-
-        // IMPORTANT: do NOT touch item.targetSets here.
-        // It represents the planned number of sets from the program.
-        try? context.save()
-    }
-}
-
-
-
-
-
-// MARK: - Swap sheet
-
-/// Sheet for swapping an exercise using SwapMap.
-struct ExerciseSwapSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-
-    @Bindable var item: SessionItem
-
-    private var currentExercise: CatalogExercise? {
-        ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
-    }
-
-    private var alternatives: [CatalogExercise] {
-        // DEV PHASE: allow swapping to ANY other exercise in the catalog.
-        SwapMap.swapOptions(for: item.exerciseId)
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let current = currentExercise {
-                    Section(header: Text("Current")) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(current.name)
-                                .font(.headline)
-                            Text(current.primaryMuscle.rawValue.capitalized)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-
-                Section(header: Text("Swap options")) {
-                    ForEach(alternatives) { alt in
-                        Button {
-                            item.exerciseId = alt.id
-                            try? context.save()
-                            dismiss()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(alt.name)
-                                    Text(alt.primaryMuscle.rawValue.capitalized)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if alt.id == item.exerciseId {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.accentColor)
-                                }
-                            }
+    @ViewBuilder
+    private func swapExerciseSheet(for item: SessionItem) -> some View {
+        List {
+            ForEach(ExerciseCatalog.all) { exercise in
+                Button {
+                    performSwap(on: item, to: exercise)
+                    itemToSwap = nil
+                } label: {
+                    HStack {
+                        Text(exercise.name)
+                        Spacer()
+                        if exercise.id == item.exerciseId {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.accentColor)
                         }
                     }
                 }
             }
-            .navigationTitle("Swap Exercise")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+        }
+        .navigationTitle("Swap Exercise")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    itemToSwap = nil
                 }
             }
         }
     }
-}
 
-// MARK: - Per-set row with Steppers
+    private func performSwap(on item: SessionItem, to exercise: CatalogExercise) {
+        item.exerciseId = exercise.id
+        item.coachNote = nil
+        item.nextSuggestedLoad = nil
+        item.isCompleted = false
+        item.isPR = false
+        // Optional: clear logged data when swapping
+        item.actualReps = []
+        item.actualLoads = []
+        item.actualRIRs = []
+        item.usedRestPauseFlags = []
+        item.restPausePatternsBySet = []
+        saveContext()
+    }
 
-struct SessionSetRowView: View {
-    /// Index of the set (0-based here, but will display as 1-based)
-    let index: Int
+    // MARK: - Add exercise sheet + helpers
 
-    /// Planned values
-    let plannedLoad: Double
-    let plannedReps: Int
-
-    /// Bindings into the actual values stored on SessionItem
-    @Binding var actualLoad: Double
-    @Binding var actualReps: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Set label
-            Text("Set \(index + 1)")
-                .font(.caption)
-                .fontWeight(.semibold)
-
-            // PLAN row
-            HStack(spacing: 4) {
-                Text("Planned:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Text("\(plannedLoad, specifier: "%.1f") lb × \(plannedReps)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // ACTUAL controls
-            HStack(spacing: 16) {
-                // LOAD: typeable field backed by the Double binding
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Load")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-
-                    TextField(
-                        "0",
-                        text: Binding(
-                            get: {
-                                actualLoad == 0
-                                    ? ""
-                                    : String(format: "%.1f", actualLoad)
-                            },
-                            set: { newValue in
-                                let trimmed = newValue
-                                    .trimmingCharacters(in: .whitespaces)
-                                if let value = Double(trimmed) {
-                                    actualLoad = value
-                                } else if trimmed.isEmpty {
-                                    actualLoad = 0
-                                }
-                                // If you want: we can later hook a callback here
-                                // so changing set 1 can prefill other sets live.
-                            }
-                        )
-                    )
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
-                }
-
-                // REPS: keep as a Stepper (this is usually fine UX-wise)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Reps")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-
-                    Stepper(
-                        value: $actualReps,
-                        in: 0...50
-                    ) {
-                        Text("\(actualReps) reps")
-                            .frame(minWidth: 60, alignment: .leading)
+    private var addExerciseSheet: some View {
+        List {
+            ForEach(ExerciseCatalog.all) { exercise in
+                Button {
+                    addExercise(exercise)
+                } label: {
+                    HStack {
+                        Text(exercise.name)
+                        Spacer()
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
+        .navigationTitle("Add Exercise")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    showingAddExerciseSheet = false
+                }
+            }
+        }
+    }
+
+    private func addExercise(_ exercise: CatalogExercise) {
+        let nextOrder = (session.items.map { $0.order }.max() ?? 0) + 1
+
+        // Simple defaults for ad-hoc adds; progression can refine later.
+        let newItem = SessionItem(
+            order: nextOrder,
+            exerciseId: exercise.id,
+            targetReps: 10,
+            targetSets: 3,
+            targetRIR: 2,
+            suggestedLoad: 0
+        )
+
+        session.items.append(newItem)
+        saveContext()
+        showingAddExerciseSheet = false
+    }
+
+    private func deleteExercise(_ item: SessionItem) {
+        // Remove from relationship
+        if let idx = session.items.firstIndex(where: { $0 === item }) {
+            session.items.remove(at: idx)
+        }
+
+        // Delete from model context
+        modelContext.delete(item)
+        saveContext()
     }
 }

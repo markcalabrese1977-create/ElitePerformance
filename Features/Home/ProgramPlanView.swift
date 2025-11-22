@@ -1,148 +1,373 @@
 import SwiftUI
 import SwiftData
 
-/// "Program Plan" screen to seed starting loads for each exercise
-/// across the current block. This lets you plan before you ever hit
-/// the first session, so in-session logging is execution vs plan.
+/// High-level planner: shows the current block grouped by Week → Day,
+/// and lets you inspect each day's planned exercises.
 struct ProgramPlanView: View {
-    @Environment(\.modelContext) private var context
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
-    /// Text fields keyed by exerciseId
-    @State private var loadText: [String: String] = [:]
+    private var calendar: Calendar { Calendar.current }
 
-    /// All SessionItems in the block.
-    private var allItems: [SessionItem] {
-        sessions.flatMap { $0.items }
+    /// Start date of the current block (earliest session).
+    private var blockStartDate: Date? {
+        sessions.map(\.date).min()
     }
 
-    /// Unique exercises present in the block, sorted by name.
-    private var exercises: [(id: String, name: String)] {
-        let grouped = Dictionary(grouping: allItems, by: { $0.exerciseId })
+    /// Group sessions into weeks relative to the block start.
+    private var weeks: [WeekGroup] {
+        guard let start = blockStartDate else { return [] }
 
-        return grouped.compactMap { (exerciseId, _) in
-            let ex = ExerciseCatalog.all.first { $0.id == exerciseId }
-            let name = ex?.name ?? "Exercise \(exerciseId)"
-            return (id: exerciseId, name: name)
+        let startDay = calendar.startOfDay(for: start)
+        let sortedSessions = sessions.sorted { $0.date < $1.date }
+
+        var groups: [Int: [Session]] = [:]
+
+        for session in sortedSessions {
+            let day = calendar.startOfDay(for: session.date)
+            guard let offsetDays = calendar.dateComponents([.day], from: startDay, to: day).day else {
+                continue
+            }
+            let weekIndex = max(1, (offsetDays / 7) + 1)
+            groups[weekIndex, default: []].append(session)
         }
-        .sorted { $0.name < $1.name }
+
+        return groups
+            .map { (weekIndex, sessions) in
+                let ordered = sessions.sorted { $0.date < $1.date }
+                return WeekGroup(weekIndex: weekIndex, sessions: ordered)
+            }
+            .sorted { $0.weekIndex < $1.weekIndex }
     }
 
     var body: some View {
         List {
-            if exercises.isEmpty {
-                Text("No sessions found. Complete onboarding to create a block first.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+            if weeks.isEmpty {
+                Section {
+                    Text("No program found.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text("Create a program from onboarding to see your block here.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             } else {
-                Section(footer: footerNote) {
-                    ForEach(exercises, id: \.id) { exercise in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(exercise.name)
-                                    .font(.headline)
-
-                                Text(exercise.id)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                ForEach(weeks) { week in
+                    Section(header: Text("Week \(week.weekIndex)")) {
+                        ForEach(week.sessions) { session in
+                            NavigationLink {
+                                ProgramDayDetailView(session: session)
+                            } label: {
+                                ProgramDayRow(session: session, calendar: calendar)
                             }
-
-                            Spacer()
-
-                            TextField("Load", text: binding(for: exercise.id))
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                                .textFieldStyle(.roundedBorder)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
         }
-        .navigationTitle("Starting Loads")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    saveLoads()
-                }
-                .disabled(exercises.isEmpty)
-            }
-        }
-        .onAppear {
-            if loadText.isEmpty {
-                seedFromExisting()
-            }
-        }
+    }
+}
+
+// MARK: - Week grouping model
+
+struct WeekGroup: Identifiable {
+    let weekIndex: Int
+    let sessions: [Session]
+
+    var id: Int { weekIndex }
+}
+
+// MARK: - Row for a single day in the plan
+
+struct ProgramDayRow: View {
+    let session: Session
+    let calendar: Calendar
+
+    private var weekdayName: String {
+        let weekdayIndex = calendar.component(.weekday, from: session.date) - 1
+        return calendar.weekdaySymbols[safe: weekdayIndex] ?? ""
     }
 
-    private var footerNote: some View {
+    private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: session.date)
+    }
+
+    private var exerciseCountText: String {
+        let count = session.items.count
+        return "\(count) exercise\(count == 1 ? "" : "s")"
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("These loads will be used as the planned working weight for every set of this exercise across the block. You can still adjust per set when logging.")
-                .font(.caption2)
+            HStack {
+                Text(weekdayName)
+                    .font(.headline)
+                Spacer()
+                Text(session.status.displayTitle)
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(6)
+            }
+
+            Text(formattedDate)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            Text(exerciseCountText)
+                .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding(.top, 4)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Detail view: plan for a single session/day (NOW EDITABLE)
+
+struct ProgramDayDetailView: View {
+    @Environment(\.modelContext) private var context
+    @Bindable var session: Session
+
+    @State private var selectedItemForEdit: SessionItem?
+
+    private var calendar: Calendar { Calendar.current }
+
+    private var weekdayName: String {
+        let weekdayIndex = calendar.component(.weekday, from: session.date) - 1
+        return calendar.weekdaySymbols[safe: weekdayIndex] ?? ""
     }
 
-    private func binding(for exerciseId: String) -> Binding<String> {
-        Binding(
-            get: { loadText[exerciseId] ?? "" },
-            set: { loadText[exerciseId] = $0 }
-        )
+    private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        return formatter.string(from: session.date)
     }
 
-    /// Seed the text fields from any existing planned or suggested loads,
-    /// so you can tweak instead of always starting from blank.
-    private func seedFromExisting() {
-        for exercise in exercises {
-            let exerciseId = exercise.id
-            guard loadText[exerciseId] == nil else { continue }
+    /// Planned items in order.
+    private var sortedItems: [SessionItem] {
+        session.items.sorted { $0.order < $1.order }
+    }
 
-            let itemsForExercise = allItems.filter { $0.exerciseId == exerciseId }
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(weekdayName)
+                        .font(.headline)
 
-            // Prefer plannedLoadsBySet if present
-            if let withPlan = itemsForExercise.first(where: { !$0.plannedLoadsBySet.isEmpty && $0.plannedLoadsBySet[0] > 0 }) {
-                let value = withPlan.plannedLoadsBySet[0]
-                loadText[exerciseId] = value > 0 ? String(format: "%.1f", value) : ""
-                continue
+                    Text(formattedDate)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    Text(session.status.displayTitle)
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(6)
+                }
+                .padding(.vertical, 4)
             }
 
-            // Fall back to suggestedLoad
-            if let withSuggested = itemsForExercise.first(where: { $0.suggestedLoad > 0 }) {
-                let value = withSuggested.suggestedLoad
-                loadText[exerciseId] = value > 0 ? String(format: "%.1f", value) : ""
-                continue
+            Section(header: Text("Planned exercises")) {
+                ForEach(sortedItems) { item in
+                    Button {
+                        selectedItemForEdit = item
+                    } label: {
+                        ProgramExerciseRow(item: item)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("Day Plan")
+        .sheet(item: $selectedItemForEdit) { item in
+            ProgramExerciseEditSheet(item: item)
+        }
+    }
+}
+
+// MARK: - Per-exercise planned row
+
+struct ProgramExerciseRow: View {
+    let item: SessionItem
+
+    private var exercise: CatalogExercise? {
+        ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
+    }
+
+    private var titleText: String {
+        exercise?.name ?? "Unknown exercise"
+    }
+
+    private var muscleText: String? {
+        exercise?.primaryMuscle.rawValue.capitalized
+    }
+
+    private var prescriptionText: String {
+        let sets = max(item.targetSets, 1)
+        let reps = item.targetReps
+        return "\(sets)x\(reps) · RIR \(item.targetRIR)"
+    }
+
+    private var startingLoadText: String? {
+        // Prefer suggestedLoad, then plannedLoadsBySet[0] if present
+        if item.suggestedLoad > 0 {
+            return String(format: "%.1f lb starting load", item.suggestedLoad)
+        }
+        if let first = item.plannedLoadsBySet.first, first > 0 {
+            return String(format: "%.1f lb starting load", first)
+        }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(titleText)
+                .font(.headline)
+
+            if let muscle = muscleText {
+                Text(muscle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text(prescriptionText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if let loadText = startingLoadText {
+                Text(loadText)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("Tap to edit")
+                .font(.caption2)
+                .foregroundColor(.blue)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Editor sheet: sets / reps / RIR / starting load
+
+struct ProgramExerciseEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+
+    @Bindable var item: SessionItem
+
+    @State private var sets: Int
+    @State private var reps: Int
+    @State private var rir: Int
+    @State private var startingLoadText: String
+
+    private var exercise: CatalogExercise? {
+        ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
+    }
+
+    init(item: SessionItem) {
+        self._item = Bindable(wrappedValue: item)
+
+        let initialSets = max(item.targetSets, 1)
+        let initialReps = max(item.targetReps, 1)
+        let initialRir = item.targetRIR
+
+        let baseLoad: Double
+        if item.suggestedLoad > 0 {
+            baseLoad = item.suggestedLoad
+        } else if let first = item.plannedLoadsBySet.first, first > 0 {
+            baseLoad = first
+        } else {
+            baseLoad = 0
+        }
+
+        _sets = State(initialValue: initialSets)
+        _reps = State(initialValue: initialReps)
+        _rir = State(initialValue: max(0, min(initialRir, 4)))
+        _startingLoadText = State(initialValue: baseLoad > 0 ? String(format: "%.1f", baseLoad) : "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let exercise {
+                    Section {
+                        Text(exercise.name)
+                            .font(.headline)
+                    }
+                }
+
+                Section("Prescription") {
+                    Stepper("Sets: \(sets)", value: $sets, in: 1...6)
+                    Stepper("Reps: \(reps)", value: $reps, in: 4...20)
+                    Stepper("Target RIR: \(rir)", value: $rir, in: 0...4)
+                }
+
+                Section("Starting load") {
+                    TextField("e.g. 135", text: $startingLoadText)
+                        .keyboardType(.decimalPad)
+
+                    Text("Used as the starting working weight and to prefill planned loads for this day.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Edit Exercise")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveAndClose()
+                    }
+                }
             }
         }
     }
 
-    /// Persist the planned loads back into all matching SessionItems.
-    /// For each exerciseId, every SessionItem in the block gets:
-    /// - suggestedLoad = value
-    /// - plannedLoadsBySet = [value, value, ...] for each target set
-    private func saveLoads() {
-        guard !sessions.isEmpty else { return }
+    private func saveAndClose() {
+        let trimmed = startingLoadText.trimmingCharacters(in: .whitespaces)
+        let loadValue: Double
+        if let parsed = Double(trimmed), parsed > 0 {
+            loadValue = parsed
+        } else {
+            loadValue = 0
+        }
 
-        for (exerciseId, text) in loadText {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, let value = Double(trimmed), value > 0 else { continue }
+        // Update core prescription
+        item.targetSets = sets
+        item.targetReps = reps
+        item.targetRIR = rir
 
-            for session in sessions {
-                for item in session.items where item.exerciseId == exerciseId {
-                    item.suggestedLoad = value
-                    let setCount = max(item.targetSets, 1)
-                    item.plannedLoadsBySet = Array(repeating: value, count: setCount)
-                }
-            }
+        // Update planned reps to match prescription
+        item.plannedRepsBySet = Array(repeating: reps, count: sets)
+
+        // Update starting load + planned loads
+        if loadValue > 0 {
+            item.suggestedLoad = loadValue
+            item.plannedLoadsBySet = Array(repeating: loadValue, count: sets)
+        } else {
+            item.suggestedLoad = 0
+            item.plannedLoadsBySet = []
         }
 
         try? context.save()
+        dismiss()
     }
-}//
-//  ProgramPlanView.swift
-//  ElitePerformance
-//
-//  Created by Mark Calabrese on 11/16/25.
-//
+}
 
+// MARK: - Safe array index helper
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
+    }
+}

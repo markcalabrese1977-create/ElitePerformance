@@ -1,40 +1,55 @@
 import Foundation
 import SwiftData
 
+// MARK: - Session Status
+
 enum SessionStatus: String, Codable, CaseIterable {
     case planned
     case inProgress
     case completed
 }
 
+// MARK: - Session
+
 @Model
 final class Session {
     var date: Date
     var status: SessionStatus
+
+    /// 0 = not set yet, 1–5 = readiness rating for this session.
     var readinessStars: Int
+
+    /// Optional text recap / notes for this session (end-of-workout recap writes here).
+    var sessionNotes: String?
 
     /// Which week of the block this session belongs to (1-based).
     var weekIndex: Int
 
+    /// Exercises for this session.
     @Relationship(deleteRule: .cascade) var items: [SessionItem]
 
     init(
         date: Date,
         status: SessionStatus = .planned,
         readinessStars: Int = 0,
-        weekIndex: Int = 1,
+        sessionNotes: String? = nil,
+        weekIndex: Int,
         items: [SessionItem] = []
     ) {
         self.date = date
         self.status = status
         self.readinessStars = readinessStars
+        self.sessionNotes = sessionNotes
         self.weekIndex = weekIndex
         self.items = items
     }
 }
 
+// MARK: - Session Item (per-exercise)
+
 @Model
 final class SessionItem {
+    /// Display order within the session (1-based).
     var order: Int
 
     /// ID of the exercise in `ExerciseCatalog` / `CatalogExercise`.
@@ -46,6 +61,7 @@ final class SessionItem {
     var targetRIR: Int
     var suggestedLoad: Double
 
+    /// Optional per-set logs (for future richer analytics).
     @Relationship(deleteRule: .cascade) var logs: [SetLog]
 
     // Planned pattern per set (v1)
@@ -54,17 +70,21 @@ final class SessionItem {
     /// Planned load per set (same index as plannedRepsBySet).
     var plannedLoadsBySet: [Double]
 
-    // Simple inline logging for v1
+    // Simple inline logging (what you’re using now)
     /// Logged reps per set (index 0 = Set 1, etc.).
     var actualReps: [Int]
     /// Logged load per set (same indexing as actualReps).
     var actualLoads: [Double]
     /// Logged RIR per set (same indexing as actualReps).
     var actualRIRs: [Int]
+    /// Whether each set used rest-pause / myo-rep (same indexing).
+    var usedRestPauseFlags: [Bool]
+    /// Rest-pause pattern per set, e.g. "10+4+3" (same indexing as actualReps).
+    var restPausePatternsBySet: [String]
 
     /// Whether this exercise has any logged work.
     var isCompleted: Bool
-    /// Whether this session hit a new PR for this exercise.
+    /// Whether this exercise hit a new PR in this session.
     var isPR: Bool
 
     /// Coach note summarizing what to do next time on this exercise.
@@ -85,6 +105,8 @@ final class SessionItem {
         actualReps: [Int] = [],
         actualLoads: [Double] = [],
         actualRIRs: [Int] = [],
+        usedRestPauseFlags: [Bool] = [],
+        restPausePatternsBySet: [String] = [],
         isCompleted: Bool = false,
         isPR: Bool = false,
         coachNote: String? = nil,
@@ -102,12 +124,16 @@ final class SessionItem {
         self.actualReps = actualReps
         self.actualLoads = actualLoads
         self.actualRIRs = actualRIRs
+        self.usedRestPauseFlags = usedRestPauseFlags
+        self.restPausePatternsBySet = restPausePatternsBySet
         self.isCompleted = isCompleted
         self.isPR = isPR
         self.coachNote = coachNote
         self.nextSuggestedLoad = nextSuggestedLoad
     }
 }
+
+// MARK: - SetLog (for future detailed logging)
 
 @Model
 final class SetLog {

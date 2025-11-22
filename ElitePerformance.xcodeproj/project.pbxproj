@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
+		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
@@ -37,6 +39,7 @@
 		D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293932EC7BBD500034D78 /* PlannedBlock.swift */; };
 		D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */; };
 		D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2939F2EC7C4E900034D78 /* Goal.swift */; };
+		D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +53,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
+		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
@@ -82,6 +87,7 @@
 		D5E293932EC7BBD500034D78 /* PlannedBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannedBlock.swift; sourceTree = "<group>"; };
 		D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseCatalog.swift; sourceTree = "<group>"; };
 		D5E2939F2EC7C4E900034D78 /* Goal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Goal.swift; sourceTree = "<group>"; };
+		D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumericTextFields.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -164,6 +170,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D58618272ECCA95F006EF818 /* ProgramCatalog.swift */,
 				D5D7DB662EC94F150058D515 /* CoachingEngine.swift */,
 				D5E293872EC6BDB400034D78 /* PRService.swift */,
 				D5E293832EC6B59700034D78 /* SwapMap.swift */,
@@ -177,6 +184,7 @@
 		D5E293522EC410DD00034D78 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				D58618252ECCA92A006EF818 /* TrainingProgram.swift */,
 				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */,
 				D5E2939F2EC7C4E900034D78 /* Goal.swift */,
 				D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */,
@@ -228,6 +236,7 @@
 		D5E2935B2EC410DD00034D78 /* Session */ = {
 			isa = PBXGroup;
 			children = (
+				D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */,
 				D5E2938B2EC6BDE800034D78 /* SessionRecapView.swift */,
 				D5E2935A2EC410DD00034D78 /* SessionView.swift */,
 			);
@@ -424,6 +433,7 @@
 				D5E293662EC410DD00034D78 /* User.swift in Sources */,
 				D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */,
 				D5E293682EC410DD00034D78 /* Progression.swift in Sources */,
+				D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */,
 				D5E293692EC410DD00034D78 /* Readiness.swift in Sources */,
 				D5E2936A2EC410DD00034D78 /* ElitePerformanceApp.swift in Sources */,
 				D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */,
@@ -436,6 +446,7 @@
 				D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */,
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
 				D5E293702EC410DD00034D78 /* OnboardingView.swift in Sources */,
+				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
@@ -445,6 +456,7 @@
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
 				D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
+				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
 				D5E2938C2EC6BDEA00034D78 /* SessionRecapView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
