@@ -65,13 +65,7 @@ struct OnboardingFlowView: View {
         .padding()
         .navigationTitle("Welcome")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Close") {
-                    dismiss()
-                }
-            }
-        }
+        
     }
 
     // MARK: - Pages

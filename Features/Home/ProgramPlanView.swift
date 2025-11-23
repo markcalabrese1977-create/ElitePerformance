@@ -8,6 +8,10 @@ struct ProgramPlanView: View {
 
     var body: some View {
         List {
+            // TEMP: debug display
+            Text("DEBUG sessions count: \(sessions.count)")
+                .font(.caption)
+                .foregroundColor(.secondary)
             if sessions.isEmpty {
                 Section {
                     Text("No program scheduled yet.")
