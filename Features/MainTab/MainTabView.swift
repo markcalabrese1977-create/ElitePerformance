@@ -6,14 +6,23 @@ import SwiftData
 struct MainTabView: View {
     var body: some View {
         TabView {
-            TodayView()
+
+            // 1) TODAY = what do I do right now?
+            AnyView(TodayView())
                 .tabItem {
                     Label("Today", systemImage: "bolt.circle")
                 }
 
-            HomeView()
+            // 2) PROGRAM = see / manage the block (your existing HomeView)
+            AnyView(HomeView())
                 .tabItem {
-                    Label("Sessions", systemImage: "list.bullet.rectangle")
+                    Label("Program", systemImage: "list.bullet.rectangle")
+                }
+
+            // 3) HISTORY = past sessions / recaps
+            AnyView(NavigationStack { HistoryView() })
+                .tabItem {
+                    Label("History", systemImage: "clock.arrow.circlepath")
                 }
         }
     }

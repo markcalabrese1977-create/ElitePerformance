@@ -1,18 +1,25 @@
-//
-//  UserProfile.swift
-//  ElitePerformance
-//
-//  Created by Mark Calabrese on 11/14/25.
-//
-
 // Domain/Models/UserProfile.swift
 
 import Foundation
 
-enum TrainingExperience: String, Codable {
+// MARK: - Core profile enums
+
+enum TrainingExperience: String, CaseIterable, Codable {
     case new
     case intermediate
     case advanced
+
+    /// Short label for buttons / chips in onboarding
+    var label: String {
+        switch self {
+        case .new:
+            return "New"
+        case .intermediate:
+            return "Some experience"
+        case .advanced:
+            return "Advanced"
+        }
+    }
 }
 
 enum PrimaryGoal: String, Codable {
@@ -21,8 +28,6 @@ enum PrimaryGoal: String, Codable {
     case fatLoss
     case longevity
 }
-
-
 
 enum InjuryFlag: String, Codable {
     case lowBack
@@ -48,7 +53,10 @@ enum RIRComfort: String, Codable {
     case rirAware
 }
 
-struct UserProfile: Identifiable, Codable {
+// MARK: - UserProfile model
+/// Long-term preference snapshot. We *don’t* need Codable right now,
+/// so we drop it to avoid compiler errors on nested types.
+struct UserProfile: Identifiable {
     let id: UUID
     let userId: UUID
 

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Central catalog of all built-in training programs that the coach can recommend.
 enum ProgramCatalog {
@@ -262,4 +263,72 @@ enum ProgramCatalog {
         description: "High-frequency 6-day Push/Pull/Legs split for experienced lifters.",
         whyItWorks: "Six training days a week lets you hit each muscle group often with smaller, higher-quality doses. This template assumes you understand RIR and recovery. The coach will nudge load up when you’re clearly over-performing and pull back or hold when rep quality and RIR show fatigue building, so you can train like a warrior without digging yourself into a hole."
     )
+}
+// MARK: - Applying onboarding result to the current program
+
+extension ProgramCatalog {
+
+    /// Apply the onboarding answers to the user's plan:
+    /// - Pick a Goal from the TrainingGoal enum used in onboarding.
+    /// - Delete only *planned* sessions (no logged work).
+    /// - Seed a new block starting from today using ProgramGenerator.
+    static func applyOnboardingResult(
+        _ result: OnboardingResult,
+        context: ModelContext
+    ) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        print("DEBUG ProgramCatalog.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek)")
+
+        // 1) Map onboarding TrainingGoal -> domain Goal
+        let goal = mapGoal(from: result.goal)
+
+        // 2) Clamp days/week to a sane range (1–6 for now)
+        let daysPerWeek = max(1, min(result.daysPerWeek, 6))
+
+        print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), clamped daysPerWeek=\(daysPerWeek)")
+
+        // 3) For v1, assume a 6-week block, no explicit deload week.
+        //    You can later branch this on experience or ProgramOption.
+        let totalWeeks = 6
+        let includeDeloadWeek = false
+
+        // 4) Delete only *planned* sessions (no logged data).
+        //    Any session with logged sets should already be .inProgress or .completed
+        //    because SessionView flips .planned → .inProgress on first save.
+        let fetch = FetchDescriptor<Session>()
+        if let sessions = try? context.fetch(fetch) {
+            print("DEBUG ProgramCatalog.applyOnboardingResult – existing sessions before delete: \(sessions.count)")
+            for session in sessions where session.status == .planned {
+                context.delete(session)
+            }
+        }
+
+        // 5) Seed a new block starting from today with the new parameters.
+        print("DEBUG ProgramCatalog.applyOnboardingResult – seeding program now")
+        ProgramGenerator.seedInitialProgram(
+            goal: goal,
+            daysPerWeek: daysPerWeek,
+            totalWeeks: totalWeeks,
+            includeDeloadWeek: includeDeloadWeek,
+            context: context
+        )
+        print("DEBUG ProgramCatalog.applyOnboardingResult – finished seeding")
+    }
+
+    /// Helper: connect onboarding's TrainingGoal to the existing Goal enum.
+    private static func mapGoal(from trainingGoal: TrainingGoal) -> Goal {
+        switch trainingGoal {
+        case .hypertrophy:
+            return .hypertrophy
+        case .strength:
+            return .strength
+        case .fatLoss:
+            return .fatLoss
+        case .maintenance:
+            // Treat maintenance as a "longevity / feel better" style goal
+            return .longevity
+        }
+    }
 }

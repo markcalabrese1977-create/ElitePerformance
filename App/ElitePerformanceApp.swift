@@ -1,38 +1,6 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Root View
-
-struct RootView: View {
-    @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
-    @Environment(\.modelContext) private var context
-
-    var body: some View {
-        Group {
-            if hasOnboarded {
-                MainTabView()
-            } else {
-                OnboardingView { goal, days, units in
-                    // Create user record only – program seeding is handled
-                    // inside OnboardingView via ProgramGenerator.seedInitialProgram.
-                    let user = User(
-                        units: units,
-                        coachVoice: .casual,
-                        progressionEnabled: true
-                    )
-                    context.insert(user)
-
-                    // Persist user and mark onboarding complete
-                    try? context.save()
-                    hasOnboarded = true
-                }
-            }
-        }
-    }
-}
-
-// MARK: - App Entry
-
 @main
 struct ElitePerformanceApp: App {
 
@@ -56,7 +24,7 @@ struct ElitePerformanceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            ContentView()
                 .modelContainer(sharedModelContainer)
         }
     }

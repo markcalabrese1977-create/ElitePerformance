@@ -319,7 +319,43 @@ struct SessionView: View {
     private func exerciseBody(for item: SessionItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
 
-            // Column labels
+            // Planned load + reps (separate from actual logs)
+            HStack(spacing: 8) {
+                Text("Plan")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 52, alignment: .leading)
+
+                // Planned working load
+                TextField(
+                    "0",
+                    value: Binding(
+                        get: { item.suggestedLoad },
+                        set: { item.suggestedLoad = $0 }
+                    ),
+                    format: .number
+                )
+                .keyboardType(.decimalPad)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 70)
+
+                // Planned reps
+                TextField(
+                    "0",
+                    value: Binding(
+                        get: { item.targetReps },
+                        set: { item.targetReps = $0 }
+                    ),
+                    format: .number
+                )
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 60)
+
+                Spacer()
+            }
+
+            // Column labels for ACTUAL sets
             HStack(spacing: 8) {
                 Text("Set")
                     .font(.caption2)
@@ -349,7 +385,9 @@ struct SessionView: View {
                 Spacer()
             }
 
-            ForEach(0..<item.plannedSetCount, id: \.self) { index in
+            // Actual logged sets
+            // Per-set rows (allow more than the planned set count)
+            ForEach(0..<displaySetCount(for: item), id: \.self) { index in
                 setRow(for: item, index: index)
             }
 
@@ -366,25 +404,17 @@ struct SessionView: View {
                 }
                 .font(.caption)
             }
-            .padding(.top, 4)
-
-            HStack {
-                Text("Logged sets: \(item.loggedSetsCount)/\(item.plannedSetCount)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                Button(item.isCompleted ? "Mark Not Done" : "Mark Done") {
-                    item.isCompleted.toggle()
-                    saveContext()
-                }
-                .font(.caption)
-            }
-             .padding(.top, 4)
-            }
-            .padding(.vertical, 4)
+            .padding(.top, 2)
         }
+        .padding(.vertical, 4)
+        // Persist plan tweaks even if you back out without logging
+        .onChange(of: item.suggestedLoad) { _ in
+            saveContext()
+        }
+        .onChange(of: item.targetReps) { _ in
+            saveContext()
+        }
+    }
 
 
     // MARK: - Per-set row (simple, direct bindings)
@@ -431,7 +461,17 @@ struct SessionView: View {
             }
         }
     }
+    
+    // MARK: - How many rows to show per exercise
 
+    private func displaySetCount(for item: SessionItem) -> Int {
+        let planned = item.plannedSetCount
+        let logged = max(item.actualReps.count, item.actualLoads.count)
+        let baseline = 6   // minimum rows we always show
+
+        return max(planned, logged, baseline)
+    }
+    
     // MARK: - Bindings for per-set arrays
 
     private func ensureCapacity(for item: SessionItem, upTo index: Int) {

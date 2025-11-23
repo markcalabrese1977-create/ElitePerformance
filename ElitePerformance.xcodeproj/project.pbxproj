@@ -11,6 +11,11 @@
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
+		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
+		D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */; };
+		D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF92ED207A40035FE70 /* ContentView.swift */; };
+		D5BEBEFC2ED2087B0035FE70 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEFB2ED208790035FE70 /* RootTabView.swift */; };
+		D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
 		D5E293662EC410DD00034D78 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293512EC410DD00034D78 /* User.swift */; };
 		D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */; };
@@ -22,7 +27,6 @@
 		D5E2936D2EC410DD00034D78 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293502EC410DD00034D78 /* Session.swift */; };
 		D5E2936E2EC410DD00034D78 /* PrimaryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2935F2EC410DD00034D78 /* PrimaryButton.swift */; };
 		D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2935A2EC410DD00034D78 /* SessionView.swift */; };
-		D5E293702EC410DD00034D78 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293582EC410DD00034D78 /* OnboardingView.swift */; };
 		D5E293712EC410DD00034D78 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293562EC410DD00034D78 /* HomeView.swift */; };
 		D5E293722EC410DD00034D78 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293632EC410DD00034D78 /* Haptics.swift */; };
 		D5E293732EC410DD00034D78 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293612EC410DD00034D78 /* Theme.swift */; };
@@ -57,6 +61,11 @@
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
+		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
+		D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPickerView.swift; sourceTree = "<group>"; };
+		D5BEBEF92ED207A40035FE70 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D5BEBEFB2ED208790035FE70 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingGoal.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
 		D5E2931D2EC4102800034D78 /* ElitePerformance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElitePerformance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E2932C2EC4102900034D78 /* ElitePerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ElitePerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -69,7 +78,6 @@
 		D5E293512EC410DD00034D78 /* User.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = User.swift; sourceTree = "<group>"; };
 		D5E293542EC410DD00034D78 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		D5E293562EC410DD00034D78 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		D5E293582EC410DD00034D78 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		D5E2935A2EC410DD00034D78 /* SessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionView.swift; sourceTree = "<group>"; };
 		D5E2935C2EC410DD00034D78 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		D5E2935F2EC410DD00034D78 /* PrimaryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryButton.swift; sourceTree = "<group>"; };
@@ -162,7 +170,10 @@
 		D5E2934A2EC410DD00034D78 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				D5BEBEFB2ED208790035FE70 /* RootTabView.swift */,
 				D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */,
+				D5BEBEF92ED207A40035FE70 /* ContentView.swift */,
+				D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -219,6 +230,7 @@
 		D5E293572EC410DD00034D78 /* Home */ = {
 			isa = PBXGroup;
 			children = (
+				D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */,
 				D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */,
 				D5E293562EC410DD00034D78 /* HomeView.swift */,
 			);
@@ -228,7 +240,7 @@
 		D5E293592EC410DD00034D78 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
-				D5E293582EC410DD00034D78 /* OnboardingView.swift */,
+				D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -437,27 +449,31 @@
 				D5E293692EC410DD00034D78 /* Readiness.swift in Sources */,
 				D5E2936A2EC410DD00034D78 /* ElitePerformanceApp.swift in Sources */,
 				D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */,
+				D5BEBEFC2ED2087B0035FE70 /* RootTabView.swift in Sources */,
 				D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */,
 				D5E2936C2EC410DD00034D78 /* HistoryView.swift in Sources */,
+				D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */,
 				D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */,
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
 				D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */,
 				D5E2936E2EC410DD00034D78 /* PrimaryButton.swift in Sources */,
 				D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */,
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
-				D5E293702EC410DD00034D78 /* OnboardingView.swift in Sources */,
 				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
+				D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */,
 				D5E293722EC410DD00034D78 /* Haptics.swift in Sources */,
+				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
 				D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
 				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
+				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E2938C2EC6BDEA00034D78 /* SessionRecapView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
