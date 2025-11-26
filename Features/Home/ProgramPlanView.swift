@@ -8,28 +8,20 @@ struct ProgramPlanView: View {
 
     var body: some View {
         List {
-            // TEMP: debug display
-            Text("DEBUG sessions count: \(sessions.count)")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            debugSection
+
             if sessions.isEmpty {
-                Section {
-                    Text("No program scheduled yet.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    Text("Use “Change Program” to create your first training block.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                emptyStateSection
             } else {
-                ForEach(groupedByWeek, id: \.week) { group in
-                    Section(header: Text("Week \(group.week)")
-                        .font(.headline)) {
-
-                        ForEach(group.sessions) { session in
+                ForEach(weekGroups) { weekGroup in
+                    Section(
+                        header: Text("Week \(weekGroup.weekIndex)")
+                            .font(.headline)
+                    ) {
+                        ForEach(weekGroup.sessions) { session in
                             NavigationLink {
-                                SessionView(session: session)
+                                // Real session-driven view model
+                                ProgramDayDetailView(session: session)   // 👈 only this line changes
                             } label: {
                                 programRow(for: session)
                             }
@@ -40,16 +32,52 @@ struct ProgramPlanView: View {
         }
     }
 
+    // MARK: - Debug
+
+    private var debugSection: some View {
+        Section {
+            Text("DEBUG sessions count: \(sessions.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Empty State
+
+    private var emptyStateSection: some View {
+        Section {
+            Text("No program scheduled yet.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text("Use “Change Program” to create your first training block.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Grouping
 
     /// Sessions grouped by `weekIndex`, sorted by week then by date.
-    private var groupedByWeek: [(week: Int, sessions: [Session])] {
+    private var weekGroups: [WeekGroup] {
         let grouped = Dictionary(grouping: sessions) { $0.weekIndex }
+
         return grouped.keys.sorted().map { week in
             let daySessions = (grouped[week] ?? [])
                 .sorted { $0.date < $1.date }
-            return (week, daySessions)
+
+            return WeekGroup(
+                weekIndex: week,
+                sessions: daySessions
+            )
         }
+    }
+
+    private struct WeekGroup: Identifiable {
+        let weekIndex: Int
+        let sessions: [Session]
+
+        var id: Int { weekIndex }
     }
 
     // MARK: - Row view
@@ -64,11 +92,11 @@ struct ProgramPlanView: View {
 
                 Text(session.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
 
                 Text("\(session.items.count) exercise\(session.items.count == 1 ? "" : "s")")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()

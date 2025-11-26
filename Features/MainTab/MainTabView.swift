@@ -7,169 +7,64 @@ struct MainTabView: View {
     var body: some View {
         TabView {
 
-            // 1) TODAY = what do I do right now?
-            AnyView(TodayView())
+            // 1) TODAY = “what do I do right now?”
+            TodayTabView()
                 .tabItem {
                     Label("Today", systemImage: "bolt.circle")
                 }
 
-            // 2) PROGRAM = see / manage the block (your existing HomeView)
-            AnyView(HomeView())
+            // 2) PROGRAM = see / manage the block
+            HomeView()
                 .tabItem {
                     Label("Program", systemImage: "list.bullet.rectangle")
                 }
 
-            // 3) HISTORY = past sessions / recaps
-            AnyView(NavigationStack { HistoryView() })
+            // 3) HISTORY (placeholder for now)
+            HistoryTabView()
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
+                }
+
+            // 4) SETTINGS
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
                 }
         }
     }
 }
 
-// MARK: - Today View
+// MARK: - Today Tab
 
-/// Shows today's session (if any) plus block position (Week / Day) and upcoming sessions.
-struct TodayView: View {
+struct TodayTabView: View {
+    @Environment(\.modelContext) private var context
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
-    private var calendar: Calendar { Calendar.current }
-
-    // MARK: Session buckets
-
-    /// All sessions that fall on today's date.
-    private var todaySessions: [Session] {
-        sessions.filter { calendar.isDateInToday($0.date) }
-            .sorted { $0.date < $1.date }
-    }
-
-    /// If there's a non-completed session today, that's the "work to do".
-    private var todaysIncompleteSession: Session? {
-        todaySessions.first(where: { $0.status != .completed })
-    }
-
-    /// If everything for today is done, show the (first) completed one.
-    private var todaysCompletedSession: Session? {
-        // If there is any non-completed today, we don't treat today as "done".
-        guard todaysIncompleteSession == nil else { return nil }
-        return todaySessions.first(where: { $0.status == .completed })
-    }
-
-    /// Sessions strictly after today, one per calendar day.
     private var upcomingSessions: [Session] {
-        guard !sessions.isEmpty else { return [] }
-
-        let todayStart = calendar.startOfDay(for: Date())
-        let sorted = sessions.sorted { $0.date < $1.date }
-
-        var seenDays = Set<Date>()
-        var result: [Session] = []
-
-        for session in sorted {
-            let day = calendar.startOfDay(for: session.date)
-            // Only look at days after today
-            guard day > todayStart else { continue }
-
-            // Skip additional sessions on the same calendar day
-            if !seenDays.contains(day) {
-                seenDays.insert(day)
-                result.append(session)
-            }
-        }
-
-        return result
+        sessions.filter { $0.date >= Calendar.current.startOfDay(for: Date()) }
     }
 
-    /// Convenience: the very next upcoming session (for preview when today is empty).
-    private var nextUpcomingSession: Session? {
-        upcomingSessions.first
+    private var todaySession: Session? {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let todayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)!
+
+        return sessions.first(where: { $0.date >= todayStart && $0.date < todayEnd })
     }
-
-    /// Earliest and latest session dates in the current block.
-    private var blockStartDate: Date? {
-        sessions.map(\.date).min()
-    }
-
-    private var blockEndDate: Date? {
-        sessions.map(\.date).max()
-    }
-
-    // MARK: - Block position (Week / Day / Weekday)
-
-    private struct BlockPosition {
-        let currentWeek: Int
-        let totalWeeks: Int
-        let dayInWeek: Int
-        let weekdayName: String
-    }
-
-    private var blockPosition: BlockPosition? {
-        guard
-            let start = blockStartDate,
-            let end = blockEndDate
-        else {
-            return nil
-        }
-
-        let startDay = calendar.startOfDay(for: start)
-        let endDay = calendar.startOfDay(for: end)
-
-        guard
-            let totalDaySpan = calendar.dateComponents([.day], from: startDay, to: endDay).day
-        else {
-            return nil
-        }
-
-        // inclusive span
-        let totalDaysInclusive = totalDaySpan + 1
-        let totalWeeks = max(1, Int(ceil(Double(totalDaysInclusive) / 7.0)))
-
-        // Reference date: today's session if available, otherwise next upcoming
-        let referenceDate: Date? =
-            todaysIncompleteSession?.date ??
-            todaysCompletedSession?.date ??
-            nextUpcomingSession?.date
-
-        guard let ref = referenceDate else { return nil }
-
-        let refDay = calendar.startOfDay(for: ref)
-        guard
-            let offsetDays = calendar.dateComponents([.day], from: startDay, to: refDay).day
-        else {
-            return nil
-        }
-
-        let currentWeekIndex = max(1, min(totalWeeks, (offsetDays / 7) + 1))
-        let dayInWeek = (offsetDays % 7) + 1
-
-        let weekdayIndex = calendar.component(.weekday, from: refDay) - 1
-        let weekdayName = calendar.weekdaySymbols[safe: weekdayIndex] ?? ""
-
-        return BlockPosition(
-            currentWeek: currentWeekIndex,
-            totalWeeks: totalWeeks,
-            dayInWeek: dayInWeek,
-            weekdayName: weekdayName
-        )
-    }
-
-    // MARK: - Body
 
     var body: some View {
         NavigationStack {
             List {
-                // HERO / TODAY SECTION
                 Section {
                     headerCard
                 }
 
-                // UPCOMING SECTION
                 if !upcomingSessions.isEmpty {
                     Section(header: Text("Upcoming")) {
                         ForEach(upcomingSessions) { session in
                             NavigationLink {
-                                SessionView(session: session)
+                                SessionView(
+                                    viewModel: SessionScreenViewModel(session: session)
+                                )
                             } label: {
                                 SessionSummaryRow(session: session)
                             }
@@ -186,57 +81,69 @@ struct TodayView: View {
 
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Strapline & Week/Day info
             VStack(alignment: .leading, spacing: 4) {
-                Text("3 TO GROW 1 TO KNOW")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
+                Text("Elite Performance")
+                    .font(.headline)
 
-                if let pos = blockPosition {
-                    Text("Week \(pos.currentWeek) of \(pos.totalWeeks)")
-                        .font(.headline)
-
-                    Text("Day \(pos.dayInWeek) · \(pos.weekdayName)")
+                if let session = todaySession {
+                    Text("Week \(session.weekIndex) · \(session.date.formatted(date: .abbreviated, time: .omitted))")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 } else {
-                    Text("No program scheduled")
-                        .font(.headline)
+                    Text("No session planned for today")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            // Up Next / Today content
-            if let session = todaysIncompleteSession {
-                upNextCard(for: session, mode: .start)
-            } else if let session = todaysCompletedSession {
-                upNextCard(for: session, mode: .recap)
+            if let session = todaySession {
+                TodaySessionCard(session: session)
             } else {
-                emptyTodayCard
+                Text("Tap on a future session to start planning your week.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(16)
+        .padding()
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+                .shadow(radius: 4, y: 2)
         )
     }
+}
 
-    private enum TodayCardMode {
+// MARK: - Today Session Card
+
+struct TodaySessionCard: View {
+    let session: Session
+
+    private var exercisesText: String {
+        let count = session.items.count
+        if count == 0 {
+            return "No exercises yet"
+        } else if count == 1 {
+            return "1 exercise"
+        } else {
+            return "\(count) exercises"
+        }
+    }
+
+    private enum Mode {
         case start
         case recap
     }
 
-    private func upNextCard(for session: Session, mode: TodayCardMode) -> some View {
-        let exerciseCount = session.items.count
-        let exercisesText = "\(exerciseCount) exercise\(exerciseCount == 1 ? "" : "s")"
+    private var mode: Mode {
+        switch session.status {
+        case .planned, .inProgress: return .start
+        case .completed: return .recap
+        }
+    }
 
-        return VStack(alignment: .leading, spacing: 12) {
-            Text(mode == .start ? "Up Next" : "Completed Today")
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Today’s Session")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
@@ -252,7 +159,9 @@ struct TodayView: View {
                 Spacer()
                 if mode == .start {
                     NavigationLink {
-                        SessionView(session: session)
+                        SessionView(
+                            viewModel: SessionScreenViewModel(session: session)
+                        )
                     } label: {
                         Text("Start Session")
                             .font(.headline)
@@ -272,75 +181,68 @@ struct TodayView: View {
                 Spacer()
             }
         }
-    }
-
-    private var emptyTodayCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Today is an off day.")
-                .font(.subheadline)
-            Text("No training session scheduled.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            if let next = nextUpcomingSession {
-                Divider().padding(.vertical, 4)
-
-                Text("Next session")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                SessionSummaryRow(session: next)
-            }
-        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 }
 
-// MARK: - Summary UI
+// MARK: - History Tab (placeholder)
 
-struct SessionSummaryCard: View {
-    let session: Session
-
+struct HistoryTabView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(session.date, style: .date)
-                .font(.headline)
-
-            Text(session.status.displayTitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            Text("\(session.items.count) exercises")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 4)
+        Text("History will go here.")
+            .padding()
     }
 }
+
+// MARK: - Session Summary Row (Upcoming list)
 
 struct SessionSummaryRow: View {
     let session: Session
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(session.date, style: .date)
-                .font(.subheadline)
-
-            Text(session.status.displayTitle)
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Text("\(session.items.count) exercises")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+    private var exercisesText: String {
+        let count = session.items.count
+        if count == 0 {
+            return "No exercises yet"
+        } else if count == 1 {
+            return "1 exercise"
+        } else {
+            return "\(count) exercises"
         }
     }
-}
 
-// MARK: - Safe array index helper
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.subheadline)
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        guard indices.contains(index) else { return nil }
-        return self[index]
+                Text(exercisesText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Text(session.status.displayTitle)
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(statusColor.opacity(0.15))
+                .foregroundColor(statusColor)
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var statusColor: Color {
+        switch session.status {
+        case .planned:    return .secondary
+        case .inProgress: return .blue
+        case .completed:  return .green
+        }
     }
 }
