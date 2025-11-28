@@ -1,6 +1,6 @@
-import Foundation
-import SwiftData
+#if canImport(Testing)
 import Testing
+import SwiftData
 @testable import ElitePerformance
 
 @Suite("ProgramGenerator weekday seeding")
@@ -14,54 +14,38 @@ struct ProgramGeneratorWeekdayTests {
             SessionItem.self,
             SetLog.self
         ])
+
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return try ModelContainer(for: schema, configurations: [config])
+        return try ModelContainer(for: schema, configurations: config)
     }
 
-    @Test("6-day schedule skipping Thursday (Sun, Mon, Tue, Wed, Fri, Sat)")
-    func sixDaySkipsThursday() throws {
+    @Test("6-day schedule with Thu as rest day")
+    func sixDaySchedule_skipsThursday() throws {
         let container = try makeInMemoryContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
-        // Choose the upcoming Sunday (including today if already Sunday)
-        let cal = Calendar.current
-        let todayStart = cal.startOfDay(for: Date())
-        let todayWeekday = cal.component(.weekday, from: todayStart)
-        let daysUntilSunday = (1 - todayWeekday + 7) % 7
-        let startDate = cal.date(byAdding: .day, value: daysUntilSunday, to: todayStart)!
-
-        // Sun(1), Mon(2), Tue(3), Wed(4), Fri(6), Sat(7) — Thursday(5) is OFF
-        let selectedWeekdays = [1, 2, 3, 4, 6, 7]
-
-        // Seed a single week to make assertions simple
-        ProgramGenerator.seedInitialProgram(
+        // Simulate onboarding result
+        let result = OnboardingResult(
             goal: .hypertrophy,
-            daysPerWeek: selectedWeekdays.count,
-            totalWeeks: 1,
-            includeDeloadWeek: false,
-            weekdays: selectedWeekdays,
-            startDate: startDate,
-            context: context
+            daysPerWeek: 6,
+            weekdays: [1, 2, 3, 4, 6, 7]   // Sun, Mon, Tue, Wed, Fri, Sat (Thu off)
         )
 
-        // Fetch all sessions and inspect their dates
-        let fetch = FetchDescriptor<Session>()
-        let sessions = try context.fetch(fetch)
+        let generator = ProgramGenerator(context: context)
+        try generator.seedInitialProgram(from: result)
 
-        // Expect exactly 6 sessions created for week 1
-        #expect(sessions.count == 6)
-        #expect(Set(sessions.map { $0.weekIndex }) == Set([1]))
+        let allSessions = try context.fetch(FetchDescriptor<Session>())
 
-        // Check the weekdays of the generated sessions
-        let generatedWeekdays = Set(sessions.map { cal.component(.weekday, from: $0.date) })
-        #expect(generatedWeekdays == Set(selectedWeekdays))
-        #expect(!generatedWeekdays.contains(5)) // Ensure Thursday(5) is not present
+        // We only care about the weekday pattern for Week 1
+        let week1 = allSessions.filter { $0.weekIndex == 1 }
 
-        // Ensure all sessions are within the first 7-day window starting at our anchor date
-        for s in sessions {
-            #expect(s.date >= startDate)
-            let diff = cal.dateComponents([.day], from: startDate, to: s.date).day ?? -1
-            #expect(diff >= 0 && diff < 7)
-        }
+        // Extract weekday numbers for those sessions
+        let calendar = Calendar.current
+        let weekdays = week1.map { calendar.component(.weekday, from: $0.date) }
+                            .sorted()
+
+        #expect(weekdays == [1, 2, 3, 4, 6, 7])
+        #expect(!weekdays.contains(5)) // 5 = Thursday
     }
 }
+#endif

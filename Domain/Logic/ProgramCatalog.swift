@@ -278,16 +278,18 @@ extension ProgramCatalog {
     ) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        
+        let weekdays = result.trainingDaysOfWeek.map { min(max($0, 1), 7) }.sorted()
 
-        print("DEBUG ProgramCatalog.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek)")
+        print("DEBUG ProgramCatalog.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(result.trainingDaysOfWeek)")
 
         // 1) Map onboarding TrainingGoal -> domain Goal
         let goal = mapGoal(from: result.goal)
 
-        // 2) Clamp days/week to a sane range (1–6 for now)
-        let daysPerWeek = max(1, min(result.daysPerWeek, 6))
+        // 2) Clamp days/week to a sane range (1–7 for now) based on weekdays count
+        let daysPerWeek = max(1, min(weekdays.count, 7))
 
-        print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), clamped daysPerWeek=\(daysPerWeek)")
+        print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), derived daysPerWeek from weekdays=\(daysPerWeek), weekdays=\(weekdays)")
 
         // 3) For v1, assume a 6-week block, no explicit deload week.
         //    You can later branch this on experience or ProgramOption.
@@ -312,6 +314,8 @@ extension ProgramCatalog {
             daysPerWeek: daysPerWeek,
             totalWeeks: totalWeeks,
             includeDeloadWeek: includeDeloadWeek,
+            weekdays: weekdays,
+            startDate: today,
             context: context
         )
         print("DEBUG ProgramCatalog.applyOnboardingResult – finished seeding")

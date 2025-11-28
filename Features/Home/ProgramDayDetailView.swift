@@ -10,10 +10,15 @@ struct ProgramDayDetailView: View {
     @Bindable var session: Session   // SwiftData-friendly
 
     @State private var showingAddExerciseSheet = false
+    @State private var showingApplyScopeDialog = false
 
-    /// Local ordering buffer so List drag & drop is smooth and
-    /// doesn’t fight SwiftData’s relationship ordering.
-    @State private var orderedItems: [SessionItem] = []
+    // MARK: - Derived ordered items
+
+    /// Session items sorted by their `order` field.
+    /// This is the canonical order we want everywhere.
+    private var orderedItems: [SessionItem] {
+        session.items.sorted { $0.order < $1.order }
+    }
 
     // MARK: - Body
 
@@ -22,33 +27,54 @@ struct ProgramDayDetailView: View {
             headerSection
 
             Section("Exercises") {
-                if currentItems.isEmpty {
+                if orderedItems.isEmpty {
                     Text("No exercises yet.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    // Bind directly into the LOCAL ordered array.
-                    ForEach($orderedItems, id: \.id) { $item in
-                        ProgramExercisePlanRow(item: $item)
+                    // Show rows in `order` order.
+                    ForEach(orderedItems, id: \.persistentModelID) { item in
+                        ProgramExercisePlanRow(item: binding(for: item))
                     }
                     .onDelete(perform: deleteExercises)
                     .onMove(perform: moveExercises)
                 }
             }
+
+            // Apply-to-meso control lives as its own section at the bottom of the page
+            Section {
+                Button {
+                    showingApplyScopeDialog = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("Apply these plan changes to other days…")
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                        Spacer()
+                    }
+                }
+            } footer: {
+                Text("Use this when you want today’s loads / reps / RIR to become the plan for the same day across the rest of this block.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .navigationTitle("Edit Plan")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // Left: system Edit button (delete + reorder)
+            ToolbarItem(placement: .topBarLeading) {
+                EditButton()
+            }
+
+            // Right: add exercise
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingAddExerciseSheet = true
                 } label: {
                     Image(systemName: "plus")
                 }
-            }
-
-            ToolbarItem(placement: .topBarLeading) {
-                EditButton()
             }
         }
         .sheet(isPresented: $showingAddExerciseSheet) {
@@ -59,50 +85,79 @@ struct ProgramDayDetailView: View {
                 }
             }
         }
-        .onAppear {
-            // Seed local ordering once when the view appears.
-            if orderedItems.isEmpty {
-                orderedItems = session.items.sorted { $0.order < $1.order }
+        .confirmationDialog(
+            "Apply these plan changes to…",
+            isPresented: $showingApplyScopeDialog,
+            titleVisibility: .visible
+        ) {
+            Button("This day only", role: .cancel) {
+                // No-op: edits already applied live to this day.
+            }
+
+            Button("All matching days in this block") {
+                applyPlanChangesToBlock()
             }
         }
     }
 
-    /// Use the local buffer when present, otherwise fall back to session.items.
-    private var currentItems: [SessionItem] {
-        orderedItems.isEmpty ? session.items : orderedItems
+    // MARK: - Bindings
+
+    /// Binding into `session.items` for a given `SessionItem`, matched by `persistentModelID`.
+    private func binding(for item: SessionItem) -> Binding<SessionItem> {
+        Binding(
+            get: {
+                // Find the live instance in session.items; if somehow missing, fall back.
+                session.items.first(where: { $0.persistentModelID == item.persistentModelID }) ?? item
+            },
+            set: { newValue in
+                guard let idx = session.items.firstIndex(where: { $0.persistentModelID == item.persistentModelID }) else {
+                    return
+                }
+                session.items[idx] = newValue
+            }
+        )
     }
 
     // MARK: - Mutations
 
-    /// Sync local order → Session relationship + `order` field + save.
-    private func syncToSession() {
-        // Ensure every item has a clean sequential order.
-        for (idx, item) in orderedItems.enumerated() {
-            item.order = idx + 1
-        }
-
-        // Replace the relationship array with the ordered buffer.
-        session.items = orderedItems
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("⚠️ Failed to save session after reorder: \(error)")
+    private func renumberItems(using items: [SessionItem]? = nil) {
+        let base = items ?? orderedItems
+        for (idx, item) in base.enumerated() {
+            if let realIdx = session.items.firstIndex(where: { $0.persistentModelID == item.persistentModelID }) {
+                session.items[realIdx].order = idx + 1
+            }
         }
     }
 
     private func deleteExercises(at offsets: IndexSet) {
-        orderedItems.remove(atOffsets: offsets)
-        syncToSession()
+        // Map visible indices (in orderedItems) back to underlying session.items via persistentModelID.
+        let idsToDelete = offsets.map { orderedItems[$0].persistentModelID }
+
+        session.items.removeAll { item in
+            idsToDelete.contains(item.persistentModelID)
+        }
+
+        renumberItems()
+        try? modelContext.save()
     }
 
     private func moveExercises(from source: IndexSet, to destination: Int) {
-        orderedItems.move(fromOffsets: source, toOffset: destination)
-        syncToSession()
+        // Work in the ordered view first.
+        var newOrder = orderedItems
+        newOrder.move(fromOffsets: source, toOffset: destination)
+
+        // Then re-number the `order` field in session.items to match.
+        renumberItems(using: newOrder)
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("⚠️ Failed to save moved exercises: \(error)")
+        }
     }
 
     private func addExercise(_ catalogExercise: CatalogExercise) {
-        let nextOrder = (currentItems.map(\.order).max() ?? 0) + 1
+        let nextOrder = (session.items.map(\.order).max() ?? 0) + 1
 
         let defaultReps = 10
         let defaultSets = 3
@@ -122,16 +177,68 @@ struct ProgramDayDetailView: View {
             plannedLoadsBySet: plannedLoads
         )
 
-        orderedItems.append(item)
-        syncToSession()
+        session.items.append(item)
+        renumberItems()
+        try? modelContext.save()
+    }
+
+    /// Push current day's PLAN edits to all matching days in the meso.
+    /// Matching rule:
+    /// - Same weekday as this session's date.
+    /// - For each exercise with the same `exerciseId`, copy plan fields.
+    private func applyPlanChangesToBlock() {
+        do {
+            let descriptor = FetchDescriptor<Session>()
+            let allSessions = try modelContext.fetch(descriptor)
+
+            let calendar = Calendar.current
+            let targetWeekday = calendar.component(.weekday, from: session.date)
+            let thisID = session.persistentModelID
+
+            let otherSessions = allSessions.filter { other in
+                other.persistentModelID != thisID &&
+                calendar.component(.weekday, from: other.date) == targetWeekday
+            }
+
+            guard !otherSessions.isEmpty else {
+                print("ℹ️ No other matching sessions for weekday \(targetWeekday)")
+                return
+            }
+
+            // Use the current session's items (ordered) as the source of truth.
+            let sourceItems = orderedItems
+
+            for other in otherSessions {
+                let targetItems = other.items
+
+                for sourceItem in sourceItems {
+                    guard let target = targetItems.first(where: { $0.exerciseId == sourceItem.exerciseId }) else {
+                        continue
+                    }
+
+                    // Copy PLAN-related fields
+                    target.targetReps        = sourceItem.targetReps
+                    target.targetSets        = sourceItem.targetSets
+                    target.targetRIR         = sourceItem.targetRIR
+                    target.suggestedLoad     = sourceItem.suggestedLoad
+                    target.plannedRepsBySet  = sourceItem.plannedRepsBySet
+                    target.plannedLoadsBySet = sourceItem.plannedLoadsBySet
+                }
+
+                // We intentionally do NOT change `order` or add/remove exercises here.
+            }
+
+            try modelContext.save()
+            print("✅ Applied plan changes from \(session.date) to \(otherSessions.count) other sessions.")
+        } catch {
+            print("⚠️ Failed to apply plan changes to block: \(error)")
+        }
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
         Section {
-            let itemsForSummary = currentItems
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.headline)
@@ -140,8 +247,8 @@ struct ProgramDayDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                let exerciseCount = itemsForSummary.count
-                let plannedSets = itemsForSummary.reduce(0) { $0 + $1.targetSets }
+                let exerciseCount = session.items.count
+                let plannedSets = session.items.reduce(0) { $0 + $1.targetSets }
                 Text("\(exerciseCount) exercises · \(plannedSets) planned working sets")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

@@ -15,6 +15,7 @@ enum SessionStatus: String, Codable, CaseIterable {
 final class Session {
     var date: Date
     var status: SessionStatus
+    var completedAt: Date?
 
     /// 0 = not set yet, 1–5 = readiness rating for this session.
     var readinessStars: Int
@@ -34,7 +35,8 @@ final class Session {
         readinessStars: Int = 0,
         sessionNotes: String? = nil,
         weekIndex: Int,
-        items: [SessionItem] = []
+        items: [SessionItem] = [],
+        completedAt: Date? = nil
     ) {
         self.date = date
         self.status = status
@@ -42,6 +44,7 @@ final class Session {
         self.sessionNotes = sessionNotes
         self.weekIndex = weekIndex
         self.items = items
+        self.completedAt = completedAt
     }
 }
 

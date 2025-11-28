@@ -19,8 +19,8 @@ struct MainTabView: View {
                     Label("Program", systemImage: "list.bullet.rectangle")
                 }
 
-            // 3) HISTORY (placeholder for now)
-            HistoryTabView()
+            // 3) HISTORY
+            HistoryView()
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
@@ -170,9 +170,11 @@ struct TodaySessionCard: View {
                     .buttonStyle(.borderedProminent)
                 } else {
                     NavigationLink {
-                        SessionRecapView(session: session)
+                        SessionView(
+                            viewModel: SessionScreenViewModel(session: session)
+                        )
                     } label: {
-                        Text("View Recap")
+                        Text("View Session")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
@@ -186,15 +188,6 @@ struct TodaySessionCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.secondarySystemBackground))
         )
-    }
-}
-
-// MARK: - History Tab (placeholder)
-
-struct HistoryTabView: View {
-    var body: some View {
-        Text("History will go here.")
-            .padding()
     }
 }
 

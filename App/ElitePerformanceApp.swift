@@ -10,7 +10,9 @@ struct ElitePerformanceApp: App {
             Session.self,
             SessionItem.self,
             SetLog.self,
-            PRIndex.self
+            PRIndex.self,
+            SessionHistory.self,
+            SessionHistoryExercise.self
         ])
 
         let config = ModelConfiguration(isStoredInMemoryOnly: false)
@@ -25,7 +27,7 @@ struct ElitePerformanceApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(sharedModelContainer)
+                .modelContainer(sharedModelContainer)   // 👈 single source of truth
         }
     }
 }

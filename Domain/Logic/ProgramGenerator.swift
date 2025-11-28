@@ -8,6 +8,8 @@ import SwiftData
 /// - Optional deload week at the end.
 /// - Currently uses a fixed Push / Pull / Legs rotation.
 /// - Starting loads are left at 0.0 – to be set later via planning UI.
+/// - Honors exact user-selected weekdays; no auto-filled days.
+/// Provided `weekdays` are the single source of truth and use Calendar weekday numbers (1=Sun...7=Sat).
 struct ProgramGenerator {
 
     /// Seed a full block of training sessions.
@@ -43,19 +45,7 @@ struct ProgramGenerator {
             )
         ).sorted()
 
-        if normalized.count >= daysPerWeek {
-            return Array(normalized.prefix(daysPerWeek))
-        } else {
-            // If fewer provided than daysPerWeek, fill with defaults
-            var result = normalized
-            let defaults = defaultWeekdays(for: daysPerWeek)
-            for w in defaults where result.count < daysPerWeek {
-                if !result.contains(w) {
-                    result.append(w)
-                }
-            }
-            return result
-        }
+        return normalized
     }
 
     /// Build a list of session dates using the given weekday pattern,
@@ -98,21 +88,44 @@ struct ProgramGenerator {
     ///   - daysPerWeek: Planned training days per week (e.g. 3–6).
     ///   - totalWeeks: Number of "hard" weeks (1–8). Deload week is added on top if requested.
     ///   - includeDeloadWeek: If true, appends a lighter deload week at the end.
+    ///   - weekdays: Optional user-selected training weekdays (1 = Sunday ... 7 = Saturday). Overrides defaults.
+    ///   - startDate: Optional start date for the program. Defaults to today.
     ///   - context: SwiftData model context.
     static func seedInitialProgram(
         goal: Goal,
         daysPerWeek: Int,
         totalWeeks: Int,
         includeDeloadWeek: Bool,
+        weekdays: [Int]? = nil,
+        startDate: Date? = nil,
         context: ModelContext
     ) {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let baseStart = startDate ?? Date()
+        let today = calendar.startOfDay(for: baseStart)
 
         // Clamp inputs
-        let trainingDays = max(daysPerWeek, 1)
+        let desiredDays = max(daysPerWeek, 1)
         let hardWeeks = max(1, min(totalWeeks, 8))
         let totalWeeksCount = includeDeloadWeek ? hardWeeks + 1 : hardWeeks
+
+        // Determine training weekdays (1 = Sunday ... 7 = Saturday).
+        // If `weekdays` are provided, they are the single source of truth.
+        let trainingWeekdays = normalizedTrainingWeekdays(
+            daysPerWeek: desiredDays,
+            provided: weekdays
+        )
+        let trainingDays = trainingWeekdays.count
+
+        // Precompute all session dates so we always honor rest days.
+        // Example: for 6 days/week this will naturally leave 1 rest day per 7-day cycle.
+        let totalSessions = trainingDays * totalWeeksCount
+        let sessionDates = buildSessionDates(
+            calendar: calendar,
+            today: today,
+            weekdays: trainingWeekdays,
+            totalSessions: totalSessions
+        )
 
         var createdSessions = 0
 
@@ -121,11 +134,14 @@ struct ProgramGenerator {
             let isDeload = includeDeloadWeek && (weekIndex == totalWeeksCount - 1)
 
             for dayIndex in 0..<trainingDays {
-                let globalDay = (weekIndex * trainingDays) + dayIndex
-                let date = calendar.date(byAdding: .day, value: globalDay, to: today) ?? today
+                // Global index into our precomputed date list
+                let globalIndex = (weekIndex * trainingDays) + dayIndex
+                guard globalIndex < sessionDates.count else { continue }
+
+                let date = sessionDates[globalIndex]
 
                 // Which focus for this day: 0 = Push, 1 = Pull, 2 = Legs
-                let focusIndex = globalDay % 3
+                let focusIndex = globalIndex % 3
                 let exercisesForDay: [CatalogExercise]
 
                 switch focusIndex {

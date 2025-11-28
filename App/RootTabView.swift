@@ -16,6 +16,8 @@ struct RootTabView: View {
             Session.self,
             SessionItem.self,
             SetLog.self,
-            PRIndex.self
+            PRIndex.self,
+            SessionHistory.self,
+            SessionHistoryExercise.self
         ], inMemory: true)
 }

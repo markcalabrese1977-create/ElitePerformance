@@ -90,6 +90,13 @@ struct ExerciseCatalog {
         primaryMuscle: .core,
         isCompound: true
     )
+    
+    static let hangingKneeRaise = CatalogExercise(
+        id: "hanging_knee_raise",
+        name: "Hanging Knee Raise",
+        primaryMuscle: .core,
+        isCompound: true
+    )
 
     // MARK: - Quads / Hinge / Glutes
 
@@ -132,6 +139,13 @@ struct ExerciseCatalog {
         id: "cable_glute_kickback",
         name: "Cable Glute Kickback",
         primaryMuscle: .glutes,
+        isCompound: false
+    )
+    
+    static let seatedLegCurl = CatalogExercise(
+        id: "seated_leg_curl",
+        name: "Seated Leg Curl",
+        primaryMuscle: .hamstrings,
         isCompound: false
     )
 
@@ -213,6 +227,13 @@ struct ExerciseCatalog {
         isCompound: false
     )
 
+    static let cableRopeHammerCurl = CatalogExercise(
+        id: "cable_rope_hammer_curl",
+        name: "Cable Rope Hammer Curl",
+        primaryMuscle: .biceps,
+        isCompound: false
+    )
+    
     static let ezBarReverseCurl = CatalogExercise(
         id: "ez_bar_reverse_curl",
         name: "EZ Bar Reverse Curl",
@@ -237,12 +258,14 @@ struct ExerciseCatalog {
         pallofPress,
         cableRopeCrunch,
         hangingStraightLegRaise,
+        hangingKneeRaise,
 
         // Quads / hinge / glutes
         hackSquat,
         legExtension,
         romanianDeadlift,
         lyingLegCurl,
+        seatedLegCurl,
         machineHipThrust,
         cableGluteKickback,
 
@@ -263,6 +286,7 @@ struct ExerciseCatalog {
         // Biceps / forearms
         ezBarCurl,
         hammerCurl,
+        cableRopeHammerCurl,
         ezBarReverseCurl
     ]
 }

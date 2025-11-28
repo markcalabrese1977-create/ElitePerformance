@@ -5,19 +5,19 @@
 
 import SwiftUI
 import Combine
+import SwiftData
 
 // MARK: - Root Session Screen
 
 /// Root Session screen.
-/// In normal navigation, use `SessionView(viewModel: SessionScreenViewModel(session: someSession))`.
+/// In normal navigation, use:
+/// `SessionView(viewModel: SessionScreenViewModel(session: someSession))`.
 struct SessionView: View {
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel: SessionScreenViewModel
 
-    // Swap sheet state
-    @State private var swapTarget: SwapTarget? = nil
-
-    // Recap (summary) sheet state
-    @State private var isSummaryPresented = false
+    /// Unified sheet state: either swapping an exercise or showing the recap.
+    @State private var activeSheet: ActiveSheet?
 
     // MARK: - Initializers
 
@@ -39,17 +39,6 @@ struct SessionView: View {
 
                 if viewModel.isSessionComplete {
                     completionBanner
-
-                    Button {
-                        isSummaryPresented = true
-                    } label: {
-                        Text("Finish Session")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.green.opacity(0.18))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
                 }
 
                 // Use enumerated so we have a stable index for swapping,
@@ -60,11 +49,14 @@ struct SessionView: View {
                         onSetLogged: { setIndex in
                             viewModel.handleSetLogged(
                                 exerciseID: exercise.id,
-                                setIndex: setIndex
+                                setIndex: setIndex,
+                                context: modelContext
                             )
                         },
                         onSwapTapped: {
-                            swapTarget = SwapTarget(index: index)
+                            activeSheet = .swap(
+                                SwapTarget(exerciseIndex: index)
+                            )
                         }
                     )
                 }
@@ -74,24 +66,43 @@ struct SessionView: View {
         }
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $swapTarget) { target in
-            ExerciseSwapSheet(
-                current: viewModel.exercises[target.index],
-                onSelect: { catalogExercise in
-                    viewModel.swapExercise(at: target.index, with: catalogExercise)
-                    swapTarget = nil
-                },
-                onCancel: {
-                    swapTarget = nil
-                }
-            )
-        }
-        .sheet(isPresented: $isSummaryPresented) {
-            SessionSummaryView(summary: viewModel.buildSummary())
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .swap(let target):
+                ExerciseSwapSheet(
+                    current: viewModel.exercises[target.exerciseIndex],
+                    onSelect: { catalogExercise in
+                        viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise)
+                        // Persist the swap into the Session model as well.
+                        viewModel.persist(using: modelContext)
+                        activeSheet = nil
+                    },
+                    onCancel: {
+                        activeSheet = nil
+                    }
+                )
+
+            case .recap(let recap):
+                SessionRecapSheet(
+                    recap: recap,
+                    onDone: {
+                        do {
+                            try viewModel.persistCompletion(
+                                using: modelContext,
+                                recap: recap
+                            )
+                        } catch {
+                            // For now just log – we can add user-visible error later.
+                            print("Failed to persist completion: \(error)")
+                        }
+                        activeSheet = nil
+                    }
+                )
+            }
         }
     }
 
-    // MARK: - Header
+    // MARK: - Header / Banner
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -123,6 +134,20 @@ struct SessionView: View {
             }
 
             Spacer()
+
+            Button {
+                let recap = viewModel.buildRecap()
+                activeSheet = .recap(recap)
+            } label: {
+                Text("Recap")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundStyle(.blue)
+                    .clipShape(Capsule())
+            }
         }
         .padding(10)
         .background(
@@ -132,10 +157,27 @@ struct SessionView: View {
     }
 }
 
-// Helper used for the swap sheet
-private struct SwapTarget: Identifiable {
+// MARK: - Sheet Routing
+
+/// Which sheet is currently being shown from the Session screen.
+private enum ActiveSheet: Identifiable {
+    case swap(SwapTarget)
+    case recap(SessionRecap)
+
+    var id: UUID {
+        switch self {
+        case .swap(let target):
+            return target.id
+        case .recap(let recap):
+            return recap.id
+        }
+    }
+}
+
+/// Helper used for the swap sheet.
+private struct SwapTarget {
     let id = UUID()
-    let index: Int
+    let exerciseIndex: Int
 }
 
 // MARK: - Exercise Card
@@ -197,7 +239,7 @@ private struct SessionExerciseCardView: View {
             VStack(spacing: 6) {
                 ForEach($exercise.sets) { $set in
                     SessionSetRowView(
-                        set: $set,
+                        uiSet: $set,
                         onLog: {
                             onSetLogged(set.index)
                         }
@@ -230,17 +272,17 @@ private struct SessionExerciseCardView: View {
 // MARK: - Set Row
 
 private struct SessionSetRowView: View {
-    @Binding var set: UISessionSet
+    @Binding var uiSet: UISessionSet
     let onLog: () -> Void
 
     private var isLocked: Bool {
-        return set.status == .completed || set.status == .skipped
+        uiSet.status == .completed || uiSet.status == .skipped
     }
 
     var body: some View {
         HStack(spacing: 8) {
             // Set Index
-            Text("Set \(set.index)")
+            Text("Set \(uiSet.index)")
                 .font(.caption)
                 .frame(width: 44, alignment: .leading)
 
@@ -250,7 +292,7 @@ private struct SessionSetRowView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Text(set.plannedDescription)
+                Text(uiSet.plannedDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -271,7 +313,7 @@ private struct SessionSetRowView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
 
-                        TextField("0", text: $set.actualLoadText)
+                        TextField("0", text: $uiSet.actualLoadText)
                             .keyboardType(.decimalPad)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 60)
@@ -284,7 +326,7 @@ private struct SessionSetRowView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
 
-                        TextField("0", text: $set.actualRepsText)
+                        TextField("0", text: $uiSet.actualRepsText)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 40)
@@ -299,7 +341,7 @@ private struct SessionSetRowView: View {
                 guard !isLocked else { return }
                 onLog()
             }) {
-                switch set.status {
+                switch uiSet.status {
                 case .completed:
                     Text("Done")
                         .font(.caption)
@@ -332,11 +374,11 @@ private struct SessionSetRowView: View {
             .contextMenu {
                 if isLocked {
                     Button("Edit set") {
-                        set.status = .notStarted
+                        uiSet.status = .notStarted
                     }
                 } else {
                     Button("Skip set") {
-                        set.status = .skipped
+                        uiSet.status = .skipped
                     }
                 }
             }
@@ -346,50 +388,33 @@ private struct SessionSetRowView: View {
 
 // MARK: - Swap Sheet
 
-/// Simple sheet to pick a replacement exercise from the catalog.
+/// Sheet to pick a replacement exercise from the catalog.
+/// Shows "recommended" (same primary muscle group) first, then all others.
 private struct ExerciseSwapSheet: View {
     let current: UISessionExercise
     let onSelect: (CatalogExercise) -> Void
     let onCancel: () -> Void
 
-    private var suggested: [CatalogExercise] {
+    private var options: [CatalogExercise] {
         let all = ExerciseCatalog.all
 
         guard let currentCatalog = all.first(where: { $0.id == current.exerciseId }) else {
-            return []
+            return all
         }
 
-        return all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
-    }
+        let same = all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
+        let others = all.filter {
+            $0.id != currentCatalog.id && $0.primaryMuscle != currentCatalog.primaryMuscle
+        }
 
-    private var allExercises: [CatalogExercise] {
-        ExerciseCatalog.all.sorted { $0.name < $1.name }
+        return same + others
     }
 
     var body: some View {
         NavigationStack {
             List {
-                if !suggested.isEmpty {
-                    Section("Suggested for \(current.name)") {
-                        ForEach(suggested) { exercise in
-                            Button {
-                                onSelect(exercise)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(exercise.name)
-                                        .font(.body)
-
-                                    Text(exercise.primaryMuscle.rawValue.capitalized)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Section("All exercises") {
-                    ForEach(allExercises) { exercise in
+                Section {
+                    ForEach(options) { exercise in
                         Button {
                             onSelect(exercise)
                         } label: {
@@ -403,6 +428,8 @@ private struct ExerciseSwapSheet: View {
                             }
                         }
                     }
+                } header: {
+                    Text("Choose a replacement for \(current.name)")
                 }
             }
             .navigationTitle("Swap Exercise")
@@ -418,110 +445,24 @@ private struct ExerciseSwapSheet: View {
     }
 }
 
-// MARK: - Summary Models + View (renamed to avoid clashes)
-
-struct SessionSummary {
-    struct ExerciseSummary: Identifiable {
-        let id = UUID()
-        let name: String
-        let setsCompleted: Int
-        let totalReps: Int
-        let totalVolume: Double
-    }
-
-    let title: String
-    let subtitle: String
-    let totalExercises: Int
-    let totalSetsCompleted: Int
-    let totalVolume: Double
-    let exercises: [ExerciseSummary]
-}
-
-struct SessionSummaryView: View {
-    let summary: SessionSummary
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(summary.title)
-                            .font(.headline)
-
-                        Text(summary.subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.bottom, 8)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Exercises")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(summary.totalExercises)")
-                                .font(.headline)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Sets completed")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(summary.totalSetsCompleted)")
-                                .font(.headline)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Total volume")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(String(format: "%.0f", summary.totalVolume))
-                                .font(.headline)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-
-                Section("By exercise") {
-                    ForEach(summary.exercises) { ex in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(ex.name)
-                                .font(.subheadline.weight(.semibold))
-
-                            HStack(spacing: 12) {
-                                Text("Sets: \(ex.setsCompleted)")
-                                Text("Reps: \(ex.totalReps)")
-                                Text("Vol: \(Int(ex.totalVolume))")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-            .navigationTitle("Session Recap")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
 // MARK: - View Model
 
 final class SessionScreenViewModel: ObservableObject {
+    // Backing SwiftData model (what we persist to)
+    private let session: Session
+
+    // UI state
     @Published var title: String
     @Published var subtitle: String
     @Published var exercises: [UISessionExercise]
 
     init(
+        session: Session,
         title: String,
         subtitle: String,
         exercises: [UISessionExercise]
     ) {
+        self.session = session
         self.title = title
         self.subtitle = subtitle
         self.exercises = exercises
@@ -538,51 +479,9 @@ final class SessionScreenViewModel: ObservableObject {
         exercises.allSatisfy { $0.isComplete }
     }
 
-    // MARK: - Summary Builder
-
-    func buildSummary() -> SessionSummary {
-        let exerciseSummaries: [SessionSummary.ExerciseSummary] = exercises.map { exercise in
-            let completedSets = exercise.sets
-                .filter { $0.index <= exercise.targetSets }
-                .filter { $0.status == .completed }
-
-            let setsCompleted = completedSets.count
-
-            var totalReps = 0
-            var totalVolume: Double = 0
-
-            for set in completedSets {
-                let reps = set.actualReps ?? set.plannedReps
-                let load = set.actualLoad ?? set.plannedLoad
-                totalReps += reps
-                totalVolume += Double(reps) * load
-            }
-
-            return SessionSummary.ExerciseSummary(
-                name: exercise.name,
-                setsCompleted: setsCompleted,
-                totalReps: totalReps,
-                totalVolume: totalVolume
-            )
-        }
-
-        let totalExercises = exercises.count
-        let totalSetsCompleted = exerciseSummaries.reduce(0) { $0 + $1.setsCompleted }
-        let totalVolume = exerciseSummaries.reduce(0) { $0 + $1.totalVolume }
-
-        return SessionSummary(
-            title: title,
-            subtitle: subtitle,
-            totalExercises: totalExercises,
-            totalSetsCompleted: totalSetsCompleted,
-            totalVolume: totalVolume,
-            exercises: exerciseSummaries
-        )
-    }
-
     // MARK: - Set Logging Logic
 
-    func handleSetLogged(exerciseID: UUID, setIndex: Int) {
+    func handleSetLogged(exerciseID: UUID, setIndex: Int, context: ModelContext) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
 
@@ -608,6 +507,8 @@ final class SessionScreenViewModel: ObservableObject {
 
             exercises[exerciseIdx] = exercise
             onSetCompleted(exercise: exercise, set: set)
+
+            persist(using: context)
             return
         }
 
@@ -616,6 +517,8 @@ final class SessionScreenViewModel: ObservableObject {
         exercise.sets[setIdx] = set
         exercises[exerciseIdx] = exercise
         onSetCompleted(exercise: exercise, set: set)
+
+        persist(using: context)
     }
 
     private func onSetCompleted(exercise: UISessionExercise, set: UISessionSet) {
@@ -631,36 +534,110 @@ final class SessionScreenViewModel: ObservableObject {
         exercise.exerciseId = catalogExercise.id
         exercise.name = catalogExercise.name
 
+        // Reset loads, text fields, and logged data when we swap to a new exercise.
+        for i in exercise.sets.indices {
+            // numeric values
+            exercise.sets[i].plannedLoad = 0.0
+            exercise.sets[i].actualLoad = nil
+            exercise.sets[i].actualReps = nil
+            exercise.sets[i].actualRIR = nil
+            exercise.sets[i].status = .notStarted
+
+            // text fields shown in the UI
+            exercise.sets[i].plannedLoadText = "0"
+            exercise.sets[i].actualLoadText = "0"
+            exercise.sets[i].plannedRepsText = "\(exercise.sets[i].plannedReps)"
+            exercise.sets[i].actualRepsText = "\(exercise.sets[i].plannedReps)"
+        }
+
         let baseReps = exercise.sets.first?.plannedReps ?? 10
         let baseRIR = exercise.sets.first?.plannedRIR ?? 2
 
         exercise.detail = "Week \(exercise.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(baseReps) reps @ RIR \(baseRIR)"
         exercise.coachMessage = ""
 
-        // Reset PLAN loads to 0 for all sets so you consciously re-baseline this movement.
-        exercise.sets = exercise.sets.map { set in
-            var updated = set
-            updated.plannedLoad = 0
-            updated.plannedLoadText = "0"
-            updated.actualLoad = nil
-            updated.actualLoadText = "0"
-            updated.actualReps = nil
-            updated.actualRepsText = "\(updated.plannedReps)"
-            updated.status = .notStarted
-            return updated
-        }
-
         exercises[index] = exercise
     }
 
-    // MARK: - Plan vs Actual Coaching Logic
+    // MARK: - Persist UI → SwiftData
 
+    /// Push current UI state into the underlying `Session` / `SessionItem`s.
+    func persist(using context: ModelContext) {
+        let items = session.items.sorted { $0.order < $1.order }
+
+        for (exerciseIndex, uiExercise) in exercises.enumerated() {
+            guard exerciseIndex < items.count else { continue }
+            let item = items[exerciseIndex]
+
+            // Sync basic exercise info (including swaps)
+            item.exerciseId = uiExercise.exerciseId
+            item.targetSets = uiExercise.targetSets
+
+            if let firstSet = uiExercise.sets.first {
+                item.targetReps = firstSet.plannedReps
+                item.suggestedLoad = firstSet.plannedLoad
+                if let plannedRIR = firstSet.plannedRIR {
+                    item.targetRIR = plannedRIR
+                }
+            }
+
+            let setCount = uiExercise.sets.count
+
+            // Resize arrays to match UI
+            item.plannedRepsBySet = Array(repeating: 0, count: setCount)
+            item.plannedLoadsBySet = Array(repeating: 0, count: setCount)
+            item.actualReps        = Array(repeating: 0, count: setCount)
+            item.actualLoads       = Array(repeating: 0, count: setCount)
+            item.actualRIRs        = Array(repeating: 0, count: setCount)
+            item.usedRestPauseFlags = Array(repeating: false, count: setCount)
+            item.restPausePatternsBySet = Array(repeating: "", count: setCount)
+
+            for uiSet in uiExercise.sets {
+                let idx = uiSet.index - 1
+                guard idx >= 0 && idx < setCount else { continue }
+
+                item.plannedRepsBySet[idx] = uiSet.plannedReps
+                item.plannedLoadsBySet[idx] = uiSet.plannedLoad
+
+                if let reps = uiSet.actualReps, reps > 0 {
+                    item.actualReps[idx] = reps
+                }
+                if let load = uiSet.actualLoad, load > 0 {
+                    item.actualLoads[idx] = load
+                }
+            }
+
+            item.isCompleted = uiExercise.isComplete
+            item.coachNote = uiExercise.coachMessage.isEmpty ? nil : uiExercise.coachMessage
+        }
+
+        // Update overall session status
+        let anyLoggedSet = exercises
+            .flatMap { $0.sets }
+            .contains { $0.status == .completed || $0.status == .skipped }
+
+        if exercises.allSatisfy({ $0.isComplete }) {
+            session.status = .completed
+        } else if anyLoggedSet {
+            session.status = .inProgress
+        } else {
+            session.status = .planned
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ Failed to save session: \(error)")
+        }
+    }
+
+    // MARK: - Plan vs Actual Coaching Logic
+    // (unchanged)
     private func coachMessage(for exercise: UISessionExercise, recentSetIndex: Int) -> String {
         guard let recentSet = exercise.sets.first(where: { $0.index == recentSetIndex }) else {
             return ""
         }
 
-        // Use actual load if present, otherwise fall back to planned
         let plannedReps = recentSet.plannedReps
         let actualReps = recentSet.actualReps ?? plannedReps
 
@@ -676,7 +653,6 @@ final class SessionScreenViewModel: ObservableObject {
         let repsDiff = actualReps - plannedReps
         let loadDiff = actualLoad - plannedLoad
 
-        // Banding: when is the plan clearly off?
         let step: Double
         if plannedLoad >= 185 {
             step = 5.0
@@ -700,24 +676,19 @@ final class SessionScreenViewModel: ObservableObject {
             significantlyLighter ||
             repsDiff <= -3
 
-        // Helper for "reset the plan" suggestions
         let easierPlanLoad = max(0, actualLoad - step)
         let easierPlanString = formatLoad(easierPlanLoad)
 
         switch recentSet.index {
-        // 3 to grow – working sets
         case 1...3:
             if planTooEasy {
-                // If there was no real load plan (0.0), don’t fake precision.
-                // Treat this as a baseline set and talk in ranges.
                 if plannedLoad == 0 {
-                    let targetLow = max(6, plannedReps)       // e.g. 10
-                    let targetHigh = targetLow + 2            // e.g. 12
+                    let targetLow = max(6, plannedReps)
+                    let targetHigh = targetLow + 2
 
                     return "Set \(recentSet.index): You had far more than needed at \(loadString) × \(actualReps). Use this as a baseline. Next time, pick a weight where your hardest working set lands around \(targetLow)–\(targetHigh) solid reps, not 20+."
                 }
 
-                // Normal “plan too easy” case when we *do* have a real plan load
                 let lower = max(plannedReps + 1, actualReps - 3)
                 let upper = actualReps
 
@@ -737,16 +708,12 @@ final class SessionScreenViewModel: ObservableObject {
             switch outcome {
             case .matchedPlan:
                 return "Set \(recentSet.index): On target at \(loadString) × \(plannedReps). Next set: repeat \(loadString) × \(plannedReps)."
-
             case .exceededPlan:
-                // Could be more reps, more load, or both
                 return "Set \(recentSet.index): You beat your plan at \(loadString) × \(actualReps). Next set: stay at \(loadString) and aim to hold or add a rep."
-
             case .fellShort:
                 return "Set \(recentSet.index): You fell short of plan (\(actualReps) vs \(plannedReps)). Next set: stay at \(loadString) and aim to match \(plannedReps). If this repeats next session, drop to \(nextLoadString)."
             }
 
-        // 1 to know – diagnostic/test set
         case 4:
             if planTooEasy {
                 if plannedLoad == 0 {
@@ -775,12 +742,10 @@ final class SessionScreenViewModel: ObservableObject {
             switch outcome {
             case .matchedPlan, .exceededPlan:
                 return "Test set (Set 4): Strong at \(loadString) × \(plannedReps) for \(actualReps) reps. Next session: try \(nextLoadString) × \(plannedReps) if recovery is solid."
-
             case .fellShort:
                 return "Test set (Set 4): Right at the edge (\(actualReps) vs \(plannedReps)). Next session: hold at \(loadString) × \(plannedReps) or drop to \(nextLoadString) if fatigue stays high."
             }
 
-        // Overflow volume – caution language
         default:
             switch outcome {
             case .matchedPlan:
@@ -803,7 +768,6 @@ final class SessionScreenViewModel: ObservableObject {
         let repsDiff = actualReps - plannedReps
         let loadDiff = actualLoad - plannedLoad
 
-        // Heavier with roughly similar reps = progression
         let loadStep: Double
         if plannedLoad >= 185 {
             loadStep = 5.0
@@ -821,7 +785,6 @@ final class SessionScreenViewModel: ObservableObject {
             return .exceededPlan
         }
 
-        // Otherwise fall back to pure reps comparison
         if repsDiff >= 1 {
             return .exceededPlan
         } else if repsDiff <= -2 {
@@ -831,16 +794,10 @@ final class SessionScreenViewModel: ObservableObject {
         }
     }
 
-    /// Suggest a next load based on current plan and outcome.
-    /// This only affects the *text* cue, not stored data (yet).
     private func nextLoadSuggestion(for set: UISessionSet, outcome: SetOutcome) -> Double {
-        // Use actual load as the base if we have it
         let baseLoad = set.actualLoad ?? set.plannedLoad
         let load = baseLoad
 
-        // Basic heuristic for step size in lbs:
-        // - Heavier lifts → bigger jumps
-        // - Lighter lifts → smaller jumps
         let step: Double
         if load >= 185 {
             step = 5.0
@@ -863,18 +820,88 @@ final class SessionScreenViewModel: ObservableObject {
     }
 
     private func formatLoad(_ value: Double) -> String {
-        if value == 0 {
-            return "0"
-        } else {
-            return String(format: "%.1f", value)
+        value == 0 ? "0" : String(format: "%.1f", value)
+    }
+
+    // MARK: - Recap + Persistence (History)
+
+    func buildRecap() -> SessionRecap {
+        let exerciseSummaries: [SessionRecapExercise] = exercises.map { exercise in
+            let catalog = ExerciseCatalog.all.first(where: { $0.id == exercise.exerciseId })
+            let primary = catalog?.primaryMuscle.rawValue.capitalized
+
+            var setsCompleted = 0
+            var totalReps = 0
+            var totalVolume: Double = 0
+
+            for set in exercise.sets where set.index <= exercise.targetSets {
+                guard set.status == .completed else { continue }
+
+                let reps = set.actualReps ?? set.plannedReps
+                let load = set.actualLoad ?? set.plannedLoad
+
+                setsCompleted += 1
+                totalReps += reps
+                totalVolume += Double(reps) * load
+            }
+
+            return SessionRecapExercise(
+                name: exercise.name,
+                primaryMuscle: primary,
+                sets: setsCompleted,
+                reps: totalReps,
+                volume: totalVolume
+            )
         }
+
+        return SessionRecap(
+            date: session.date,
+            weekIndex: session.weekIndex,
+            title: title,
+            subtitle: subtitle,
+            exercises: exerciseSummaries
+        )
+    }
+
+    func persistCompletion(using context: ModelContext, recap: SessionRecap) throws {
+        print("🔁 persistCompletion called – exercises: \(recap.exerciseCount), sets: \(recap.setCount), volume: \(recap.totalVolume)")
+
+        if session.completedAt == nil {
+            session.completedAt = Date()
+        }
+        session.status = .completed
+
+        let historyExercises = recap.exercises.map {
+            SessionHistoryExercise(
+                name: $0.name,
+                primaryMuscle: $0.primaryMuscle,
+                sets: $0.sets,
+                reps: $0.reps,
+                volume: $0.volume
+            )
+        }
+
+        let history = SessionHistory(
+            date: recap.date,
+            weekIndex: recap.weekIndex,
+            title: recap.title,
+            subtitle: recap.subtitle,
+            totalExercises: recap.exerciseCount,
+            totalSets: recap.setCount,
+            totalVolume: recap.totalVolume,
+            exercises: historyExercises
+        )
+
+        context.insert(history)
+        try context.save()
+
+        print("✅ SessionHistory saved")
     }
 }
 
 // MARK: - Integration with real Session model
 
 extension SessionScreenViewModel {
-    /// Build a view model from a real SwiftData `Session`.
     convenience init(session: Session) {
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
         let subtitle = "Week \(session.weekIndex)"
@@ -882,20 +909,15 @@ extension SessionScreenViewModel {
         let exercises: [UISessionExercise] = session.items
             .sorted { $0.order < $1.order }
             .map { item in
-                // Look up exercise metadata from the catalog
                 let catalogExercise = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
                 let name = catalogExercise?.name ?? "Exercise"
 
-                // Planned targets
-                // 3–4 working sets per exercise; UI always shows 4 rows.
                 let targetSets = max(3, min(item.targetSets, 4))
-
                 let baseReps = item.targetReps
                 let baseLoad = item.suggestedLoad
                 let baseRIR = item.targetRIR
 
-                let setCount = 4   // We always show 4 set rows in the logger
-
+                let setCount = 4
                 var uiSets: [UISessionSet] = []
                 uiSets.reserveCapacity(setCount)
 
@@ -903,16 +925,25 @@ extension SessionScreenViewModel {
                     let setIndex = idx + 1
                     let isPlannedWorkingSet = setIndex <= targetSets
 
-                    let reps = baseReps
-                    let load = isPlannedWorkingSet ? baseLoad : 0.0
+                    let plannedReps = baseReps
+                    let plannedLoad = isPlannedWorkingSet ? baseLoad : 0.0
                     let plannedRIR = baseRIR
+
+                    // Do NOT read item.actualReps / item.actualLoads here.
+                    let actualReps: Int? = nil
+                    let actualLoad: Double? = nil
+                    let status: SetStatus = .notStarted
 
                     uiSets.append(
                         UISessionSet(
                             index: setIndex,
-                            plannedLoad: load,
-                            plannedReps: reps,
-                            plannedRIR: plannedRIR
+                            plannedLoad: plannedLoad,
+                            plannedReps: plannedReps,
+                            plannedRIR: plannedRIR,
+                            actualLoad: actualLoad,
+                            actualReps: actualReps,
+                            actualRIR: nil,
+                            status: status
                         )
                     )
                 }
@@ -936,6 +967,7 @@ extension SessionScreenViewModel {
             }
 
         self.init(
+            session: session,
             title: title,
             subtitle: subtitle,
             exercises: exercises
@@ -961,11 +993,11 @@ enum SetOutcome {
 struct UISessionExercise: Identifiable {
     let id = UUID()
 
-    var exerciseId: String          // matches CatalogExercise.id and SessionItem.exerciseId
+    var exerciseId: String
     var name: String
-    var detail: String              // e.g. "Week 3 · Day 1 · 8–12 reps @ 2–3 RIR"
-    var weekInMeso: Int             // to drive meso-phase logic
-    var targetSets: Int             // 3–6
+    var detail: String
+    var weekInMeso: Int
+    var targetSets: Int
     var sets: [UISessionSet]
     var coachMessage: String
 
@@ -1008,7 +1040,6 @@ struct UISessionSet: Identifiable {
 
     var status: SetStatus
 
-    // String backing for TextField input
     var plannedLoadText: String
     var plannedRepsText: String
     var actualLoadText: String
@@ -1033,7 +1064,6 @@ struct UISessionSet: Identifiable {
         self.actualRIR = actualRIR
         self.status = status
 
-        // Text backing
         let planLoadString: String
         if plannedLoad == 0 {
             planLoadString = "0"
@@ -1047,14 +1077,12 @@ struct UISessionSet: Identifiable {
         if let actualLoad {
             self.actualLoadText = String(format: "%.1f", actualLoad)
         } else {
-            // PREFILL: plan → actual, so one tap logs if you follow the plan
             self.actualLoadText = planLoadString
         }
 
         if let actualReps {
             self.actualRepsText = "\(actualReps)"
         } else {
-            // PREFILL: plan → actual
             self.actualRepsText = "\(plannedReps)"
         }
     }
@@ -1081,48 +1109,181 @@ struct UISessionSet: Identifiable {
     }
 }
 
+// MARK: - Recap Types + Sheet
+
+struct SessionRecap: Identifiable {
+    let id = UUID()
+    let date: Date
+    let weekIndex: Int
+    let title: String
+    let subtitle: String
+    let exercises: [SessionRecapExercise]
+
+    var exerciseCount: Int {
+        exercises.count
+    }
+
+    var setCount: Int {
+        exercises.reduce(0) { $0 + $1.sets }
+    }
+
+    var totalVolume: Double {
+        exercises.reduce(0) { $0 + $1.volume }
+    }
+}
+
+struct SessionRecapExercise: Identifiable {
+    let id = UUID()
+    let name: String
+    let primaryMuscle: String?
+    let sets: Int
+    let reps: Int
+    let volume: Double
+}
+
+private struct SessionRecapSheet: View {
+    let recap: SessionRecap
+    let onDone: () -> Void
+
+    private var dateFormatter: DateFormatter {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .none
+        return df
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    headerCard
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("By exercise")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        VStack(spacing: 0) {
+                            ForEach(recap.exercises) { ex in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(ex.name)
+                                        .font(.body)
+                                    HStack(spacing: 12) {
+                                        Text("Sets: \(ex.sets)")
+                                        Text("Reps: \(ex.reps)")
+                                        Text("Vol: \(Int(ex.volume))")
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 8)
+
+                                if ex.id != recap.exercises.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(.systemBackground))
+                        )
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Session Recap")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onDone()
+                    }
+                }
+            }
+        }
+    }
+
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(dateFormatter.string(from: recap.date))
+                .font(.headline)
+
+            Text("Week \(recap.weekIndex)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Exercises")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(recap.exerciseCount)")
+                        .font(.headline)
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading) {
+                    Text("Sets completed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(recap.setCount)")
+                        .font(.headline)
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading) {
+                    Text("Total volume")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(Int(recap.totalVolume))")
+                        .font(.headline)
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+        )
+    }
+}
+
 // MARK: - Mock Data for Previews
 
 extension SessionScreenViewModel {
     static var mock: SessionScreenViewModel {
+        let dummySession = Session(
+            date: Date(),
+            weekIndex: 1,
+            items: []
+        )
+
         let benchSets = [
             UISessionSet(index: 1, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
             UISessionSet(index: 2, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
             UISessionSet(index: 3, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-            UISessionSet(index: 4, plannedLoad: 185, plannedReps: 8, plannedRIR: 1),
-            UISessionSet(index: 5, plannedLoad: 0, plannedReps: 0, plannedRIR: nil),
-            UISessionSet(index: 6, plannedLoad: 0, plannedReps: 0, plannedRIR: nil)
+            UISessionSet(index: 4, plannedLoad: 185, plannedReps: 8, plannedRIR: 1)
         ]
 
         let bench = UISessionExercise(
             exerciseId: "bench",
             name: "Barbell Bench Press",
-            detail: "Week 3 · Day 1 · 8–12 reps @ 2–3 RIR · 3–4 sets (4th = test)",
-            weekInMeso: 3,
-            targetSets: 4,
+            detail: "Week 1 · Chest · 8–12 reps @ 2–3 RIR",
+            weekInMeso: 1,
+            targetSets: 3,
             sets: benchSets
         )
 
-        let rowSets = [
-            UISessionSet(index: 1, plannedLoad: 225, plannedReps: 10, plannedRIR: 2),
-            UISessionSet(index: 2, plannedLoad: 225, plannedReps: 10, plannedRIR: 2),
-            UISessionSet(index: 3, plannedLoad: 225, plannedReps: 10, plannedRIR: 2),
-            UISessionSet(index: 4, plannedLoad: 225, plannedReps: 10, plannedRIR: 1)
-        ]
-
-        let row = UISessionExercise(
-            exerciseId: "row",
-            name: "Chest Supported Row",
-            detail: "Week 3 · Day 1 · 10–15 reps @ 2–3 RIR · 3–4 sets",
-            weekInMeso: 3,
-            targetSets: 3,
-            sets: rowSets
-        )
-
         return SessionScreenViewModel(
-            title: "Week 3 · Day 1",
-            subtitle: "Upper · Heavy Press Focus",
-            exercises: [bench, row]
+            session: dummySession,
+            title: "Nov 26, 2025",
+            subtitle: "Week 1",
+            exercises: [bench]
         )
     }
 }

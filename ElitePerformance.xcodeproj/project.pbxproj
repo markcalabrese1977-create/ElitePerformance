@@ -12,6 +12,7 @@
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
+		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
 		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
@@ -19,6 +20,8 @@
 		D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF92ED207A40035FE70 /* ContentView.swift */; };
 		D5BEBEFC2ED2087B0035FE70 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEFB2ED208790035FE70 /* RootTabView.swift */; };
 		D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */; };
+		D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */; };
+		D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
 		D5E293662EC410DD00034D78 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293512EC410DD00034D78 /* User.swift */; };
 		D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */; };
@@ -41,7 +44,6 @@
 		D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293852EC6BD8200034D78 /* PRIndex.swift */; };
 		D5E293882EC6BDB600034D78 /* PRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293872EC6BDB400034D78 /* PRService.swift */; };
 		D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293892EC6BDCF00034D78 /* PRBadge.swift */; };
-		D5E2938C2EC6BDEA00034D78 /* SessionRecapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2938B2EC6BDE800034D78 /* SessionRecapView.swift */; };
 		D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293912EC7BBC000034D78 /* UserProfile.swift */; };
 		D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293932EC7BBD500034D78 /* PlannedBlock.swift */; };
 		D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */; };
@@ -65,6 +67,7 @@
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
+		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
 		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
@@ -72,6 +75,8 @@
 		D5BEBEF92ED207A40035FE70 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D5BEBEFB2ED208790035FE70 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingGoal.swift; sourceTree = "<group>"; };
+		D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoggedSet.swift; sourceTree = "<group>"; };
+		D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistory.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
 		D5E2931D2EC4102800034D78 /* ElitePerformance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElitePerformance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E2932C2EC4102900034D78 /* ElitePerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ElitePerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -96,7 +101,6 @@
 		D5E293852EC6BD8200034D78 /* PRIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRIndex.swift; sourceTree = "<group>"; };
 		D5E293872EC6BDB400034D78 /* PRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRService.swift; sourceTree = "<group>"; };
 		D5E293892EC6BDCF00034D78 /* PRBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRBadge.swift; sourceTree = "<group>"; };
-		D5E2938B2EC6BDE800034D78 /* SessionRecapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecapView.swift; sourceTree = "<group>"; };
 		D5E293912EC7BBC000034D78 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		D5E293932EC7BBD500034D78 /* PlannedBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannedBlock.swift; sourceTree = "<group>"; };
 		D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseCatalog.swift; sourceTree = "<group>"; };
@@ -195,6 +199,7 @@
 				D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */,
 				D5E2934C2EC410DD00034D78 /* Progression.swift */,
 				D5E2934D2EC410DD00034D78 /* Readiness.swift */,
+				D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */,
 			);
 			path = Logic;
 			sourceTree = "<group>";
@@ -202,6 +207,8 @@
 		D5E293522EC410DD00034D78 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */,
+				D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */,
 				D550F56E2ED60DA40011D54B /* CoachingModels.swift */,
 				D58618252ECCA92A006EF818 /* TrainingProgram.swift */,
 				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */,
@@ -258,7 +265,6 @@
 			isa = PBXGroup;
 			children = (
 				D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */,
-				D5E2938B2EC6BDE800034D78 /* SessionRecapView.swift */,
 				D5E2935A2EC410DD00034D78 /* SessionView.swift */,
 			);
 			path = Session;
@@ -481,12 +487,14 @@
 				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
+				D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */,
 				D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
+				D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */,
 				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,
+				D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
-				D5E2938C2EC6BDEA00034D78 /* SessionRecapView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
 			);

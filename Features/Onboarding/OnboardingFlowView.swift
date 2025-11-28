@@ -306,6 +306,7 @@ struct OnboardingFlowView: View {
             selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
         }
 
+        // NOTE: trainingDaysOfWeek is the single source of truth for schedule; daysPerWeek is derived.
         let weekdays = selectedWeekdays
             .map { min(max($0, 1), 7) }
             .sorted()
@@ -313,7 +314,7 @@ struct OnboardingFlowView: View {
         let result = OnboardingResult(
             goal: selectedGoal,
             experience: selectedExperience,
-            daysPerWeek: daysPerWeek,
+            daysPerWeek: weekdays.count,
             trainingDaysOfWeek: weekdays
         )
 

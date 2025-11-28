@@ -4,12 +4,11 @@ import SwiftData
 /// Shows your current block grouped by week.
 /// Change-program actions are owned by `HomeView`.
 struct ProgramPlanView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     var body: some View {
         List {
-            debugSection
-
             if sessions.isEmpty {
                 emptyStateSection
             } else {
@@ -21,7 +20,7 @@ struct ProgramPlanView: View {
                         ForEach(weekGroup.sessions) { session in
                             NavigationLink {
                                 // Real session-driven view model
-                                ProgramDayDetailView(session: session)   // 👈 only this line changes
+                                ProgramDayDetailView(session: session)
                             } label: {
                                 programRow(for: session)
                             }
@@ -30,15 +29,52 @@ struct ProgramPlanView: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    addExtraSession()
+                } label: {
+                    Label("Add Session", systemImage: "plus")
+                }
+            }
+        }
     }
 
-    // MARK: - Debug
+    // MARK: - Extra Session
 
-    private var debugSection: some View {
-        Section {
-            Text("DEBUG sessions count: \(sessions.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    /// Adds an extra planned session for "today" in the current week.
+    private func addExtraSession() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Sort existing sessions so we can reason about the block.
+        let sorted = sessions.sorted { $0.date < $1.date }
+
+        // If there is already a session today, reuse its weekIndex.
+        let todaysWeekIndex = sorted.first {
+            calendar.isDate($0.date, inSameDayAs: today)
+        }?.weekIndex
+
+        // Otherwise, fall back to the last known weekIndex, or 1.
+        let weekIndex = todaysWeekIndex ?? sorted.last?.weekIndex ?? 1
+
+        let newSession = Session(
+            date: today,
+            status: .planned,
+            readinessStars: 0,
+            sessionNotes: nil,
+            weekIndex: weekIndex,
+            items: [],
+            completedAt: nil
+        )
+
+        modelContext.insert(newSession)
+
+        do {
+            try modelContext.save()
+            print("✅ Added extra session on \(today) (week \(weekIndex))")
+        } catch {
+            print("⚠️ Failed to save extra session: \(error)")
         }
     }
 
