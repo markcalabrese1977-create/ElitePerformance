@@ -4,25 +4,41 @@
 //
 
 import SwiftUI
-import Combine
 import SwiftData
+import UIKit
+import Combine
 
 // MARK: - Root Session Screen
 
 /// Root Session screen.
-/// In normal navigation, use:
-/// `SessionView(viewModel: SessionScreenViewModel(session: someSession))`.
+///
+/// Normal usage in the app:
+/// ```swift
+/// NavigationLink {
+///     SessionView(session: session)
+/// } label: { ... }
+/// ```
 struct SessionView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel: SessionScreenViewModel
+    @State private var hasDisabledIdleTimer = false
 
     /// Unified sheet state: either swapping an exercise or showing the recap.
     @State private var activeSheet: ActiveSheet?
 
     // MARK: - Initializers
 
+    /// Preferred initializer when you already have a view model.
     init(viewModel: SessionScreenViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
+    }
+
+    /// Convenience initializer for existing call sites:
+    /// `SessionView(session: someSession)`
+    init(session: Session) {
+        _viewModel = StateObject(
+            wrappedValue: SessionScreenViewModel(session: session)
+        )
     }
 
     /// Preview-only convenience initializer.
@@ -66,6 +82,19 @@ struct SessionView: View {
         }
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
+        // Keep screen awake while this view is visible
+        .onAppear {
+            if !hasDisabledIdleTimer {
+                UIApplication.shared.isIdleTimerDisabled = true
+                hasDisabledIdleTimer = true
+            }
+        }
+        .onDisappear {
+            if hasDisabledIdleTimer {
+                UIApplication.shared.isIdleTimerDisabled = false
+                hasDisabledIdleTimer = false
+            }
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .swap(let target):
@@ -113,8 +142,24 @@ struct SessionView: View {
             Text(viewModel.sessionSummary)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            Text(coachCue)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .italic()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var coachCue: String {
+        // Look across all exercises in this session
+        let maxSets = viewModel.exercises.map(\.targetSets).max() ?? 3
+
+        if maxSets >= 4 {
+            return "3 to grow, 1 to know: use the 4th set as your tester if recovery is solid."
+        } else {
+            return "3 to grow: 3 solid working sets. Add a tester only on good days."
+        }
     }
 
     private var completionBanner: some View {
@@ -199,6 +244,7 @@ private struct SessionExerciseCardView: View {
                     Text(exercise.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer()
@@ -275,117 +321,210 @@ private struct SessionSetRowView: View {
     @Binding var uiSet: UISessionSet
     let onLog: () -> Void
 
+    @State private var actualRIRText: String = ""
+
     private var isLocked: Bool {
         uiSet.status == .completed || uiSet.status == .skipped
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Set Index
-            Text("Set \(uiSet.index)")
-                .font(.caption)
-                .frame(width: 44, alignment: .leading)
-
-            // PLAN (read-only)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("PLAN")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text(uiSet.plannedDescription)
+        VStack(alignment: .leading, spacing: 6) {
+            // Top line: Set label + status chip (for locked sets)
+            HStack {
+                Text("Set \(uiSet.index)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(width: 130, alignment: .leading)
 
-            Spacer()
+                Spacer()
 
-            // ACTUAL (editable, unless locked)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ACTUAL")
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-
-                HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Load")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        TextField("0", text: $uiSet.actualLoadText)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 60)
-                            .disabled(isLocked)
-                            .opacity(isLocked ? 0.6 : 1.0)
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reps")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        TextField("0", text: $uiSet.actualRepsText)
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 40)
-                            .disabled(isLocked)
-                            .opacity(isLocked ? 0.6 : 1.0)
-                    }
-                }
-            }
-
-            // Log / Done / Skipped
-            Button(action: {
-                guard !isLocked else { return }
-                onLog()
-            }) {
-                switch uiSet.status {
-                case .completed:
-                    Text("Done")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.2))
-                        .clipShape(Capsule())
-
-                case .skipped:
-                    Text("Skipped")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.orange.opacity(0.2))
-                        .clipShape(Capsule())
-
-                default:
-                    Text("Log")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.2))
-                        .clipShape(Capsule())
-                }
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
                 if isLocked {
-                    Button("Edit set") {
-                        uiSet.status = .notStarted
+                    Text(uiSet.status == .skipped ? "Skipped" : "Done")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            (uiSet.status == .skipped
+                             ? Color.orange.opacity(0.2)
+                             : Color.green.opacity(0.2))
+                        )
+                        .foregroundStyle(
+                            uiSet.status == .skipped ? Color.orange : Color.green
+                        )
+                        .clipShape(Capsule())
+                }
+            }
+
+            // PLAN line
+            Text("PLAN \(uiSet.plannedDescription)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            // ACTUAL inputs + Log / Skip buttons
+            HStack(alignment: .bottom, spacing: 8) {
+                // Load
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Load")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    TextField("0", text: $uiSet.actualLoadText)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 72)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                }
+
+                // Reps
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reps")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    TextField("0", text: $uiSet.actualRepsText)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 52)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                }
+
+                // RIR
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("RIR")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    TextField("0", text: $actualRIRText)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 40)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                }
+
+                Spacer()
+
+                // Primary actions: Log + Skip
+                VStack(spacing: 4) {
+                    // Log button
+                    Button(action: {
+                        guard !isLocked else { return }
+                        onLog()
+                    }) {
+                        switch uiSet.status {
+                        case .completed:
+                            Text("Done")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.green.opacity(0.2))
+                                .clipShape(Capsule())
+
+                        case .skipped:
+                            Text("Skipped")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.orange.opacity(0.2))
+                                .clipShape(Capsule())
+
+                        default:
+                            Text("Log")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.blue.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
                     }
-                } else {
-                    Button("Skip set") {
-                        uiSet.status = .skipped
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        if isLocked {
+                            Button("Edit set") {
+                                // Unlock and restore fields to planned values
+                                uiSet.status = .notStarted
+                                resetToPlan()
+                            }
+                        } else {
+                            Button("Skip set") {
+                                applySkip()
+                            }
+                        }
                     }
+
+                    // Explicit Skip button
+                    Button {
+                        guard !isLocked else { return }
+                        applySkip()
+                    } label: {
+                        Text("Skip")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }
+        .padding(.vertical, 4)
+        .onAppear {
+            // Pre-fill RIR from actual (if any) or from plan
+            if actualRIRText.isEmpty {
+                if let rir = uiSet.actualRIR {
+                    actualRIRText = "\(rir)"
+                } else if let planned = uiSet.plannedRIR {
+                    actualRIRText = "\(planned)"
+                } else {
+                    actualRIRText = ""
+                }
+            }
+        }
+        .onChange(of: actualRIRText) { newValue in
+            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                uiSet.actualRIR = nil
+            } else if let val = Int(trimmed) {
+                uiSet.actualRIR = val
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Clear any actuals and mark as skipped, ignoring prefilled plan values.
+    private func applySkip() {
+        uiSet.status = .skipped
+
+        // Clear actual numeric values so they don't get persisted
+        uiSet.actualLoad = nil
+        uiSet.actualReps = nil
+        uiSet.actualRIR = nil
+
+        // Reset text fields away from "real" numbers
+        uiSet.actualLoadText = "0"
+        uiSet.actualRepsText = "\(uiSet.plannedReps)"
+        actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
+    }
+
+    /// Restore inputs to the planned baseline when you "Edit set".
+    private func resetToPlan() {
+        uiSet.actualLoad = nil
+        uiSet.actualReps = nil
+        uiSet.actualRIR = nil
+
+        uiSet.actualLoadText = uiSet.plannedLoad == 0
+            ? "0"
+            : String(format: "%.1f", uiSet.plannedLoad)
+        uiSet.actualRepsText = "\(uiSet.plannedReps)"
+        actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
     }
 }
-
 // MARK: - Swap Sheet
 
 /// Sheet to pick a replacement exercise from the catalog.
@@ -444,7 +583,6 @@ private struct ExerciseSwapSheet: View {
         }
     }
 }
-
 // MARK: - View Model
 
 final class SessionScreenViewModel: ObservableObject {
@@ -474,7 +612,8 @@ final class SessionScreenViewModel: ObservableObject {
         return "\(exercises.count) exercises · \(setCount) planned working sets"
     }
 
-    /// Whether all exercises have all planned sets completed or skipped.
+    /// Whether all exercises have all planned sets completed.
+    /// NOTE: skipped sets DO count as satisfied (you explicitly chose to skip).
     var isSessionComplete: Bool {
         exercises.allSatisfy { $0.isComplete }
     }
@@ -605,6 +744,9 @@ final class SessionScreenViewModel: ObservableObject {
                 if let load = uiSet.actualLoad, load > 0 {
                     item.actualLoads[idx] = load
                 }
+                if let rir = uiSet.actualRIR, rir >= 0 {
+                    item.actualRIRs[idx] = rir
+                }
             }
 
             item.isCompleted = uiExercise.isComplete
@@ -614,7 +756,7 @@ final class SessionScreenViewModel: ObservableObject {
         // Update overall session status
         let anyLoggedSet = exercises
             .flatMap { $0.sets }
-            .contains { $0.status == .completed || $0.status == .skipped }
+            .contains { $0.status == .completed }
 
         if exercises.allSatisfy({ $0.isComplete }) {
             session.status = .completed
@@ -632,7 +774,8 @@ final class SessionScreenViewModel: ObservableObject {
     }
 
     // MARK: - Plan vs Actual Coaching Logic
-    // (unchanged)
+    // (unchanged – logic only)
+
     private func coachMessage(for exercise: UISessionExercise, recentSetIndex: Int) -> String {
         guard let recentSet = exercise.sets.first(where: { $0.index == recentSetIndex }) else {
             return ""
@@ -866,11 +1009,13 @@ final class SessionScreenViewModel: ObservableObject {
     func persistCompletion(using context: ModelContext, recap: SessionRecap) throws {
         print("🔁 persistCompletion called – exercises: \(recap.exerciseCount), sets: \(recap.setCount), volume: \(recap.totalVolume)")
 
+        // Mark the underlying session as completed (first time only we set completedAt)
         if session.completedAt == nil {
             session.completedAt = Date()
         }
         session.status = .completed
 
+        // Build the exercises payload for history
         let historyExercises = recap.exercises.map {
             SessionHistoryExercise(
                 name: $0.name,
@@ -881,23 +1026,53 @@ final class SessionScreenViewModel: ObservableObject {
             )
         }
 
-        let history = SessionHistory(
-            date: recap.date,
-            weekIndex: recap.weekIndex,
-            title: recap.title,
-            subtitle: recap.subtitle,
-            totalExercises: recap.exerciseCount,
-            totalSets: recap.setCount,
-            totalVolume: recap.totalVolume,
-            exercises: historyExercises
+        // Capture scalar values for the predicate (SwiftData can't compare two key paths)
+        let targetDate = recap.date
+        let targetWeek = recap.weekIndex
+
+        // 🔑 Try to find an existing history entry for this same session day/week
+        let descriptor = FetchDescriptor<SessionHistory>(
+            predicate: #Predicate<SessionHistory> { history in
+                history.date == targetDate && history.weekIndex == targetWeek
+            }
         )
 
-        context.insert(history)
-        try context.save()
+        let existing: [SessionHistory]
+        do {
+            existing = try context.fetch(descriptor)
+        } catch {
+            print("⚠️ Failed to fetch existing SessionHistory: \(error)")
+            existing = []
+        }
 
-        print("✅ SessionHistory saved")
+        if let existingHistory = existing.first {
+            // Update the existing record instead of creating a duplicate
+            existingHistory.title = recap.title
+            existingHistory.subtitle = recap.subtitle
+            existingHistory.totalExercises = recap.exerciseCount
+            existingHistory.totalSets = recap.setCount
+            existingHistory.totalVolume = recap.totalVolume
+            existingHistory.exercises = historyExercises
+        } else {
+            // First time completing this session → insert a new history row
+            let history = SessionHistory(
+                date: recap.date,
+                weekIndex: recap.weekIndex,
+                title: recap.title,
+                subtitle: recap.subtitle,
+                totalExercises: recap.exerciseCount,
+                totalSets: recap.setCount,
+                totalVolume: recap.totalVolume,
+                exercises: historyExercises
+            )
+
+            context.insert(history)
+        }
+
+        try context.save()
+        print("✅ SessionHistory saved/updated")
     }
-}
+} // ← closes SessionScreenViewModel
 
 // MARK: - Integration with real Session model
 
@@ -906,65 +1081,106 @@ extension SessionScreenViewModel {
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
         let subtitle = "Week \(session.weekIndex)"
 
-        let exercises: [UISessionExercise] = session.items
-            .sorted { $0.order < $1.order }
-            .map { item in
-                let catalogExercise = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
-                let name = catalogExercise?.name ?? "Exercise"
+        let items = session.items.sorted { $0.order < $1.order }
 
-                let targetSets = max(3, min(item.targetSets, 4))
-                let baseReps = item.targetReps
-                let baseLoad = item.suggestedLoad
-                let baseRIR = item.targetRIR
+        let exercises: [UISessionExercise] = items.map { item in
+            let catalogExercise = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
+            let name = catalogExercise?.name ?? "Exercise"
 
-                let setCount = 4
-                var uiSets: [UISessionSet] = []
-                uiSets.reserveCapacity(setCount)
+            // Clamp to 3–4 working sets for now
+            let targetSets = max(3, min(item.targetSets, 4))
+            let baseReps = item.targetReps
+            let baseLoad = item.suggestedLoad
+            let baseRIR = item.targetRIR
 
-                for idx in 0..<setCount {
-                    let setIndex = idx + 1
-                    let isPlannedWorkingSet = setIndex <= targetSets
+            // We currently support up to 4 sets in the logger UI
+            let setCount = 4
+            var uiSets: [UISessionSet] = []
+            uiSets.reserveCapacity(setCount)
 
-                    let plannedReps = baseReps
-                    let plannedLoad = isPlannedWorkingSet ? baseLoad : 0.0
-                    let plannedRIR = baseRIR
+            for idx in 0..<setCount {
+                let setIndex = idx + 1
+                let isPlannedWorkingSet = setIndex <= targetSets
 
-                    // Do NOT read item.actualReps / item.actualLoads here.
-                    let actualReps: Int? = nil
-                    let actualLoad: Double? = nil
-                    let status: SetStatus = .notStarted
-
-                    uiSets.append(
-                        UISessionSet(
-                            index: setIndex,
-                            plannedLoad: plannedLoad,
-                            plannedReps: plannedReps,
-                            plannedRIR: plannedRIR,
-                            actualLoad: actualLoad,
-                            actualReps: actualReps,
-                            actualRIR: nil,
-                            status: status
-                        )
-                    )
-                }
-
-                let detail: String
-                if let ce = catalogExercise {
-                    detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(baseReps) reps @ RIR \(baseRIR)"
+                // ---- Planned values ----
+                let plannedReps: Int
+                if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
+                    plannedReps = item.plannedRepsBySet[idx]
                 } else {
-                    detail = "Week \(session.weekIndex) · \(baseReps) reps @ RIR \(baseRIR)"
+                    plannedReps = baseReps
                 }
 
-                return UISessionExercise(
-                    exerciseId: item.exerciseId,
-                    name: name,
-                    detail: detail,
-                    weekInMeso: session.weekIndex,
-                    targetSets: targetSets,
-                    sets: uiSets,
-                    coachMessage: item.coachNote ?? ""
+                let plannedLoad: Double
+                if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
+                    plannedLoad = item.plannedLoadsBySet[idx]
+                } else {
+                    plannedLoad = isPlannedWorkingSet ? baseLoad : 0.0
+                }
+
+                let plannedRIR = baseRIR
+
+                // ---- Actual values (read back from SwiftData) ----
+                var actualReps: Int? = nil
+                if idx < item.actualReps.count, item.actualReps[idx] > 0 {
+                    actualReps = item.actualReps[idx]
+                }
+
+                var actualLoad: Double? = nil
+                if idx < item.actualLoads.count, item.actualLoads[idx] > 0 {
+                    actualLoad = item.actualLoads[idx]
+                }
+
+                var actualRIR: Int? = nil
+                if idx < item.actualRIRs.count {
+                    let stored = item.actualRIRs[idx]
+                    // Treat 0 as “real” only if there is an actual set logged
+                    if stored > 0 || ((actualReps != nil || actualLoad != nil) && stored == 0) {
+                        actualRIR = stored
+                    }
+                }
+
+                // ---- Status ----
+                let status: SetStatus
+                if let reps = actualReps,
+                   let load = actualLoad,
+                   reps > 0,
+                   load > 0 {
+                    status = .completed
+                } else {
+                    status = .notStarted
+                }
+
+                uiSets.append(
+                    UISessionSet(
+                        index: setIndex,
+                        plannedLoad: plannedLoad,
+                        plannedReps: plannedReps,
+                        plannedRIR: plannedRIR,
+                        actualLoad: actualLoad,
+                        actualReps: actualReps,
+                        actualRIR: actualRIR,
+                        status: status
+                    )
                 )
             }
+
+            let detail: String
+            if let ce = catalogExercise {
+                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(baseReps) reps @ RIR \(baseRIR)"
+            } else {
+                detail = "Week \(session.weekIndex) · \(baseReps) reps @ RIR \(baseRIR)"
+            }
+
+            return UISessionExercise(
+                exerciseId: item.exerciseId,
+                name: name,
+                detail: detail,
+                weekInMeso: session.weekIndex,
+                targetSets: targetSets,
+                sets: uiSets,
+                coachMessage: item.coachNote ?? ""
+            )
+        }
 
         self.init(
             session: session,
@@ -1001,10 +1217,15 @@ struct UISessionExercise: Identifiable {
     var sets: [UISessionSet]
     var coachMessage: String
 
+    /// A session exercise is "complete" when all working sets (up to `targetSets`)
+    /// are either completed or explicitly skipped.
     var isComplete: Bool {
-        sets
-            .filter { $0.index <= targetSets }
-            .allSatisfy { $0.status == .completed || $0.status == .skipped }
+        let workingSets = sets.filter { $0.index <= targetSets }
+        guard !workingSets.isEmpty else { return false }
+
+        return workingSets.allSatisfy { set in
+            set.status == .completed || set.status == .skipped
+        }
     }
 
     init(

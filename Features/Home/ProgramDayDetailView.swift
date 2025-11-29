@@ -263,8 +263,9 @@ struct ProgramDayDetailView: View {
 /// Per-exercise plan editor.
 /// Edits target reps, suggested load, target RIR, and target sets.
 /// Does NOT expose any Actual values.
-private struct ProgramExercisePlanRow: View {
+struct ProgramExercisePlanRow: View {
     @Binding var item: SessionItem
+    @State private var showingSwapSheet = false
 
     // number formatter for load
     private static let loadFormatter: NumberFormatter = {
@@ -279,7 +280,7 @@ private struct ProgramExercisePlanRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Title
-            HStack {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(exerciseName)
                         .font(.headline)
@@ -291,19 +292,32 @@ private struct ProgramExercisePlanRow: View {
 
                 Spacer()
 
-                // Sets count editor (3–4 working sets)
-                HStack(spacing: 4) {
-                    Text("\(item.targetSets) sets")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 4) {
+                    // Sets count editor (3–4 working sets)
+                    HStack(spacing: 4) {
+                        Text("\(item.targetSets) sets")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                    Stepper(
-                        "",
-                        value: $item.targetSets,
-                        in: 3...4,
-                        step: 1
-                    )
-                    .labelsHidden()
+                        Stepper(
+                            "",
+                            value: $item.targetSets,
+                            in: 3...4,
+                            step: 1
+                        )
+                        .labelsHidden()
+                    }
+
+                    if !SwapMap.swapOptions(for: item.exerciseId).isEmpty {
+                        Button {
+                            showingSwapSheet = true
+                        } label: {
+                            Label("Swap", systemImage: "arrow.triangle.2.circlepath")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
             }
 
@@ -363,8 +377,52 @@ private struct ProgramExercisePlanRow: View {
                     }
                 }
             }
+
+            // Coach cue
+            Text(coachCue)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .italic()
         }
         .padding(.vertical, 6)
+        .sheet(isPresented: $showingSwapSheet) {
+            NavigationStack {
+                let options = SwapMap.swapOptions(for: item.exerciseId)
+
+                List {
+                    Section("Swap \(exerciseName)") {
+                        if options.isEmpty {
+                            Text("No alternatives available yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(options, id: \.id) { candidate in
+                                Button {
+                                    item.exerciseId = candidate.id
+                                    showingSwapSheet = false
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(candidate.name)
+                                            .font(.body)
+                                        Text(candidate.primaryMuscle.rawValue.capitalized)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Swap Exercise")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showingSwapSheet = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -382,6 +440,19 @@ private struct ProgramExercisePlanRow: View {
             return "\(primary.rawValue.capitalized) · \(item.targetReps) reps @ RIR \(item.targetRIR)"
         } else {
             return "\(item.targetReps) reps @ RIR \(item.targetRIR)"
+        }
+    }
+
+    private var coachCue: String {
+        switch item.targetSets {
+        case ..<3:
+            return "Build to at least 3 quality working sets."
+        case 3:
+            return "3 to grow: 3 solid working sets. Push the last set if RIR holds."
+        case 4:
+            return "3 to grow, 1 to know: 4th set is your tester. Only push if recovery is solid."
+        default:
+            return "Hit clean form first, then earn your tester set."
         }
     }
 }
