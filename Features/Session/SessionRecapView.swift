@@ -61,6 +61,13 @@ struct SessionRecapView: View {
             partial + item.loggedSetsCount
         }
     }
+    
+    /// Total reps actually logged across all exercises.
+    private var loggedRepsTotal: Int {
+        sortedItems.reduce(0) { partial, item in
+            partial + item.actualReps.reduce(0, +)
+        }
+    }
 
     private var completedExercises: Int {
         sortedItems.filter { $0.loggedSetsCount > 0 }.count
@@ -74,7 +81,42 @@ struct SessionRecapView: View {
         guard plannedSetsTotal > 0 else { return 0 }
         return (Double(loggedSetsTotal) / Double(plannedSetsTotal)) * 100.0
     }
+    
+    /// Last-set RIR values across all exercises with logged work.
+    private var lastSetRIRs: [Int] {
+        sortedItems.compactMap { item in
+            let count = min(item.actualReps.count,
+                            item.actualLoads.count,
+                            item.actualRIRs.count)
+            guard count > 0 else { return nil }
 
+            var lastRIR: Int?
+
+            // Walk backwards to find the last *real* work set.
+            for idx in stride(from: count - 1, through: 0, by: -1) {
+                let reps = item.actualReps[idx]
+                let load = item.actualLoads[idx]
+                guard reps > 0 && load > 0 else { continue }
+                lastRIR = item.actualRIRs[idx]
+                break
+            }
+
+            return lastRIR
+        }
+    }
+
+    /// Average of last-set RIRs, if any exist.
+    private var averageLastSetRIR: Double? {
+        let values = lastSetRIRs
+        guard !values.isEmpty else { return nil }
+        let sum = values.reduce(0, +)
+        return Double(sum) / Double(values.count)
+    }
+
+    /// Minimum and maximum last-set RIR across the session.
+    private var minLastSetRIR: Int? { lastSetRIRs.min() }
+    private var maxLastSetRIR: Int? { lastSetRIRs.max() }
+    
     /// Items for which the coaching engine has a concrete next-load suggestion.
     private var itemsWithRecommendations: [SessionItem] {
         sortedItems.filter {
@@ -188,6 +230,13 @@ struct SessionRecapView: View {
             }
 
             HStack {
+                Text("Reps logged")
+                Spacer()
+                Text("\(loggedRepsTotal)")
+                    .fontWeight(.semibold)
+            }
+
+            HStack {
                 Text("Completion")
                 Spacer()
                 Text(String(format: "%.0f%%", completionPercent))
@@ -199,6 +248,24 @@ struct SessionRecapView: View {
                 Spacer()
                 Text(formattedVolume(totalVolume))
                     .fontWeight(.semibold)
+            }
+
+            if let avg = averageLastSetRIR {
+                HStack {
+                    Text("Avg last-set RIR")
+                    Spacer()
+                    Text(String(format: "%.1f", avg))
+                        .fontWeight(.semibold)
+                }
+            }
+
+            if let minR = minLastSetRIR, let maxR = maxLastSetRIR {
+                HStack {
+                    Text("Last-set RIR range")
+                    Spacer()
+                    Text("\(minR)–\(maxR)")
+                        .fontWeight(.semibold)
+                }
             }
         }
     }

@@ -766,6 +766,11 @@ final class SessionScreenViewModel: ObservableObject {
             session.status = .planned
         }
 
+        // ✅ Plan Memory v1 – always attempt to carry plans forward.
+        // Safe because it only touches future items with *empty loads*.
+        let planMemory = PlanMemoryEngine(context: context)
+        planMemory.carryForwardPlans(from: session)
+
         do {
             try context.save()
         } catch {
@@ -974,26 +979,34 @@ final class SessionScreenViewModel: ObservableObject {
             let primary = catalog?.primaryMuscle.rawValue.capitalized
 
             var setsCompleted = 0
-            var totalReps = 0
+            var totalRepsForExercise = 0
             var totalVolume: Double = 0
+            var lastRIR: Int? = nil
 
             for set in exercise.sets where set.index <= exercise.targetSets {
                 guard set.status == .completed else { continue }
 
                 let reps = set.actualReps ?? set.plannedReps
                 let load = set.actualLoad ?? set.plannedLoad
+                let rir  = set.actualRIR ?? set.plannedRIR
 
                 setsCompleted += 1
-                totalReps += reps
+                totalRepsForExercise += reps
                 totalVolume += Double(reps) * load
+
+                // Track the last completed set's RIR
+                if let rir = rir {
+                    lastRIR = rir
+                }
             }
 
             return SessionRecapExercise(
                 name: exercise.name,
                 primaryMuscle: primary,
                 sets: setsCompleted,
-                reps: totalReps,
-                volume: totalVolume
+                reps: totalRepsForExercise,
+                volume: totalVolume,
+                lastSetRIR: lastRIR
             )
         }
 
@@ -1351,6 +1364,27 @@ struct SessionRecap: Identifiable {
     var totalVolume: Double {
         exercises.reduce(0) { $0 + $1.volume }
     }
+
+    /// Total reps logged across all exercises.
+    var totalReps: Int {
+        exercises.reduce(0) { $0 + $1.reps }
+    }
+
+    /// Last-set RIR values for exercises that have them.
+    private var lastSetRIRs: [Int] {
+        exercises.compactMap { $0.lastSetRIR }
+    }
+
+    /// Average last-set RIR for the session.
+    var averageLastSetRIR: Double? {
+        guard !lastSetRIRs.isEmpty else { return nil }
+        let sum = lastSetRIRs.reduce(0, +)
+        return Double(sum) / Double(lastSetRIRs.count)
+    }
+
+    /// Minimum and maximum last-set RIR.
+    var minLastSetRIR: Int? { lastSetRIRs.min() }
+    var maxLastSetRIR: Int? { lastSetRIRs.max() }
 }
 
 struct SessionRecapExercise: Identifiable {
@@ -1360,30 +1394,31 @@ struct SessionRecapExercise: Identifiable {
     let sets: Int
     let reps: Int
     let volume: Double
+    let lastSetRIR: Int?
 }
 
 private struct SessionRecapSheet: View {
     let recap: SessionRecap
     let onDone: () -> Void
-
+    
     private var dateFormatter: DateFormatter {
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = .none
         return df
     }
-
+    
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
-
+                    
                     VStack(alignment: .leading, spacing: 8) {
                         Text("By exercise")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
-
+                        
                         VStack(spacing: 0) {
                             ForEach(recap.exercises) { ex in
                                 VStack(alignment: .leading, spacing: 4) {
@@ -1398,7 +1433,7 @@ private struct SessionRecapSheet: View {
                                     .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 8)
-
+                                
                                 if ex.id != recap.exercises.last?.id {
                                     Divider()
                                 }
@@ -1424,18 +1459,19 @@ private struct SessionRecapSheet: View {
             }
         }
     }
-
+    
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(dateFormatter.string(from: recap.date))
                 .font(.headline)
-
+            
             Text("Week \(recap.weekIndex)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
+            
             Divider()
-
+            
+            // Top row: same 3 metrics you already see
             HStack {
                 VStack(alignment: .leading) {
                     Text("Exercises")
@@ -1444,9 +1480,9 @@ private struct SessionRecapSheet: View {
                     Text("\(recap.exerciseCount)")
                         .font(.headline)
                 }
-
+                
                 Spacer()
-
+                
                 VStack(alignment: .leading) {
                     Text("Sets completed")
                         .font(.caption)
@@ -1454,9 +1490,9 @@ private struct SessionRecapSheet: View {
                     Text("\(recap.setCount)")
                         .font(.headline)
                 }
-
+                
                 Spacer()
-
+                
                 VStack(alignment: .leading) {
                     Text("Total volume")
                         .font(.caption)
@@ -1465,15 +1501,43 @@ private struct SessionRecapSheet: View {
                         .font(.headline)
                 }
             }
+            
+            // New: extra detail underneath
+            if recap.totalReps > 0 {
+                HStack {
+                    Text("Total reps")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(recap.totalReps)")
+                        .font(.caption)
+                }
+            }
+            
+            if let avg = recap.averageLastSetRIR {
+                HStack {
+                    Text("Avg last-set RIR")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.1f", avg))
+                        .font(.caption)
+                }
+            }
+            
+            if let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
+                HStack {
+                    Text("Last-set RIR range")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(minR)–\(maxR)")
+                        .font(.caption)
+                }
+            }
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-        )
     }
 }
-
 // MARK: - Mock Data for Previews
 
 extension SessionScreenViewModel {

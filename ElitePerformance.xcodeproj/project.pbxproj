@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
@@ -63,6 +64,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
+		D537C68F2EE3AE3F006C16F7 /* Untitled.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Untitled.swift; sourceTree = "<group>"; };
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
@@ -193,6 +196,8 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D537C68F2EE3AE3F006C16F7 /* Untitled.swift */,
+				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
 				D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */,
 				D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */,
 				D58618272ECCA95F006EF818 /* ProgramCatalog.swift */,
@@ -491,6 +496,7 @@
 				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
+				D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */,
 				D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */,
 				D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
