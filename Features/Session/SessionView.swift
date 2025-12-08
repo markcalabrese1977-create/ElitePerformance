@@ -23,7 +23,7 @@ struct SessionView: View {
     @StateObject private var viewModel: SessionScreenViewModel
     @State private var hasDisabledIdleTimer = false
 
-    /// Unified sheet state: either swapping an exercise or showing the recap.
+    /// Unified sheet state: swap, recap, or exercise history.
     @State private var activeSheet: ActiveSheet?
 
     // MARK: - Initializers
@@ -69,10 +69,18 @@ struct SessionView: View {
                                 context: modelContext
                             )
                         },
+                        onSkipSet: { _ in
+                            // Skip changes are already applied to the binding;
+                            // we just need to persist them.
+                            viewModel.persist(using: modelContext)
+                        },
                         onSwapTapped: {
                             activeSheet = .swap(
                                 SwapTarget(exerciseIndex: index)
                             )
+                        },
+                        onHistoryTapped: {
+                            activeSheet = .history(exerciseName: exercise.name)
                         }
                     )
                 }
@@ -124,6 +132,14 @@ struct SessionView: View {
                             // For now just log – we can add user-visible error later.
                             print("Failed to persist completion: \(error)")
                         }
+                        activeSheet = nil
+                    }
+                )
+
+            case .history(let exerciseName):
+                ExerciseHistorySheet(
+                    exerciseName: exerciseName,
+                    onClose: {
                         activeSheet = nil
                     }
                 )
@@ -206,15 +222,20 @@ struct SessionView: View {
 
 /// Which sheet is currently being shown from the Session screen.
 private enum ActiveSheet: Identifiable {
+    typealias ID = String
+
     case swap(SwapTarget)
     case recap(SessionRecap)
+    case history(exerciseName: String)
 
-    var id: UUID {
+    var id: String {
         switch self {
         case .swap(let target):
-            return target.id
+            return "swap-\(target.id)"
         case .recap(let recap):
-            return recap.id
+            return "recap-\(recap.id)"
+        case .history(let exerciseName):
+            return "history-\(exerciseName)"
         }
     }
 }
@@ -231,7 +252,110 @@ private struct SwapTarget {
 private struct SessionExerciseCardView: View {
     @Binding var exercise: UISessionExercise
     let onSetLogged: (_ setIndex: Int) -> Void
+    let onSkipSet: (_ setIndex: Int) -> Void
     let onSwapTapped: () -> Void
+    let onHistoryTapped: () -> Void
+
+    // MARK: - Coach v5 (ProgressionEngine) helpers
+
+    /// Map the current exercise ID into a progression cluster.
+    /// This is meso-specific: tuned for the Chest/Bis/Tris + Low-Back 8-week block.
+    private var exerciseCluster: ExerciseCluster? {
+        switch exercise.exerciseId {
+
+        // Primary chest presses
+        case "bench_press",
+             "incline_dumbbell_press",
+             "machine_chest_press":
+            return .primaryChestPress
+
+        // Secondary press / triceps compounds / back compounds
+        case "cable_tricep_rope_pushdown",
+             "overhead_rope_tricep_extension",
+             "smith_machine_dip",
+             "wide_grip_pulldown",
+             "pulldown_normal_grip",
+             "seated_cable_row",
+             "dumbbell_row_single_arm":
+            return .secondaryPressOrArms
+
+        // Primary leg compounds
+        case "hack_squat",
+             "leg_press":
+            return .primaryLeg
+
+        // Pump / isolation work
+        case "seated_cable_fly",
+             "leg_extension",
+             "lying_leg_curl",
+             "seated_leg_curl",
+             "smith_machine_calves",
+             "seated_calf_raise",
+             "leg_press_calf_raise",
+             "ez_bar_curl",
+             "hammer_curl",
+             "cable_rope_hammer_curl",
+             "single_arm_cable_curl",
+             "dumbbell_lateral_raise",
+             "incline_rear_delt_fly",
+             "cable_rope_crunch":
+            return .pumpIsolation
+
+        // Low-back / stability day
+        case "cable_pull_through",
+             "back_extension_45",
+             "bench_back_extension",
+             "pallof_press",
+             "dead_bug",
+             "suitcase_carry",
+             "farmer_carry":
+            return .lowBackStability
+
+        default:
+            return nil
+        }
+    }
+
+    /// One-line summary from the global ProgressionEngine for this exercise.
+    /// Returns nil if we don't have enough logged data yet.
+    private var coachV5Line: String? {
+        guard let cluster = exerciseCluster else { return nil }
+
+        // Build history from completed working sets (up to targetSets)
+        let workingSets = exercise.sets.filter { uiSet in
+            uiSet.index <= exercise.targetSets && uiSet.status == .completed
+        }
+
+        let snapshots: [SetSnapshot] = workingSets.compactMap { uiSet in
+            let reps = uiSet.actualReps ?? uiSet.plannedReps
+            let load = uiSet.actualLoad ?? uiSet.plannedLoad
+            let rir  = uiSet.actualRIR
+
+            guard reps > 0, load > 0 else { return nil }
+
+            return SetSnapshot(
+                load: load,
+                reps: reps,
+                rir: rir.map { Double($0) }
+            )
+        }
+
+        guard !snapshots.isEmpty else { return nil }
+
+        let weekIndex = exercise.weekInMeso
+        let phase = ChestArmsLowBackMesoProfile.phase(forWeek: weekIndex)
+        let config = ChestArmsLowBackMesoProfile.config(for: cluster)
+
+        let decision = ProgressionEngine.suggestNext(
+            history: snapshots,
+            currentSets: exercise.targetSets,
+            config: config,
+            phase: phase
+        )
+
+        let loadString = String(format: "%.1f", decision.nextLoad)
+        return "Coach v5: \(decision.action.rawValue) → next \(loadString), sets \(decision.nextSets)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -256,6 +380,14 @@ private struct SessionExerciseCardView: View {
                         .padding(.vertical, 4)
                         .background(Color.black.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    Button(action: onHistoryTapped) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.caption)
+                            .padding(6)
+                    }
+                    .background(Color.black.opacity(0.05))
+                    .clipShape(Circle())
 
                     Button(action: onSwapTapped) {
                         Text("Swap")
@@ -288,18 +420,32 @@ private struct SessionExerciseCardView: View {
                         uiSet: $set,
                         onLog: {
                             onSetLogged(set.index)
+                        },
+                        onSkip: {
+                            onSkipSet(set.index)
                         }
                     )
                     .opacity(set.index <= exercise.targetSets ? 1.0 : 0.35)
                 }
             }
 
-            // Coach message
-            if !exercise.coachMessage.isEmpty {
+            // Legacy coach message (plan vs actual) – hide on low-back/stability work
+            if exerciseCluster != .lowBackStability,
+               !exercise.coachMessage.isEmpty {
                 Text(exercise.coachMessage)
                     .font(.caption)
                     .foregroundStyle(.blue)
                     .padding(.top, 4)
+            }
+
+            // New global progression coach (v5)
+            if let coachV5Line {
+                Text(coachV5Line)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top,
+                             (exercise.coachMessage.isEmpty || exerciseCluster == .lowBackStability) ? 4 : 2
+                    )
             }
         }
         .padding(12)
@@ -320,6 +466,7 @@ private struct SessionExerciseCardView: View {
 private struct SessionSetRowView: View {
     @Binding var uiSet: UISessionSet
     let onLog: () -> Void
+    let onSkip: () -> Void
 
     @State private var actualRIRText: String = ""
 
@@ -510,6 +657,9 @@ private struct SessionSetRowView: View {
         uiSet.actualLoadText = "0"
         uiSet.actualRepsText = "\(uiSet.plannedReps)"
         actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
+
+        // 🔁 Tell the parent so it can persist the change
+        onSkip()
     }
 
     /// Restore inputs to the planned baseline when you "Edit set".
@@ -525,6 +675,7 @@ private struct SessionSetRowView: View {
         actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
     }
 }
+
 // MARK: - Swap Sheet
 
 /// Sheet to pick a replacement exercise from the catalog.
@@ -583,6 +734,7 @@ private struct ExerciseSwapSheet: View {
         }
     }
 }
+
 // MARK: - View Model
 
 final class SessionScreenViewModel: ObservableObject {
@@ -723,19 +875,19 @@ final class SessionScreenViewModel: ObservableObject {
             let setCount = uiExercise.sets.count
 
             // Resize arrays to match UI
-            item.plannedRepsBySet = Array(repeating: 0, count: setCount)
-            item.plannedLoadsBySet = Array(repeating: 0, count: setCount)
-            item.actualReps        = Array(repeating: 0, count: setCount)
-            item.actualLoads       = Array(repeating: 0, count: setCount)
-            item.actualRIRs        = Array(repeating: 0, count: setCount)
-            item.usedRestPauseFlags = Array(repeating: false, count: setCount)
-            item.restPausePatternsBySet = Array(repeating: "", count: setCount)
+            item.plannedRepsBySet        = Array(repeating: 0, count: setCount)
+            item.plannedLoadsBySet       = Array(repeating: 0, count: setCount)
+            item.actualReps              = Array(repeating: 0, count: setCount)
+            item.actualLoads             = Array(repeating: 0, count: setCount)
+            item.actualRIRs              = Array(repeating: 0, count: setCount)
+            item.usedRestPauseFlags      = Array(repeating: false, count: setCount)
+            item.restPausePatternsBySet  = Array(repeating: "", count: setCount)
 
             for uiSet in uiExercise.sets {
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
 
-                item.plannedRepsBySet[idx] = uiSet.plannedReps
+                item.plannedRepsBySet[idx]  = uiSet.plannedReps
                 item.plannedLoadsBySet[idx] = uiSet.plannedLoad
 
                 if let reps = uiSet.actualReps, reps > 0 {
@@ -746,6 +898,11 @@ final class SessionScreenViewModel: ObservableObject {
                 }
                 if let rir = uiSet.actualRIR, rir >= 0 {
                     item.actualRIRs[idx] = rir
+                }
+
+                // 🔑 Encode skipped sets explicitly so we can restore them later.
+                if uiSet.status == .skipped {
+                    item.restPausePatternsBySet[idx] = "SKIP"
                 }
             }
 
@@ -767,7 +924,6 @@ final class SessionScreenViewModel: ObservableObject {
         }
 
         // ✅ Plan Memory v1 – always attempt to carry plans forward.
-        // Safe because it only touches future items with *empty loads*.
         let planMemory = PlanMemoryEngine(context: context)
         planMemory.carryForwardPlans(from: session)
 
@@ -778,8 +934,7 @@ final class SessionScreenViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Plan vs Actual Coaching Logic
-    // (unchanged – logic only)
+    // MARK: - Plan vs Actual Coaching Logic (legacy)
 
     private func coachMessage(for exercise: UISessionExercise, recentSetIndex: Int) -> String {
         guard let recentSet = exercise.sets.first(where: { $0.index == recentSetIndex }) else {
@@ -974,7 +1129,10 @@ final class SessionScreenViewModel: ObservableObject {
     // MARK: - Recap + Persistence (History)
 
     func buildRecap() -> SessionRecap {
-        let exerciseSummaries: [SessionRecapExercise] = exercises.map { exercise in
+        var exerciseSummaries: [SessionRecapExercise] = []
+        exerciseSummaries.reserveCapacity(exercises.count)
+
+        for exercise in exercises {
             let catalog = ExerciseCatalog.all.first(where: { $0.id == exercise.exerciseId })
             let primary = catalog?.primaryMuscle.rawValue.capitalized
 
@@ -982,6 +1140,7 @@ final class SessionScreenViewModel: ObservableObject {
             var totalRepsForExercise = 0
             var totalVolume: Double = 0
             var lastRIR: Int? = nil
+            var topE1RM: Double? = nil
 
             for set in exercise.sets where set.index <= exercise.targetSets {
                 guard set.status == .completed else { continue }
@@ -998,16 +1157,31 @@ final class SessionScreenViewModel: ObservableObject {
                 if let rir = rir {
                     lastRIR = rir
                 }
+
+                // Epley e1RM estimate for this set
+                if load > 0 && reps > 0 {
+                    let e1 = load * (1.0 + Double(reps) / 30.0)
+                    if let currentTop = topE1RM {
+                        if e1 > currentTop {
+                            topE1RM = e1
+                        }
+                    } else {
+                        topE1RM = e1
+                    }
+                }
             }
 
-            return SessionRecapExercise(
+            let summary = SessionRecapExercise(
                 name: exercise.name,
                 primaryMuscle: primary,
                 sets: setsCompleted,
                 reps: totalRepsForExercise,
                 volume: totalVolume,
-                lastSetRIR: lastRIR
+                lastSetRIR: lastRIR,
+                topE1RM: topE1RM
             )
+
+            exerciseSummaries.append(summary)
         }
 
         return SessionRecap(
@@ -1153,11 +1327,21 @@ extension SessionScreenViewModel {
                 }
 
                 // ---- Status ----
+                let isSkipped: Bool
+                if idx < item.restPausePatternsBySet.count,
+                   item.restPausePatternsBySet[idx] == "SKIP" {
+                    isSkipped = true
+                } else {
+                    isSkipped = false
+                }
+
                 let status: SetStatus
-                if let reps = actualReps,
-                   let load = actualLoad,
-                   reps > 0,
-                   load > 0 {
+                if isSkipped {
+                    status = .skipped
+                } else if let reps = actualReps,
+                          let load = actualLoad,
+                          reps > 0,
+                          load > 0 {
                     status = .completed
                 } else {
                     status = .notStarted
@@ -1385,6 +1569,11 @@ struct SessionRecap: Identifiable {
     /// Minimum and maximum last-set RIR.
     var minLastSetRIR: Int? { lastSetRIRs.min() }
     var maxLastSetRIR: Int? { lastSetRIRs.max() }
+
+    /// Best estimated 1RM across all exercises (top set only).
+    var bestE1RM: Double? {
+        exercises.compactMap { $0.topE1RM }.max()
+    }
 }
 
 struct SessionRecapExercise: Identifiable {
@@ -1395,30 +1584,36 @@ struct SessionRecapExercise: Identifiable {
     let reps: Int
     let volume: Double
     let lastSetRIR: Int?
+    let topE1RM: Double?
 }
 
 private struct SessionRecapSheet: View {
     let recap: SessionRecap
     let onDone: () -> Void
-    
+
     private var dateFormatter: DateFormatter {
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = .none
         return df
     }
-    
+
+    private func e1RMString(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.0f", value)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
-                    
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("By exercise")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        
+
                         VStack(spacing: 0) {
                             ForEach(recap.exercises) { ex in
                                 VStack(alignment: .leading, spacing: 4) {
@@ -1428,12 +1623,15 @@ private struct SessionRecapSheet: View {
                                         Text("Sets: \(ex.sets)")
                                         Text("Reps: \(ex.reps)")
                                         Text("Vol: \(Int(ex.volume))")
+                                        if let top = ex.topE1RM {
+                                            Text("e1RM: \(e1RMString(top))")
+                                        }
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 8)
-                                
+
                                 if ex.id != recap.exercises.last?.id {
                                     Divider()
                                 }
@@ -1459,19 +1657,19 @@ private struct SessionRecapSheet: View {
             }
         }
     }
-    
+
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(dateFormatter.string(from: recap.date))
                 .font(.headline)
-            
+
             Text("Week \(recap.weekIndex)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            
+
             Divider()
-            
-            // Top row: same 3 metrics you already see
+
+            // Top row
             HStack {
                 VStack(alignment: .leading) {
                     Text("Exercises")
@@ -1480,9 +1678,9 @@ private struct SessionRecapSheet: View {
                     Text("\(recap.exerciseCount)")
                         .font(.headline)
                 }
-                
+
                 Spacer()
-                
+
                 VStack(alignment: .leading) {
                     Text("Sets completed")
                         .font(.caption)
@@ -1490,9 +1688,9 @@ private struct SessionRecapSheet: View {
                     Text("\(recap.setCount)")
                         .font(.headline)
                 }
-                
+
                 Spacer()
-                
+
                 VStack(alignment: .leading) {
                     Text("Total volume")
                         .font(.caption)
@@ -1501,8 +1699,18 @@ private struct SessionRecapSheet: View {
                         .font(.headline)
                 }
             }
-            
-            // New: extra detail underneath
+
+            if let best = recap.bestE1RM {
+                HStack {
+                    Text("Best est. 1RM")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(e1RMString(best))
+                        .font(.caption)
+                }
+            }
+
             if recap.totalReps > 0 {
                 HStack {
                     Text("Total reps")
@@ -1513,7 +1721,7 @@ private struct SessionRecapSheet: View {
                         .font(.caption)
                 }
             }
-            
+
             if let avg = recap.averageLastSetRIR {
                 HStack {
                     Text("Avg last-set RIR")
@@ -1524,7 +1732,7 @@ private struct SessionRecapSheet: View {
                         .font(.caption)
                 }
             }
-            
+
             if let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
                 HStack {
                     Text("Last-set RIR range")
@@ -1538,6 +1746,168 @@ private struct SessionRecapSheet: View {
         }
     }
 }
+
+// MARK: - Exercise History Sheet (per-exercise view)
+
+// MARK: - Exercise History Sheet (per-exercise view)
+
+private struct ExerciseHistorySheet: View {
+    let exerciseName: String
+    let onClose: () -> Void
+
+    @Environment(\.modelContext) private var context
+    @Query(sort: \SessionHistory.date, order: .reverse)
+    private var history: [SessionHistory]
+
+    private struct ExerciseHistoryEntry: Identifiable {
+        let id = UUID()
+        let date: Date
+        let weekIndex: Int
+        let sets: Int
+        let reps: Int
+        let volume: Double
+        let detail: String   // e.g. "185×12, 185×11, 185×10"
+    }
+
+    private var entries: [ExerciseHistoryEntry] {
+        history.compactMap { sessionHistory in
+            // Only sessions that logged this exercise
+            guard let ex = sessionHistory.exercises.first(where: { $0.name == exerciseName }) else {
+                return nil
+            }
+
+            var detailParts: [String] = []
+
+            // Try to find the underlying Session for this history row
+            let targetDate = sessionHistory.date
+            let targetWeek = sessionHistory.weekIndex
+
+            let descriptor = FetchDescriptor<Session>(
+                predicate: #Predicate<Session> { session in
+                    session.date == targetDate &&
+                    session.weekIndex == targetWeek
+                }
+            )
+
+            if let sessions = try? context.fetch(descriptor),
+               let matchingSession = sessions.first {
+
+                // Find the matching SessionItem by exercise name
+                if let item = matchingSession.items.first(where: { item in
+                    let catalogName = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
+                    return catalogName == exerciseName
+                }) {
+                    let workingSetCount = max(1, min(item.targetSets, item.plannedRepsBySet.count))
+
+                    for idx in 0..<workingSetCount {
+                        let reps: Int
+                        if idx < item.actualReps.count, item.actualReps[idx] > 0 {
+                            reps = item.actualReps[idx]
+                        } else if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
+                            reps = item.plannedRepsBySet[idx]
+                        } else {
+                            continue
+                        }
+
+                        let load: Double
+                        if idx < item.actualLoads.count, item.actualLoads[idx] > 0 {
+                            load = item.actualLoads[idx]
+                        } else if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
+                            load = item.plannedLoadsBySet[idx]
+                        } else {
+                            continue
+                        }
+
+                        let loadString: String
+                        if abs(load.rounded() - load) < 0.01 {
+                            loadString = String(format: "%.0f", load)
+                        } else {
+                            loadString = String(format: "%.1f", load)
+                        }
+
+                        detailParts.append("\(loadString)×\(reps)")
+                    }
+                }
+            }
+
+            let detail = detailParts.joined(separator: ", ")
+
+            return ExerciseHistoryEntry(
+                date: sessionHistory.date,
+                weekIndex: sessionHistory.weekIndex,
+                sets: ex.sets,
+                reps: ex.reps,
+                volume: ex.volume,
+                detail: detail
+            )
+        }
+        .sorted(by: { $0.date > $1.date })
+    }
+
+    private var dateFormatter: DateFormatter {
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .none
+        return df
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if entries.isEmpty {
+                    VStack(spacing: 12) {
+                        Text("No history yet for")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(exerciseName)
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(entries) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(dateFormatter.string(from: entry.date))
+                                        .font(.body)
+                                    Spacer()
+                                    Text("Week \(entry.weekIndex)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                HStack(spacing: 12) {
+                                    Text("Sets: \(entry.sets)")
+                                    Text("Reps: \(entry.reps)")
+                                    Text("Vol: \(Int(entry.volume))")
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                                if !entry.detail.isEmpty {
+                                    Text(entry.detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(exerciseName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        onClose()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Mock Data for Previews
 
 extension SessionScreenViewModel {

@@ -15,6 +15,8 @@
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
+		D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */; };
+		D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
 		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
@@ -73,6 +75,8 @@
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
+		D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
+		D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseHistoryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
 		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
@@ -196,6 +200,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */,
 				D537C68F2EE3AE3F006C16F7 /* Untitled.swift */,
 				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
 				D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */,
@@ -253,6 +258,7 @@
 		D5E293572EC410DD00034D78 /* Home */ = {
 			isa = PBXGroup;
 			children = (
+				D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */,
 				D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */,
 				D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */,
 				D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */,
@@ -481,6 +487,7 @@
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
 				D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */,
 				D5E2936E2EC410DD00034D78 /* PrimaryButton.swift in Sources */,
+				D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */,
 				D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
@@ -503,6 +510,7 @@
 				D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */,
 				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,
 				D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */,
+				D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,

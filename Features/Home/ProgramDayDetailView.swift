@@ -261,7 +261,8 @@ struct ProgramDayDetailView: View {
 // MARK: - Exercise Plan Row
 
 /// Per-exercise plan editor.
-/// Edits target reps, suggested load, target RIR, and target sets.
+/// Edits target reps, suggested load, target RIR, target sets,
+/// and optional per-set planned loads/reps.
 /// Does NOT expose any Actual values.
 struct ProgramExercisePlanRow: View {
     @Binding var item: SessionItem
@@ -327,6 +328,7 @@ struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                // Global defaults
                 HStack(spacing: 8) {
                     // Load
                     VStack(alignment: .leading, spacing: 2) {
@@ -374,6 +376,41 @@ struct ProgramExercisePlanRow: View {
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 40)
+                    }
+                }
+
+                // Per-set plan overrides (optional)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Per-set plan (optional)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(0..<item.targetSets, id: \.self) { idx in
+                        HStack(spacing: 8) {
+                            Text("Set \(idx + 1)")
+                                .font(.caption2)
+                                .frame(width: 44, alignment: .leading)
+
+                            // Load per set
+                            TextField(
+                                "0",
+                                value: bindingForPlannedLoad(setIndex: idx),
+                                formatter: Self.loadFormatter
+                            )
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 70)
+
+                            // Reps per set
+                            TextField(
+                                "0",
+                                value: bindingForPlannedReps(setIndex: idx),
+                                format: .number
+                            )
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 50)
+                        }
                     }
                 }
             }
@@ -454,6 +491,46 @@ struct ProgramExercisePlanRow: View {
         default:
             return "Hit clean form first, then earn your tester set."
         }
+    }
+
+    // MARK: - Per-set plan bindings
+
+    private func bindingForPlannedLoad(setIndex idx: Int) -> Binding<Double> {
+        Binding<Double>(
+            get: {
+                if idx < item.plannedLoadsBySet.count {
+                    return item.plannedLoadsBySet[idx]
+                } else {
+                    return 0
+                }
+            },
+            set: { newValue in
+                if idx >= item.plannedLoadsBySet.count {
+                    let extra = idx + 1 - item.plannedLoadsBySet.count
+                    item.plannedLoadsBySet.append(contentsOf: Array(repeating: 0.0, count: extra))
+                }
+                item.plannedLoadsBySet[idx] = newValue
+            }
+        )
+    }
+
+    private func bindingForPlannedReps(setIndex idx: Int) -> Binding<Int> {
+        Binding<Int>(
+            get: {
+                if idx < item.plannedRepsBySet.count {
+                    return item.plannedRepsBySet[idx]
+                } else {
+                    return 0
+                }
+            },
+            set: { newValue in
+                if idx >= item.plannedRepsBySet.count {
+                    let extra = idx + 1 - item.plannedRepsBySet.count
+                    item.plannedRepsBySet.append(contentsOf: Array(repeating: 0, count: extra))
+                }
+                item.plannedRepsBySet[idx] = newValue
+            }
+        )
     }
 }
 

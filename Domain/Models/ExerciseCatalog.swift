@@ -58,7 +58,12 @@ struct ExerciseCatalog {
         primaryMuscle: .chest,
         isCompound: true
     )
-
+    static let machineChestPress = CatalogExercise(
+        id: "machine_chest_press",
+        name: "Machine Chest Press",
+        primaryMuscle: .chest,
+        isCompound: true
+    )
     // MARK: - Triceps
 
     static let cableTricepRopePushdown = CatalogExercise(
@@ -67,7 +72,33 @@ struct ExerciseCatalog {
         primaryMuscle: .triceps,
         isCompound: false
     )
+    static let overheadRopeTricepExtension = CatalogExercise(
+        id: "overhead_rope_tricep_extension",
+        name: "Overhead Rope Tricep Extension",
+        primaryMuscle: .triceps,
+        isCompound: false
+    )
 
+    static let smithMachineDip = CatalogExercise(
+        id: "smith_machine_dip",
+        name: "Smith Machine Dip",
+        primaryMuscle: .triceps,
+        isCompound: true
+    )
+
+    static let tricepKickback = CatalogExercise(
+        id: "tricep_kickback",
+        name: "Tricep Kickback",
+        primaryMuscle: .triceps,
+        isCompound: false
+    )
+
+    static let singleArmCableTricepExtension = CatalogExercise(
+        id: "single_arm_cable_tricep_extension",
+        name: "Single-Arm Cable Tricep Extension",
+        primaryMuscle: .triceps,
+        isCompound: false
+    )
     // MARK: - Core / Anti-rotation
 
     static let pallofPress = CatalogExercise(
@@ -97,7 +128,26 @@ struct ExerciseCatalog {
         primaryMuscle: .core,
         isCompound: true
     )
+    static let deadBug = CatalogExercise(
+        id: "dead_bug",
+        name: "Dead Bug",
+        primaryMuscle: .core,
+        isCompound: false
+    )
 
+    static let suitcaseCarry = CatalogExercise(
+        id: "suitcase_carry",
+        name: "Suitcase Carry",
+        primaryMuscle: .core,
+        isCompound: true
+    )
+
+    static let farmerCarry = CatalogExercise(
+        id: "farmer_carry",
+        name: "Farmer Carry",
+        primaryMuscle: .core,
+        isCompound: true
+    )
     // MARK: - Quads / Hinge / Glutes
 
     static let hackSquat = CatalogExercise(
@@ -107,6 +157,47 @@ struct ExerciseCatalog {
         isCompound: true
     )
 
+    static let legPress = CatalogExercise(
+        id: "leg_press",
+        name: "Leg Press",
+        primaryMuscle: .quads,
+        isCompound: true
+    )
+
+    static let bulgarianSplitSquat = CatalogExercise(
+        id: "bulgarian_split_squat",
+        name: "Bulgarian Split Squat",
+        primaryMuscle: .quads,
+        isCompound: true
+    )
+
+    static let walkingLunge = CatalogExercise(
+        id: "walking_lunge",
+        name: "Walking Lunge",
+        primaryMuscle: .quads,
+        isCompound: true
+    )
+
+    static let cablePullThrough = CatalogExercise(
+        id: "cable_pull_through",
+        name: "Cable Pull-Through",
+        primaryMuscle: .glutes,
+        isCompound: true
+    )
+
+    static let backExtension45 = CatalogExercise(
+        id: "back_extension_45",
+        name: "45° Back Extension",
+        primaryMuscle: .hamstrings,
+        isCompound: true
+    )
+
+    static let benchBackExtension = CatalogExercise(
+        id: "bench_back_extension",
+        name: "Bench Back Extension",
+        primaryMuscle: .hamstrings,
+        isCompound: true
+    )
     static let legExtension = CatalogExercise(
         id: "leg_extension",
         name: "Leg Extension",
@@ -154,6 +245,19 @@ struct ExerciseCatalog {
     static let smithMachineCalves = CatalogExercise(
         id: "smith_machine_calves",
         name: "Smith Machine Calf Raise",
+        primaryMuscle: .calves,
+        isCompound: false
+    )
+    static let seatedCalfRaise = CatalogExercise(
+        id: "seated_calf_raise",
+        name: "Seated Calf Raise",
+        primaryMuscle: .calves,
+        isCompound: false
+    )
+
+    static let legPressCalfRaise = CatalogExercise(
+        id: "leg_press_calf_raise",
+        name: "Leg Press Calf Raise",
         primaryMuscle: .calves,
         isCompound: false
     )
@@ -233,7 +337,12 @@ struct ExerciseCatalog {
         primaryMuscle: .biceps,
         isCompound: false
     )
-    
+    static let singleArmCableCurl = CatalogExercise(
+        id: "single_arm_cable_curl",
+        name: "Single-Arm Cable Curl",
+        primaryMuscle: .biceps,
+        isCompound: false
+    )
     static let ezBarReverseCurl = CatalogExercise(
         id: "ez_bar_reverse_curl",
         name: "EZ Bar Reverse Curl",
@@ -250,27 +359,43 @@ struct ExerciseCatalog {
         inclineDumbbellPress,
         seatedCableFly,
         dumbbellPress,
+        machineChestPress,
 
         // Triceps
         cableTricepRopePushdown,
+        overheadRopeTricepExtension,
+        smithMachineDip,
+        tricepKickback,
+        singleArmCableTricepExtension,
 
         // Core
         pallofPress,
         cableRopeCrunch,
         hangingStraightLegRaise,
         hangingKneeRaise,
+        deadBug,
+        suitcaseCarry,
+        farmerCarry,
 
         // Quads / hinge / glutes
         hackSquat,
         legExtension,
+        legPress,
+        bulgarianSplitSquat,
+        walkingLunge,
         romanianDeadlift,
         lyingLegCurl,
         seatedLegCurl,
         machineHipThrust,
         cableGluteKickback,
+        cablePullThrough,
+        backExtension45,
+        benchBackExtension,
 
         // Calves
         smithMachineCalves,
+        seatedCalfRaise,
+        legPressCalfRaise,
 
         // Back / pull
         wideGripPulldown,
@@ -287,6 +412,8 @@ struct ExerciseCatalog {
         ezBarCurl,
         hammerCurl,
         cableRopeHammerCurl,
-        ezBarReverseCurl
+        ezBarReverseCurl,
+        singleArmCableCurl
     ]
+    
 }

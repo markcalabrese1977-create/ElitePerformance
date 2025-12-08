@@ -28,10 +28,95 @@ struct SwapMap {
     }
 
     /// Explicit overrides for common "problem" exercises.
-    /// These let us steer toward joint-friendly swaps.
+    /// These let us steer toward joint-friendly swaps and keep the intent of the plan.
     private static let explicitOverrides: [String: [CatalogExercise]] = [
-        // Example: EZ Bar Reverse Curl bothering the elbow
-        // Prioritize neutral-grip options and then standard curls.
+        // Chest: if barbell bench is rough on shoulders, bias DB/machine
+        "bench_press": [
+            ExerciseCatalog.dumbbellPress,
+            ExerciseCatalog.machineChestPress,
+            ExerciseCatalog.seatedCableFly
+        ],
+
+        "incline_dumbbell_press": [
+            ExerciseCatalog.machineChestPress,
+            ExerciseCatalog.benchPress,
+            ExerciseCatalog.seatedCableFly
+        ],
+
+        // Hack squat issues → leg press / Bulgarian / leg extension
+        "hack_squat": [
+            ExerciseCatalog.legPress,
+            ExerciseCatalog.bulgarianSplitSquat,
+            ExerciseCatalog.legExtension
+        ],
+
+        // Leg press issues → hack / Bulgarian / walking lunge
+        "leg_press": [
+            ExerciseCatalog.hackSquat,
+            ExerciseCatalog.bulgarianSplitSquat,
+            ExerciseCatalog.walkingLunge
+        ],
+
+        // Lying leg curl → seated curl / RDL if needed
+        "lying_leg_curl": [
+            ExerciseCatalog.seatedLegCurl,
+            ExerciseCatalog.romanianDeadlift
+        ],
+
+        // Calves: if Smith calves sucks, prefer seated / leg press calves
+        "smith_machine_calves": [
+            ExerciseCatalog.seatedCalfRaise,
+            ExerciseCatalog.legPressCalfRaise
+        ],
+
+        // Cable pull-through → hip thrust / RDL / back extension
+        "cable_pull_through": [
+            ExerciseCatalog.machineHipThrust,
+            ExerciseCatalog.romanianDeadlift,
+            ExerciseCatalog.backExtension45
+        ],
+
+        // Back extension cluster – bench + 45°
+        "back_extension_45": [
+            ExerciseCatalog.benchBackExtension,
+            ExerciseCatalog.romanianDeadlift
+        ],
+        "bench_back_extension": [
+            ExerciseCatalog.backExtension45,
+            ExerciseCatalog.romanianDeadlift
+        ],
+
+        // Core / carries cluster
+        "pallof_press": [
+            ExerciseCatalog.suitcaseCarry,
+            ExerciseCatalog.farmerCarry,
+            ExerciseCatalog.deadBug
+        ],
+        "suitcase_carry": [
+            ExerciseCatalog.farmerCarry,
+            ExerciseCatalog.pallofPress
+        ],
+
+        // Triceps cluster: rope pushdown ↔ overhead ↔ Smith dip ↔ kickback
+        "cable_tricep_rope_pushdown": [
+            ExerciseCatalog.overheadRopeTricepExtension,
+            ExerciseCatalog.smithMachineDip,
+            ExerciseCatalog.tricepKickback
+        ],
+        "overhead_rope_tricep_extension": [
+            ExerciseCatalog.cableTricepRopePushdown,
+            ExerciseCatalog.smithMachineDip
+        ],
+        "smith_machine_dip": [
+            ExerciseCatalog.cableTricepRopePushdown,
+            ExerciseCatalog.overheadRopeTricepExtension
+        ],
+        "tricep_kickback": [
+            ExerciseCatalog.cableTricepRopePushdown,
+            ExerciseCatalog.overheadRopeTricepExtension
+        ],
+
+        // Biceps: existing reverse curl case preserved
         "ez_bar_reverse_curl": [
             ExerciseCatalog.cableRopeHammerCurl,
             ExerciseCatalog.hammerCurl,
