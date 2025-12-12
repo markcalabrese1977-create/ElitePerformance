@@ -106,7 +106,9 @@ struct ProgramGenerator {
 
         // Clamp inputs
         let desiredDays = max(daysPerWeek, 1)
-        let hardWeeks = max(1, min(totalWeeks, 8))
+        // Allow longer mesocycles (e.g. 10 hard weeks)
+        // Still guard against 0 or negative values.
+        let hardWeeks = max(1, min(totalWeeks, 12))
         let totalWeeksCount = includeDeloadWeek ? hardWeeks + 1 : hardWeeks
 
         // Determine training weekdays (1 = Sunday ... 7 = Saturday).

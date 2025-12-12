@@ -297,15 +297,28 @@ struct ProgressionEngine {
 /// These are *data only* – the engine logic above stays global.
 struct ChestArmsLowBackMesoProfile {
 
-    /// Map week index (1–8) to a meso phase.
+    /// Map absolute week index (1-based) to a meso phase.
+    /// This meso is 11 weeks total: 10 working + 1 deload.
+    ///
+    /// - Weeks 1–3: Early accumulation (higher reps, 2–3 RIR).
+    /// - Weeks 4–6: Mid meso (steady progression, 1–2 RIR).
+    /// - Weeks 7–10: Late / peak (heavier, 0–1 RIR slots).
+    /// - Week 11+: Deload / reset.
     static func phase(forWeek week: Int) -> MesoPhase {
         switch week {
-        case 1...3: return .early
-        case 4...5: return .mid
-        case 6...7: return .late
-        default:    return .deload
+        case 1...3:
+            return .early        // accumulation block
+        case 4...6:
+            return .mid          // building block
+        case 7...10:
+            return .late         // peak / overreach block
+        default:
+            return .deload       // week 11 and anything beyond
         }
     }
+    
+    /// Total planned length for this meso (weeks).
+    static let totalWeeks: Int = 11
 
     /// Primary chest presses (bench, main incline).
     static let primaryChest = ProgressionConfig(

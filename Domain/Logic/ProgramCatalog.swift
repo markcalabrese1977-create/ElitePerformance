@@ -291,10 +291,10 @@ extension ProgramCatalog {
 
         print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), derived daysPerWeek from weekdays=\(daysPerWeek), weekdays=\(weekdays)")
 
-        // 3) For v1, assume a 6-week block, no explicit deload week.
-        //    You can later branch this on experience or ProgramOption.
-        let totalWeeks = 6
-        let includeDeloadWeek = false
+        // 3) For now, use a 10-week working block plus 1 deload week
+        //    → 11-week meso (matches what you want through end of February).
+        let totalWeeks = 10        // hard weeks
+        let includeDeloadWeek = true
 
         // 4) Delete only *planned* sessions (no logged data).
         //    Any session with logged sets should already be .inProgress or .completed

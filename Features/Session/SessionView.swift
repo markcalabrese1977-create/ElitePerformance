@@ -1747,18 +1747,26 @@ private struct SessionRecapSheet: View {
     }
 }
 
-// MARK: - Exercise History Sheet (per-exercise view)
-
-// MARK: - Exercise History Sheet (per-exercise view)
+// MARK: - Exercise History Sheet (per exercise)
 
 private struct ExerciseHistorySheet: View {
     let exerciseName: String
     let onClose: () -> Void
 
     @Environment(\.modelContext) private var context
-    @Query(sort: \SessionHistory.date, order: .reverse)
-    private var history: [SessionHistory]
 
+    // Fetch all SessionHistory rows; we’ll filter per-exercise in memory.
+    private var history: [SessionHistory] {
+        let descriptor = FetchDescriptor<SessionHistory>()
+        do {
+            return try context.fetch(descriptor)
+        } catch {
+            print("⚠️ Failed to fetch SessionHistory: \(error)")
+            return []
+        }
+    }
+
+    // One row in the history list
     private struct ExerciseHistoryEntry: Identifiable {
         let id = UUID()
         let date: Date
@@ -1766,71 +1774,141 @@ private struct ExerciseHistorySheet: View {
         let sets: Int
         let reps: Int
         let volume: Double
-        let detail: String   // e.g. "185×12, 185×11, 185×10"
+        let detail: String          // e.g. "140×12, 140×12, 140×12, 140×12"
+        let estimated1RM: Double?   // top e1RM for that day
     }
+
+    // Date formatter to match 12/7/25 style
+    private static let df: DateFormatter = {
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .none
+        return df
+    }()
 
     private var entries: [ExerciseHistoryEntry] {
         history.compactMap { sessionHistory in
-            // Only sessions that logged this exercise
+            // Find this exercise in the recap for set/rep/volume totals
             guard let ex = sessionHistory.exercises.first(where: { $0.name == exerciseName }) else {
                 return nil
             }
 
             var detailParts: [String] = []
+            var bestE1RM: Double? = nil
 
-            // Try to find the underlying Session for this history row
-            let targetDate = sessionHistory.date
-            let targetWeek = sessionHistory.weekIndex
+            // Try to find the underlying Session so we can reconstruct set-by-set detail
+            do {
+                // Fetch all sessions, then filter in memory to match this history row
+                let descriptor = FetchDescriptor<Session>()
+                let sessions = try context.fetch(descriptor)
 
-            let descriptor = FetchDescriptor<Session>(
-                predicate: #Predicate<Session> { session in
-                    session.date == targetDate &&
-                    session.weekIndex == targetWeek
-                }
-            )
-
-            if let sessions = try? context.fetch(descriptor),
-               let matchingSession = sessions.first {
-
-                // Find the matching SessionItem by exercise name
-                if let item = matchingSession.items.first(where: { item in
-                    let catalogName = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
-                    return catalogName == exerciseName
+                if let session = sessions.first(where: {
+                    $0.date == sessionHistory.date && $0.weekIndex == sessionHistory.weekIndex
                 }) {
-                    let workingSetCount = max(1, min(item.targetSets, item.plannedRepsBySet.count))
+                    // Match SessionItem by exercise name
+                    if let item = session.items.first(where: { item in
+                        let catalogName = ExerciseCatalog.all
+                            .first(where: { $0.id == item.exerciseId })?
+                            .name ?? "Exercise"
+                        return catalogName == exerciseName
+                    }) {
+                        // How many working sets to inspect
+                        let workingSetCount = min(
+                            item.targetSets,
+                            max(
+                                item.plannedRepsBySet.count,
+                                item.plannedLoadsBySet.count,
+                                item.actualReps.count,
+                                item.actualLoads.count,
+                                item.actualRIRs.count
+                            )
+                        )
 
-                    for idx in 0..<workingSetCount {
-                        let reps: Int
-                        if idx < item.actualReps.count, item.actualReps[idx] > 0 {
-                            reps = item.actualReps[idx]
-                        } else if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
-                            reps = item.plannedRepsBySet[idx]
-                        } else {
-                            continue
+                        if workingSetCount > 0 {
+                            for idx in 0..<workingSetCount {
+                                // Planned reps
+                                let plannedReps: Int = {
+                                    if idx < item.plannedRepsBySet.count,
+                                       item.plannedRepsBySet[idx] > 0 {
+                                        return item.plannedRepsBySet[idx]
+                                    } else {
+                                        return item.targetReps
+                                    }
+                                }()
+
+                                // Planned load
+                                let plannedLoad: Double = {
+                                    if idx < item.plannedLoadsBySet.count,
+                                       item.plannedLoadsBySet[idx] > 0 {
+                                        return item.plannedLoadsBySet[idx]
+                                    } else {
+                                        return item.suggestedLoad
+                                    }
+                                }()
+
+                                // Actuals fall back to plan if missing
+                                let reps: Int = {
+                                    if idx < item.actualReps.count,
+                                       item.actualReps[idx] > 0 {
+                                        return item.actualReps[idx]
+                                    } else {
+                                        return plannedReps
+                                    }
+                                }()
+
+                                let load: Double = {
+                                    if idx < item.actualLoads.count,
+                                       item.actualLoads[idx] > 0 {
+                                        return item.actualLoads[idx]
+                                    } else {
+                                        return plannedLoad
+                                    }
+                                }()
+
+                                let rir: Int? = {
+                                    if idx < item.actualRIRs.count {
+                                        let val = item.actualRIRs[idx]
+                                        return val >= 0 ? val : nil
+                                    } else {
+                                        return nil
+                                    }
+                                }()
+
+                                // Skip truly empty sets
+                                guard load > 0, reps > 0 else { continue }
+
+                                // --- e1RM tracking (Epley) ---
+                                let e1rm = load * (1.0 + Double(reps) / 30.0)
+                                if let currentBest = bestE1RM {
+                                    if e1rm > currentBest { bestE1RM = e1rm }
+                                } else {
+                                    bestE1RM = e1rm
+                                }
+
+                                // --- Detail string for this set ---
+                                let loadString: String
+                                if load == floor(load) {
+                                    loadString = String(format: "%.0f", load)
+                                } else {
+                                    loadString = String(format: "%.1f", load)
+                                }
+
+                                var part = "\(loadString)×\(reps)"
+                                if let rir {
+                                    part += " @ RIR \(rir)"
+                                }
+                                detailParts.append(part)
+                            }
                         }
-
-                        let load: Double
-                        if idx < item.actualLoads.count, item.actualLoads[idx] > 0 {
-                            load = item.actualLoads[idx]
-                        } else if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
-                            load = item.plannedLoadsBySet[idx]
-                        } else {
-                            continue
-                        }
-
-                        let loadString: String
-                        if abs(load.rounded() - load) < 0.01 {
-                            loadString = String(format: "%.0f", load)
-                        } else {
-                            loadString = String(format: "%.1f", load)
-                        }
-
-                        detailParts.append("\(loadString)×\(reps)")
                     }
                 }
+            } catch {
+                print("⚠️ Failed to fetch Session for history row: \(error)")
             }
 
-            let detail = detailParts.joined(separator: ", ")
+            let detailText = detailParts.isEmpty
+                ? ""
+                : detailParts.joined(separator: ", ")
 
             return ExerciseHistoryEntry(
                 date: sessionHistory.date,
@@ -1838,73 +1916,114 @@ private struct ExerciseHistorySheet: View {
                 sets: ex.sets,
                 reps: ex.reps,
                 volume: ex.volume,
-                detail: detail
+                detail: detailText,
+                estimated1RM: bestE1RM
             )
         }
-        .sorted(by: { $0.date > $1.date })
+        // Newest first
+        .sorted { $0.date > $1.date }
     }
 
-    private var dateFormatter: DateFormatter {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        df.timeStyle = .none
-        return df
+    private var bestOverallE1RM: Double? {
+        entries.compactMap { $0.estimated1RM }.max()
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if entries.isEmpty {
-                    VStack(spacing: 12) {
-                        Text("No history yet for")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(exerciseName)
+        ZStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                // Header with Close + title
+                HStack {
+                    Button(action: onClose) {
+                        Text("Close")
                             .font(.headline)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(Capsule())
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
+
+                    Spacer()
+
+                    Text(exerciseName)
+                        .font(.title3)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+                    Color.clear.frame(width: 80) // balance Close button
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+                ScrollView {
+                    VStack(spacing: 12) {
                         ForEach(entries) { entry in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(dateFormatter.string(from: entry.date))
-                                        .font(.body)
-                                    Spacer()
-                                    Text("Week \(entry.weekIndex)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                HStack(spacing: 12) {
-                                    Text("Sets: \(entry.sets)")
-                                    Text("Reps: \(entry.reps)")
-                                    Text("Vol: \(Int(entry.volume))")
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                                if !entry.detail.isEmpty {
-                                    Text(entry.detail)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.vertical, 4)
+                            historyRow(entry)
                         }
                     }
-                }
-            }
-            .navigationTitle(exerciseName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        onClose()
-                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func historyRow(_ entry: ExerciseHistoryEntry) -> some View {
+        let isBest: Bool = {
+            guard let best = bestOverallE1RM,
+                  let e1 = entry.estimated1RM else { return false }
+            return abs(e1 - best) < 0.5   // fuzzy match
+        }()
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(Self.df.string(from: entry.date))
+                    .font(.headline)
+                Spacer()
+                Text("Week \(entry.weekIndex)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Text("Sets: \(entry.sets)")
+                Text("Reps: \(entry.reps)")
+                Text("Vol: \(Int(entry.volume))")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if !entry.detail.isEmpty {
+                Text(entry.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            if let e1 = entry.estimated1RM {
+                HStack(spacing: 6) {
+                    Text("Top est 1RM: \(Int(e1.rounded()))")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+
+                    if isBest {
+                        Text("Best so far")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.green)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 }
 
