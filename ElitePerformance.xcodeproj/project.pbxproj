@@ -17,6 +17,7 @@
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
 		D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */; };
 		D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */; };
+		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
 		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
@@ -77,6 +78,7 @@
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
 		D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
 		D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseHistoryView.swift; sourceTree = "<group>"; };
+		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
 		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 		D5E293552EC410DD00034D78 /* History */ = {
 			isa = PBXGroup;
 			children = (
+				D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */,
 				D5E293542EC410DD00034D78 /* HistoryView.swift */,
 			);
 			path = History;
@@ -499,6 +502,7 @@
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */,
+				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
 				D5E293722EC410DD00034D78 /* Haptics.swift in Sources */,
 				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,

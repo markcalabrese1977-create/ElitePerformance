@@ -25,6 +25,38 @@ struct HistoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+
+                    // 🔹 Block summary card at the top
+                    NavigationLink {
+                        HistorySummaryView()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Block summary")
+                                        .font(.headline)
+
+                                    Text("Best lifts, volume, and exercise stats")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    // 🔹 Existing per-day history blocks
                     ForEach(groupedSessions, id: \.date) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(group.date, format: .dateTime.month(.wide).day().year())
