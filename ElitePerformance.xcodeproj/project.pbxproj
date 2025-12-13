@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
+		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
+		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
@@ -70,6 +72,8 @@
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D537C68F2EE3AE3F006C16F7 /* Untitled.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Untitled.swift; sourceTree = "<group>"; };
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
+		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
+		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
@@ -202,6 +206,8 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */,
+				D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */,
 				D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */,
 				D537C68F2EE3AE3F006C16F7 /* Untitled.swift */,
 				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
@@ -515,9 +521,11 @@
 				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,
 				D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */,
 				D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */,
+				D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
+				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

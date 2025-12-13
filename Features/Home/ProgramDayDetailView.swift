@@ -11,6 +11,7 @@ struct ProgramDayDetailView: View {
 
     @State private var showingAddExerciseSheet = false
     @State private var showingApplyScopeDialog = false
+    @State private var showAppliedToast = false
 
     // MARK: - Derived ordered items
 
@@ -32,7 +33,6 @@ struct ProgramDayDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    // Show rows in `order` order.
                     ForEach(orderedItems) { item in
                         ProgramExercisePlanRow(
                             item: item,
@@ -46,6 +46,7 @@ struct ProgramDayDetailView: View {
                 }
 
                 Button {
+                    print("✅ Add exercise tapped")
                     showingAddExerciseSheet = true
                 } label: {
                     Label("Add exercise", systemImage: "plus.circle.fill")
@@ -56,14 +57,9 @@ struct ProgramDayDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Apply to block") {
+                Button("Apply") {
                     showingApplyScopeDialog = true
                 }
-            }
-        }
-        .sheet(isPresented: $showingAddExerciseSheet) {
-            ExercisePickerView { catalogExercise in
-                addExercise(from: catalogExercise)
             }
         }
         .confirmationDialog(
@@ -71,10 +67,18 @@ struct ProgramDayDetailView: View {
             isPresented: $showingApplyScopeDialog,
             titleVisibility: .visible
         ) {
-            Button("This weekday in this block") {
+            Button("This weekday going forward") {
                 applyPlanChangesToBlock()
             }
+
             Button("Cancel", role: .cancel) { }
+        }
+        // ✅ ADD THIS
+        .sheet(isPresented: $showingAddExerciseSheet) {
+            ExercisePickerView { catalogExercise in
+                addExercise(from: catalogExercise)
+                showingAddExerciseSheet = false
+            }
         }
     }
 
@@ -132,14 +136,17 @@ struct ProgramDayDetailView: View {
 
         let setCount = 4
         newItem.plannedRepsBySet       = Array(repeating: newItem.targetReps, count: setCount)
-        newItem.plannedLoadsBySet      = Array(repeating: 0.0,                count: setCount)
-        newItem.actualReps             = Array(repeating: 0,                   count: setCount)
-        newItem.actualLoads            = Array(repeating: 0.0,                count: setCount)
-        newItem.actualRIRs             = Array(repeating: 0,                   count: setCount)
-        newItem.usedRestPauseFlags     = Array(repeating: false,               count: setCount)
-        newItem.restPausePatternsBySet = Array(repeating: "",                  count: setCount)
+        newItem.plannedLoadsBySet      = Array(repeating: 0.0,               count: setCount)
+        newItem.actualReps             = Array(repeating: 0,                 count: setCount)
+        newItem.actualLoads            = Array(repeating: 0.0,               count: setCount)
+        newItem.actualRIRs             = Array(repeating: 0,                 count: setCount)
+        newItem.usedRestPauseFlags     = Array(repeating: false,             count: setCount)
+        newItem.restPausePatternsBySet = Array(repeating: "",                count: setCount)
 
         session.items.append(newItem)
+
+        // ✅ NEW: propagate program edits forward into future planned sessions
+        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
 
         do {
             try modelContext.save()
@@ -158,6 +165,9 @@ struct ProgramDayDetailView: View {
         for sessionItem in session.items where sessionItem.order > removedOrder {
             sessionItem.order -= 1
         }
+
+        // ✅ NEW: propagate program edits forward into future planned sessions
+        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
 
         do {
             try modelContext.save()
@@ -178,6 +188,9 @@ struct ProgramDayDetailView: View {
         for (idx, sessionItem) in session.items.enumerated() {
             sessionItem.order = idx + 1
         }
+
+        // ✅ NEW: propagate program edits forward into future planned sessions
+        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
 
         do {
             try modelContext.save()
@@ -233,46 +246,84 @@ struct ProgramDayDetailView: View {
     /// does NOT touch logged Actuals.
     private func applyPlanChangesToBlock() {
         let calendar = Calendar.current
-        let weekday = calendar.component(.weekday, from: session.date)  // 1=Sun...7=Sat
+        let today = calendar.startOfDay(for: Date())
+        let weekday = calendar.component(.weekday, from: session.date) // 1=Sun...7=Sat
 
-        let descriptor = FetchDescriptor<Session>()
+        // Fetch only future sessions (predicate is safe/simple)
+        let descriptor = FetchDescriptor<Session>(
+            predicate: #Predicate { s in
+                s.date > today
+            },
+            sortBy: [SortDescriptor(\.date, order: .forward)]
+        )
 
         do {
-            let allSessions = try modelContext.fetch(descriptor)
+            let futureSessions = try modelContext.fetch(descriptor)
 
-            let otherSessions = allSessions.filter { other in
+            // Only planned, same weekday, exclude the session you're editing
+            let targets = futureSessions.filter { other in
                 other.id != session.id &&
-                other.status != .completed &&
+                other.status == .planned &&
                 calendar.component(.weekday, from: other.date) == weekday
             }
 
-            guard !otherSessions.isEmpty else {
-                print("ℹ️ No other sessions in this block matched for applyPlanChangesToBlock.")
+            guard !targets.isEmpty else {
+                print("ℹ️ No future planned sessions matched for applyPlanChangesToBlock.")
                 return
             }
 
+            // Source = this Program day, ordered by 'order'
             let sourceItems = orderedItems
 
-            for other in otherSessions {
-                let targetItems = other.items
+            for other in targets {
+                let targetItemsSorted = other.items.sorted { $0.order < $1.order }
 
-                for sourceItem in sourceItems {
-                    guard let target = targetItems.first(where: { $0.exerciseId == sourceItem.exerciseId }) else {
-                        continue
+                // 1) Delete extras
+                if targetItemsSorted.count > sourceItems.count {
+                    for extra in targetItemsSorted[sourceItems.count...] {
+                        modelContext.delete(extra)
                     }
+                }
 
-                    // Copy PLAN-related fields
-                    target.targetReps        = sourceItem.targetReps
-                    target.targetSets        = sourceItem.targetSets
-                    target.targetRIR         = sourceItem.targetRIR
-                    target.suggestedLoad     = sourceItem.suggestedLoad
-                    target.plannedRepsBySet  = sourceItem.plannedRepsBySet
-                    target.plannedLoadsBySet = sourceItem.plannedLoadsBySet
+                // 2) Add missing
+                if targetItemsSorted.count < sourceItems.count {
+                    for idx in targetItemsSorted.count..<sourceItems.count {
+                        let src = sourceItems[idx]
+                        let newItem = SessionItem(
+                            order: idx + 1,
+                            exerciseId: src.exerciseId,
+                            targetReps: src.targetReps,
+                            targetSets: src.targetSets,
+                            targetRIR: src.targetRIR,
+                            suggestedLoad: src.suggestedLoad,
+                            plannedRepsBySet: src.plannedRepsBySet,
+                            plannedLoadsBySet: src.plannedLoadsBySet
+                        )
+                        other.items.append(newItem)
+                    }
+                }
+
+                // 3) Align & copy by order
+                let aligned = other.items.sorted { $0.order < $1.order }
+
+                for (idx, src) in sourceItems.enumerated() {
+                    guard idx < aligned.count else { continue }
+                    let dst = aligned[idx]
+
+                    dst.order = idx + 1
+                    dst.exerciseId = src.exerciseId
+
+                    dst.targetReps = src.targetReps
+                    dst.targetSets = src.targetSets
+                    dst.targetRIR = src.targetRIR
+                    dst.suggestedLoad = src.suggestedLoad
+                    dst.plannedRepsBySet = src.plannedRepsBySet
+                    dst.plannedLoadsBySet = src.plannedLoadsBySet
                 }
             }
 
             try modelContext.save()
-            print("✅ Applied plan changes from \(session.date) to \(otherSessions.count) other sessions.")
+            print("✅ Applied plan changes from \(session.date) to \(targets.count) future planned sessions.")
         } catch {
             print("⚠️ Failed to apply plan changes to block: \(error)")
         }

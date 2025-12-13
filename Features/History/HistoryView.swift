@@ -26,26 +26,17 @@ struct HistoryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
 
-                    // 🔹 Block summary card at the top
+                    // Block recap card at the top of History
                     NavigationLink {
                         HistorySummaryView()
                     } label: {
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Block summary")
-                                        .font(.headline)
+                            Text("Block recap")
+                                .font(.headline)
 
-                                    Text("Best lifts, volume, and exercise stats")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("See best lifts, total volume, and how often you’ve trained each exercise this block.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,7 +47,7 @@ struct HistoryView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // 🔹 Existing per-day history blocks
+                    // Existing per-day history list
                     ForEach(groupedSessions, id: \.date) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(group.date, format: .dateTime.month(.wide).day().year())
@@ -163,21 +154,14 @@ private struct HistoryDayDetailView: View {
     @Environment(\.modelContext) private var context
     let history: SessionHistory
 
+    // State for "Apply to future" feedback
+    @State private var showApplyAlert = false
+    @State private var applyAlertMessage = ""
+
     /// Rebuild set-by-set data by finding the underlying Session
     /// that produced this SessionHistory (same date + weekIndex).
     private var exerciseDetails: [HistoryExerciseDetail] {
-        let targetDate = history.date
-        let targetWeek = history.weekIndex
-
-        let descriptor = FetchDescriptor<Session>(
-            predicate: #Predicate<Session> { session in
-                session.date == targetDate && session.weekIndex == targetWeek
-            }
-        )
-
-        guard
-            let session = (try? context.fetch(descriptor))?.first
-        else {
+        guard let session = fetchSourceSession() else {
             // Fall back to aggregate history only
             return history.exercises.map { ex in
                 HistoryExerciseDetail(
@@ -203,9 +187,9 @@ private struct HistoryDayDetailView: View {
             var setDetails: [HistorySetDetail] = []
 
             for set in uiEx.sets where set.index <= uiEx.targetSets {
-                let reps = set.actualReps ?? set.plannedReps
-                let load = set.actualLoad ?? set.plannedLoad
-                let rir  = set.actualRIR ?? set.plannedRIR
+                let reps = (set.actualReps ?? set.plannedReps) ?? 0
+                let load = (set.actualLoad ?? set.plannedLoad) ?? 0.0
+                let rir  = (set.actualRIR ?? set.plannedRIR)
 
                 // Only count sets that were actually done
                 guard reps > 0, load > 0 else { continue }
@@ -242,12 +226,29 @@ private struct HistoryDayDetailView: View {
         ScrollView {
             VStack(spacing: 16) {
                 headerCard
+
+                // Apply-to-future button
+                Button {
+                    applyForwardToFutureSessions()
+                } label: {
+                    Label("Apply to future sessions", systemImage: "arrowshape.turn.up.right.fill")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+
                 exerciseBreakdown
             }
             .padding()
         }
         .navigationTitle("Session Recap")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Apply to future", isPresented: $showApplyAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(applyAlertMessage)
+        }
     }
 
     // Top summary card (day-level)
@@ -358,6 +359,136 @@ private struct HistoryDayDetailView: View {
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(.systemBackground))
             )
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Find the live Session that produced this history entry.
+    private func fetchSourceSession() -> Session? {
+        let targetDate = history.date
+        let targetWeekIndex = history.weekIndex
+
+        let descriptor = FetchDescriptor<Session>(
+            predicate: #Predicate<Session> { session in
+                session.date == targetDate && session.weekIndex == targetWeekIndex
+            }
+        )
+
+        return try? context.fetch(descriptor).first
+    }
+
+    /// Take what actually happened in this session and push it forward to
+    /// all *future* sessions on the same weekday that share the same exercises.
+    private func applyForwardToFutureSessions() {
+        let calendar = Calendar.current
+
+        guard let sourceSession = fetchSourceSession() else {
+            applyAlertMessage = "Could not find the original session for this recap."
+            showApplyAlert = true
+            return
+        }
+
+        do {
+            // Build UI model from the completed session so we can see per-set actuals.
+            let vm = SessionScreenViewModel(session: sourceSession)
+
+            let weekday = calendar.component(.weekday, from: sourceSession.date)
+
+            // Fetch all sessions; we'll filter in Swift.
+            let descriptor = FetchDescriptor<Session>()
+            let allSessions = try context.fetch(descriptor)
+
+            // Future sessions on the same weekday, not yet completed.
+            let targetSessions = allSessions.filter { other in
+                other.id != sourceSession.id &&
+                other.date > sourceSession.date &&
+                other.status != .completed &&
+                calendar.component(.weekday, from: other.date) == weekday
+            }
+
+            guard !targetSessions.isEmpty else {
+                applyAlertMessage = "No future sessions on this day pattern to update."
+                showApplyAlert = true
+                return
+            }
+
+            for target in targetSessions {
+                for uiEx in vm.exercises {
+                    // Match by exerciseId across sessions
+                    guard let targetItem = target.items.first(where: { $0.exerciseId == uiEx.exerciseId }) else {
+                        continue
+                    }
+
+                    // How many sets are we really using from this completed session?
+                    let workingSetCount = max(1, min(uiEx.targetSets, uiEx.sets.count))
+
+                    var plannedLoads: [Double] = []
+                    var plannedReps: [Int] = []
+                    var plannedRIRs: [Int] = []
+
+                    for idx in 0..<workingSetCount {
+                        let set = uiEx.sets[idx]
+                        let reps = (set.actualReps ?? set.plannedReps) ?? 0
+                        let load = (set.actualLoad ?? set.plannedLoad) ?? 0.0
+                        let rir  = (set.actualRIR ?? set.plannedRIR) ?? 0
+
+                        // Only copy meaningful work sets
+                        guard reps > 0, load > 0 else { continue }
+
+                        plannedReps.append(reps)
+                        plannedLoads.append(load)
+                        plannedRIRs.append(rir)
+                    }
+
+                    guard !plannedReps.isEmpty, !plannedLoads.isEmpty else {
+                        // Nothing useful logged for this exercise, skip
+                        continue
+                    }
+
+                    let fallbackReps = plannedReps.first ?? 10
+                    let fallbackRIR  = plannedRIRs.first ?? 2
+
+                    // Decide final set count for the plan (match existing plan shape but at least 4)
+                    let setCount = max(4, max(targetItem.targetSets, plannedLoads.count))
+
+                    // Pad out arrays so they match setCount
+                    if plannedReps.count < setCount {
+                        plannedReps.append(
+                            contentsOf: repeatElement(fallbackReps, count: setCount - plannedReps.count)
+                        )
+                    }
+                    if plannedLoads.count < setCount {
+                        plannedLoads.append(
+                            contentsOf: repeatElement(plannedLoads.last ?? 0.0, count: setCount - plannedLoads.count)
+                        )
+                    }
+                    if plannedRIRs.count < setCount {
+                        plannedRIRs.append(
+                            contentsOf: repeatElement(fallbackRIR, count: setCount - plannedRIRs.count)
+                        )
+                    }
+
+                    targetItem.plannedRepsBySet  = Array(plannedReps.prefix(setCount))
+                    targetItem.plannedLoadsBySet = Array(plannedLoads.prefix(setCount))
+
+                    // Update simple headline plan fields for this exercise.
+                    targetItem.targetReps = fallbackReps
+                    targetItem.targetRIR  = fallbackRIR
+
+                    if let lastWorkingLoad = plannedLoads.prefix(workingSetCount).last {
+                        targetItem.suggestedLoad = lastWorkingLoad
+                    }
+                }
+            }
+
+            try context.save()
+            applyAlertMessage = "Applied today’s plan to \(targetSessions.count) future session(s) on this day."
+            showApplyAlert = true
+        } catch {
+            print("⚠️ Failed to apply forward from history: \(error)")
+            applyAlertMessage = "Something went wrong while updating future sessions."
+            showApplyAlert = true
         }
     }
 }

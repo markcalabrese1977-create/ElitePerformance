@@ -25,6 +25,8 @@ struct SessionView: View {
 
     /// Unified sheet state: swap, recap, or exercise history.
     @State private var activeSheet: ActiveSheet?
+    @State private var pendingSwapForPropagation: (from: String, to: String, name: String)?
+    @State private var showSwapPropagationDialog = false
 
     // MARK: - Initializers
 
@@ -109,10 +111,18 @@ struct SessionView: View {
                 ExerciseSwapSheet(
                     current: viewModel.exercises[target.exerciseIndex],
                     onSelect: { catalogExercise in
+                        // Capture the original + new exercise IDs
+                        let fromId = viewModel.exercises[target.exerciseIndex].exerciseId
+                        let toId = catalogExercise.id
+                        let toName = catalogExercise.name
+
                         viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise)
-                        // Persist the swap into the Session model as well.
                         viewModel.persist(using: modelContext)
                         activeSheet = nil
+
+                        // Offer optional propagation to future planned sessions
+                        pendingSwapForPropagation = (from: fromId, to: toId, name: toName)
+                        showSwapPropagationDialog = true
                     },
                     onCancel: {
                         activeSheet = nil
@@ -143,6 +153,25 @@ struct SessionView: View {
                         activeSheet = nil
                     }
                 )
+            }
+        }
+        .confirmationDialog(
+            "Swapped to \(pendingSwapForPropagation?.name ?? "new exercise")",
+            isPresented: $showSwapPropagationDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Apply to future planned sessions") {
+                guard let swap = pendingSwapForPropagation else { return }
+                ExerciseSwapPropagationService.apply(
+                    fromExerciseId: swap.from,
+                    toExerciseId: swap.to,
+                    in: modelContext
+                )
+                pendingSwapForPropagation = nil
+            }
+
+            Button("Keep this session only", role: .cancel) {
+                pendingSwapForPropagation = nil
             }
         }
     }
