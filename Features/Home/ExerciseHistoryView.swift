@@ -108,7 +108,7 @@ struct ExerciseHistoryView: View {
 
                 let entry = ExerciseHistoryEntry(
                     date: session.date,
-                    weekIndex: session.weekIndex,
+                    weekIndex: session.weekInMeso,
                     bestLoad: best.load,
                     bestReps: best.reps,
                     estimated1RM: best.e1rm

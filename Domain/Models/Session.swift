@@ -23,11 +23,53 @@ final class Session {
     /// Optional text recap / notes for this session (end-of-workout recap writes here).
     var sessionNotes: String?
 
-    /// Which week of the block this session belongs to (1-based).
-    var weekIndex: Int
+    /// ✅ STORED property (keep this name to match the existing on-device SwiftData store)
+    var weekInMeso: Int
+
+    /// ✅ Alias used throughout the app (does NOT change the stored schema)
+    var weekIndex: Int {
+        get { weekInMeso }
+        set { weekInMeso = newValue }
+    }
 
     /// Exercises for this session.
     @Relationship(deleteRule: .cascade) var items: [SessionItem]
+
+    // MARK: - HealthKit / Apple Workout Summary (stored on Session)
+
+    /// Linked HealthKit workout UUID (string form). Used as our “already synced” flag.
+    var hkWorkoutUUID: String?
+
+    var hkWorkoutStart: Date?
+    var hkWorkoutEnd: Date?
+
+    /// Workout duration in seconds.
+    var hkDuration: Double
+
+    /// Calories (kcal)
+    var hkActiveCalories: Double
+    var hkTotalCalories: Double
+
+    /// Heart Rate (bpm)
+    var hkAvgHeartRate: Double
+    var hkMaxHeartRate: Double
+
+    // MARK: - HealthKit HR UI series (optional)
+
+    /// Zone durations in seconds
+    var hkZone1Seconds: Double
+    var hkZone2Seconds: Double
+    var hkZone3Seconds: Double
+    var hkZone4Seconds: Double
+    var hkZone5Seconds: Double
+
+    /// Downsampled HR series for sparkline (bpm)
+    var hkHeartRateSeriesBPM: [Double]
+    var hkHeartRateSeriesStepSeconds: Double
+
+    /// Post-workout HR mini chart (bpm)
+    var hkPostWorkoutHeartRateBPM: [Double]
+    var hkPostWorkoutHeartRateStepSeconds: Double
 
     init(
         date: Date,
@@ -36,15 +78,62 @@ final class Session {
         sessionNotes: String? = nil,
         weekIndex: Int,
         items: [SessionItem] = [],
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+
+        // HK defaults
+        hkWorkoutUUID: String? = nil,
+        hkWorkoutStart: Date? = nil,
+        hkWorkoutEnd: Date? = nil,
+        hkDuration: Double = 0,
+        hkActiveCalories: Double = 0,
+        hkTotalCalories: Double = 0,
+        hkAvgHeartRate: Double = 0,
+        hkMaxHeartRate: Double = 0,
+
+        hkZone1Seconds: Double = 0,
+        hkZone2Seconds: Double = 0,
+        hkZone3Seconds: Double = 0,
+        hkZone4Seconds: Double = 0,
+        hkZone5Seconds: Double = 0,
+
+        hkHeartRateSeriesBPM: [Double] = [],
+        hkHeartRateSeriesStepSeconds: Double = 0,
+
+        hkPostWorkoutHeartRateBPM: [Double] = [],
+        hkPostWorkoutHeartRateStepSeconds: Double = 0
     ) {
         self.date = date
         self.status = status
+        self.completedAt = completedAt
+
         self.readinessStars = readinessStars
         self.sessionNotes = sessionNotes
-        self.weekIndex = weekIndex
+
+        // store into the legacy schema field
+        self.weekInMeso = weekIndex
+
         self.items = items
-        self.completedAt = completedAt
+
+        self.hkWorkoutUUID = hkWorkoutUUID
+        self.hkWorkoutStart = hkWorkoutStart
+        self.hkWorkoutEnd = hkWorkoutEnd
+        self.hkDuration = hkDuration
+        self.hkActiveCalories = hkActiveCalories
+        self.hkTotalCalories = hkTotalCalories
+        self.hkAvgHeartRate = hkAvgHeartRate
+        self.hkMaxHeartRate = hkMaxHeartRate
+
+        self.hkZone1Seconds = hkZone1Seconds
+        self.hkZone2Seconds = hkZone2Seconds
+        self.hkZone3Seconds = hkZone3Seconds
+        self.hkZone4Seconds = hkZone4Seconds
+        self.hkZone5Seconds = hkZone5Seconds
+
+        self.hkHeartRateSeriesBPM = hkHeartRateSeriesBPM
+        self.hkHeartRateSeriesStepSeconds = hkHeartRateSeriesStepSeconds
+
+        self.hkPostWorkoutHeartRateBPM = hkPostWorkoutHeartRateBPM
+        self.hkPostWorkoutHeartRateStepSeconds = hkPostWorkoutHeartRateStepSeconds
     }
 }
 
@@ -68,31 +157,20 @@ final class SessionItem {
     @Relationship(deleteRule: .cascade) var logs: [SetLog]
 
     // Planned pattern per set (v1)
-    /// Planned reps per set (index 0 = Set 1).
     var plannedRepsBySet: [Int]
-    /// Planned load per set (same index as plannedRepsBySet).
     var plannedLoadsBySet: [Double]
 
     // Simple inline logging (what you’re using now)
-    /// Logged reps per set (index 0 = Set 1, etc.).
     var actualReps: [Int]
-    /// Logged load per set (same indexing as actualReps).
     var actualLoads: [Double]
-    /// Logged RIR per set (same indexing as actualReps).
     var actualRIRs: [Int]
-    /// Whether each set used rest-pause / myo-rep (same indexing).
     var usedRestPauseFlags: [Bool]
-    /// Rest-pause pattern per set, e.g. "10+4+3" (same indexing as actualReps).
     var restPausePatternsBySet: [String]
 
-    /// Whether this exercise has any logged work.
     var isCompleted: Bool
-    /// Whether this exercise hit a new PR in this session.
     var isPR: Bool
 
-    /// Coach note summarizing what to do next time on this exercise.
     var coachNote: String?
-    /// Next suggested load for the main working sets (if the coach has a strong opinion).
     var nextSuggestedLoad: Double?
 
     init(
@@ -121,14 +199,17 @@ final class SessionItem {
         self.targetSets = targetSets
         self.targetRIR = targetRIR
         self.suggestedLoad = suggestedLoad
+
         self.plannedRepsBySet = plannedRepsBySet
         self.plannedLoadsBySet = plannedLoadsBySet
         self.logs = logs
+
         self.actualReps = actualReps
         self.actualLoads = actualLoads
         self.actualRIRs = actualRIRs
         self.usedRestPauseFlags = usedRestPauseFlags
         self.restPausePatternsBySet = restPausePatternsBySet
+
         self.isCompleted = isCompleted
         self.isPR = isPR
         self.coachNote = coachNote
@@ -136,7 +217,7 @@ final class SessionItem {
     }
 }
 
-// MARK: - SetLog (for future detailed logging)
+// MARK: - SetLog
 
 @Model
 final class SetLog {
@@ -172,12 +253,9 @@ final class SetLog {
 extension SessionStatus {
     var displayTitle: String {
         switch self {
-        case .planned:
-            return "Planned"
-        case .inProgress:
-            return "In Progress"
-        case .completed:
-            return "Completed"
+        case .planned:     return "Planned"
+        case .inProgress:  return "In Progress"
+        case .completed:   return "Completed"
         }
     }
 }

@@ -55,6 +55,18 @@ struct SessionView: View {
             VStack(spacing: 16) {
                 header
 
+                // ✅ Warm-up card (shows above exercise cards)
+                if let first = viewModel.exercises.first {
+                    WarmupCardView(
+                        sessionKey: warmupSessionKey,
+                        firstExerciseName: first.name,
+                        firstExercisePlannedLoad: (first.sets.first?.plannedLoad ?? 0) > 0
+                            ? first.sets.first?.plannedLoad
+                            : nil,
+                        rounding: warmupRounding(for: first.name)
+                    )
+                }
+
                 if viewModel.isSessionComplete {
                     completionBanner
                 }
@@ -92,6 +104,16 @@ struct SessionView: View {
         }
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    activeSheet = .addExercise
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add exercise")
+            }
+        }
         // Keep screen awake while this view is visible
         .onAppear {
             if !hasDisabledIdleTimer {
@@ -107,6 +129,17 @@ struct SessionView: View {
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
+            case .addExercise:
+                AddExerciseSheet(
+                    onSelect: { catalogExercise in
+                        viewModel.addExercise(catalogExercise, context: modelContext)
+                        activeSheet = nil
+                    },
+                    onCancel: {
+                        activeSheet = nil
+                    }
+                )
+            
             case .swap(let target):
                 ExerciseSwapSheet(
                     current: viewModel.exercises[target.exerciseIndex],
@@ -207,6 +240,21 @@ struct SessionView: View {
         }
     }
 
+    private var warmupSessionKey: String {
+        // Stable per-session key for AppStorage checkmarks
+        let raw = "\(viewModel.title)_\(viewModel.subtitle)"
+        return raw
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: "")
+    }
+
+    private func warmupRounding(for exerciseName: String) -> WarmupCardView.LoadRounding {
+        let n = exerciseName.lowercased()
+        if n.contains("dumbbell") || n.contains("db") { return .dumbbell }
+        if n.contains("cable") || n.contains("machine") { return .machine }
+        return .barbell
+    }
+    
     private var completionBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
@@ -256,6 +304,7 @@ private enum ActiveSheet: Identifiable {
     case swap(SwapTarget)
     case recap(SessionRecap)
     case history(exerciseName: String)
+    case addExercise
 
     var id: String {
         switch self {
@@ -265,6 +314,8 @@ private enum ActiveSheet: Identifiable {
             return "recap-\(recap.id)"
         case .history(let exerciseName):
             return "history-\(exerciseName)"
+        case .addExercise:
+            return "add-exercise"
         }
     }
 }
@@ -305,6 +356,7 @@ private struct SessionExerciseCardView: View {
              "wide_grip_pulldown",
              "pulldown_normal_grip",
              "seated_cable_row",
+            "chest_supported_incline_dumbbell_row",
              "dumbbell_row_single_arm":
             return .secondaryPressOrArms
 
@@ -385,7 +437,12 @@ private struct SessionExerciseCardView: View {
         let loadString = String(format: "%.1f", decision.nextLoad)
         return "Coach v5: \(decision.action.rawValue) → next \(loadString), sets \(decision.nextSets)"
     }
-
+    private var repRange: RepRange {
+        RepRangeRulebook.range(
+            forExerciseId: exercise.exerciseId,
+            exerciseName: exercise.name
+        )
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
@@ -397,7 +454,9 @@ private struct SessionExerciseCardView: View {
                     Text(exercise.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .minimumScaleFactor(0.9)
                 }
 
                 Spacer()
@@ -447,6 +506,7 @@ private struct SessionExerciseCardView: View {
                 ForEach($exercise.sets) { $set in
                     SessionSetRowView(
                         uiSet: $set,
+                        repRange: repRange,
                         onLog: {
                             onSetLogged(set.index)
                         },
@@ -494,6 +554,7 @@ private struct SessionExerciseCardView: View {
 
 private struct SessionSetRowView: View {
     @Binding var uiSet: UISessionSet
+    let repRange: RepRange
     let onLog: () -> Void
     let onSkip: () -> Void
 
@@ -532,7 +593,7 @@ private struct SessionSetRowView: View {
             }
 
             // PLAN line
-            Text("PLAN \(uiSet.plannedDescription)")
+            Text("PLAN \(uiSet.plannedDescription(with: repRange))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -707,6 +768,55 @@ private struct SessionSetRowView: View {
 
 // MARK: - Swap Sheet
 
+private struct AddExerciseSheet: View {
+    let onSelect: (CatalogExercise) -> Void
+    let onCancel: () -> Void
+
+    @State private var searchText: String = ""
+
+    private var options: [CatalogExercise] {
+        let all = ExerciseCatalog.all
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return all
+        }
+        let q = searchText.lowercased()
+        return all.filter {
+            $0.name.lowercased().contains(q) || $0.id.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Pick an exercise") {
+                    ForEach(options) { ex in
+                        Button {
+                            onSelect(ex)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(ex.name)
+                                    .font(.body)
+
+                                Text(ex.primaryMuscle.rawValue.capitalized + (ex.isCompound ? " · Compound" : " · Isolation"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search exercises")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+        }
+    }
+}
+
 /// Sheet to pick a replacement exercise from the catalog.
 /// Shows "recommended" (same primary muscle group) first, then all others.
 private struct ExerciseSwapSheet: View {
@@ -873,12 +983,81 @@ final class SessionScreenViewModel: ObservableObject {
         let baseReps = exercise.sets.first?.plannedReps ?? 10
         let baseRIR = exercise.sets.first?.plannedRIR ?? 2
 
-        exercise.detail = "Week \(exercise.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(baseReps) reps @ RIR \(baseRIR)"
+        let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
+        let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
+        exercise.detail = "Week \(exercise.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
         exercise.coachMessage = ""
 
         exercises[index] = exercise
     }
 
+    func addExercise(_ catalogExercise: CatalogExercise, context: ModelContext) {
+        // If the user already "completed" the session, adding an exercise means we're back in progress.
+        if session.status == .completed {
+            session.status = .inProgress
+            session.completedAt = nil
+        }
+
+        let nextOrder = (session.items.map(\.order).max() ?? 0) + 1
+
+        // Defaults: simple + sane.
+        let defaultSets = 3
+        let defaultRIR = 2
+        let defaultReps = catalogExercise.isCompound ? 10 : 12
+        let defaultLoad: Double = 0
+
+        let newItem = SessionItem(
+            order: nextOrder,
+            exerciseId: catalogExercise.id,
+            targetReps: defaultReps,
+            targetSets: defaultSets,
+            targetRIR: defaultRIR,
+            suggestedLoad: defaultLoad,
+            plannedRepsBySet: Array(repeating: defaultReps, count: 4),
+            plannedLoadsBySet: Array(repeating: 0, count: 4)
+        )
+
+        // Attach to session + persist
+        session.items.append(newItem)
+        context.insert(newItem)
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ Failed to add exercise: \(error)")
+        }
+
+        // Build UI model immediately so it appears instantly (no backing out).
+        let uiSets: [UISessionSet] = (1...4).map { idx in
+            UISessionSet(
+                index: idx,
+                plannedLoad: (idx <= defaultSets) ? defaultLoad : 0,
+                plannedReps: defaultReps,
+                plannedRIR: defaultRIR,
+                actualLoad: nil,
+                actualReps: nil,
+                actualRIR: nil,
+                status: .notStarted
+            )
+        }
+
+        let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
+        let repsLabel = RepRangeRulebook.display(targetReps: defaultReps, range: range)
+        let detail = "Week \(session.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(defaultRIR)"
+
+        let uiExercise = UISessionExercise(
+            exerciseId: catalogExercise.id,
+            name: catalogExercise.name,
+            detail: detail,
+            weekInMeso: session.weekInMeso,
+            targetSets: defaultSets,
+            sets: uiSets,
+            coachMessage: ""
+        )
+
+        exercises.append(uiExercise)
+    }
+    
     // MARK: - Persist UI → SwiftData
 
     /// Push current UI state into the underlying `Session` / `SessionItem`s.
@@ -1215,7 +1394,7 @@ final class SessionScreenViewModel: ObservableObject {
 
         return SessionRecap(
             date: session.date,
-            weekIndex: session.weekIndex,
+            weekIndex: session.weekInMeso,
             title: title,
             subtitle: subtitle,
             exercises: exerciseSummaries
@@ -1287,6 +1466,11 @@ final class SessionScreenViewModel: ObservableObject {
 
         try context.save()
         print("✅ SessionHistory saved/updated")
+        // ✅ Link Apple Health workout + pull metrics after completion is saved.
+        Task { @MainActor in
+            await HealthKitWorkoutSummarySyncService
+                .syncForCompletedSession(session, in: context)
+        }
     }
 } // ← closes SessionScreenViewModel
 
@@ -1295,8 +1479,7 @@ final class SessionScreenViewModel: ObservableObject {
 extension SessionScreenViewModel {
     convenience init(session: Session) {
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
-        let subtitle = "Week \(session.weekIndex)"
-
+        let subtitle = MesoLabel.label(for: session.date)   // ✅ no quotes
         let items = session.items.sorted { $0.order < $1.order }
 
         let exercises: [UISessionExercise] = items.map { item in
@@ -1390,18 +1573,21 @@ extension SessionScreenViewModel {
                 )
             }
 
+            let range = RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: name)
+            let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
+
             let detail: String
             if let ce = catalogExercise {
-                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(baseReps) reps @ RIR \(baseRIR)"
+                detail = "Week \(session.weekInMeso) · \(ce.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
             } else {
-                detail = "Week \(session.weekIndex) · \(baseReps) reps @ RIR \(baseRIR)"
+                detail = "Week \(session.weekInMeso) · Target \(repsLabel) @ RIR \(baseRIR)"
             }
 
             return UISessionExercise(
                 exerciseId: item.exerciseId,
                 name: name,
                 detail: detail,
-                weekInMeso: session.weekIndex,
+                weekInMeso: session.weekInMeso,
                 targetSets: targetSets,
                 sets: uiSets,
                 coachMessage: item.coachNote ?? ""
@@ -1538,7 +1724,7 @@ struct UISessionSet: Identifiable {
         if plannedLoad == 0 && plannedReps == 0 {
             return "—"
         }
-
+        
         if let plannedRIR {
             return String(
                 format: "%.1f × %d @ %d RIR",
@@ -1554,7 +1740,19 @@ struct UISessionSet: Identifiable {
             )
         }
     }
-}
+            func plannedDescription(with repRange: RepRange) -> String {
+                if plannedLoad == 0 && plannedReps == 0 { return "—" }
+
+                let repsLabel = RepRangeRulebook.display(targetReps: plannedReps, range: repRange)
+
+                if let plannedRIR {
+                    return String(format: "%.1f × %@ @ %d RIR", plannedLoad, repsLabel, plannedRIR)
+                } else {
+                    return String(format: "%.1f × %@", plannedLoad, repsLabel)
+                }
+            }
+        }
+
 
 // MARK: - Recap Types + Sheet
 

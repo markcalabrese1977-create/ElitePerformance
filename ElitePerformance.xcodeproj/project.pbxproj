@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */; };
+		D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D536A6A12EF7265F0036BB4E /* MesoLabel.swift */; };
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
@@ -17,6 +19,7 @@
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
+		D59902C92EF7553800E50075 /* HeartRateCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59902C82EF7553700E50075 /* HeartRateCharts.swift */; };
 		D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */; };
 		D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */; };
 		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
@@ -30,6 +33,7 @@
 		D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */; };
 		D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
+		D5E02AA92EFCA6EB0035B768 /* RepRangeRulebook.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */; };
 		D5E293662EC410DD00034D78 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293512EC410DD00034D78 /* User.swift */; };
 		D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934B2EC410DD00034D78 /* ProgramGenerator.swift */; };
 		D5E293682EC410DD00034D78 /* Progression.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934C2EC410DD00034D78 /* Progression.swift */; };
@@ -69,6 +73,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitWorkoutSummarySyncService.swift; sourceTree = "<group>"; };
+		D536A6A12EF7265F0036BB4E /* MesoLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoLabel.swift; sourceTree = "<group>"; };
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D537C68F2EE3AE3F006C16F7 /* Untitled.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Untitled.swift; sourceTree = "<group>"; };
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
@@ -80,6 +86,7 @@
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
+		D59902C82EF7553700E50075 /* HeartRateCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartRateCharts.swift; sourceTree = "<group>"; };
 		D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
 		D5A810EE2EE644CC00130345 /* ExerciseHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseHistoryView.swift; sourceTree = "<group>"; };
 		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
@@ -93,6 +100,7 @@
 		D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoggedSet.swift; sourceTree = "<group>"; };
 		D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistory.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
+		D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepRangeRulebook.swift; sourceTree = "<group>"; };
 		D5E2931D2EC4102800034D78 /* ElitePerformance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElitePerformance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E2932C2EC4102900034D78 /* ElitePerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ElitePerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElitePerformanceApp.swift; sourceTree = "<group>"; };
@@ -124,6 +132,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		D536A6312EF4790E0036BB4E /* Components */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Components;
+			sourceTree = "<group>";
+		};
 		D5E2931F2EC4102800034D78 /* ElitePerformance */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = ElitePerformance;
@@ -195,6 +208,7 @@
 		D5E2934A2EC410DD00034D78 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				D536A6A12EF7265F0036BB4E /* MesoLabel.swift */,
 				D5BEBEFB2ED208790035FE70 /* RootTabView.swift */,
 				D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */,
 				D5BEBEF92ED207A40035FE70 /* ContentView.swift */,
@@ -206,6 +220,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */,
 				D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */,
 				D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */,
 				D5A810EC2EE5EECC00130345 /* ProgressionEngine.swift */,
@@ -248,6 +263,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */,
 				D5E293952EC7BBFB00034D78 /* Engines */,
 				D5E2934E2EC410DD00034D78 /* Logic */,
 				D5E293522EC410DD00034D78 /* Models */,
@@ -304,6 +320,7 @@
 		D5E2935E2EC410DD00034D78 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				D536A6312EF4790E0036BB4E /* Components */,
 				D5E2939B2EC7BCFC00034D78 /* Debug */,
 				D5E2937D2EC6B51200034D78 /* MainTab */,
 				D5E293552EC410DD00034D78 /* History */,
@@ -318,6 +335,7 @@
 		D5E293602EC410DD00034D78 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				D59902C82EF7553700E50075 /* HeartRateCharts.swift */,
 				D5E293892EC6BDCF00034D78 /* PRBadge.swift */,
 				D5E293812EC6B55B00034D78 /* StarPicker.swift */,
 				D5E2935F2EC410DD00034D78 /* PrimaryButton.swift */,
@@ -384,6 +402,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				D536A6312EF4790E0036BB4E /* Components */,
 				D5E2931F2EC4102800034D78 /* ElitePerformance */,
 				D5E2937D2EC6B51200034D78 /* MainTab */,
 				D5E293952EC7BBFB00034D78 /* Engines */,
@@ -495,15 +514,18 @@
 				D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */,
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
 				D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */,
+				D59902C92EF7553800E50075 /* HeartRateCharts.swift in Sources */,
 				D5E2936E2EC410DD00034D78 /* PrimaryButton.swift in Sources */,
 				D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */,
 				D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
 				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
+				D5E02AA92EFCA6EB0035B768 /* RepRangeRulebook.swift in Sources */,
 				D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */,
+				D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */,
 				D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
@@ -514,6 +536,7 @@
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
 				D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */,
+				D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */,
 				D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */,
 				D5E293942EC7BBDA00034D78 /* PlannedBlock.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
@@ -671,6 +694,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
@@ -680,6 +704,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ElitePerformance;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -716,6 +742,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
@@ -725,6 +752,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ElitePerformance;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

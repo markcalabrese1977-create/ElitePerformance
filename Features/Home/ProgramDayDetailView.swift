@@ -397,40 +397,60 @@ private struct ProgramExercisePlanRow: View {
 
     private var planRow: some View {
         HStack(spacing: 12) {
+
+            // Sets
             VStack(alignment: .leading, spacing: 4) {
                 Text("Sets")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
                 Stepper(value: $item.targetSets, in: 1...6) {
                     Text("\(item.targetSets)")
                         .font(.body)
+                        .monospacedDigit()
+                        .frame(minWidth: 22, alignment: .leading)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                 }
-                .frame(maxWidth: 120, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
+            // Reps (clean option: show ONLY the editable number here)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Reps")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
                 Stepper(value: $item.targetReps, in: 4...30, step: 1) {
                     Text("\(item.targetReps)")
                         .font(.body)
+                        .monospacedDigit()
+                        .frame(minWidth: 34, alignment: .leading) // prevents "1" of "12"
+                        .lineLimit(1)
+                        .layoutPriority(1)
                 }
-                .frame(maxWidth: 140, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
+            // RIR
             VStack(alignment: .leading, spacing: 4) {
                 Text("RIR")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
                 Stepper(value: $item.targetRIR, in: 0...5) {
                     Text("\(item.targetRIR)")
                         .font(.body)
+                        .monospacedDigit()
+                        .frame(minWidth: 22, alignment: .leading)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                 }
-                .frame(maxWidth: 120, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
 
     private var perSetPlanEditor: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -496,9 +516,17 @@ private struct ProgramExercisePlanRow: View {
             muscle = "—"
         }
 
-        return "\(muscle) · \(item.targetReps) reps @ \(item.targetRIR) RIR"
+        let repsDisplay = RepRangeRulebook.display(targetReps: item.targetReps, range: repRange)
+        return "\(muscle) · Target \(repsDisplay) @ \(item.targetRIR) RIR"
+        
     }
-
+    private var repRange: RepRange {
+        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
+            return RepRangeRulebook.range(forExerciseId: catalog.id, exerciseName: catalog.name)
+        } else {
+            return RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: "Exercise")
+        }
+    }
     // MARK: - Array helpers
 
     private func normalizeArraySizes() {

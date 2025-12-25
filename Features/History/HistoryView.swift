@@ -97,6 +97,7 @@ private struct HistoryRow: View {
 
                 Spacer()
 
+                // Keeping your existing layout (even though it repeats the same date).
                 Text(shortDate)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -127,14 +128,21 @@ private struct HistorySetDetail: Identifiable {
     let load: Double
     let reps: Int
     let rir: Int?
+    let isSkipped: Bool
 
     var lineText: String {
-        let loadString = load == 0 ? "0" : String(format: "%.1f", load)
-        var base = "Set \(index)  \(loadString) × \(reps)"
-        if let rir {
-            base += " @ \(rir) RIR"
+        if isSkipped {
+            // Example: "Set 3  — skipped (planned 90.0 × 15 @ 2 RIR)"
+            let loadString = load == 0 ? "0" : String(format: "%.1f", load)
+            var planned = "planned \(loadString) × \(reps)"
+            if let rir { planned += " @ \(rir) RIR" }
+            return "Set \(index)  — skipped (\(planned))"
+        } else {
+            let loadString = load == 0 ? "0" : String(format: "%.1f", load)
+            var base = "Set \(index)  \(loadString) × \(reps)"
+            if let rir { base += " @ \(rir) RIR" }
+            return base
         }
-        return base
     }
 }
 
@@ -154,14 +162,17 @@ private struct HistoryDayDetailView: View {
     @Environment(\.modelContext) private var context
     let history: SessionHistory
 
-    // State for "Apply to future" feedback
     @State private var showApplyAlert = false
     @State private var applyAlertMessage = ""
+
+    private var sourceSession: Session? {
+        fetchSourceSession()
+    }
 
     /// Rebuild set-by-set data by finding the underlying Session
     /// that produced this SessionHistory (same date + weekIndex).
     private var exerciseDetails: [HistoryExerciseDetail] {
-        guard let session = fetchSourceSession() else {
+        guard let session = sourceSession else {
             // Fall back to aggregate history only
             return history.exercises.map { ex in
                 HistoryExerciseDetail(
@@ -187,30 +198,50 @@ private struct HistoryDayDetailView: View {
             var setDetails: [HistorySetDetail] = []
 
             for set in uiEx.sets where set.index <= uiEx.targetSets {
-                let reps = (set.actualReps ?? set.plannedReps) ?? 0
-                let load = (set.actualLoad ?? set.plannedLoad) ?? 0.0
-                let rir  = (set.actualRIR ?? set.plannedRIR)
+                let actualReps = set.actualReps ?? 0
+                let actualLoad = set.actualLoad ?? 0.0
 
-                // Only count sets that were actually done
-                guard reps > 0, load > 0 else { continue }
+                let plannedReps = set.plannedReps ?? 0
+                let plannedLoad = set.plannedLoad ?? 0.0
 
-                totalReps += reps
-                totalVolume += Double(reps) * load
+                // Executed if actuals exist and are non-zero
+                let didExecute = actualReps > 0 && actualLoad > 0
 
-                setDetails.append(
-                    HistorySetDetail(
-                        index: set.index,
-                        load: load,
-                        reps: reps,
-                        rir: rir
+                if didExecute {
+                    let rir = set.actualRIR ?? set.plannedRIR
+
+                    totalReps += actualReps
+                    totalVolume += Double(actualReps) * actualLoad
+
+                    setDetails.append(
+                        HistorySetDetail(
+                            index: set.index,
+                            load: actualLoad,
+                            reps: actualReps,
+                            rir: rir,
+                            isSkipped: false
+                        )
                     )
-                )
+                } else {
+                    // Only show a skipped row if there was a real planned prescription
+                    guard plannedReps > 0, plannedLoad > 0 else { continue }
+
+                    setDetails.append(
+                        HistorySetDetail(
+                            index: set.index,
+                            load: plannedLoad,
+                            reps: plannedReps,
+                            rir: set.plannedRIR,
+                            isSkipped: true
+                        )
+                    )
+                }
             }
 
             return HistoryExerciseDetail(
                 name: uiEx.name,
                 primaryMuscle: primary,
-                totalSets: setDetails.count,
+                totalSets: setDetails.filter { !$0.isSkipped }.count,
                 totalReps: totalReps,
                 totalVolume: totalVolume,
                 sets: setDetails
@@ -227,7 +258,8 @@ private struct HistoryDayDetailView: View {
             VStack(spacing: 16) {
                 headerCard
 
-                // Apply-to-future button
+                workoutMetricsCard
+
                 Button {
                     applyForwardToFutureSessions()
                 } label: {
@@ -251,7 +283,8 @@ private struct HistoryDayDetailView: View {
         }
     }
 
-    // Top summary card (day-level)
+    // MARK: - Cards
+
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(history.date, format: .dateTime.month().day().year())
@@ -312,7 +345,109 @@ private struct HistoryDayDetailView: View {
         )
     }
 
-    // Per-exercise + per-set breakdown
+    /// ✅ HealthKit / Apple Fitness metrics for this session (if linked).
+    @ViewBuilder
+    private var workoutMetricsCard: some View {
+        if let s = sourceSession {
+            if s.hkWorkoutUUID == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Workout metrics")
+                        .font(.headline)
+
+                    Text("Not linked yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Finish your Apple Watch workout, then reopen this recap (or tap Done and open again).")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(.systemBackground))
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Workout metrics")
+                        .font(.headline)
+
+                    HStack {
+                        metricBlock(title: "Duration", value: formatDuration(s.hkDuration))
+                        Spacer()
+                        metricBlock(title: "Total cals", value: formatNumber(s.hkTotalCalories))
+                    }
+
+                    HStack {
+                        metricBlock(title: "Active cals", value: formatNumber(s.hkActiveCalories))
+                        Spacer()
+                        metricBlock(title: "Avg HR", value: formatNumber(s.hkAvgHeartRate))
+                        Spacer()
+                        metricBlock(title: "Max HR", value: formatNumber(s.hkMaxHeartRate))
+                    }
+
+                    if let start = s.hkWorkoutStart, let end = s.hkWorkoutEnd {
+                        Text("\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // ✅ Pretty HR (no local `let` declarations)
+                    if !s.hkHeartRateSeriesBPM.isEmpty {
+                        HeartRateSparkline(values: s.hkHeartRateSeriesBPM)
+                    }
+
+                    if (s.hkZone1Seconds + s.hkZone2Seconds + s.hkZone3Seconds + s.hkZone4Seconds + s.hkZone5Seconds) > 0 {
+                        HeartRateZonesBar(
+                            z1: s.hkZone1Seconds,
+                            z2: s.hkZone2Seconds,
+                            z3: s.hkZone3Seconds,
+                            z4: s.hkZone4Seconds,
+                            z5: s.hkZone5Seconds
+                        )
+                    }
+
+                    if !s.hkPostWorkoutHeartRateBPM.isEmpty {
+                        PostWorkoutHRMiniChart(values: s.hkPostWorkoutHeartRateBPM)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(.systemBackground))
+                )
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func metricBlock(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+        }
+    }
+
+    private func formatNumber(_ value: Double) -> String {
+        guard value > 0 else { return "—" }
+        return "\(Int(value.rounded()))"
+    }
+
+    /// Formats seconds as MM:SS (e.g., 54:15)
+    private func formatDuration(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "—" }
+        let total = Int(seconds.rounded())
+        let m = total / 60
+        let s = total % 60
+        return "\(m):" + String(format: "%02d", s)
+    }
+
     private var exerciseBreakdown: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("By exercise")
@@ -326,9 +461,7 @@ private struct HistoryDayDetailView: View {
                             .font(.body)
 
                         HStack(spacing: 12) {
-                            if let primary = ex.primaryMuscle {
-                                Text(primary)
-                            }
+                            if let primary = ex.primaryMuscle { Text(primary) }
                             Text("Sets: \(ex.totalSets)")
                             Text("Reps: \(ex.totalReps)")
                             Text("Vol: \(Int(ex.totalVolume))")
@@ -341,7 +474,8 @@ private struct HistoryDayDetailView: View {
                                 ForEach(ex.sets) { set in
                                     Text(set.lineText)
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(set.isSkipped ? .tertiary : .secondary)
+                                        .strikethrough(set.isSkipped)
                                 }
                             }
                             .padding(.top, 4)
@@ -364,22 +498,24 @@ private struct HistoryDayDetailView: View {
 
     // MARK: - Helpers
 
-    /// Find the live Session that produced this history entry.
     private func fetchSourceSession() -> Session? {
-        let targetDate = history.date
-        let targetWeekIndex = history.weekIndex
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: history.date)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        let targetWeek = history.weekIndex
 
-        let descriptor = FetchDescriptor<Session>(
-            predicate: #Predicate<Session> { session in
-                session.date == targetDate && session.weekIndex == targetWeekIndex
+        var descriptor = FetchDescriptor<Session>(
+            predicate: #Predicate<Session> { s in
+                s.date >= start &&
+                s.date < end &&
+                s.weekInMeso == targetWeek
             }
         )
+        descriptor.fetchLimit = 1
 
         return try? context.fetch(descriptor).first
     }
 
-    /// Take what actually happened in this session and push it forward to
-    /// all *future* sessions on the same weekday that share the same exercises.
     private func applyForwardToFutureSessions() {
         let calendar = Calendar.current
 
@@ -390,16 +526,12 @@ private struct HistoryDayDetailView: View {
         }
 
         do {
-            // Build UI model from the completed session so we can see per-set actuals.
             let vm = SessionScreenViewModel(session: sourceSession)
-
             let weekday = calendar.component(.weekday, from: sourceSession.date)
 
-            // Fetch all sessions; we'll filter in Swift.
             let descriptor = FetchDescriptor<Session>()
             let allSessions = try context.fetch(descriptor)
 
-            // Future sessions on the same weekday, not yet completed.
             let targetSessions = allSessions.filter { other in
                 other.id != sourceSession.id &&
                 other.date > sourceSession.date &&
@@ -415,12 +547,10 @@ private struct HistoryDayDetailView: View {
 
             for target in targetSessions {
                 for uiEx in vm.exercises {
-                    // Match by exerciseId across sessions
                     guard let targetItem = target.items.first(where: { $0.exerciseId == uiEx.exerciseId }) else {
                         continue
                     }
 
-                    // How many sets are we really using from this completed session?
                     let workingSetCount = max(1, min(uiEx.targetSets, uiEx.sets.count))
 
                     var plannedLoads: [Double] = []
@@ -433,7 +563,6 @@ private struct HistoryDayDetailView: View {
                         let load = (set.actualLoad ?? set.plannedLoad) ?? 0.0
                         let rir  = (set.actualRIR ?? set.plannedRIR) ?? 0
 
-                        // Only copy meaningful work sets
                         guard reps > 0, load > 0 else { continue }
 
                         plannedReps.append(reps)
@@ -441,38 +570,26 @@ private struct HistoryDayDetailView: View {
                         plannedRIRs.append(rir)
                     }
 
-                    guard !plannedReps.isEmpty, !plannedLoads.isEmpty else {
-                        // Nothing useful logged for this exercise, skip
-                        continue
-                    }
+                    guard !plannedReps.isEmpty, !plannedLoads.isEmpty else { continue }
 
                     let fallbackReps = plannedReps.first ?? 10
                     let fallbackRIR  = plannedRIRs.first ?? 2
 
-                    // Decide final set count for the plan (match existing plan shape but at least 4)
                     let setCount = max(4, max(targetItem.targetSets, plannedLoads.count))
 
-                    // Pad out arrays so they match setCount
                     if plannedReps.count < setCount {
-                        plannedReps.append(
-                            contentsOf: repeatElement(fallbackReps, count: setCount - plannedReps.count)
-                        )
+                        plannedReps.append(contentsOf: repeatElement(fallbackReps, count: setCount - plannedReps.count))
                     }
                     if plannedLoads.count < setCount {
-                        plannedLoads.append(
-                            contentsOf: repeatElement(plannedLoads.last ?? 0.0, count: setCount - plannedLoads.count)
-                        )
+                        plannedLoads.append(contentsOf: repeatElement(plannedLoads.last ?? 0.0, count: setCount - plannedLoads.count))
                     }
                     if plannedRIRs.count < setCount {
-                        plannedRIRs.append(
-                            contentsOf: repeatElement(fallbackRIR, count: setCount - plannedRIRs.count)
-                        )
+                        plannedRIRs.append(contentsOf: repeatElement(fallbackRIR, count: setCount - plannedRIRs.count))
                     }
 
                     targetItem.plannedRepsBySet  = Array(plannedReps.prefix(setCount))
                     targetItem.plannedLoadsBySet = Array(plannedLoads.prefix(setCount))
 
-                    // Update simple headline plan fields for this exercise.
                     targetItem.targetReps = fallbackReps
                     targetItem.targetRIR  = fallbackRIR
 
@@ -501,3 +618,9 @@ struct HistoryView_Previews: PreviewProvider {
             .modelContainer(for: SessionHistory.self, inMemory: true)
     }
 }
+
+
+
+
+
+

@@ -291,7 +291,14 @@ struct ExerciseCatalog {
         primaryMuscle: .back,
         isCompound: true
     )
-
+    
+    static let chestSupportedInclineDumbbellRow = CatalogExercise(
+        id: "chest_supported_incline_dumbbell_row",
+        name: "Chest-Supported Incline DB Row",
+        primaryMuscle: .back,
+        isCompound: true
+    )
+    
     // MARK: - Rear delts / Shoulders
 
     static let inclineRearDeltFly = CatalogExercise(
@@ -401,6 +408,7 @@ struct ExerciseCatalog {
         wideGripPulldown,
         pulldownNormalGrip,
         dumbbellRowSingleArm,
+        chestSupportedInclineDumbbellRow,
         seatedCableRow,
 
         // Shoulders / rear delts
