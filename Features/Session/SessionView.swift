@@ -443,6 +443,37 @@ private struct SessionExerciseCardView: View {
             exerciseName: exercise.name
         )
     }
+   
+
+    private var targetRepsForDisplay: Int {
+        // Prefer first planned reps (set 1). Fallback to 10.
+        exercise.sets.first(where: { $0.index == 1 })?.plannedReps
+        ?? exercise.sets.first?.plannedReps
+        ?? 10
+    }
+
+    private var rirForDisplay: Int? {
+        exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
+        ?? exercise.sets.first?.plannedRIR
+    }
+
+    private var todayDetailLine: String {
+        // Preserve "Week X · Muscle" prefix if it exists, replace reps portion.
+        let parts = exercise.detail.components(separatedBy: " · ")
+        let prefix: String = {
+            if parts.count >= 2 { return "\(parts[0]) · \(parts[1]) · " }
+            return parts.first.map { "\($0) · " } ?? ""
+        }()
+
+        let repsLabel = RepRangeRulebook.display(targetReps: targetRepsForDisplay, range: repRange)
+
+        if let rirForDisplay {
+            return "\(prefix)\(repsLabel) @ \(rirForDisplay) RIR"
+        } else {
+            return "\(prefix)\(repsLabel)"
+        }
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
@@ -451,7 +482,12 @@ private struct SessionExerciseCardView: View {
                     Text(exercise.name)
                         .font(.headline)
 
-                    Text(exercise.detail)
+                    Text(todayDetailLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .allowsTightening(true)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -507,12 +543,8 @@ private struct SessionExerciseCardView: View {
                     SessionSetRowView(
                         uiSet: $set,
                         repRange: repRange,
-                        onLog: {
-                            onSetLogged(set.index)
-                        },
-                        onSkip: {
-                            onSkipSet(set.index)
-                        }
+                        onLog: { onSetLogged(set.index) },
+                        onSkip: { onSkipSet(set.index) }
                     )
                     .opacity(set.index <= exercise.targetSets ? 1.0 : 0.35)
                 }
@@ -1740,17 +1772,17 @@ struct UISessionSet: Identifiable {
             )
         }
     }
-            func plannedDescription(with repRange: RepRange) -> String {
-                if plannedLoad == 0 && plannedReps == 0 { return "—" }
+    func plannedDescription(with repRange: RepRange) -> String {
+        if plannedLoad == 0 && plannedReps == 0 { return "—" }
 
-                let repsLabel = RepRangeRulebook.display(targetReps: plannedReps, range: repRange)
+        let repsLabel = RepRangeRulebook.display(targetReps: plannedReps, range: repRange)
 
-                if let plannedRIR {
-                    return String(format: "%.1f × %@ @ %d RIR", plannedLoad, repsLabel, plannedRIR)
-                } else {
-                    return String(format: "%.1f × %@", plannedLoad, repsLabel)
-                }
-            }
+        if let plannedRIR {
+            return String(format: "%.1f × %@ @ %d RIR", plannedLoad, repsLabel, plannedRIR)
+        } else {
+            return String(format: "%.1f × %@", plannedLoad, repsLabel)
+        }
+    }
         }
 
 

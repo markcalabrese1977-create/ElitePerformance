@@ -56,7 +56,15 @@ struct ProgramDayDetailView: View {
         .navigationTitle(session.date.formatted(date: .abbreviated, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Auto+") {
+                    autoGenerateSuggestedLoadsFromHistoryForThisDay()
+                }
+
+                Button("Auto") {
+                    autoGeneratePerSetPlanForThisDay()
+                }
+
                 Button("Apply") {
                     showingApplyScopeDialog = true
                 }
@@ -119,6 +127,284 @@ struct ProgramDayDetailView: View {
         return "\(exerciseCount) exercises · \(totalSets) working sets"
     }
 
+    // MARK: - Auto-generate (no model changes)
+
+    // MARK: - Auto+ (From History): update suggestedLoad from last logged performance
+
+    private func autoGenerateSuggestedLoadsFromHistoryForThisDay() {
+        // Pull recent past sessions once (status is not reliable)
+        let sessions = fetchRecentSessions(limit: 60)
+
+        for item in orderedItems {
+
+            if let lastLogged = findMostRecentLoggedItem(exerciseId: item.exerciseId, in: sessions) {
+                let range = repRange(for: item)
+
+                let nextLoad = computeNextSuggestedLoad(
+                    currentItem: item,
+                    lastLoggedItem: lastLogged,
+                    repRange: range
+                )
+
+                // ✅ Always overwrite suggestedLoad when we have real history
+                if nextLoad > 0 {
+                    item.suggestedLoad = nextLoad
+                }
+            } else {
+                // No history → only seed if user already has something (don’t guess)
+                seedSuggestedLoadIfNeeded(item)
+            }
+
+            // ✅ Don’t stomp an already-programmed plan.
+            // Only fill per-set loads if they're currently blank.
+            // Fill only missing loads (don’t overwrite already-programmed ones)
+            fillBlankPlannedLoadsFromSuggestedLoad(for: item)
+        }
+
+        do {
+            try modelContext.save()
+            print("✅ Auto+ applied (suggestedLoad updated from history)")
+        } catch {
+            print("⚠️ Auto+ save failed: \(error)")
+        }
+    }
+    
+    private func autoGeneratePerSetPlanForThisDay() {
+        for item in orderedItems {
+            autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: false)
+        }
+
+        do {
+            try modelContext.save()
+            print("✅ Auto-generated per-set plan for this day")
+        } catch {
+            print("⚠️ Auto-generate save failed: \(error)")
+        }
+    }
+
+    private func autoGeneratePerSetPlan(for item: SessionItem, overwriteLoadsFromSuggested: Bool) {
+        // Ensure arrays are large enough for editing UI + target sets
+        let setCount = max(4, item.targetSets)
+
+        func ensureIntArray(_ array: inout [Int]) {
+            if array.count < setCount {
+                array.append(contentsOf: repeatElement(0, count: setCount - array.count))
+            } else if array.count > setCount {
+                array = Array(array.prefix(setCount))
+            }
+        }
+
+        func ensureDoubleArray(_ array: inout [Double]) {
+            if array.count < setCount {
+                array.append(contentsOf: repeatElement(0.0, count: setCount - array.count))
+            } else if array.count > setCount {
+                array = Array(array.prefix(setCount))
+            }
+        }
+
+        ensureIntArray(&item.plannedRepsBySet)
+        ensureDoubleArray(&item.plannedLoadsBySet)
+        ensureIntArray(&item.actualRIRs) // (used as per-set RIR override in this screen)
+
+        // Choose a base load to spread across sets:
+        // 1) suggestedLoad if present
+        // 2) first non-zero planned set load
+        // 3) otherwise 0 (leave as-is)
+        // Choose a base load to spread across sets
+        let firstPlannedNonZero = item.plannedLoadsBySet.first(where: { $0 > 0 }) ?? 0
+
+        let baseLoad: Double
+        if overwriteLoadsFromSuggested {
+            // Auto+ mode: ONLY use suggestedLoad (this is the key change)
+            baseLoad = item.suggestedLoad
+        } else {
+            // Auto mode: keep existing behavior
+            baseLoad = item.suggestedLoad > 0 ? item.suggestedLoad : firstPlannedNonZero
+        }
+    }
+    
+    private func fillBlankPlannedLoadsFromSuggestedLoad(for item: SessionItem) {
+        normalizePlanArrays(for: item)
+
+        let baseLoad = item.suggestedLoad
+        guard baseLoad > 0 else { return }
+
+        let n = min(item.targetSets, item.plannedLoadsBySet.count)
+        guard n > 0 else { return }
+
+        for idx in 0..<n {
+            if item.plannedLoadsBySet[idx] == 0 {
+                item.plannedLoadsBySet[idx] = baseLoad
+            }
+        }
+    }
+
+    /// Ensures the plan arrays can safely be edited up to max(4, targetSets)
+    private func normalizePlanArrays(for item: SessionItem) {
+        let setCount = max(4, item.targetSets)
+
+        func ensureIntArray(_ array: inout [Int]) {
+            if array.count < setCount {
+                array.append(contentsOf: repeatElement(0, count: setCount - array.count))
+            } else if array.count > setCount {
+                array = Array(array.prefix(setCount))
+            }
+        }
+
+        func ensureDoubleArray(_ array: inout [Double]) {
+            if array.count < setCount {
+                array.append(contentsOf: repeatElement(0.0, count: setCount - array.count))
+            } else if array.count > setCount {
+                array = Array(array.prefix(setCount))
+            }
+        }
+
+        ensureIntArray(&item.plannedRepsBySet)
+        ensureDoubleArray(&item.plannedLoadsBySet)
+        ensureIntArray(&item.actualRIRs)
+    }
+    
+    private func fetchRecentSessions(limit: Int) -> [Session] {
+        let descriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+
+        do {
+            let all = try modelContext.fetch(descriptor)
+
+            // ✅ Source of truth: past sessions only.
+            // A session might still be `.planned` even if you logged it.
+            let now = Date()
+            let past = all.filter { $0.date <= now }
+
+            return Array(past.prefix(limit))
+        } catch {
+            print("⚠️ Failed to fetch sessions: \(error)")
+            return []
+        }
+    }
+
+    /// Returns the most recent SessionItem (from any past session) that has actual logged work.
+    private func findMostRecentLoggedItem(exerciseId: String, in sessions: [Session]) -> SessionItem? {
+        for s in sessions {
+            guard let match = s.items.first(where: { $0.exerciseId == exerciseId }) else { continue }
+
+            let pairs = zip(match.actualLoads, match.actualReps)
+            let hasActualWork = zip(match.actualLoads, match.actualReps).contains { $0 > 0 && $1 > 0 }
+
+            if hasActualWork {
+                return match
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Rep range + rule helpers
+
+    private func repRange(for item: SessionItem) -> RepRange {
+        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
+            return RepRangeRulebook.range(forExerciseId: catalog.id, exerciseName: catalog.name)
+        }
+        return RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: "Exercise")
+    }
+
+    /// If we truly have no history, keep the plan honest:
+    /// - If suggestedLoad already exists, do nothing.
+    /// - Else if plannedLoadsBySet has a non-zero, seed suggestedLoad from it.
+    /// - Else leave suggestedLoad at 0 (TBD).
+    private func seedSuggestedLoadIfNeeded(_ item: SessionItem) {
+        if item.suggestedLoad > 0 { return }
+
+        if let first = item.plannedLoadsBySet.first(where: { $0 > 0 }) {
+            item.suggestedLoad = first
+        }
+    }
+
+    // MARK: - Core load decision (history → next suggestedLoad)
+
+    private func computeNextSuggestedLoad(
+        currentItem: SessionItem,
+        lastLoggedItem: SessionItem,
+        repRange: RepRange
+    ) -> Double {
+
+        // Identify the “current load” used most recently for this exercise.
+        let setCount = max(1, currentItem.targetSets)
+        let lastLoad = bestWorkingLoad(from: lastLoggedItem, setCount: setCount)
+        guard lastLoad > 0 else { return 0 }
+
+        // Gather last working-set reps for the first N sets (N = current targetSets).
+        // Prefer actual reps; fallback to planned reps; final fallback to current targetReps.
+        var repsBySet: [Int] = []
+        repsBySet.reserveCapacity(setCount)
+
+        for idx in 0..<setCount {
+            let actual = idx < lastLoggedItem.actualReps.count ? lastLoggedItem.actualReps[idx] : 0
+            if actual > 0 {
+                repsBySet.append(actual)
+                continue
+            }
+
+            let planned = idx < lastLoggedItem.plannedRepsBySet.count ? lastLoggedItem.plannedRepsBySet[idx] : 0
+            if planned > 0 {
+                repsBySet.append(planned)
+                continue
+            }
+
+            repsBySet.append(lastLoggedItem.targetReps)
+        }
+
+        // Apply your blueprint triggers (load-only version).
+        let earnedWeight = repsBySet.allSatisfy { $0 >= repRange.max }
+
+        let missesBottomBadlyCount = repsBySet.filter { $0 < (repRange.min - 1) }.count
+        let tooMuchFatigue = missesBottomBadlyCount >= 2
+
+        if tooMuchFatigue {
+            // Deload / reduce load trigger
+            return roundToIncrement(lastLoad * 0.95, increment: loadIncrement(for: repRange))
+        }
+
+        if earnedWeight {
+            // Load increase trigger
+            return roundToIncrement(lastLoad + loadIncrement(for: repRange), increment: loadIncrement(for: repRange))
+        }
+
+        // Otherwise hold load
+        return roundToIncrement(lastLoad, increment: loadIncrement(for: repRange))
+    }
+
+    private func bestLoggedLoad(from item: SessionItem) -> Double {
+        // ✅ Actuals only. If there are no actuals, treat as no reliable history.
+        if let bestActual = item.actualLoads.filter({ $0 > 0 }).max() {
+            return bestActual
+        }
+        return 0
+    }
+
+    /// Simple, model-free increment heuristic:
+    /// - “Compound-ish” ranges (<=12 max) → 5 lb
+    /// - Higher-rep work → 2.5 lb
+    private func loadIncrement(for repRange: RepRange) -> Double {
+        repRange.max <= 12 ? 5.0 : 2.5
+    }
+
+    private func roundToIncrement(_ value: Double, increment: Double) -> Double {
+        guard increment > 0 else { return value }
+        return (value / increment).rounded() * increment
+    }
+    
+    private func bestWorkingLoad(from item: SessionItem, setCount: Int) -> Double {
+        let actualSlice = Array(item.actualLoads.prefix(setCount)).filter { $0 > 0 }
+        if let first = actualSlice.first { return first }            // prefer what you actually used
+        if let max = actualSlice.max() { return max }                // fallback if first missing
+
+        let plannedSlice = Array(item.plannedLoadsBySet.prefix(setCount)).filter { $0 > 0 }
+        if let firstPlanned = plannedSlice.first { return firstPlanned }
+
+        return item.suggestedLoad
+    }
+    
     // MARK: - CRUD helpers
 
     private func addExercise(from catalog: CatalogExercise) {
@@ -359,6 +645,12 @@ private struct ProgramExercisePlanRow: View {
             syncLoadTextsFromItem()
             save()
         }
+        .onChange(of: item.plannedLoadsBySet) { _ in
+            syncLoadTextsFromItem()
+        }
+        .onChange(of: item.plannedLoadsBySet) { _ in
+            syncLoadTextsFromItem()
+        }
     }
 
     // MARK: - Subviews
@@ -486,14 +778,19 @@ private struct ProgramExercisePlanRow: View {
                 }
             }
         }
-        // When base reps change, fill blanks for planned reps
+        // When base reps change, fill blanks for planned reps (include Set 4)
         .onChange(of: item.targetReps) { newValue in
             normalizeArraySizes()
-            for idx in 0..<min(item.targetSets, item.plannedRepsBySet.count) {
+
+            let setRows = max(4, item.targetSets)
+            let limit = min(setRows, item.plannedRepsBySet.count)
+
+            for idx in 0..<limit {
                 if item.plannedRepsBySet[idx] == 0 {
                     item.plannedRepsBySet[idx] = newValue
                 }
             }
+
             save()
         }
     }
@@ -588,16 +885,22 @@ private struct ProgramExercisePlanRow: View {
 
     private func syncLoadTextsFromItem() {
         let setRows = max(4, max(item.targetSets, item.plannedLoadsBySet.count))
+
+        // Ensure local cache is the right size
         if loadTexts.count != setRows {
-            loadTexts = (0..<setRows).map { idx in
-                guard idx < item.plannedLoadsBySet.count else { return "" }
-                let value = item.plannedLoadsBySet[idx]
-                if value == 0 { return "" }
-                if value.truncatingRemainder(dividingBy: 1) == 0 {
-                    return String(format: "%.0f", value)
-                } else {
-                    return String(format: "%.1f", value)
-                }
+            loadTexts = Array(repeating: "", count: setRows)
+        }
+
+        // Always resync values (not just when count changes)
+        for idx in 0..<setRows {
+            let value = (idx < item.plannedLoadsBySet.count) ? item.plannedLoadsBySet[idx] : 0.0
+
+            if value == 0 {
+                loadTexts[idx] = ""
+            } else if value.truncatingRemainder(dividingBy: 1) == 0 {
+                loadTexts[idx] = String(format: "%.0f", value)
+            } else {
+                loadTexts[idx] = String(format: "%.1f", value)
             }
         }
     }
