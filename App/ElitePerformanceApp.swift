@@ -3,49 +3,47 @@ import SwiftData
 
 @main
 struct ElitePerformanceApp: App {
-    @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
+
+    private let sharedModelContainer: ModelContainer
+
+    init() {
+        let schema = Schema([
+            User.self,
+            Session.self,
+            SessionItem.self,
+            SetLog.self,
+            PRIndex.self,
+            SessionHistory.self,
+            SessionHistoryExercise.self
+        ])
+
+        // Attempt #1: try opening the existing store (whatever name/url it previously used)
+        do {
+            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            self.sharedModelContainer = try ModelContainer(for: schema, configurations: [config])
+            return
+        } catch {
+            print("⚠️ SwiftData store failed to load (likely schema mismatch): \(error)")
+        }
+
+        // Attempt #2: fall back to a NEW store file (no uninstall required)
+        do {
+            let freshConfig = ModelConfiguration(
+                "ElitePerformanceStore_v2",
+                schema: schema,
+                isStoredInMemoryOnly: false
+            )
+            self.sharedModelContainer = try ModelContainer(for: schema, configurations: [freshConfig])
+            print("✅ Created fresh SwiftData store: ElitePerformanceStore_v2")
+        } catch {
+            fatalError("Could not create ModelContainer (fresh store also failed): \(error)")
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-        }
-        .modelContainer(sharedModelContainer)
-    }
-}
-
-// MARK: - RootView
-
-struct RootView: View {
-    @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
-    @Environment(\.modelContext) private var context
-
-    var body: some View {
-        Group {
-            if hasOnboarded {
-                HomeView()
-            } else {
-                OnboardingView(onComplete: { goal, days, units in
-                    // Create user
-                    let user = User(units: units, coachVoice: .casual, progressionEnabled: true)
-                    context.insert(user)
-                    // Seed starter exercises + session
-                    ProgramGenerator.seedInitialProgram(goal: goal, daysPerWeek: days, context: context)
-                    try? context.save()
-                    hasOnboarded = true
-                })
-            }
+            ContentView()
+                .modelContainer(sharedModelContainer)
         }
     }
 }
-
-// MARK: - SwiftData Container
-
-fileprivate var sharedModelContainer: ModelContainer = {
-    let schema = Schema([User.self, Exercise.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self])
-    let config = ModelConfiguration(isStoredInMemoryOnly: false)
-    do {
-        return try ModelContainer(for: schema, configurations: [config])
-    } catch {
-        fatalError("Could not create ModelContainer: \(error)")
-    }
-}()

@@ -1,47 +1,46 @@
 import SwiftUI
 import SwiftData
 
+/// Program tab = Program hub.
+/// Shows the current block by default, with a toolbar button to re-run onboarding
+/// (Change Program). Session history is its own view used in the History tab.
 struct HomeView: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \Session.date, order: .forward, animation: .default) private var sessions: [Session]
+    @Environment(\.modelContext) private var modelContext
+    @State private var showingChangeProgram = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if let today = sessions.first(where: { Calendar.current.isDateInToday($0.date) }) {
-                    SessionCard(session: today)
-                } else if let first = sessions.first {
-                    SessionCard(session: first)
-                } else {
-                    Text("No session yet — pull down to refresh or add via Onboarding.")
+            ProgramPlanView()
+                .navigationTitle("Program")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingChangeProgram = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                Text("Change Program")
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.systemGray6))
+                            .clipShape(Capsule())
+                        }
+                    }
                 }
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Do This Today")
+                .sheet(isPresented: $showingChangeProgram) {
+                    NavigationStack {
+                        OnboardingFlowView()
+                            .navigationTitle("Change Program")
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Cancel") {
+                                        showingChangeProgram = false
+                                    }
+                                }
+                            }
+                    }
+                }
         }
-    }
-}
-
-struct SessionCard: View {
-    @Environment(\.modelContext) private var context
-    @State var session: Session
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Today's Session").font(.title2).bold()
-            if let first = session.items.sorted(by: { $0.order < $1.order }).first, let ex = first.exercise {
-                Text("\(ex.name)").font(.headline)
-                Text("Target: \(first.targetSets) × \(first.targetReps) @ RIR \(first.targetRIR)")
-                    .foregroundStyle(.secondary)
-            }
-            NavigationLink("Start / Resume") {
-                SessionView(session: session)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
     }
 }
