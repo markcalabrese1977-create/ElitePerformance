@@ -5,38 +5,64 @@ import SwiftData
 
 
 
+import SwiftUI
+import SwiftData
+
+// MARK: - Main Tab View
+
 struct MainTabView: View {
     @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
     private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
-    
+
     var body: some View {
         TabView {
-            if mode == .mark {
-                TodayTabView()
-                    .tabItem { Label("Today", systemImage: "bolt.circle") }
-
-                ExtrasTabView()
-                    .tabItem { Label("Extras", systemImage: "heart.circle") }
-
-                HomeView()
-                    .tabItem { Label("Program", systemImage: "list.bullet.rectangle") }
-                
-                HistoryView()
-                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-                
-                SettingsView()
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-            } else {
-                PlannerHomeView()
-                    .tabItem { Label("Planner", systemImage: "calendar") }
-                
-                HistoryView()
-                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-                
-                SettingsView()
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            switch mode {
+            case .mark:
+                markTabs
+            case .angela:
+                plannerTabs
             }
         }
+    }
+
+    // MARK: - Tab Groups
+
+    @ViewBuilder
+    private var markTabs: some View {
+        TodayTabView()
+            .tabItem { Label("Today", systemImage: "bolt.circle") }
+
+        ExtrasTabView()
+            .tabItem { Label("Extras", systemImage: "heart.circle") }
+
+        HomeView()
+            .tabItem { Label("Program", systemImage: "list.bullet.rectangle") }
+
+        HistoryView()
+            .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+
+        // ✅ NEW: Analytics tab v1
+        AnalyticsView()
+            .tabItem { Label("Analytics", systemImage: "chart.bar") }
+
+        SettingsView()
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+    }
+
+    @ViewBuilder
+    private var plannerTabs: some View {
+        PlannerHomeView()
+            .tabItem { Label("Planner", systemImage: "calendar") }
+
+        HistoryView()
+            .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+
+        // ✅ NEW: Analytics tab v1 (available in planner mode too)
+        AnalyticsView()
+            .tabItem { Label("Analytics", systemImage: "chart.bar") }
+
+        SettingsView()
+            .tabItem { Label("Settings", systemImage: "gearshape") }
     }
 }
 

@@ -514,3 +514,23 @@ struct ExerciseCatalog {
         builtIn + customExercises()
     }
 }
+extension ExerciseCatalog {
+    static func displayName(for exerciseId: String) -> String {
+        // 1) Try built-in + custom list
+        if let ex = all.first(where: { $0.id == exerciseId }) {
+            return ex.name
+        }
+
+        // 2) Fallback: prettify IDs like "ez_bar_curl" -> "Ez Bar Curl"
+        let pretty = exerciseId
+            .replacingOccurrences(of: "custom_", with: "")
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Title-case it lightly
+        return pretty
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+}

@@ -1,6 +1,26 @@
+# macOS
+.DS_Store
 
-# Xcode user data (never commit)
-xcuserdata/
+# Xcode
+DerivedData/
+*.xcuserdata/
 *.xcuserstate
-*.xcscmblueprint
 *.xccheckout
+*.xcscmblueprint
+
+# SwiftPM
+.build/
+Packages/
+Package.resolved
+
+# Logs
+*.log
+
+# Fastlane (if ever used)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Secrets (if you ever add these)
+*.env

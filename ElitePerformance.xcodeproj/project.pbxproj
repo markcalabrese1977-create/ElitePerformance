@@ -22,6 +22,7 @@
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
 		D5550A732F1D237B00456F8C /* AppleHealthLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5550A722F1D237900456F8C /* AppleHealthLinkStore.swift */; };
+		D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476E82F40F47E00FE3F46 /* AnalyticsView.swift */; };
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
@@ -98,6 +99,7 @@
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
 		D5550A722F1D237900456F8C /* AppleHealthLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleHealthLinkStore.swift; sourceTree = "<group>"; };
+		D58476E82F40F47E00FE3F46 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
@@ -242,6 +244,14 @@
 			path = Planner;
 			sourceTree = "<group>";
 		};
+		D58476E72F40F46F00FE3F46 /* Analytics */ = {
+			isa = PBXGroup;
+			children = (
+				D58476E82F40F47E00FE3F46 /* AnalyticsView.swift */,
+			);
+			path = Analytics;
+			sourceTree = "<group>";
+		};
 		D5E293142EC4102800034D78 = {
 			isa = PBXGroup;
 			children = (
@@ -382,6 +392,7 @@
 		D5E2935E2EC410DD00034D78 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				D58476E72F40F46F00FE3F46 /* Analytics */,
 				D568F46C2F2D57C000108B45 /* Extras */,
 				D5550A742F1D25EF00456F8C /* Health */,
 				D5C48EFD2F1C105700495C46 /* Notes */,
@@ -635,6 +646,7 @@
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
+				D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
 			);
