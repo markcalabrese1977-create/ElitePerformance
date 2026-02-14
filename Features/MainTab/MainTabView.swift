@@ -3,33 +3,39 @@ import SwiftData
 
 // MARK: - Main Tab View
 
+
+
 struct MainTabView: View {
+    @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
+    private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
+    
     var body: some View {
         TabView {
+            if mode == .mark {
+                TodayTabView()
+                    .tabItem { Label("Today", systemImage: "bolt.circle") }
 
-            // 1) TODAY = “what do I do right now?”
-            TodayTabView()
-                .tabItem {
-                    Label("Today", systemImage: "bolt.circle")
-                }
+                ExtrasTabView()
+                    .tabItem { Label("Extras", systemImage: "heart.circle") }
 
-            // 2) PROGRAM = see / manage the block
-            HomeView()
-                .tabItem {
-                    Label("Program", systemImage: "list.bullet.rectangle")
-                }
-
-            // 3) HISTORY
-            HistoryView()
-                .tabItem {
-                    Label("History", systemImage: "clock.arrow.circlepath")
-                }
-
-            // 4) SETTINGS
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
+                HomeView()
+                    .tabItem { Label("Program", systemImage: "list.bullet.rectangle") }
+                
+                HistoryView()
+                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            } else {
+                PlannerHomeView()
+                    .tabItem { Label("Planner", systemImage: "calendar") }
+                
+                HistoryView()
+                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            }
         }
     }
 }
@@ -41,7 +47,10 @@ struct TodayTabView: View {
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     private var upcomingSessions: [Session] {
-        sessions.filter { $0.date >= Calendar.current.startOfDay(for: Date()) }
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
+        let tomorrowStart = cal.date(byAdding: .day, value: 1, to: todayStart)!
+        return sessions.filter { $0.date >= tomorrowStart }
     }
 
     private var todaySession: Session? {
@@ -49,6 +58,34 @@ struct TodayTabView: View {
         let todayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)!
 
         return sessions.first(where: { $0.date >= todayStart && $0.date < todayEnd })
+    }
+    
+    private func dayIndexInWeek(for session: Session) -> Int? {
+        // Determine D1..D6 by sorting sessions in the same meso week by date.
+        // Uses session.weekIndex (alias to weekInMeso).
+        let sameWeek = sessions
+            .filter { $0.weekIndex == session.weekIndex }
+            .sorted { $0.date < $1.date }
+
+        guard let idx = sameWeek.firstIndex(where: { $0.id == session.id }) else { return nil }
+        return idx + 1 // 1-based: D1..D6
+    }
+
+    private func plannedZone2Targets(forWeek week: Int) -> [Int] {
+        // Your rule:
+        // - This week (week 8): 2 sessions
+        // - Weeks 9+ (and 10): 3 sessions
+        //
+        // Sessions happen on: after D2 and D4 + rest day (Thu).
+        // We'll represent "after D2" as dayIndex 2, "after D4" as 4.
+        // Rest day is handled separately via weekday check.
+        if week <= 8 { return [2] }          // after D2 only
+        return [2, 4]                        // after D2 and after D4
+    }
+
+    private var isRestDayToday: Bool {
+        // Your rest day is Thursday
+        Calendar.current.component(.weekday, from: Date()) == 5 // 1=Sun ... 5=Thu
     }
 
     var body: some View {
@@ -103,6 +140,14 @@ struct TodayTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // ✅ Always show the Extras card daily
+            Zone2AndCoreCard(
+                todaySession: todaySession,
+                todayDayIndex: todaySession.flatMap { dayIndexInWeek(for: $0) },
+                isRestDayToday: isRestDayToday,
+                todayDate: Date()
+            )
         }
         .padding()
         .background(
@@ -236,6 +281,140 @@ struct SessionSummaryRow: View {
         case .planned:    return .secondary
         case .inProgress: return .blue
         case .completed:  return .green
+        }
+    }
+}
+struct Zone2AndCoreCard: View {
+    let todaySession: Session?      // ✅ now optional
+    let todayDayIndex: Int?         // optional
+    let isRestDayToday: Bool
+    let todayDate: Date             // pass Date() from parent
+
+    private var week: Int {
+        todaySession?.weekIndex ?? 0
+    }
+
+    private func isLoggedToday(_ kind: ExtrasEntry.Kind) -> Bool {
+        let cal = Calendar.current
+        return ExtrasLogStore.load().contains { entry in
+            entry.kind == kind && cal.isDate(entry.date, inSameDayAs: todayDate)
+        }
+    }
+
+    // ✅ Week logic: week 8 = 2 sessions, week 9+ = 3 sessions
+    private var zone2ShouldShowToday: Bool {
+        // Rest day always eligible
+        if isRestDayToday { return true }
+
+        // If we don't have a lift session/day index, we can't know D2/D4
+        guard week > 0, let d = todayDayIndex else { return false }
+
+        let afterD2 = (d == 2)
+        let afterD4 = (week >= 9 && d == 4)
+        return afterD2 || afterD4
+    }
+
+    private var zone2Label: String {
+        if isRestDayToday { return "Zone 2 (Rest Day)" }
+        if todayDayIndex == 2 { return "Zone 2 (After D2)" }
+        if todayDayIndex == 4 { return "Zone 2 (After D4)" }
+        return "Zone 2"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+
+            // Zone 2 prompt
+            if zone2ShouldShowToday {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(zone2Label)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+
+                    Text("Easy conversational pace · 30–45 min · keep it smooth.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        if isLoggedToday(.zone2) {
+                            Text("Zone 2 logged ✅")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule().fill(Color(.tertiarySystemBackground))
+                                )
+                        } else {
+                            Button("Log Zone 2") {
+                                ExtrasLogStore.add(
+                                    ExtrasEntry(
+                                        kind: .zone2,
+                                        date: todayDate,
+                                        durationMinutes: 35,
+                                        notes: "Zone 2"
+                                    )
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        Spacer()
+                    }
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+
+            // Core stability prompt (daily light dose)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Core Stability (Carries + Bracing)")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text("Pick 1 carry + 1 brace (6–10 min total). No fatigue spiral.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("• Carry: farmer / suitcase / front rack · 3–5 x 30–60s\n• Brace: dead bug / bird dog / Pallof press · 2–3 sets")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    if isLoggedToday(.core) {
+                        Text("Core logged ✅")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule().fill(Color(.tertiarySystemBackground))
+                            )
+                    } else {
+                        Button("Log Core") {
+                            ExtrasLogStore.add(
+                                ExtrasEntry(
+                                    kind: .core,
+                                    date: todayDate,
+                                    durationMinutes: 8,
+                                    notes: "Carry + brace"
+                                )
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Spacer()
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.secondarySystemBackground))
+            )
         }
     }
 }

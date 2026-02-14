@@ -11,7 +11,7 @@ enum HealthKitWorkoutSummarySyncService {
     /// NOTE: MVP hardcode for Mark. Move into UserProfile/Settings later.
     private static let markBirthDateComponents = DateComponents(year: 1977, month: 6, day: 7)
 
-    /// Apple-like zoneing works best with HR Reserve (HRR / Karvonen).
+    /// Apple-like zoning works best with HR Reserve (HRR / Karvonen).
     /// We still need an HRmax estimate; "Fox" (220-age) tends to mirror Apple thresholds more closely for many users.
     private enum HRMaxFormula {
         case fox       // 220 - age
@@ -28,6 +28,8 @@ enum HealthKitWorkoutSummarySyncService {
     }
 
     private static let hrMaxFormula: HRMaxFormula = .fox
+
+    // MARK: - Auth
 
     static func requestAuthorizationIfNeeded() async throws {
         guard HKHealthStore.isHealthDataAvailable() else { return }
@@ -47,7 +49,13 @@ enum HealthKitWorkoutSummarySyncService {
         try await store.requestAuthorization(toShare: [], read: toRead)
     }
 
-    /// Pull metrics for the most likely workout around `session.completedAt` (or session.date).
+    // MARK: - Public API
+
+    /// Pull metrics for the most likely workout for this session date.
+    /// Bulletproof behavior:
+    /// - If session.completedAt is missing (common when logging later), we fall back to a full-day search.
+    /// - If multiple workouts exist, we score candidates and pick the best.
+    /// - We use a non-strict predicate so workouts that overlap the window are still returned.
     @MainActor
     static func syncForCompletedSession(_ session: Session, in context: ModelContext) async {
         do {
@@ -67,17 +75,78 @@ enum HealthKitWorkoutSummarySyncService {
                 return
             }
 
-            let anchor = session.completedAt ?? session.date
-            let startWindow = Calendar.current.date(byAdding: .hour, value: -6, to: anchor) ?? anchor.addingTimeInterval(-6*3600)
-            let endWindow   = Calendar.current.date(byAdding: .hour, value:  6, to: anchor) ?? anchor.addingTimeInterval( 6*3600)
+            let cal = Calendar.current
 
-            // Find candidate workouts
-            let workout = try await fetchBestStrengthWorkout(from: startWindow, to: endWindow, anchor: anchor)
+            // If completedAt exists, use it as a precise anchor. Otherwise use the session day.
+            // ✅ Anchor logic
+            // If completedAt exists, use it.
+            // If not, anchor to MIDDAY of the session date (prevents “midnight anchor” rejecting real workouts).
+            let sessionDayStart = cal.startOfDay(for: session.date)
+            let sessionDayEnd = cal.date(byAdding: .day, value: 1, to: sessionDayStart) ?? sessionDayStart.addingTimeInterval(86400)
 
-            guard let workout else {
-                print("ℹ️ No matching strength workout found in window.")
+            let anchor: Date
+            if let completed = session.completedAt {
+                anchor = completed
+            } else {
+                anchor = cal.date(byAdding: .hour, value: 12, to: sessionDayStart)
+                    ?? sessionDayStart.addingTimeInterval(12 * 3600)
+            }
+
+            // Day window should be based on the session day, not the anchor day.
+            let dayStart = sessionDayStart
+            let dayEnd = sessionDayEnd
+
+            // Build search strategy:
+            // 1) If completedAt exists -> narrow ±6h
+            // 2) Always -> day window (the key fix for "yesterday workout logged today")
+            // 3) Fallback -> broad ±24h
+            var windows: [(label: String, start: Date, end: Date)] = []
+
+            if session.completedAt != nil {
+                let start = cal.date(byAdding: .hour, value: -6, to: anchor) ?? anchor.addingTimeInterval(-6 * 3600)
+                let end = cal.date(byAdding: .hour, value: 6, to: anchor) ?? anchor.addingTimeInterval(6 * 3600)
+                windows.append(("narrow", start, end))
+            }
+
+            windows.append(("day", dayStart, dayEnd))
+
+            let broadStart = cal.date(byAdding: .hour, value: -24, to: anchor) ?? anchor.addingTimeInterval(-24 * 3600)
+            let broadEnd = cal.date(byAdding: .hour, value: 24, to: anchor) ?? anchor.addingTimeInterval(24 * 3600)
+            windows.append(("broad", broadStart, broadEnd))
+
+            var chosen: HKWorkout? = nil
+            var chosenFrom: String = ""
+            var lastCounts: [String: Int] = [:]
+
+            for w in windows {
+                let list = try await fetchWorkoutCandidates(from: w.start, to: w.end)
+                print("🔎 HK candidates [\(w.label)] = \(list.count)")
+                for wk in list {
+                    let type = wk.workoutActivityType.rawValue
+                    let minutes = wk.duration / 60.0
+                    let source = wk.sourceRevision.source.name
+                    print("   • type=\(type) start=\(wk.startDate) end=\(wk.endDate) min=\(String(format: "%.1f", minutes)) source=\(source)")
+                }
+                lastCounts[w.label] = list.count
+
+                if let best = pickBestWorkout(
+                    from: list,
+                    anchor: anchor,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd
+                ) {
+                    chosen = best
+                    chosenFrom = w.label
+                    break
+                }
+            }
+
+            guard let workout = chosen else {
+                print("ℹ️ No matching workout found. Counts: \(lastCounts)")
                 return
             }
+
+            print("✅ HK match: \(workout.workoutActivityType) [\(chosenFrom)] start=\(workout.startDate) end=\(workout.endDate)")
 
             // Core workout fields
             session.hkWorkoutUUID = workout.uuid.uuidString
@@ -97,8 +166,13 @@ enum HealthKitWorkoutSummarySyncService {
             session.hkAvgHeartRate = avgHR
             session.hkMaxHeartRate = maxHR
 
-            // ✅ Zones + sparkline series + post-workout HR (v2 zones)
-            await syncHeartRateUIFields(into: session, workoutStart: workout.startDate, workoutEnd: workout.endDate, maxHR: maxHR)
+            // Zones + sparkline series + post-workout HR
+            await syncHeartRateUIFields(
+                into: session,
+                workoutStart: workout.startDate,
+                workoutEnd: workout.endDate,
+                maxHR: maxHR
+            )
 
             try context.save()
             print("✅ HK workout summary synced to Session")
@@ -107,10 +181,11 @@ enum HealthKitWorkoutSummarySyncService {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Candidate Selection
 
-    private static func fetchBestStrengthWorkout(from start: Date, to end: Date, anchor: Date) async throws -> HKWorkout? {
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+    private static func fetchWorkoutCandidates(from start: Date, to end: Date) async throws -> [HKWorkout] {
+        // Non-strict options so overlapping workouts still show up.
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
 
         return try await withCheckedThrowingContinuation { continuation in
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
@@ -118,31 +193,96 @@ enum HealthKitWorkoutSummarySyncService {
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
                 predicate: predicate,
-                limit: 25,
+                limit: 50,
                 sortDescriptors: [sort]
             ) { _, samples, error in
                 if let error { return continuation.resume(throwing: error) }
-
                 let workouts = (samples as? [HKWorkout]) ?? []
-
-                // Prefer Traditional Strength Training if present; else take closest workout by time.
-                let strength = workouts.filter { $0.workoutActivityType == .traditionalStrengthTraining }
-                let candidates = strength.isEmpty ? workouts : strength
-
-                let best = candidates.min { a, b in
-                    abs(a.startDate.timeIntervalSince(anchor)) < abs(b.startDate.timeIntervalSince(anchor))
-                }
-
-                continuation.resume(returning: best)
+                continuation.resume(returning: workouts)
             }
 
             store.execute(query)
         }
     }
 
+    private static func pickBestWorkout(
+        from workouts: [HKWorkout],
+        anchor: Date,
+        dayStart: Date,
+        dayEnd: Date
+    ) -> HKWorkout? {
+
+        guard !workouts.isEmpty else { return nil }
+
+        // Prefer strength workouts, but don’t fail hard if user logged as “Other”.
+        // We score and pick the best overall candidate.
+        func typeScore(_ type: HKWorkoutActivityType) -> Double {
+            switch type {
+            case .traditionalStrengthTraining: return 120
+            case .functionalStrengthTraining: return 100
+            default: return 20
+            }
+        }
+
+        func inSameDay(_ d: Date) -> Bool {
+            d >= dayStart && d < dayEnd
+        }
+
+        func clamp(_ x: Double, _ lo: Double, _ hi: Double) -> Double {
+            min(hi, max(lo, x))
+        }
+
+        // Compute best by score
+        var best: (workout: HKWorkout, score: Double)? = nil
+
+        for w in workouts {
+            let start = w.startDate
+            let end = w.endDate
+
+            // Distance to anchor (seconds)
+            let dist = abs(start.timeIntervalSince(anchor))
+
+            // Basic features
+            let tScore = typeScore(w.workoutActivityType)
+            let dayScore: Double = inSameDay(start) ? 40.0 : 0.0
+
+            // Longer workouts are more likely the real lift vs a 2-min accidental
+            let durationMinutes = w.duration / 60.0
+            let durationScore = clamp(durationMinutes, 0, 30) // cap at +30
+
+            // Penalize distance (0 penalty within ~30 min, then grows)
+            let distHours = dist / 3600.0
+            let distPenalty = clamp(distHours * 12, 0, 120) // max -120
+
+            // Overlap bonus if it overlaps the session day window
+            let overlapsDay = (start < dayEnd) && (end > dayStart)
+            let overlapScore: Double = overlapsDay ? 25.0 : 0.0
+
+            // Total
+            let score = tScore + dayScore + durationScore + overlapScore - distPenalty
+
+            if let cur = best {
+                if score > cur.score {
+                    best = (w, score)
+                }
+            } else {
+                best = (w, score)
+            }
+        }
+
+        // If we found a very low score across the board, still return nil (prevents linking random workouts)
+        guard let chosen = best, chosen.score >= 35 else {
+            return nil
+        }
+
+        return chosen.workout
+    }
+
+    // MARK: - Heart Rate Stats / Calories
+
     private static func heartRateStats(from start: Date, to end: Date) async throws -> (avg: Double, max: Double) {
         guard let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return (0, 0) }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
 
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsCollectionQuery(
@@ -182,10 +322,14 @@ enum HealthKitWorkoutSummarySyncService {
 
     private static func sumBasalCalories(from start: Date, to end: Date) async throws -> Double {
         guard let type = HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned) else { return 0 }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
 
         return try await withCheckedThrowingContinuation { continuation in
-            let query = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, error in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, result, error in
                 if let error { return continuation.resume(throwing: error) }
                 let kcal = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
                 continuation.resume(returning: kcal)
@@ -194,7 +338,7 @@ enum HealthKitWorkoutSummarySyncService {
         }
     }
 
-    // MARK: - NEW: HR series + zones + post-workout HR
+    // MARK: - HR series + zones + post-workout HR
 
     /// Writes UI-friendly HR fields onto Session.
     /// Safe behavior: if we can’t get samples, we just leave series empty + zones at 0.
@@ -203,7 +347,6 @@ enum HealthKitWorkoutSummarySyncService {
         do {
             let samples = try await fetchHeartRateSamples(from: workoutStart, to: workoutEnd)
             guard samples.count >= 2 else {
-                // leave empty; UI can hide sparkline/zones
                 session.hkHeartRateSeriesBPM = []
                 session.hkHeartRateSeriesStepSeconds = 0
                 session.hkPostWorkoutHeartRateBPM = []
@@ -217,13 +360,12 @@ enum HealthKitWorkoutSummarySyncService {
                 return
             }
 
-            // Sparkline series (downsample to keep SwiftData fast)
             let (series, step) = downsampleHRSeries(samples: samples, start: workoutStart, end: workoutEnd, maxPoints: 140)
             session.hkHeartRateSeriesBPM = series
             session.hkHeartRateSeriesStepSeconds = step
 
             // ✅ v2 Zones: HRR (Karvonen) using 30-day resting HR average.
-            // If we fail to fetch RHR, we fall back to the legacy %max model.
+            // If we fail to fetch RHR, we fall back to legacy %max model.
             if let rhr30 = try await restingHeartRateAverageBPM(endingAt: workoutStart, lookbackDays: 30),
                rhr30 > 0 {
 
@@ -237,7 +379,6 @@ enum HealthKitWorkoutSummarySyncService {
                 session.hkZone4Seconds = zones.z4
                 session.hkZone5Seconds = zones.z5
             } else {
-                // Legacy fallback: percent of observed max HR for this workout
                 let effectiveMax = maxHR > 0 ? maxHR : (session.hkMaxHeartRate > 0 ? session.hkMaxHeartRate : 180)
                 let zones = computeZoneDurationsPercentMax(samples: samples, maxHR: effectiveMax)
 
@@ -270,7 +411,7 @@ enum HealthKitWorkoutSummarySyncService {
     private static func fetchHeartRateSamples(from start: Date, to end: Date) async throws -> [HKQuantitySample] {
         guard let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return [] }
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -289,12 +430,12 @@ enum HealthKitWorkoutSummarySyncService {
     }
 
     /// 30-day average Resting Heart Rate (bpm) from Apple Health.
-    /// Returns nil if the data is unavailable or the query yields no samples.
     private static func restingHeartRateAverageBPM(endingAt end: Date, lookbackDays: Int) async throws -> Double? {
         guard let type = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) else { return nil }
-        let start = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: end) ?? end.addingTimeInterval(-Double(lookbackDays) * 86400)
+        let start = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: end)
+            ?? end.addingTimeInterval(-Double(lookbackDays) * 86400)
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
 
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsQuery(
@@ -303,7 +444,6 @@ enum HealthKitWorkoutSummarySyncService {
                 options: [.discreteAverage]
             ) { _, result, error in
                 if let error { return continuation.resume(throwing: error) }
-
                 let avg = result?.averageQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
                 continuation.resume(returning: avg)
             }
@@ -314,8 +454,7 @@ enum HealthKitWorkoutSummarySyncService {
 
     private static func markAgeYears(at date: Date) -> Int? {
         guard let birth = Calendar.current.date(from: markBirthDateComponents) else { return nil }
-        let years = Calendar.current.dateComponents([.year], from: birth, to: date).year
-        return years
+        return Calendar.current.dateComponents([.year], from: birth, to: date).year
     }
 
     /// Downsample heart rate to <= maxPoints evenly spaced points.
@@ -330,8 +469,7 @@ enum HealthKitWorkoutSummarySyncService {
 
         let total = max(1, end.timeIntervalSince(start))
         let rawStep = total / Double(maxPoints)
-        // keep step reasonable; round to 5s increments
-        let step = max(5, (rawStep / 5.0).rounded() * 5.0)
+        let step = max(5.0, (rawStep / 5.0).rounded() * 5.0) // round to 5s
 
         var series: [Double] = []
         series.reserveCapacity(min(maxPoints, 200))
@@ -340,19 +478,16 @@ enum HealthKitWorkoutSummarySyncService {
         var i = 0
 
         while targetTime <= end {
-            // advance i until sample time >= target
             while i < samples.count && samples[i].startDate < targetTime {
                 i += 1
             }
 
-            // choose nearest previous sample if we overshot
             let sampleIndex: Int
             if i == 0 {
                 sampleIndex = 0
             } else if i >= samples.count {
                 sampleIndex = samples.count - 1
             } else {
-                // between i-1 and i, pick whichever is closer
                 let prev = samples[i - 1].startDate
                 let next = samples[i].startDate
                 sampleIndex = (targetTime.timeIntervalSince(prev) <= next.timeIntervalSince(targetTime)) ? (i - 1) : i
@@ -371,7 +506,6 @@ enum HealthKitWorkoutSummarySyncService {
     // MARK: - Zone calculation
 
     /// v2: Zones based on HRR (Karvonen).
-    /// We use Apple-like cutoffs:
     /// Z1 <60%, Z2 60–70%, Z3 70–80%, Z4 80–90%, Z5 >=90% of HRR, offset by Resting HR.
     private static func computeZoneDurationsHRR(
         samples: [HKQuantitySample],
@@ -385,9 +519,7 @@ enum HealthKitWorkoutSummarySyncService {
         let maxHr = max(rhr + 40, hrMax)
         let hrr = max(1, maxHr - rhr)
 
-        func boundary(_ pct: Double) -> Double {
-            rhr + pct * hrr
-        }
+        func boundary(_ pct: Double) -> Double { rhr + pct * hrr }
 
         let z1Upper = boundary(0.60)
         let z2Upper = boundary(0.70)

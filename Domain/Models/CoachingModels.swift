@@ -1,11 +1,13 @@
 import Foundation
 
-/// Overall readiness/fatigue snapshot for the day.
-/// These are 1–10 or 1–5 scales that *you* control from the UI.
+// MARK: - Day Readiness
+
+/// Overall readiness / fatigue snapshot for the day.
+/// Scales are user-controlled from UI (typically 1–10 or 1–5).
 public struct DayReadiness: Equatable {
-    public let fatigue: Int           // e.g. 1–10
-    public let sleepQuality: Int      // e.g. 1–5
-    public let stress: Int            // e.g. 1–5
+    public let fatigue: Int        // e.g. 1–10
+    public let sleepQuality: Int   // e.g. 1–5
+    public let stress: Int         // e.g. 1–5
 
     public init(
         fatigue: Int = 5,
@@ -18,14 +20,21 @@ public struct DayReadiness: Equatable {
     }
 }
 
+// MARK: - Set Context
+
 /// Minimal context the coach needs to make a decision about a single set.
-/// This is deliberately generic so we can map your real models into it later.
+/// Designed to be model-agnostic so we can map from SwiftData models cleanly.
 public struct SetContext: Equatable {
-    /// Stable identifier for the exercise (can map from your Exercise/Session models later).
+
+    /// Stable identifier for the exercise (maps from catalog/exercise model later).
     public let exerciseId: UUID
 
-    /// Week number within the mesocycle (1–7, where 7 may be deload).
+    /// Week number within the mesocycle (1–N).
+    /// Keep this name for compatibility with older coach logic.
     public let weekInMeso: Int
+
+    /// Preferred alias used across the app (does not change stored schema anywhere).
+    public var weekIndex: Int { weekInMeso }
 
     /// Index of this set within the exercise for today (0-based: 0,1,2,3).
     public let setIndex: Int
@@ -33,7 +42,7 @@ public struct SetContext: Equatable {
     /// How many sets are currently planned for this exercise today.
     public let plannedSetCount: Int
 
-    /// Planned load (e.g. lbs or kg). Optional if not specified.
+    /// Planned load (lbs/kg). Optional if not specified yet.
     public let plannedLoad: Double?
 
     /// Planned reps for this set.
@@ -62,14 +71,14 @@ public struct SetContext: Equatable {
         weekInMeso: Int,
         setIndex: Int,
         plannedSetCount: Int,
-        plannedLoad: Double?,
-        plannedReps: Int?,
-        actualLoad: Double?,
-        actualReps: Int?,
-        targetRIR: Double?,
-        actualRIR: Double?,
-        painScore: Int?,
-        setFatigueScore: Int?
+        plannedLoad: Double? = nil,
+        plannedReps: Int? = nil,
+        actualLoad: Double? = nil,
+        actualReps: Int? = nil,
+        targetRIR: Double? = nil,
+        actualRIR: Double? = nil,
+        painScore: Int? = nil,
+        setFatigueScore: Int? = nil
     ) {
         self.exerciseId = exerciseId
         self.weekInMeso = weekInMeso
@@ -85,6 +94,8 @@ public struct SetContext: Equatable {
         self.setFatigueScore = setFatigueScore
     }
 }
+
+// MARK: - Recommendation Output
 
 /// How the coach thinks you should adjust based on this set.
 public enum SetAdjustment: Equatable {
@@ -116,8 +127,7 @@ public enum SetAdjustment: Equatable {
     case increaseSetCount
 }
 
-/// A single human-readable recommendation for the user + app.
-/// This is what the UI will display and what we can later write forward into future sessions.
+/// A single human-readable recommendation for the user + app UI.
 public struct SetRecommendation: Equatable {
     public let adjustment: SetAdjustment
     public let rationale: String

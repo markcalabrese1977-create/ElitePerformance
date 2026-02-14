@@ -12,6 +12,8 @@ struct ProgramDayDetailView: View {
     @State private var showingAddExerciseSheet = false
     @State private var showingApplyScopeDialog = false
     @State private var showAppliedToast = false
+    @State private var historyTarget: HistoryTarget?
+    @State private var noteTarget: NoteTarget?
 
     // MARK: - Derived ordered items
 
@@ -38,7 +40,14 @@ struct ProgramDayDetailView: View {
                             item: item,
                             onMoveUp:  { move(item, direction: -1) },
                             onMoveDown:{ move(item, direction: 1) },
-                            onDelete:  { delete(item) }
+                            onDelete:  { delete(item) },
+                            onHistoryTapped: { exerciseName in
+                                historyTarget = HistoryTarget(exerciseName: exerciseName)
+                            },
+                            onNoteTapped: {
+                                let name = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name ?? "Exercise"
+                                noteTarget = NoteTarget(exerciseId: item.exerciseId, exerciseName: name)
+                            }
                         )
                     }
                     .onMove(perform: moveItems)
@@ -87,6 +96,19 @@ struct ProgramDayDetailView: View {
                 addExercise(from: catalogExercise)
                 showingAddExerciseSheet = false
             }
+        }
+        .sheet(item: $historyTarget) { target in
+            ExerciseHistorySheet(
+                exerciseName: target.exerciseName,
+                onClose: { historyTarget = nil }
+            )
+        }
+        .sheet(item: $noteTarget) { target in
+            ExerciseNoteSheet(
+                exerciseId: target.exerciseId,
+                exerciseName: target.exerciseName,
+                onClose: { noteTarget = nil }
+            )
         }
     }
 
@@ -290,7 +312,7 @@ struct ProgramDayDetailView: View {
             guard let match = s.items.first(where: { $0.exerciseId == exerciseId }) else { continue }
 
             let pairs = zip(match.actualLoads, match.actualReps)
-            let hasActualWork = zip(match.actualLoads, match.actualReps).contains { $0 > 0 && $1 > 0 }
+            let hasActualWork = match.actualReps.contains(where: { $0 > 0 })
 
             if hasActualWork {
                 return match
@@ -534,7 +556,7 @@ struct ProgramDayDetailView: View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let weekday = calendar.component(.weekday, from: session.date) // 1=Sun...7=Sat
-
+        
         // Fetch only future sessions (predicate is safe/simple)
         let descriptor = FetchDescriptor<Session>(
             predicate: #Predicate { s in
@@ -542,35 +564,35 @@ struct ProgramDayDetailView: View {
             },
             sortBy: [SortDescriptor(\.date, order: .forward)]
         )
-
+        
         do {
             let futureSessions = try modelContext.fetch(descriptor)
-
+            
             // Only planned, same weekday, exclude the session you're editing
             let targets = futureSessions.filter { other in
                 other.id != session.id &&
                 other.status == .planned &&
                 calendar.component(.weekday, from: other.date) == weekday
             }
-
+            
             guard !targets.isEmpty else {
                 print("ℹ️ No future planned sessions matched for applyPlanChangesToBlock.")
                 return
             }
-
+            
             // Source = this Program day, ordered by 'order'
             let sourceItems = orderedItems
-
+            
             for other in targets {
                 let targetItemsSorted = other.items.sorted { $0.order < $1.order }
-
+                
                 // 1) Delete extras
                 if targetItemsSorted.count > sourceItems.count {
                     for extra in targetItemsSorted[sourceItems.count...] {
                         modelContext.delete(extra)
                     }
                 }
-
+                
                 // 2) Add missing
                 if targetItemsSorted.count < sourceItems.count {
                     for idx in targetItemsSorted.count..<sourceItems.count {
@@ -588,17 +610,17 @@ struct ProgramDayDetailView: View {
                         other.items.append(newItem)
                     }
                 }
-
+                
                 // 3) Align & copy by order
                 let aligned = other.items.sorted { $0.order < $1.order }
-
+                
                 for (idx, src) in sourceItems.enumerated() {
                     guard idx < aligned.count else { continue }
                     let dst = aligned[idx]
-
+                    
                     dst.order = idx + 1
                     dst.exerciseId = src.exerciseId
-
+                    
                     dst.targetReps = src.targetReps
                     dst.targetSets = src.targetSets
                     dst.targetRIR = src.targetRIR
@@ -607,7 +629,7 @@ struct ProgramDayDetailView: View {
                     dst.plannedLoadsBySet = src.plannedLoadsBySet
                 }
             }
-
+            
             try modelContext.save()
             print("✅ Applied plan changes from \(session.date) to \(targets.count) future planned sessions.")
         } catch {
@@ -615,7 +637,15 @@ struct ProgramDayDetailView: View {
         }
     }
 }
-
+private struct HistoryTarget: Identifiable {
+    let id = UUID()
+    let exerciseName: String
+}
+private struct NoteTarget: Identifiable {
+    let id = UUID()
+    let exerciseId: String
+    let exerciseName: String
+}
 // MARK: - Per-exercise plan row
 
 private struct ProgramExercisePlanRow: View {
@@ -625,6 +655,8 @@ private struct ProgramExercisePlanRow: View {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onDelete: () -> Void
+    let onHistoryTapped: (_ exerciseName: String) -> Void
+    let onNoteTapped: () -> Void
 
     /// Local text versions of loads so 0.5 / 2.5 / 47.5 all work consistently.
     @State private var loadTexts: [String] = []
@@ -669,6 +701,27 @@ private struct ProgramExercisePlanRow: View {
             Spacer()
 
             HStack(spacing: 4) {
+                Button {
+                    onHistoryTapped(displayName)
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.borderless)
+                .padding(6)
+                .background(Color.black.opacity(0.05))
+                .clipShape(Circle())
+
+                Button {
+                    onNoteTapped()
+                } label: {
+                    Image(systemName: noteIconName)
+                }
+                .buttonStyle(.borderless)
+                .padding(6)
+                .background(Color.black.opacity(0.05))
+                .clipShape(Circle())
+                .accessibilityLabel("Exercise note")
+                
                 Button(action: onMoveUp) {
                     Image(systemName: "chevron.up")
                 }
@@ -687,6 +740,10 @@ private struct ProgramExercisePlanRow: View {
         }
     }
 
+    private var noteIconName: String {
+        ExerciseNotesStore.hasNote(exerciseId: item.exerciseId) ? "note.text" : "note"
+    }
+    
     private var planRow: some View {
         HStack(spacing: 12) {
 

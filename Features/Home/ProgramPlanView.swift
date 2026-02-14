@@ -17,6 +17,16 @@ struct ProgramPlanView: View {
 
     @State private var didAttemptRealign = false
 
+    // Swipe delete (surgical)
+    @State private var sessionPendingDelete: Session?
+    @State private var showDeleteConfirm = false
+
+    // Add session (date-targeted)
+    @State private var showAddSessionSheet = false
+    @State private var newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var addSessionErrorMessage: String?
+    @State private var showAddSessionError = false
+
     private var anchorDate: Date {
         if anchorDateEpoch > 0 {
             return Date(timeIntervalSince1970: anchorDateEpoch)
@@ -57,7 +67,23 @@ struct ProgramPlanView: View {
                             NavigationLink {
                                 ProgramDayDetailView(session: session)
                             } label: {
-                                programRow(for: session, computedWeek: weekIndex(for: session.date), computedDay: dayIndexInWeek(for: session.date))
+                                programRow(
+                                    for: session,
+                                    computedWeek: weekIndex(for: session.date),
+                                    computedDay: dayIndexInWeek(for: session.date)
+                                )
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                // SAFETY: only allow deleting "junk" planned sessions (planned + empty).
+                                // This is the surgical tool for cleaning duplicates without risking real history.
+                                if session.status == .planned && session.items.isEmpty {
+                                    Button(role: .destructive) {
+                                        sessionPendingDelete = session
+                                        showDeleteConfirm = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -67,9 +93,77 @@ struct ProgramPlanView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    addExtraSession()
+                    // default to tomorrow on open
+                    newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    showAddSessionSheet = true
                 } label: {
                     Label("Add Session", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showAddSessionSheet) {
+            NavigationStack {
+                Form {
+                    Section("Create session for date") {
+                        DatePicker(
+                            "Date",
+                            selection: $newSessionDate,
+                            displayedComponents: [.date]
+                        )
+                    }
+
+                    Section("Quick pick") {
+                        Button("Tomorrow") {
+                            newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                        }
+                        Button("Thursday (next occurrence)") {
+                            newSessionDate = nextWeekday(.thursday)
+                        }
+                    }
+
+                    Section {
+                        Button("Create") {
+                            addSession(for: newSessionDate)
+                        }
+                    }
+
+                    // Optional: keep legacy behavior accessible for debugging / power use.
+                    Section("Advanced") {
+                        Button("Append extra session to end of meso") {
+                            addExtraSession()
+                            showAddSessionSheet = false
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle("Add Session")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showAddSessionSheet = false }
+                    }
+                }
+            }
+        }
+        .alert("Couldn’t add session", isPresented: $showAddSessionError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(addSessionErrorMessage ?? "Unknown error")
+        }
+        .confirmationDialog(
+            "Delete this planned session?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deletePendingSession()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Group {
+                if let s = sessionPendingDelete {
+                    Text("\(s.date.formatted(date: .abbreviated, time: .omitted)) • \(s.items.count) exercise\(s.items.count == 1 ? "" : "s")")
+                } else {
+                    Text("")
                 }
             }
         }
@@ -133,23 +227,30 @@ struct ProgramPlanView: View {
 
         do {
             try modelContext.save()
-            print("✅ Realigned stored Session.weekInMeso using meso anchor (W\(effectiveAnchorWeek)D\(effectiveAnchorDay)).")
+            print("✅ Realigned stored Session.weekIndex using meso anchor (W\(effectiveAnchorWeek)D\(effectiveAnchorDay)).")
         } catch {
             print("⚠️ Failed to realign weekIndex: \(error)")
         }
     }
 
-    // MARK: - Extra Session
+    // MARK: - Add Session (date-targeted)
 
-    /// Adds an extra planned session for "today" in the current week.
-    private func addExtraSession() {
+    private func addSession(for date: Date) {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let day = calendar.startOfDay(for: date)
 
-        let computedWeek = weekIndex(for: today)
+        // Block duplicates with an explicit alert (no silent failure).
+        let alreadyExists = sessions.contains { calendar.isDate($0.date, inSameDayAs: day) }
+        if alreadyExists {
+            addSessionErrorMessage = "A session already exists on \(day.formatted(date: .abbreviated, time: .omitted))."
+            showAddSessionError = true
+            return
+        }
+
+        let computedWeek = weekIndex(for: day)
 
         let newSession = Session(
-            date: today,
+            date: day,
             status: .planned,
             readinessStars: 0,
             sessionNotes: nil,
@@ -162,10 +263,97 @@ struct ProgramPlanView: View {
 
         do {
             try modelContext.save()
-            print("✅ Added extra session on \(today) (week \(computedWeek))")
+            Haptics.success()
+            print("✅ Added session on \(day) (week \(computedWeek))")
+            showAddSessionSheet = false
+        } catch {
+            addSessionErrorMessage = "Save failed: \(error)"
+            showAddSessionError = true
+            print("⚠️ Failed to save session: \(error)")
+        }
+    }
+
+    private enum Weekday {
+        case thursday
+
+        /// Calendar weekday: 1=Sunday ... 7=Saturday
+        var calendarValue: Int {
+            switch self {
+            case .thursday: return 5
+            }
+        }
+    }
+
+    private func nextWeekday(_ weekday: Weekday) -> Date {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        let target = weekday.calendarValue
+        let current = cal.component(.weekday, from: today)
+
+        var delta = target - current
+        if delta <= 0 { delta += 7 } // next occurrence (not today)
+
+        return cal.date(byAdding: .day, value: delta, to: today) ?? today
+    }
+
+    // MARK: - Legacy: Extra Session (append-to-end)
+
+    /// Adds an extra planned session AFTER the last scheduled session date (not "today").
+    /// This prevents accidental spam duplicates on the same day.
+    private func addExtraSession() {
+        let calendar = Calendar.current
+
+        // Start from the last scheduled day (or today if none)
+        let lastDate = sessions.map(\.date).max() ?? Date()
+        var candidate = calendar.startOfDay(for: lastDate)
+
+        // Move forward until we find a day with no existing session
+        // (so one tap = one new day)
+        for _ in 0..<30 {
+            candidate = calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
+            let alreadyExists = sessions.contains { calendar.isDate($0.date, inSameDayAs: candidate) }
+            if !alreadyExists { break }
+        }
+
+        let computedWeek = weekIndex(for: candidate)
+
+        let newSession = Session(
+            date: candidate,
+            status: .planned,
+            readinessStars: 0,
+            sessionNotes: nil,
+            weekIndex: computedWeek,
+            items: [],
+            completedAt: nil
+        )
+
+        modelContext.insert(newSession)
+
+        do {
+            try modelContext.save()
+            Haptics.success()
+            print("✅ Added extra session on \(candidate) (week \(computedWeek))")
         } catch {
             print("⚠️ Failed to save extra session: \(error)")
         }
+    }
+
+    // MARK: - Delete handler
+
+    private func deletePendingSession() {
+        guard let s = sessionPendingDelete else { return }
+
+        modelContext.delete(s)
+
+        do {
+            try modelContext.save()
+            Haptics.success()
+        } catch {
+            print("⚠️ Delete failed: \(error)")
+        }
+
+        sessionPendingDelete = nil
     }
 
     // MARK: - Empty State

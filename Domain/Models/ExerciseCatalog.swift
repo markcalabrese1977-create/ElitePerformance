@@ -29,6 +29,62 @@ struct CatalogExercise: Identifiable, Hashable, Codable {
 /// SessionItem.exerciseId MUST always be one of these ids.
 struct ExerciseCatalog {
 
+    // MARK: - Custom Exercises (UserDefaults)
+
+    private static func currentMode() -> AppMode {
+        let raw = UserDefaults.standard.string(forKey: AppStorageKeys.appMode) ?? AppMode.mark.rawValue
+        return AppMode(rawValue: raw) ?? .mark
+    }
+
+    private static func customKey(for mode: AppMode) -> String {
+        "custom_exercises_\(mode.rawValue)_v1"
+    }
+
+    static func customExercises(mode: AppMode? = nil) -> [CatalogExercise] {
+        let m = mode ?? currentMode()
+        guard let data = UserDefaults.standard.data(forKey: customKey(for: m)) else { return [] }
+        do {
+            return try JSONDecoder().decode([CatalogExercise].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
+    private static func saveCustom(_ list: [CatalogExercise], mode: AppMode? = nil) {
+        let m = mode ?? currentMode()
+        do {
+            let data = try JSONEncoder().encode(list)
+            UserDefaults.standard.set(data, forKey: customKey(for: m))
+            NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
+        } catch { }
+    }
+
+    @discardableResult
+    static func addCustomExercise(
+        name: String,
+        primaryMuscle: MuscleGroup,
+        isCompound: Bool
+    ) -> CatalogExercise {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ex = CatalogExercise(
+            id: "custom_" + UUID().uuidString.lowercased(),
+            name: trimmed,
+            primaryMuscle: primaryMuscle,
+            isCompound: isCompound
+        )
+        var list = customExercises()
+        list.append(ex)
+        list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        saveCustom(list)
+        return ex
+    }
+
+    static func deleteCustomExercises(ids: [String]) {
+        var list = customExercises()
+        list.removeAll { ids.contains($0.id) }
+        saveCustom(list)
+    }
+    
     // MARK: - Chest / Push (horizontal / vertical)
 
     static let benchPress = CatalogExercise(
@@ -38,6 +94,20 @@ struct ExerciseCatalog {
         isCompound: true
     )
 
+    static let closeGripBenchPress = CatalogExercise(
+        id: "close_grip_bench_press",
+        name: "Close Grip Bench Press",
+        primaryMuscle: .chest,
+        isCompound: true
+    )
+
+    static let pinPress = CatalogExercise(
+        id: "pin_press",
+        name: "Pin Press",
+        primaryMuscle: .chest,
+        isCompound: true
+    )
+    
     static let inclineDumbbellPress = CatalogExercise(
         id: "incline_dumbbell_press",
         name: "Incline Dumbbell Press",
@@ -115,6 +185,13 @@ struct ExerciseCatalog {
         isCompound: false
     )
 
+    static let declineCableCrunch = CatalogExercise(
+        id: "decline_cable_crunch",
+        name: "Decline Cable Crunch",
+        primaryMuscle: .core,
+        isCompound: false
+    )
+    
     static let hangingStraightLegRaise = CatalogExercise(
         id: "hanging_straight_leg_raise",
         name: "Hanging Straight Leg Raise",
@@ -261,7 +338,13 @@ struct ExerciseCatalog {
         primaryMuscle: .calves,
         isCompound: false
     )
-
+    
+    static let sledCalfPress = CatalogExercise(
+        id: "sled_calf_press",
+        name: "Sled Calf Press (Leg Press / Hack Squat)",
+        primaryMuscle: .calves,
+        isCompound: false
+    )
     // MARK: - Back / Pull
 
     static let wideGripPulldown = CatalogExercise(
@@ -360,9 +443,11 @@ struct ExerciseCatalog {
     // MARK: - All exercises array
 
     /// Master list used by lookups throughout the app.
-    static let all: [CatalogExercise] = [
+    static var builtIn: [CatalogExercise] = [
         // Chest / push
         benchPress,
+        closeGripBenchPress,
+        pinPress,
         inclineDumbbellPress,
         seatedCableFly,
         dumbbellPress,
@@ -378,6 +463,7 @@ struct ExerciseCatalog {
         // Core
         pallofPress,
         cableRopeCrunch,
+        declineCableCrunch,
         hangingStraightLegRaise,
         hangingKneeRaise,
         deadBug,
@@ -403,6 +489,7 @@ struct ExerciseCatalog {
         smithMachineCalves,
         seatedCalfRaise,
         legPressCalfRaise,
+        sledCalfPress,
 
         // Back / pull
         wideGripPulldown,
@@ -423,5 +510,7 @@ struct ExerciseCatalog {
         ezBarReverseCurl,
         singleArmCableCurl
     ]
-    
+    static var all: [CatalogExercise] {
+        builtIn + customExercises()
+    }
 }

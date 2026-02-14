@@ -53,7 +53,7 @@ public struct MarkHypertrophyCoachProfile: CoachProfile {
         }
 
         // Determine if we're in late meso 1-RIR bias mode.
-        let isLateMeso = context.weekInMeso >= lateMesoStartWeek
+        let isLateMeso = context.weekIndex >= lateMesoStartWeek
 
         // If RIR is missing, don't add extra chatter.
         // Let the plan-vs-actual coaching handle the message.

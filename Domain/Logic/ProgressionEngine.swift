@@ -327,7 +327,7 @@ struct ChestArmsLowBackMesoProfile {
         primaryLoadIncrement: 5.0,      // 5 lb jumps (BB), or equivalent
         secondaryLoadIncrement: 2.5,    // more conservative option
         minSets: 3,
-        maxSets: 4,
+        maxSets: 6,
         allowSetIncrease: true,
         allowLoadDecrease: true,
         isLowBackOrStability: false
@@ -340,7 +340,7 @@ struct ChestArmsLowBackMesoProfile {
         primaryLoadIncrement: 5.0,
         secondaryLoadIncrement: 2.5,
         minSets: 2,
-        maxSets: 4,
+        maxSets: 6,
         allowSetIncrease: true,
         allowLoadDecrease: true,
         isLowBackOrStability: false
@@ -353,7 +353,7 @@ struct ChestArmsLowBackMesoProfile {
         primaryLoadIncrement: 10.0,     // Larger jumps, but used less often
         secondaryLoadIncrement: 5.0,
         minSets: 3,
-        maxSets: 4,
+        maxSets: 6,
         allowSetIncrease: false,        // Volume is already high – no auto set add
         allowLoadDecrease: true,
         isLowBackOrStability: false
@@ -366,7 +366,7 @@ struct ChestArmsLowBackMesoProfile {
         primaryLoadIncrement: 2.5,
         secondaryLoadIncrement: 1.0,
         minSets: 2,
-        maxSets: 4,
+        maxSets: 6,
         allowSetIncrease: true,
         allowLoadDecrease: true,
         isLowBackOrStability: false
@@ -380,7 +380,7 @@ struct ChestArmsLowBackMesoProfile {
         primaryLoadIncrement: 0.0,      // We effectively never "chase" heavier here
         secondaryLoadIncrement: 2.5,
         minSets: 2,
-        maxSets: 3,
+        maxSets: 6,
         allowSetIncrease: false,
         allowLoadDecrease: true,
         isLowBackOrStability: true

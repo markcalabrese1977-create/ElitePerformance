@@ -24,13 +24,54 @@ struct HistorySummaryView: View {
         HistorySummaryBuilder.build(from: completedSessions)
     }
 
-    /// Top lifts by best e1RM.
-    private var topLifts: [ExerciseSummary] {
+    // MARK: - Top Lifts Split (Compounds vs Accessories)
+
+    /// Top compounds by best e1RM.
+    private var topCompounds: [ExerciseSummary] {
         Array(
             exerciseSummaries
+                .filter { isCompound($0) }
                 .sorted { $0.bestE1RM > $1.bestE1RM }
                 .prefix(5)
         )
+    }
+
+    /// Top accessories by best e1RM.
+    private var topAccessories: [ExerciseSummary] {
+        Array(
+            exerciseSummaries
+                .filter { !isCompound($0) }
+                .sorted { $0.bestE1RM > $1.bestE1RM }
+                .prefix(5)
+        )
+    }
+
+    /// Conservative compound classifier:
+    /// - Uses exercise name keywords (fast + reliable enough for MVP)
+    /// - Easy to refine later by exerciseId if needed.
+    private func isCompound(_ summary: ExerciseSummary) -> Bool {
+        let n = summary.name.lowercased()
+
+        // Big presses
+        if n.contains("bench") { return true }
+        if n.contains("overhead") || n.contains("shoulder press") || n == "ohp" { return true }
+
+        // Big squats / leg patterns
+        if n.contains("squat") { return true }            // includes hack squat
+        if n.contains("leg press") { return true }
+        if n.contains("lunge") { return true }
+
+        // Hinge / posterior
+        if n.contains("deadlift") { return true }
+        if n.contains("rdl") || n.contains("romanian") { return true }
+        if n.contains("hip thrust") { return true }
+
+        // Big pulls (arguable, but generally treated as compound in your program)
+        if n.contains("row") { return true }
+        if n.contains("pulldown") || n.contains("pull down") { return true }
+        if n.contains("pull-up") || n.contains("pull up") || n.contains("chin") { return true }
+
+        return false
     }
 
     /// Overall totals derived from exercise summaries.
@@ -58,7 +99,7 @@ struct HistorySummaryView: View {
                 } else {
                     overallSection
 
-                    if !topLifts.isEmpty {
+                    if !topCompounds.isEmpty || !topAccessories.isEmpty {
                         topLiftsSection
                     }
 
@@ -128,48 +169,66 @@ struct HistorySummaryView: View {
     }
 
     private var topLiftsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Top lifts (best e1RM)")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
 
-            ForEach(topLifts) { summary in
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(summary.name)
-                            .font(.subheadline.bold())
+            if !topCompounds.isEmpty {
+                Text("Top lifts — Compounds (best e1RM)")
+                    .font(.headline)
 
-                        Text(summary.primaryMuscle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text("\(summary.totalSessions) sessions · \(summary.totalSets) sets · \(summary.totalReps) reps")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(String(format: "%.0f", summary.bestE1RM))
-                            .font(.title3.bold())
-                        Text("est. 1RM")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        if let last = summary.lastTrained {
-                            Text("Last: \(HistorySummaryView.shortDateFormatter.string(from: last))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                ForEach(topCompounds) { summary in
+                    topLiftRow(summary)
                 }
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.secondarySystemBackground))
-                )
+            }
+
+            if !topAccessories.isEmpty {
+                Text("Top lifts — Accessories (best e1RM)")
+                    .font(.headline)
+                    .padding(.top, topCompounds.isEmpty ? 0 : 8)
+
+                ForEach(topAccessories) { summary in
+                    topLiftRow(summary)
+                }
             }
         }
+    }
+
+    private func topLiftRow(_ summary: ExerciseSummary) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.name)
+                    .font(.subheadline.bold())
+
+                Text(summary.primaryMuscle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("\(summary.totalSessions) sessions · \(summary.totalSets) sets · \(summary.totalReps) reps")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "%.0f", summary.bestE1RM))
+                    .font(.title3.bold())
+                Text("est. 1RM")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if let last = summary.lastTrained {
+                    Text("Last: \(HistorySummaryView.shortDateFormatter.string(from: last))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
+    
     }
 
     private var allExercisesSection: some View {

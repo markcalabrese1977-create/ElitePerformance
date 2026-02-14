@@ -1,0 +1,6 @@
+
+# Xcode user data (never commit)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout

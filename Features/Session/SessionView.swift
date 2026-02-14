@@ -22,28 +22,22 @@ struct SessionView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel: SessionScreenViewModel
     @State private var hasDisabledIdleTimer = false
-
-    /// Unified sheet state: swap, recap, or exercise history.
+    @AppStorage("warmup.isHidden.v1") private var isWarmupHidden = false
+    // Unified sheet state (swap / recap / history / note / add)
     @State private var activeSheet: ActiveSheet?
     @State private var pendingSwapForPropagation: (from: String, to: String, name: String)?
     @State private var showSwapPropagationDialog = false
 
     // MARK: - Initializers
 
-    /// Preferred initializer when you already have a view model.
     init(viewModel: SessionScreenViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
-    /// Convenience initializer for existing call sites:
-    /// `SessionView(session: someSession)`
     init(session: Session) {
-        _viewModel = StateObject(
-            wrappedValue: SessionScreenViewModel(session: session)
-        )
+        _viewModel = StateObject(wrappedValue: SessionScreenViewModel(session: session))
     }
 
-    /// Preview-only convenience initializer.
     init() {
         _viewModel = StateObject(wrappedValue: .mock)
     }
@@ -55,24 +49,49 @@ struct SessionView: View {
             VStack(spacing: 16) {
                 header
 
-                // ✅ Warm-up card (shows above exercise cards)
+                // ✅ Warm-up card (toggle hide/show)
                 if let first = viewModel.exercises.first {
-                    WarmupCardView(
-                        sessionKey: warmupSessionKey,
-                        firstExerciseName: first.name,
-                        firstExercisePlannedLoad: (first.sets.first?.plannedLoad ?? 0) > 0
-                            ? first.sets.first?.plannedLoad
-                            : nil,
-                        rounding: warmupRounding(for: first.name)
-                    )
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Warm-up")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button {
+                                isWarmupHidden.toggle()
+                            } label: {
+                                Label(
+                                    isWarmupHidden ? "Show warm-up" : "Hide warm-up",
+                                    systemImage: isWarmupHidden ? "chevron.down" : "chevron.up"
+                                )
+                                .labelStyle(.iconOnly)
+                                .font(.caption)
+                                .padding(6)
+                            }
+                            .background(Color.black.opacity(0.05))
+                            .clipShape(Circle())
+                            .accessibilityLabel(isWarmupHidden ? "Show warm-up" : "Hide warm-up")
+                        }
+
+                        if !isWarmupHidden {
+                            WarmupCardView(
+                                sessionKey: warmupSessionKey,
+                                firstExerciseName: first.name,
+                                firstExercisePlannedLoad: (first.sets.first?.plannedLoad ?? 0) > 0
+                                    ? first.sets.first?.plannedLoad
+                                    : nil,
+                                rounding: warmupRounding(for: first.name)
+                            )
+                        }
+                    }
                 }
 
                 if viewModel.isSessionComplete {
                     completionBanner
                 }
 
-                // Use enumerated so we have a stable index for swapping,
-                // but still bind into the @Published exercises array.
                 ForEach(Array(viewModel.exercises.enumerated()), id: \.element.id) { index, exercise in
                     SessionExerciseCardView(
                         exercise: $viewModel.exercises[index],
@@ -84,17 +103,19 @@ struct SessionView: View {
                             )
                         },
                         onSkipSet: { _ in
-                            // Skip changes are already applied to the binding;
-                            // we just need to persist them.
                             viewModel.persist(using: modelContext)
                         },
                         onSwapTapped: {
-                            activeSheet = .swap(
-                                SwapTarget(exerciseIndex: index)
-                            )
+                            activeSheet = .swap(SwapTarget(exerciseIndex: index))
                         },
                         onHistoryTapped: {
                             activeSheet = .history(exerciseName: exercise.name)
+                        },
+                        onNoteTapped: {
+                            activeSheet = .note(
+                                exerciseId: exercise.exerciseId,
+                                exerciseName: exercise.name
+                            )
                         }
                     )
                 }
@@ -105,7 +126,19 @@ struct SessionView: View {
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+
+                // ✅ Session Complete → Recap → persistCompletion (History + Apple Health)
+                Button {
+                    let recap = viewModel.buildRecap()
+                    activeSheet = .recap(recap)
+                } label: {
+                    Label("Complete", systemImage: "checkmark.circle")
+                }
+                .disabled(!viewModel.isSessionComplete)
+                .accessibilityLabel("Complete session")
+
+                // Add exercise
                 Button {
                     activeSheet = .addExercise
                 } label: {
@@ -114,79 +147,21 @@ struct SessionView: View {
                 .accessibilityLabel("Add exercise")
             }
         }
-        // Keep screen awake while this view is visible
-        .onAppear {
-            if !hasDisabledIdleTimer {
-                UIApplication.shared.isIdleTimerDisabled = true
-                hasDisabledIdleTimer = true
+        .safeAreaInset(edge: .bottom) {
+            if viewModel.isSessionComplete {
+                SessionCompleteBar(
+                    isEnabled: true,
+                    onComplete: {
+                        let recap = viewModel.buildRecap()
+                        activeSheet = .recap(recap)
+                    }
+                )
             }
         }
-        .onDisappear {
-            if hasDisabledIdleTimer {
-                UIApplication.shared.isIdleTimerDisabled = false
-                hasDisabledIdleTimer = false
-            }
-        }
+        .onAppear(perform: disableIdleTimerIfNeeded)
+        .onDisappear(perform: restoreIdleTimerIfNeeded)
         .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .addExercise:
-                AddExerciseSheet(
-                    onSelect: { catalogExercise in
-                        viewModel.addExercise(catalogExercise, context: modelContext)
-                        activeSheet = nil
-                    },
-                    onCancel: {
-                        activeSheet = nil
-                    }
-                )
-            
-            case .swap(let target):
-                ExerciseSwapSheet(
-                    current: viewModel.exercises[target.exerciseIndex],
-                    onSelect: { catalogExercise in
-                        // Capture the original + new exercise IDs
-                        let fromId = viewModel.exercises[target.exerciseIndex].exerciseId
-                        let toId = catalogExercise.id
-                        let toName = catalogExercise.name
-
-                        viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise)
-                        viewModel.persist(using: modelContext)
-                        activeSheet = nil
-
-                        // Offer optional propagation to future planned sessions
-                        pendingSwapForPropagation = (from: fromId, to: toId, name: toName)
-                        showSwapPropagationDialog = true
-                    },
-                    onCancel: {
-                        activeSheet = nil
-                    }
-                )
-
-            case .recap(let recap):
-                SessionRecapSheet(
-                    recap: recap,
-                    onDone: {
-                        do {
-                            try viewModel.persistCompletion(
-                                using: modelContext,
-                                recap: recap
-                            )
-                        } catch {
-                            // For now just log – we can add user-visible error later.
-                            print("Failed to persist completion: \(error)")
-                        }
-                        activeSheet = nil
-                    }
-                )
-
-            case .history(let exerciseName):
-                ExerciseHistorySheet(
-                    exerciseName: exerciseName,
-                    onClose: {
-                        activeSheet = nil
-                    }
-                )
-            }
+            sheetView(for: sheet)
         }
         .confirmationDialog(
             "Swapped to \(pendingSwapForPropagation?.name ?? "new exercise")",
@@ -207,6 +182,80 @@ struct SessionView: View {
                 pendingSwapForPropagation = nil
             }
         }
+    }
+
+    // MARK: - Sheets
+
+    @ViewBuilder
+    private func sheetView(for sheet: ActiveSheet) -> some View {
+        switch sheet {
+        case .addExercise:
+            AddExercisePickerSheet(
+                onSelect: { catalogExercise in
+                    viewModel.addExercise(catalogExercise, context: modelContext)
+                    activeSheet = nil
+                },
+                onCancel: { activeSheet = nil }
+            )
+
+        case .swap(let target):
+            ExerciseSwapSheet(
+                current: viewModel.exercises[target.exerciseIndex],
+                onSelect: { catalogExercise in
+                    let fromId = viewModel.exercises[target.exerciseIndex].exerciseId
+                    let toId = catalogExercise.id
+                    let toName = catalogExercise.name
+
+                    viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise)
+                    viewModel.persist(using: modelContext)
+                    activeSheet = nil
+
+                    pendingSwapForPropagation = (from: fromId, to: toId, name: toName)
+                    showSwapPropagationDialog = true
+                },
+                onCancel: { activeSheet = nil }
+            )
+
+        case .recap(let recap):
+            SessionRecapSheet(
+                recap: recap,
+                onDone: {
+                    do {
+                        try viewModel.persistCompletion(using: modelContext, recap: recap)
+                    } catch {
+                        print("Failed to persist completion: \(error)")
+                    }
+                    activeSheet = nil
+                }
+            )
+
+        case .history(let exerciseName):
+            ExerciseHistorySheet(
+                exerciseName: exerciseName,
+                onClose: { activeSheet = nil }
+            )
+
+        case .note(let exerciseId, let exerciseName):
+            ExerciseNoteSheet(
+                exerciseId: exerciseId,
+                exerciseName: exerciseName,
+                onClose: { activeSheet = nil }
+            )
+        }
+    }
+
+    // MARK: - Idle Timer
+
+    private func disableIdleTimerIfNeeded() {
+        guard !hasDisabledIdleTimer else { return }
+        UIApplication.shared.isIdleTimerDisabled = true
+        hasDisabledIdleTimer = true
+    }
+
+    private func restoreIdleTimerIfNeeded() {
+        guard hasDisabledIdleTimer else { return }
+        UIApplication.shared.isIdleTimerDisabled = false
+        hasDisabledIdleTimer = false
     }
 
     // MARK: - Header / Banner
@@ -230,18 +279,13 @@ struct SessionView: View {
     }
 
     private var coachCue: String {
-        // Look across all exercises in this session
         let maxSets = viewModel.exercises.map(\.targetSets).max() ?? 3
-
-        if maxSets >= 4 {
-            return "3 to grow, 1 to know: use the 4th set as your tester if recovery is solid."
-        } else {
-            return "3 to grow: 3 solid working sets. Add a tester only on good days."
-        }
+        return maxSets >= 4
+            ? "3 to grow, 1 to know: use the 4th set as your tester if recovery is solid."
+            : "3 to grow: 3 solid working sets. Add a tester only on good days."
     }
 
     private var warmupSessionKey: String {
-        // Stable per-session key for AppStorage checkmarks
         let raw = "\(viewModel.title)_\(viewModel.subtitle)"
         return raw
             .replacingOccurrences(of: " ", with: "")
@@ -254,7 +298,7 @@ struct SessionView: View {
         if n.contains("cable") || n.contains("machine") { return .machine }
         return .barbell
     }
-    
+
     private var completionBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
@@ -274,8 +318,7 @@ struct SessionView: View {
             Spacer()
 
             Button {
-                let recap = viewModel.buildRecap()
-                activeSheet = .recap(recap)
+                activeSheet = .recap(viewModel.buildRecap())
             } label: {
                 Text("Recap")
                     .font(.caption2)
@@ -304,6 +347,7 @@ private enum ActiveSheet: Identifiable {
     case swap(SwapTarget)
     case recap(SessionRecap)
     case history(exerciseName: String)
+    case note(exerciseId: String, exerciseName: String)
     case addExercise
 
     var id: String {
@@ -314,6 +358,8 @@ private enum ActiveSheet: Identifiable {
             return "recap-\(recap.id)"
         case .history(let exerciseName):
             return "history-\(exerciseName)"
+        case .note(let exerciseId, _):
+            return "note-\(exerciseId)"
         case .addExercise:
             return "add-exercise"
         }
@@ -335,6 +381,7 @@ private struct SessionExerciseCardView: View {
     let onSkipSet: (_ setIndex: Int) -> Void
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
+    let onNoteTapped: () -> Void
 
     // MARK: - Coach v5 (ProgressionEngine) helpers
 
@@ -423,7 +470,7 @@ private struct SessionExerciseCardView: View {
 
         guard !snapshots.isEmpty else { return nil }
 
-        let weekIndex = exercise.weekInMeso
+        let weekIndex = exercise.weekIndex
         let phase = ChestArmsLowBackMesoProfile.phase(forWeek: weekIndex)
         let config = ChestArmsLowBackMesoProfile.config(for: cluster)
 
@@ -474,6 +521,14 @@ private struct SessionExerciseCardView: View {
         }
     }
     
+    private var hasExerciseNote: Bool {
+        ExerciseNotesStore.hasNote(exerciseId: exercise.exerciseId)
+    }
+
+    private var noteIconName: String {
+        hasExerciseNote ? "note.text" : "note"
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
@@ -505,6 +560,15 @@ private struct SessionExerciseCardView: View {
                         .background(Color.black.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
 
+                    Button(action: onNoteTapped) {
+                        Image(systemName: noteIconName)
+                            .font(.caption)
+                            .padding(6)
+                    }
+                    .background(Color.black.opacity(0.05))
+                    .clipShape(Circle())
+                    .accessibilityLabel(hasExerciseNote ? "View note" : "Add note")
+                    
                     Button(action: onHistoryTapped) {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.caption)
@@ -675,6 +739,19 @@ private struct SessionSetRowView: View {
                         .opacity(isLocked ? 0.6 : 1.0)
                 }
 
+                // RP toggle
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("RP")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Toggle("", isOn: $uiSet.usedRestPause)
+                        .labelsHidden()
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                }
+                .frame(width: 44)
+                
                 Spacer()
 
                 // Primary actions: Log + Skip
@@ -728,6 +805,14 @@ private struct SessionSetRowView: View {
                         }
                     }
 
+                    // RP pattern text (optional)
+                    if uiSet.usedRestPause {
+                        TextField("RP pattern (e.g., 10+4+3)", text: $uiSet.restPausePattern)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isLocked)
+                            .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                    
                     // Explicit Skip button
                     Button {
                         guard !isLocked else { return }
@@ -775,10 +860,14 @@ private struct SessionSetRowView: View {
         uiSet.actualReps = nil
         uiSet.actualRIR = nil
 
+        // Clear RP so skipped sets never carry RP state/pattern
+        uiSet.usedRestPause = false
+        uiSet.restPausePattern = ""
+
         // Reset text fields away from "real" numbers
         uiSet.actualLoadText = "0"
         uiSet.actualRepsText = "\(uiSet.plannedReps)"
-        actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
+        actualRIRText = uiSet.plannedRIR.map(String.init) ?? ""
 
         // 🔁 Tell the parent so it can persist the change
         onSkip()
@@ -786,21 +875,27 @@ private struct SessionSetRowView: View {
 
     /// Restore inputs to the planned baseline when you "Edit set".
     private func resetToPlan() {
+        // Clear actual numeric values (so UI falls back to plan)
         uiSet.actualLoad = nil
         uiSet.actualReps = nil
         uiSet.actualRIR = nil
 
+        // Clear RP so "Edit set" always starts clean
+        uiSet.usedRestPause = false
+        uiSet.restPausePattern = ""
+
         uiSet.actualLoadText = uiSet.plannedLoad == 0
             ? "0"
             : String(format: "%.1f", uiSet.plannedLoad)
+
         uiSet.actualRepsText = "\(uiSet.plannedReps)"
-        actualRIRText = uiSet.plannedRIR.map { String($0) } ?? ""
+        actualRIRText = uiSet.plannedRIR.map(String.init) ?? ""
     }
 }
 
 // MARK: - Swap Sheet
 
-private struct AddExerciseSheet: View {
+private struct AddExercisePickerSheet: View {
     let onSelect: (CatalogExercise) -> Void
     let onCancel: () -> Void
 
@@ -1017,7 +1112,7 @@ final class SessionScreenViewModel: ObservableObject {
 
         let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
         let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
-        exercise.detail = "Week \(exercise.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
+        exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
         exercise.coachMessage = ""
 
         exercises[index] = exercise
@@ -1075,13 +1170,13 @@ final class SessionScreenViewModel: ObservableObject {
 
         let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
         let repsLabel = RepRangeRulebook.display(targetReps: defaultReps, range: range)
-        let detail = "Week \(session.weekInMeso) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(defaultRIR)"
+        let detail = "Week \(session.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(defaultRIR)"
 
         let uiExercise = UISessionExercise(
             exerciseId: catalogExercise.id,
             name: catalogExercise.name,
             detail: detail,
-            weekInMeso: session.weekInMeso,
+            weekInMeso: session.weekIndex,
             targetSets: defaultSets,
             sets: uiSets,
             coachMessage: ""
@@ -1127,9 +1222,11 @@ final class SessionScreenViewModel: ObservableObject {
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
 
+                // Planned
                 item.plannedRepsBySet[idx]  = uiSet.plannedReps
                 item.plannedLoadsBySet[idx] = uiSet.plannedLoad
 
+                // Actuals (only persist meaningful values)
                 if let reps = uiSet.actualReps, reps > 0 {
                     item.actualReps[idx] = reps
                 }
@@ -1140,9 +1237,14 @@ final class SessionScreenViewModel: ObservableObject {
                     item.actualRIRs[idx] = rir
                 }
 
-                // 🔑 Encode skipped sets explicitly so we can restore them later.
+                // RP tracking (persist regardless of whether actuals exist)
+                item.usedRestPauseFlags[idx] = uiSet.usedRestPause
+
+                // Skip encoding takes priority; otherwise store the RP pattern text
                 if uiSet.status == .skipped {
                     item.restPausePatternsBySet[idx] = "SKIP"
+                } else {
+                    item.restPausePatternsBySet[idx] = uiSet.restPausePattern
                 }
             }
 
@@ -1426,7 +1528,7 @@ final class SessionScreenViewModel: ObservableObject {
 
         return SessionRecap(
             date: session.date,
-            weekIndex: session.weekInMeso,
+            weekIndex: session.weekIndex,
             title: title,
             subtitle: subtitle,
             exercises: exerciseSummaries
@@ -1511,7 +1613,7 @@ final class SessionScreenViewModel: ObservableObject {
 extension SessionScreenViewModel {
     convenience init(session: Session) {
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
-        let subtitle = MesoLabel.label(for: session.date)   // ✅ no quotes
+        let subtitle = MesoLabel.label(for: session.date)
         let items = session.items.sorted { $0.order < $1.order }
 
         let exercises: [UISessionExercise] = items.map { item in
@@ -1519,13 +1621,13 @@ extension SessionScreenViewModel {
             let name = catalogExercise?.name ?? "Exercise"
 
             // Clamp to 3–4 working sets for now
-            let targetSets = max(3, min(item.targetSets, 4))
+            let targetSets = max(1, min(item.targetSets, 6))
             let baseReps = item.targetReps
             let baseLoad = item.suggestedLoad
             let baseRIR = item.targetRIR
 
             // We currently support up to 4 sets in the logger UI
-            let setCount = 4
+            let setCount = max(4, targetSets)   // keeps “3-to-grow, 1-to-know” UI baseline
             var uiSets: [UISessionSet] = []
             uiSets.reserveCapacity(setCount)
 
@@ -1534,58 +1636,70 @@ extension SessionScreenViewModel {
                 let isPlannedWorkingSet = setIndex <= targetSets
 
                 // ---- Planned values ----
-                let plannedReps: Int
-                if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
-                    plannedReps = item.plannedRepsBySet[idx]
-                } else {
-                    plannedReps = baseReps
-                }
+                let plannedReps: Int = {
+                    if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
+                        return item.plannedRepsBySet[idx]
+                    } else {
+                        return baseReps
+                    }
+                }()
 
-                let plannedLoad: Double
-                if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
-                    plannedLoad = item.plannedLoadsBySet[idx]
-                } else {
-                    plannedLoad = isPlannedWorkingSet ? baseLoad : 0.0
-                }
+                let plannedLoad: Double = {
+                    if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
+                        return item.plannedLoadsBySet[idx]
+                    } else {
+                        return isPlannedWorkingSet ? baseLoad : 0.0
+                    }
+                }()
 
                 let plannedRIR = baseRIR
 
                 // ---- Actual values (read back from SwiftData) ----
-                var actualReps: Int? = nil
-                if idx < item.actualReps.count, item.actualReps[idx] > 0 {
-                    actualReps = item.actualReps[idx]
-                }
-
-                var actualLoad: Double? = nil
-                if idx < item.actualLoads.count, item.actualLoads[idx] > 0 {
-                    actualLoad = item.actualLoads[idx]
-                }
-
-                var actualRIR: Int? = nil
-                if idx < item.actualRIRs.count {
-                    let stored = item.actualRIRs[idx]
-                    // Treat 0 as “real” only if there is an actual set logged
-                    if stored > 0 || ((actualReps != nil || actualLoad != nil) && stored == 0) {
-                        actualRIR = stored
+                let actualReps: Int? = {
+                    if idx < item.actualReps.count, item.actualReps[idx] > 0 {
+                        return item.actualReps[idx]
                     }
-                }
+                    return nil
+                }()
+
+                let actualLoad: Double? = {
+                    guard idx < item.actualLoads.count else { return nil }
+                    let stored = item.actualLoads[idx]
+                    if stored > 0 { return stored }
+                    // If reps exist, allow BW/no-load work to be represented as 0
+                    if stored == 0, actualReps != nil { return 0 }
+                    return nil
+                }()
+
+                let actualRIR: Int? = {
+                    guard idx < item.actualRIRs.count else { return nil }
+                    let stored = item.actualRIRs[idx]
+                    // Treat 0 as “real” only if a set is actually logged
+                    if stored > 0 || ((actualReps != nil || actualLoad != nil) && stored == 0) {
+                        return stored
+                    }
+                    return nil
+                }()
+
+                // ---- RP flags/patterns ----
+                let rpUsed: Bool = {
+                    if idx < item.usedRestPauseFlags.count { return item.usedRestPauseFlags[idx] }
+                    return false
+                }()
+
+                let rpPatternRaw: String = {
+                    if idx < item.restPausePatternsBySet.count { return item.restPausePatternsBySet[idx] }
+                    return ""
+                }()
+
+                let isSkipped = (rpPatternRaw == "SKIP")
+                let rpPattern = isSkipped ? "" : rpPatternRaw
 
                 // ---- Status ----
-                let isSkipped: Bool
-                if idx < item.restPausePatternsBySet.count,
-                   item.restPausePatternsBySet[idx] == "SKIP" {
-                    isSkipped = true
-                } else {
-                    isSkipped = false
-                }
-
                 let status: SetStatus
                 if isSkipped {
                     status = .skipped
-                } else if let reps = actualReps,
-                          let load = actualLoad,
-                          reps > 0,
-                          load > 0 {
+                } else if let reps = actualReps, reps > 0 {
                     status = .completed
                 } else {
                     status = .notStarted
@@ -1600,7 +1714,9 @@ extension SessionScreenViewModel {
                         actualLoad: actualLoad,
                         actualReps: actualReps,
                         actualRIR: actualRIR,
-                        status: status
+                        status: status,
+                        usedRestPause: rpUsed,
+                        restPausePattern: rpPattern
                     )
                 )
             }
@@ -1610,16 +1726,16 @@ extension SessionScreenViewModel {
 
             let detail: String
             if let ce = catalogExercise {
-                detail = "Week \(session.weekInMeso) · \(ce.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
+                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
             } else {
-                detail = "Week \(session.weekInMeso) · Target \(repsLabel) @ RIR \(baseRIR)"
+                detail = "Week \(session.weekIndex) · Target \(repsLabel) @ RIR \(baseRIR)"
             }
 
             return UISessionExercise(
                 exerciseId: item.exerciseId,
                 name: name,
                 detail: detail,
-                weekInMeso: session.weekInMeso,
+                weekInMeso: session.weekIndex,
                 targetSets: targetSets,
                 sets: uiSets,
                 coachMessage: item.coachNote ?? ""
@@ -1656,7 +1772,16 @@ struct UISessionExercise: Identifiable {
     var exerciseId: String
     var name: String
     var detail: String
+
+    /// Stored (keep)
     var weekInMeso: Int
+
+    /// Alias (use throughout app)
+    var weekIndex: Int {
+        get { weekInMeso }
+        set { weekInMeso = newValue }
+    }
+
     var targetSets: Int
     var sets: [UISessionSet]
     var coachMessage: String
@@ -1684,8 +1809,12 @@ struct UISessionExercise: Identifiable {
         self.exerciseId = exerciseId
         self.name = name
         self.detail = detail
+
+        // ✅ Correct: set the stored property
         self.weekInMeso = weekInMeso
-        self.targetSets = max(3, min(targetSets, 6))
+
+        // clamp sets
+        self.targetSets = max(1, min(targetSets, 6))
         self.sets = sets.sorted(by: { $0.index < $1.index })
         self.coachMessage = coachMessage
     }
@@ -1704,6 +1833,8 @@ struct UISessionSet: Identifiable {
     var actualRIR: Int?
 
     var status: SetStatus
+    var usedRestPause: Bool
+    var restPausePattern: String
 
     var plannedLoadText: String
     var plannedRepsText: String
@@ -1718,7 +1849,9 @@ struct UISessionSet: Identifiable {
         actualLoad: Double? = nil,
         actualReps: Int? = nil,
         actualRIR: Int? = nil,
-        status: SetStatus = .notStarted
+        status: SetStatus = .notStarted,
+        usedRestPause: Bool = false,
+        restPausePattern: String = ""
     ) {
         self.index = index
         self.plannedLoad = plannedLoad
@@ -1728,7 +1861,8 @@ struct UISessionSet: Identifiable {
         self.actualReps = actualReps
         self.actualRIR = actualRIR
         self.status = status
-
+        self.usedRestPause = usedRestPause
+        self.restPausePattern = restPausePattern
         let planLoadString: String
         if plannedLoad == 0 {
             planLoadString = "0"
@@ -2008,283 +2142,7 @@ private struct SessionRecapSheet: View {
 
 // MARK: - Exercise History Sheet (per exercise)
 
-private struct ExerciseHistorySheet: View {
-    let exerciseName: String
-    let onClose: () -> Void
 
-    @Environment(\.modelContext) private var context
-
-    // Fetch all SessionHistory rows; we’ll filter per-exercise in memory.
-    private var history: [SessionHistory] {
-        let descriptor = FetchDescriptor<SessionHistory>()
-        do {
-            return try context.fetch(descriptor)
-        } catch {
-            print("⚠️ Failed to fetch SessionHistory: \(error)")
-            return []
-        }
-    }
-
-    // One row in the history list
-    private struct ExerciseHistoryEntry: Identifiable {
-        let id = UUID()
-        let date: Date
-        let weekIndex: Int
-        let sets: Int
-        let reps: Int
-        let volume: Double
-        let detail: String          // e.g. "140×12, 140×12, 140×12, 140×12"
-        let estimated1RM: Double?   // top e1RM for that day
-    }
-
-    // Date formatter to match 12/7/25 style
-    private static let df: DateFormatter = {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        df.timeStyle = .none
-        return df
-    }()
-
-    private var entries: [ExerciseHistoryEntry] {
-        history.compactMap { sessionHistory in
-            // Find this exercise in the recap for set/rep/volume totals
-            guard let ex = sessionHistory.exercises.first(where: { $0.name == exerciseName }) else {
-                return nil
-            }
-
-            var detailParts: [String] = []
-            var bestE1RM: Double? = nil
-
-            // Try to find the underlying Session so we can reconstruct set-by-set detail
-            do {
-                // Fetch all sessions, then filter in memory to match this history row
-                let descriptor = FetchDescriptor<Session>()
-                let sessions = try context.fetch(descriptor)
-
-                if let session = sessions.first(where: {
-                    $0.date == sessionHistory.date && $0.weekIndex == sessionHistory.weekIndex
-                }) {
-                    // Match SessionItem by exercise name
-                    if let item = session.items.first(where: { item in
-                        let catalogName = ExerciseCatalog.all
-                            .first(where: { $0.id == item.exerciseId })?
-                            .name ?? "Exercise"
-                        return catalogName == exerciseName
-                    }) {
-                        // How many working sets to inspect
-                        let workingSetCount = min(
-                            item.targetSets,
-                            max(
-                                item.plannedRepsBySet.count,
-                                item.plannedLoadsBySet.count,
-                                item.actualReps.count,
-                                item.actualLoads.count,
-                                item.actualRIRs.count
-                            )
-                        )
-
-                        if workingSetCount > 0 {
-                            for idx in 0..<workingSetCount {
-                                // Planned reps
-                                let plannedReps: Int = {
-                                    if idx < item.plannedRepsBySet.count,
-                                       item.plannedRepsBySet[idx] > 0 {
-                                        return item.plannedRepsBySet[idx]
-                                    } else {
-                                        return item.targetReps
-                                    }
-                                }()
-
-                                // Planned load
-                                let plannedLoad: Double = {
-                                    if idx < item.plannedLoadsBySet.count,
-                                       item.plannedLoadsBySet[idx] > 0 {
-                                        return item.plannedLoadsBySet[idx]
-                                    } else {
-                                        return item.suggestedLoad
-                                    }
-                                }()
-
-                                // Actuals fall back to plan if missing
-                                let reps: Int = {
-                                    if idx < item.actualReps.count,
-                                       item.actualReps[idx] > 0 {
-                                        return item.actualReps[idx]
-                                    } else {
-                                        return plannedReps
-                                    }
-                                }()
-
-                                let load: Double = {
-                                    if idx < item.actualLoads.count,
-                                       item.actualLoads[idx] > 0 {
-                                        return item.actualLoads[idx]
-                                    } else {
-                                        return plannedLoad
-                                    }
-                                }()
-
-                                let rir: Int? = {
-                                    if idx < item.actualRIRs.count {
-                                        let val = item.actualRIRs[idx]
-                                        return val >= 0 ? val : nil
-                                    } else {
-                                        return nil
-                                    }
-                                }()
-
-                                // Skip truly empty sets
-                                guard load > 0, reps > 0 else { continue }
-
-                                // --- e1RM tracking (Epley) ---
-                                let e1rm = load * (1.0 + Double(reps) / 30.0)
-                                if let currentBest = bestE1RM {
-                                    if e1rm > currentBest { bestE1RM = e1rm }
-                                } else {
-                                    bestE1RM = e1rm
-                                }
-
-                                // --- Detail string for this set ---
-                                let loadString: String
-                                if load == floor(load) {
-                                    loadString = String(format: "%.0f", load)
-                                } else {
-                                    loadString = String(format: "%.1f", load)
-                                }
-
-                                var part = "\(loadString)×\(reps)"
-                                if let rir {
-                                    part += " @ RIR \(rir)"
-                                }
-                                detailParts.append(part)
-                            }
-                        }
-                    }
-                }
-            } catch {
-                print("⚠️ Failed to fetch Session for history row: \(error)")
-            }
-
-            let detailText = detailParts.isEmpty
-                ? ""
-                : detailParts.joined(separator: ", ")
-
-            return ExerciseHistoryEntry(
-                date: sessionHistory.date,
-                weekIndex: sessionHistory.weekIndex,
-                sets: ex.sets,
-                reps: ex.reps,
-                volume: ex.volume,
-                detail: detailText,
-                estimated1RM: bestE1RM
-            )
-        }
-        // Newest first
-        .sorted { $0.date > $1.date }
-    }
-
-    private var bestOverallE1RM: Double? {
-        entries.compactMap { $0.estimated1RM }.max()
-    }
-
-    var body: some View {
-        ZStack {
-            Color(.systemBackground)
-                .ignoresSafeArea()
-
-            VStack(spacing: 16) {
-                // Header with Close + title
-                HStack {
-                    Button(action: onClose) {
-                        Text("Close")
-                            .font(.headline)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(Capsule())
-                    }
-
-                    Spacer()
-
-                    Text(exerciseName)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-
-                    Spacer()
-                    Color.clear.frame(width: 80) // balance Close button
-                }
-                .padding(.horizontal)
-                .padding(.top, 12)
-
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(entries) { entry in
-                            historyRow(entry)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func historyRow(_ entry: ExerciseHistoryEntry) -> some View {
-        let isBest: Bool = {
-            guard let best = bestOverallE1RM,
-                  let e1 = entry.estimated1RM else { return false }
-            return abs(e1 - best) < 0.5   // fuzzy match
-        }()
-
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(Self.df.string(from: entry.date))
-                    .font(.headline)
-                Spacer()
-                Text("Week \(entry.weekIndex)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 12) {
-                Text("Sets: \(entry.sets)")
-                Text("Reps: \(entry.reps)")
-                Text("Vol: \(Int(entry.volume))")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if !entry.detail.isEmpty {
-                Text(entry.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-
-            if let e1 = entry.estimated1RM {
-                HStack(spacing: 6) {
-                    Text("Top est 1RM: \(Int(e1.rounded()))")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-
-                    if isBest {
-                        Text("Best so far")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.green)
-                    }
-                }
-                .padding(.top, 2)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-}
 
 // MARK: - Mock Data for Previews
 
@@ -2318,6 +2176,37 @@ extension SessionScreenViewModel {
             subtitle: "Week 1",
             exercises: [bench]
         )
+    }
+}
+
+// MARK: - Bottom Complete Bar (UI-only)
+
+private struct SessionCompleteBar: View {
+    let isEnabled: Bool
+    let onComplete: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Divider()
+
+            Button(action: onComplete) {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Complete")
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(isEnabled ? Color.green : Color.gray.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .disabled(!isEnabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
     }
 }
 

@@ -13,6 +13,7 @@ enum SessionStatus: String, Codable, CaseIterable {
 
 @Model
 final class Session {
+    // Core
     var date: Date
     var status: SessionStatus
     var completedAt: Date?
@@ -24,16 +25,17 @@ final class Session {
     var sessionNotes: String?
 
     /// ✅ STORED property (keep this name to match the existing on-device SwiftData store)
-    var weekInMeso: Int
+    /// IMPORTANT: Optional so old records without this field can migrate.
+    var weekInMeso: Int?
 
     /// ✅ Alias used throughout the app (does NOT change the stored schema)
     var weekIndex: Int {
-        get { weekInMeso }
+        get { weekInMeso ?? 1 }
         set { weekInMeso = newValue }
     }
 
     /// Exercises for this session.
-    @Relationship(deleteRule: .cascade) var items: [SessionItem]
+    @Relationship(deleteRule: .cascade) var items: [SessionItem] = []
 
     // MARK: - HealthKit / Apple Workout Summary (stored on Session)
 
@@ -76,7 +78,7 @@ final class Session {
         status: SessionStatus = .planned,
         readinessStars: Int = 0,
         sessionNotes: String? = nil,
-        weekIndex: Int,
+        weekIndex: Int = 1,
         items: [SessionItem] = [],
         completedAt: Date? = nil,
 
@@ -109,7 +111,7 @@ final class Session {
         self.readinessStars = readinessStars
         self.sessionNotes = sessionNotes
 
-        // store into the legacy schema field
+        // ✅ Write the STORED legacy field directly (never touch the computed alias in init)
         self.weekInMeso = weekIndex
 
         self.items = items
@@ -117,9 +119,11 @@ final class Session {
         self.hkWorkoutUUID = hkWorkoutUUID
         self.hkWorkoutStart = hkWorkoutStart
         self.hkWorkoutEnd = hkWorkoutEnd
+
         self.hkDuration = hkDuration
         self.hkActiveCalories = hkActiveCalories
         self.hkTotalCalories = hkTotalCalories
+
         self.hkAvgHeartRate = hkAvgHeartRate
         self.hkMaxHeartRate = hkMaxHeartRate
 
@@ -154,18 +158,18 @@ final class SessionItem {
     var suggestedLoad: Double
 
     /// Optional per-set logs (for future richer analytics).
-    @Relationship(deleteRule: .cascade) var logs: [SetLog]
+    @Relationship(deleteRule: .cascade) var logs: [SetLog] = []
 
     // Planned pattern per set (v1)
-    var plannedRepsBySet: [Int]
-    var plannedLoadsBySet: [Double]
+    var plannedRepsBySet: [Int] = []
+    var plannedLoadsBySet: [Double] = []
 
     // Simple inline logging (what you’re using now)
-    var actualReps: [Int]
-    var actualLoads: [Double]
-    var actualRIRs: [Int]
-    var usedRestPauseFlags: [Bool]
-    var restPausePatternsBySet: [String]
+    var actualReps: [Int] = []
+    var actualLoads: [Double] = []
+    var actualRIRs: [Int] = []
+    var usedRestPauseFlags: [Bool] = []
+    var restPausePatternsBySet: [String] = []
 
     var isCompleted: Bool
     var isPR: Bool
@@ -195,6 +199,7 @@ final class SessionItem {
     ) {
         self.order = order
         self.exerciseId = exerciseId
+
         self.targetReps = targetReps
         self.targetSets = targetSets
         self.targetRIR = targetRIR
@@ -212,6 +217,7 @@ final class SessionItem {
 
         self.isCompleted = isCompleted
         self.isPR = isPR
+
         self.coachNote = coachNote
         self.nextSuggestedLoad = nextSuggestedLoad
     }
