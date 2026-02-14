@@ -23,6 +23,9 @@
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
 		D5550A732F1D237B00456F8C /* AppleHealthLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5550A722F1D237900456F8C /* AppleHealthLinkStore.swift */; };
 		D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476E82F40F47E00FE3F46 /* AnalyticsView.swift */; };
+		D58476EB2F410A3600FE3F46 /* CSVExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476EA2F410A3500FE3F46 /* CSVExportService.swift */; };
+		D58476EE2F410AD000FE3F46 /* SetsV1CSVExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */; };
+		D58476F02F410AF200FE3F46 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476EF2F410AF100FE3F46 /* ShareSheet.swift */; };
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
@@ -100,6 +103,9 @@
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
 		D5550A722F1D237900456F8C /* AppleHealthLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleHealthLinkStore.swift; sourceTree = "<group>"; };
 		D58476E82F40F47E00FE3F46 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		D58476EA2F410A3500FE3F46 /* CSVExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSVExportService.swift; sourceTree = "<group>"; };
+		D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetsV1CSVExporter.swift; sourceTree = "<group>"; };
+		D58476EF2F410AF100FE3F46 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
@@ -252,6 +258,14 @@
 			path = Analytics;
 			sourceTree = "<group>";
 		};
+		D58476EC2F410AC300FE3F46 /* Export */ = {
+			isa = PBXGroup;
+			children = (
+				D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */,
+			);
+			path = Export;
+			sourceTree = "<group>";
+		};
 		D5E293142EC4102800034D78 = {
 			isa = PBXGroup;
 			children = (
@@ -333,6 +347,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D58476EC2F410AC300FE3F46 /* Export */,
 				D585D59C2F043BC70073DFE3 /* Catalog */,
 				D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */,
 				D5E293952EC7BBFB00034D78 /* Engines */,
@@ -433,6 +448,8 @@
 		D5E293642EC410DD00034D78 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				D58476EF2F410AF100FE3F46 /* ShareSheet.swift */,
+				D58476EA2F410A3500FE3F46 /* CSVExportService.swift */,
 				D5550A722F1D237900456F8C /* AppleHealthLinkStore.swift */,
 				D5C48EF92F1C05EA00495C46 /* SessionRatingStore.swift */,
 				D5C48EF72F1C05D700495C46 /* SessionNotesStore.swift */,
@@ -591,6 +608,7 @@
 				D5E293662EC410DD00034D78 /* User.swift in Sources */,
 				D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */,
 				D5E293682EC410DD00034D78 /* Progression.swift in Sources */,
+				D58476EB2F410A3600FE3F46 /* CSVExportService.swift in Sources */,
 				D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */,
 				D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */,
 				D5E293692EC410DD00034D78 /* Readiness.swift in Sources */,
@@ -611,6 +629,7 @@
 				D5C48EF82F1C05D900495C46 /* SessionNotesStore.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
 				D5C48EFC2F1C0F6E00495C46 /* ExerciseHistorySheet.swift in Sources */,
+				D58476EE2F410AD000FE3F46 /* SetsV1CSVExporter.swift in Sources */,
 				D5E293822EC6B56100034D78 /* StarPicker.swift in Sources */,
 				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
 				D5E02AA92EFCA6EB0035B768 /* RepRangeRulebook.swift in Sources */,
@@ -647,6 +666,7 @@
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */,
+				D58476F02F410AF200FE3F46 /* ShareSheet.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
 			);
