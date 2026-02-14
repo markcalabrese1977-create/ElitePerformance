@@ -7,6 +7,7 @@ struct ElitePerformanceApp: App {
     private let sharedModelContainer: ModelContainer
 
     init() {
+        // ✅ Define schema explicitly (matches your models)
         let schema = Schema([
             User.self,
             Session.self,
@@ -17,7 +18,10 @@ struct ElitePerformanceApp: App {
             SessionHistoryExercise.self
         ])
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
 
         // ✅ Store pin (prevents “accidental flip” between stores)
         let pinKey = "activeSwiftDataStoreLabel.v1"
@@ -34,7 +38,9 @@ struct ElitePerformanceApp: App {
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
             let config: ModelConfiguration
+
             if let name = label, name != "DEFAULT" {
+                // Named store
                 config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: false)
             } else {
                 // Default (unnamed) store
@@ -62,6 +68,35 @@ struct ElitePerformanceApp: App {
             }
             return count
         }
+
+        // ✅ Simulator: always use default store and skip pin/scan logic
+#if targetEnvironment(simulator)
+do {
+    print("ℹ️ Simulator detected — using DEFAULT SwiftData store (no pin/scan).")
+    let (container, _) = try openStore(label: nil)
+    self.sharedModelContainer = container
+    return
+} catch {
+    // Simulator-only self-heal: delete the local store if migration fails, then recreate.
+    print("⚠️ Simulator store failed to open. Deleting default.store and recreating. Error: \(error)")
+
+    let storeURL = appSupport.appendingPathComponent("default.store")
+    let walURL = appSupport.appendingPathComponent("default.store-wal")
+    let shmURL = appSupport.appendingPathComponent("default.store-shm")
+
+    try? FileManager.default.removeItem(at: storeURL)
+    try? FileManager.default.removeItem(at: walURL)
+    try? FileManager.default.removeItem(at: shmURL)
+
+    do {
+        let (container, _) = try openStore(label: nil)
+        self.sharedModelContainer = container
+        return
+    } catch {
+        fatalError("Simulator failed to recreate DEFAULT SwiftData store: \(error)")
+    }
+}
+#endif
 
         // ✅ 1) If we have a pinned store, ALWAYS use it (no scanning)
         if let pinned = UserDefaults.standard.string(forKey: pinKey) {
@@ -135,8 +170,16 @@ struct ElitePerformanceApp: App {
             }
         }
 
+        // ✅ If none found, fall back to DEFAULT store
         guard let best else {
-            fatalError("No SwiftData store could be opened.")
+            print("⚠️ No preferred SwiftData store found — falling back to DEFAULT store.")
+            do {
+                let (container, _) = try openStore(label: nil)
+                self.sharedModelContainer = container
+                return
+            } catch {
+                fatalError("Failed to open DEFAULT store as fallback: \(error)")
+            }
         }
 
         print("🏆 Using store: \(best.label) sessions=\(best.sessionCount) completed=\(best.completedCount) loggedItems=\(best.loggedSetCount)")
