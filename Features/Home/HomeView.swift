@@ -6,7 +6,12 @@ import SwiftData
 /// (Change Program). Session history is its own view used in the History tab.
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
+
     @State private var showingChangeProgram = false
+
+    // Meso rollover guard
+    @State private var showMesoRolloverGuard = false
+    @State private var guardRescheduleDate = Date()
 
     var body: some View {
         NavigationStack {
@@ -41,6 +46,19 @@ struct HomeView: View {
                             }
                     }
                 }
+        }
+        // ✅ Attach these to the NavigationStack (outside the inner closure)
+        .onAppear {
+            if MesoLifecycle.isRolloverDue() {
+                guardRescheduleDate = MesoLifecycle.scheduledStartDate ?? Date()
+                showMesoRolloverGuard = true
+            }
+        }
+        .sheet(isPresented: $showMesoRolloverGuard) {
+            MesoRolloverGuardSheet(
+                isPresented: $showMesoRolloverGuard,
+                rescheduleDate: $guardRescheduleDate
+            )
         }
     }
 }

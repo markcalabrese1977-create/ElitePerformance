@@ -12,6 +12,15 @@ struct SettingsView: View {
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
 
+    // MARK: - Mesocycle state (bind to the SAME key MesoLifecycle uses)
+    @AppStorage("meso.scheduledStartDateEpoch") private var scheduledStartEpoch: Double = 0
+
+    @State private var nextMesoDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+
+    private var scheduledStartDate: Date? {
+        scheduledStartEpoch > 0 ? Date(timeIntervalSince1970: scheduledStartEpoch) : nil
+    }
+
     var body: some View {
         let user = users.first
 
@@ -53,30 +62,85 @@ struct SettingsView: View {
                 )
             }
 
-            // ✅ Export
+            // MARK: - Mesocycle (single section)
+            Section("Mesocycle") {
+
+                // Future date picker (for scheduling)
+                DatePicker("Next meso start", selection: $nextMesoDate, displayedComponents: [.date])
+
+                Button("Schedule Next Mesocycle") {
+                    let d0 = Calendar.current.startOfDay(for: nextMesoDate)
+                    MesoLifecycle.scheduleNextMeso(on: d0)
+
+                    // Mirror so the UI updates immediately (AppStorage is reactive)
+                    scheduledStartEpoch = d0.timeIntervalSince1970
+                }
+
+                if let scheduled = scheduledStartDate {
+                    Text("Scheduled for \(scheduled.formatted(date: .long, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button(role: .destructive) {
+                        MesoLifecycle.clearScheduledNextMeso()
+                        scheduledStartEpoch = 0
+                    } label: {
+                        Text("Cancel Scheduled Start")
+                    }
+                } else {
+                    Text("Not scheduled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                // Full rollover (label reset + activeStartDate metrics cutoff + clear schedule)
+                Button(role: .destructive) {
+                    MesoLifecycle.confirmStartNewMeso(on: Date())
+                    scheduledStartEpoch = 0
+                } label: {
+                    Text("Start New Mesocycle Now (Reset to W1D1)")
+                }
+
+                Text("Uses a confirmation guard on the start date so you can delay if needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                // Optional: label-only reset (keep if you want)
+                Button(role: .destructive) {
+                    MesoLabel.startNewMeso(on: Date())
+                } label: {
+                    Text("Reset Labels Only (W1D1 from Today)")
+                }
+
+                Text("Resets week/day labels only. Does not modify history or active meso metrics cutoff.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // MARK: - Export
             Section("Export") {
                 Button("Export Completed Sessions (CSV)") {
                     exportError = nil
                     do {
                         let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
 
-                        // Guard: rows exist
                         guard result.rowCount > 0 else {
                             exportItem = nil
                             exportError = "No completed sessions found to export."
                             return
                         }
 
-                        // Guard: file exists
                         guard FileManager.default.fileExists(atPath: result.url.path) else {
                             exportItem = nil
                             exportError = "Export file was not created at:\n\(result.url.path)"
                             return
                         }
 
-                        // Drive sheet from this (no Bool race)
                         exportItem = ExportShareItem(url: result.url)
-
                     } catch {
                         exportItem = nil
                         exportError = error.localizedDescription
@@ -97,6 +161,13 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
+        }
+        .onAppear {
+            // If a schedule exists, reflect it in the DatePicker.
+            if let scheduled = MesoLifecycle.scheduledStartDate {
+                nextMesoDate = scheduled
+                scheduledStartEpoch = Calendar.current.startOfDay(for: scheduled).timeIntervalSince1970
+            }
         }
     }
 }

@@ -1,101 +1,88 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Public view
-
 /// High-level history dashboard:
-/// - Aggregates across all *completed* sessions
+/// - Aggregates across completed sessions
 /// - Groups data by exercise
 /// - Shows best e1RM, total volume, and last trained date.
 struct HistorySummaryView: View {
     @Environment(\.modelContext) private var modelContext
 
-    // Pull all Sessions; we'll filter in Swift.
     @Query(sort: \Session.date, order: .forward)
     private var sessions: [Session]
 
-    /// Only completed sessions are considered for summary stats.
-    private var completedSessions: [Session] {
-        sessions.filter { $0.status == .completed }
+    // MARK: - Scope (optional UI control)
+
+    private enum Scope: String, CaseIterable, Identifiable {
+        case allTime = "All-time"
+        case thisMeso = "This meso"
+
+        var id: String { rawValue }
+        var title: String { rawValue }
     }
 
-    /// Aggregated data per exercise across all completed sessions.
+    @State private var scope: Scope = .allTime
+
+    // MARK: - Derived
+
+    private var mesoCutoff: Date {
+        Calendar.current.startOfDay(for: MesoLifecycle.activeStartDate)
+    }
+
+    private var filteredCompletedSessions: [Session] {
+        let completed = sessions.filter { $0.status == .completed }
+        switch scope {
+        case .allTime:
+            return completed
+        case .thisMeso:
+            return completed.filter { $0.date >= mesoCutoff }
+        }
+    }
+
     private var exerciseSummaries: [ExerciseSummary] {
-        HistorySummaryBuilder.build(from: completedSessions)
+        HistorySummaryBuilder.build(from: filteredCompletedSessions)
     }
 
-    // MARK: - Top Lifts Split (Compounds vs Accessories)
-
-    /// Top compounds by best e1RM.
     private var topCompounds: [ExerciseSummary] {
         Array(
             exerciseSummaries
-                .filter { isCompound($0) }
+                .filter { $0.isCompound }
                 .sorted { $0.bestE1RM > $1.bestE1RM }
                 .prefix(5)
         )
     }
 
-    /// Top accessories by best e1RM.
     private var topAccessories: [ExerciseSummary] {
         Array(
             exerciseSummaries
-                .filter { !isCompound($0) }
+                .filter { !$0.isCompound }
                 .sorted { $0.bestE1RM > $1.bestE1RM }
                 .prefix(5)
         )
     }
 
-    /// Conservative compound classifier:
-    /// - Uses exercise name keywords (fast + reliable enough for MVP)
-    /// - Easy to refine later by exerciseId if needed.
-    private func isCompound(_ summary: ExerciseSummary) -> Bool {
-        let n = summary.name.lowercased()
-
-        // Big presses
-        if n.contains("bench") { return true }
-        if n.contains("overhead") || n.contains("shoulder press") || n == "ohp" { return true }
-
-        // Big squats / leg patterns
-        if n.contains("squat") { return true }            // includes hack squat
-        if n.contains("leg press") { return true }
-        if n.contains("lunge") { return true }
-
-        // Hinge / posterior
-        if n.contains("deadlift") { return true }
-        if n.contains("rdl") || n.contains("romanian") { return true }
-        if n.contains("hip thrust") { return true }
-
-        // Big pulls (arguable, but generally treated as compound in your program)
-        if n.contains("row") { return true }
-        if n.contains("pulldown") || n.contains("pull down") { return true }
-        if n.contains("pull-up") || n.contains("pull up") || n.contains("chin") { return true }
-
-        return false
-    }
-
-    /// Overall totals derived from exercise summaries.
     private var overallTotals: (sets: Int, reps: Int, volume: Double) {
         var sets = 0
         var reps = 0
         var volume: Double = 0
-
-        for summary in exerciseSummaries {
-            sets += summary.totalSets
-            reps += summary.totalReps
-            volume += summary.totalVolume
+        for s in exerciseSummaries {
+            sets += s.totalSets
+            reps += s.totalReps
+            volume += s.totalVolume
         }
-
         return (sets, reps, volume)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if completedSessions.isEmpty {
+
+                scopePicker
+
+                if filteredCompletedSessions.isEmpty {
                     Text("No completed sessions yet.")
                         .font(.body)
-                        .padding()
+                        .padding(.top, 8)
                 } else {
                     overallSection
 
@@ -112,14 +99,32 @@ struct HistorySummaryView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // MARK: - Sections
+    // MARK: - UI
+
+    private var scopePicker: some View {
+        HStack {
+            Text("Scope")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Picker("Scope", selection: $scope) {
+                ForEach(Scope.allCases) { s in
+                    Text(s.title).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 260)
+        }
+    }
 
     private var overallSection: some View {
-        let totalSessions = completedSessions.count
+        let totalSessions = filteredCompletedSessions.count
         let totals = overallTotals
 
-        let firstDate = completedSessions.first?.date
-        let lastDate  = completedSessions.last?.date
+        let firstDate = filteredCompletedSessions.first?.date
+        let lastDate  = filteredCompletedSessions.last?.date
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("Block overview")
@@ -152,7 +157,7 @@ struct HistorySummaryView: View {
             }
 
             if let firstDate, let lastDate {
-                Text("From \(HistorySummaryView.dateFormatter.string(from: firstDate)) to \(HistorySummaryView.dateFormatter.string(from: lastDate))")
+                Text("From \(Self.dateFormatter.string(from: firstDate)) to \(Self.dateFormatter.string(from: lastDate))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -217,7 +222,7 @@ struct HistorySummaryView: View {
                     .foregroundStyle(.secondary)
 
                 if let last = summary.lastTrained {
-                    Text("Last: \(HistorySummaryView.shortDateFormatter.string(from: last))")
+                    Text("Last: \(Self.shortDateFormatter.string(from: last))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -228,7 +233,6 @@ struct HistorySummaryView: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.secondarySystemBackground))
         )
-    
     }
 
     private var allExercisesSection: some View {
@@ -262,7 +266,7 @@ struct HistorySummaryView: View {
                                 .foregroundStyle(.secondary)
 
                             if let last = summary.lastTrained {
-                                Text(HistorySummaryView.shortDateFormatter.string(from: last))
+                                Text(Self.shortDateFormatter.string(from: last))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -294,12 +298,10 @@ struct HistorySummaryView: View {
 // MARK: - Exercise summary model
 
 struct ExerciseSummary: Identifiable {
-    /// Stable string key derived from SessionItem.exerciseId.
-    let id: String          // used for Identifiable
-    let exerciseKey: String // same as id, kept explicit
-
+    let id: String           // exerciseId
     let name: String
     let primaryMuscle: String
+    let isCompound: Bool
 
     let totalSessions: Int
     let totalSets: Int
@@ -313,9 +315,12 @@ struct ExerciseSummary: Identifiable {
 
 enum HistorySummaryBuilder {
 
-    /// Builds per-exercise summaries from completed sessions.
     static func build(from sessions: [Session]) -> [ExerciseSummary] {
-        // Temporary aggregation per exerciseKey
+        // O(1) catalog lookup by id (NO KVC / reflection)
+        let catalogById: [String: CatalogExercise] = Dictionary(
+            uniqueKeysWithValues: ExerciseCatalog.all.map { ($0.id, $0) }
+        )
+
         var buckets: [String: TempBucket] = [:]
 
         for session in sessions {
@@ -323,23 +328,21 @@ enum HistorySummaryBuilder {
             let sessionDate = session.date
 
             for item in session.items {
-                let exerciseKey = String(describing: item.exerciseId)
+                let exerciseId = item.exerciseId
+                let catalog = catalogById[exerciseId]
 
-                // Resolve name + muscle from catalog
-                let catalog = ExerciseCatalog.all.first { exercise in
-                    String(describing: exercise.id) == exerciseKey
-                }
-
-                let name   = catalog?.name ?? "Exercise"
+                let name = catalog?.name ?? ExerciseCatalog.displayName(for: exerciseId)
                 let muscle = catalog?.primaryMuscle.rawValue.capitalized ?? "—"
+                let isCompound = catalog?.isCompound ?? false
 
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 if setCount == 0 { continue }
 
-                var bucket = buckets[exerciseKey] ?? TempBucket(
-                    exerciseKey: exerciseKey,
+                var bucket = buckets[exerciseId] ?? TempBucket(
+                    exerciseId: exerciseId,
                     name: name,
                     primaryMuscle: muscle,
+                    isCompound: isCompound,
                     totalSets: 0,
                     totalReps: 0,
                     totalVolume: 0,
@@ -365,59 +368,45 @@ enum HistorySummaryBuilder {
                     bucket.totalSets += 1
                     bucket.totalReps += reps
                     bucket.totalVolume += volume
-
-                    if e1rm > bucket.bestE1RM {
-                        bucket.bestE1RM = e1rm
-                    }
+                    bucket.bestE1RM = max(bucket.bestE1RM, e1rm)
                 }
 
                 if didRecordAnySet {
                     bucket.sessionKeys.insert(sessionKey)
-
-                    if let last = bucket.lastTrained {
-                        if sessionDate > last {
-                            bucket.lastTrained = sessionDate
-                        }
-                    } else {
-                        bucket.lastTrained = sessionDate
-                    }
-
-                    buckets[exerciseKey] = bucket
+                    bucket.lastTrained = max(bucket.lastTrained ?? sessionDate, sessionDate)
+                    buckets[exerciseId] = bucket
                 }
             }
         }
 
-        // Convert buckets into summaries
-        let summaries: [ExerciseSummary] = buckets.values.map { bucket in
+        let summaries = buckets.values.map { b in
             ExerciseSummary(
-                id: bucket.exerciseKey,
-                exerciseKey: bucket.exerciseKey,
-                name: bucket.name,
-                primaryMuscle: bucket.primaryMuscle,
-                totalSessions: bucket.sessionKeys.count,
-                totalSets: bucket.totalSets,
-                totalReps: bucket.totalReps,
-                totalVolume: bucket.totalVolume,
-                bestE1RM: bucket.bestE1RM,
-                lastTrained: bucket.lastTrained
+                id: b.exerciseId,
+                name: b.name,
+                primaryMuscle: b.primaryMuscle,
+                isCompound: b.isCompound,
+                totalSessions: b.sessionKeys.count,
+                totalSets: b.totalSets,
+                totalReps: b.totalReps,
+                totalVolume: b.totalVolume,
+                bestE1RM: b.bestE1RM,
+                lastTrained: b.lastTrained
             )
         }
 
-        // Sort alphabetically by name for the "All exercises" section.
         return summaries.sorted { $0.name < $1.name }
     }
 
-    /// Simple Epley estimated 1RM.
     static func estimateE1RM(weight: Double, reps: Int) -> Double {
         guard weight > 0, reps > 0 else { return 0 }
         return weight * (1.0 + Double(reps) / 30.0)
     }
 
-    // Internal aggregation bucket
     private struct TempBucket {
-        let exerciseKey: String
+        let exerciseId: String
         let name: String
         let primaryMuscle: String
+        let isCompound: Bool
 
         var totalSets: Int
         var totalReps: Int

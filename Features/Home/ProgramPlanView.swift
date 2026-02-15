@@ -6,15 +6,6 @@ import SwiftData
 struct ProgramPlanView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
-
-    // MARK: - Meso Anchor (UI + Week math)
-
-    /// If you already store an anchor elsewhere, you can wire these keys to match.
-    /// For now: if missing, we default to "today is W2D2".
-    @AppStorage("meso_anchor_week") private var anchorWeek: Int = 0
-    @AppStorage("meso_anchor_day")  private var anchorDay: Int = 0
-    @AppStorage("meso_anchor_date") private var anchorDateEpoch: Double = 0
-
     @State private var didAttemptRealign = false
 
     // Swipe delete (surgical)
@@ -27,27 +18,14 @@ struct ProgramPlanView: View {
     @State private var addSessionErrorMessage: String?
     @State private var showAddSessionError = false
 
-    private var anchorDate: Date {
-        if anchorDateEpoch > 0 {
-            return Date(timeIntervalSince1970: anchorDateEpoch)
-        }
-        return Date()
-    }
-
-    /// Week 1 / Day 1 date computed from the anchor.
-    /// Example: if today is W2D2, this returns 8 days ago.
-    private var week1Day1: Date {
-        let deltaDays = ((effectiveAnchorWeek - 1) * 7) + (effectiveAnchorDay - 1)
-        let start = Calendar.current.startOfDay(for: anchorDate)
-        return Calendar.current.date(byAdding: .day, value: -deltaDays, to: start) ?? start
-    }
-
-    private var effectiveAnchorWeek: Int { max(1, anchorWeek) }
-    private var effectiveAnchorDay: Int  { max(1, anchorDay) }
 
     // MARK: - Body
 
     var body: some View {
+        content
+    }
+
+    private var content: some View {
         List {
             if sessions.isEmpty {
                 emptyStateSection
@@ -67,15 +45,14 @@ struct ProgramPlanView: View {
                             NavigationLink {
                                 ProgramDayDetailView(session: session)
                             } label: {
+                                let wd = MesoLabel.weekDay(for: session.date)
                                 programRow(
                                     for: session,
-                                    computedWeek: weekIndex(for: session.date),
-                                    computedDay: dayIndexInWeek(for: session.date)
+                                    computedWeek: wd.week,
+                                    computedDay: wd.day
                                 )
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                // SAFETY: only allow deleting "junk" planned sessions (planned + empty).
-                                // This is the surgical tool for cleaning duplicates without risking real history.
                                 if session.status == .planned && session.items.isEmpty {
                                     Button(role: .destructive) {
                                         sessionPendingDelete = session
@@ -93,7 +70,6 @@ struct ProgramPlanView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    // default to tomorrow on open
                     newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     showAddSessionSheet = true
                 } label: {
@@ -102,47 +78,8 @@ struct ProgramPlanView: View {
             }
         }
         .sheet(isPresented: $showAddSessionSheet) {
-            NavigationStack {
-                Form {
-                    Section("Create session for date") {
-                        DatePicker(
-                            "Date",
-                            selection: $newSessionDate,
-                            displayedComponents: [.date]
-                        )
-                    }
-
-                    Section("Quick pick") {
-                        Button("Tomorrow") {
-                            newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-                        }
-                        Button("Thursday (next occurrence)") {
-                            newSessionDate = nextWeekday(.thursday)
-                        }
-                    }
-
-                    Section {
-                        Button("Create") {
-                            addSession(for: newSessionDate)
-                        }
-                    }
-
-                    // Optional: keep legacy behavior accessible for debugging / power use.
-                    Section("Advanced") {
-                        Button("Append extra session to end of meso") {
-                            addExtraSession()
-                            showAddSessionSheet = false
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                .navigationTitle("Add Session")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showAddSessionSheet = false }
-                    }
-                }
-            }
+            // keep your existing sheet content
+            addSessionSheet
         }
         .alert("Couldn’t add session", isPresented: $showAddSessionError) {
             Button("OK", role: .cancel) { }
@@ -167,11 +104,7 @@ struct ProgramPlanView: View {
                 }
             }
         }
-        .onAppear {
-            ensureAnchorDefaultsIfMissing()
-        }
         .onChange(of: sessions.count) { _ in
-            // When sessions arrive/refresh, we can realign once.
             if !didAttemptRealign {
                 didAttemptRealign = true
                 realignStoredWeekIndexesIfNeeded()
@@ -179,34 +112,60 @@ struct ProgramPlanView: View {
         }
     }
 
-    // MARK: - Anchor defaults
+    private var addSessionSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Create session for date") {
+                    DatePicker(
+                        "Date",
+                        selection: $newSessionDate,
+                        displayedComponents: [.date]
+                    )
+                }
 
-    private func ensureAnchorDefaultsIfMissing() {
-        // If nothing set yet, assume "today is W2D2"
-        if anchorWeek == 0 { anchorWeek = 2 }
-        if anchorDay == 0 { anchorDay = 2 }
-        if anchorDateEpoch == 0 {
-            anchorDateEpoch = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+                Section("Quick pick") {
+                    Button("Tomorrow") {
+                        newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    }
+                    Button("Thursday (next occurrence)") {
+                        newSessionDate = nextWeekday(.thursday)
+                    }
+                }
+
+                Section {
+                    Button("Create") {
+                        addSession(for: newSessionDate)
+                    }
+                }
+
+                Section("Advanced") {
+                    Button("Append extra session to end of meso") {
+                        addExtraSession()
+                        showAddSessionSheet = false
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Add Session")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showAddSessionSheet = false }
+                }
+            }
         }
     }
 
     // MARK: - Week math
 
+    // MARK: - Week math (MesoLabel)
+
     private func weekIndex(for date: Date) -> Int {
-        let start = week1Day1
-        let d0 = Calendar.current.startOfDay(for: date)
-        let days = Calendar.current.dateComponents([.day], from: start, to: d0).day ?? 0
-        // days 0...6 => week 1, 7...13 => week 2, etc.
-        return max(1, (days / 7) + 1)
+        MesoLabel.weekIndex(for: date)
     }
 
-    /// 1–7 within a week (Day 1 = week start)
+    /// 1–6 training day within a training week (Thu rest is skipped by lift-day counting)
     private func dayIndexInWeek(for date: Date) -> Int {
-        let start = week1Day1
-        let d0 = Calendar.current.startOfDay(for: date)
-        let days = Calendar.current.dateComponents([.day], from: start, to: d0).day ?? 0
-        let mod = ((days % 7) + 7) % 7 // safe mod for past dates
-        return mod + 1
+        MesoLabel.weekDay(for: date).day
     }
 
     // MARK: - Optional: realign stored weekIndex so other screens match
@@ -214,20 +173,19 @@ struct ProgramPlanView: View {
     private func realignStoredWeekIndexesIfNeeded() {
         guard !sessions.isEmpty else { return }
 
-        // If ANY session's stored weekIndex disagrees with computed weekIndex, we realign all.
         let needsRealign = sessions.contains { s in
-            s.weekIndex != weekIndex(for: s.date)
+            s.weekIndex != MesoLabel.weekIndex(for: s.date)
         }
 
         guard needsRealign else { return }
 
         for s in sessions {
-            s.weekIndex = weekIndex(for: s.date)
+            s.weekIndex = MesoLabel.weekIndex(for: s.date)
         }
 
         do {
             try modelContext.save()
-            print("✅ Realigned stored Session.weekIndex using meso anchor (W\(effectiveAnchorWeek)D\(effectiveAnchorDay)).")
+            print("✅ Realigned stored Session.weekIndex using MesoLabel anchor.")
         } catch {
             print("⚠️ Failed to realign weekIndex: \(error)")
         }
@@ -373,14 +331,15 @@ struct ProgramPlanView: View {
     // MARK: - Grouping (computed)
 
     private var weekGroups: [WeekGroup] {
-        let grouped = Dictionary(grouping: sessions) { weekIndex(for: $0.date) }
+        let grouped = Dictionary(grouping: sessions) { MesoLabel.weekIndex(for: $0.date) }
 
         return grouped.keys.sorted().map { week in
             let daySessions = (grouped[week] ?? [])
                 .sorted { $0.date < $1.date }
 
-            let start = Calendar.current.date(byAdding: .day, value: (week - 1) * 7, to: week1Day1) ?? week1Day1
-            let end = Calendar.current.date(byAdding: .day, value: 6, to: start) ?? start
+            // Truthful header range: reflect actual dates present in this group.
+            let start = daySessions.first?.date ?? Date()
+            let end = daySessions.last?.date ?? start
 
             return WeekGroup(
                 weekIndex: week,

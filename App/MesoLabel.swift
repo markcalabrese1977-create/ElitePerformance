@@ -60,6 +60,28 @@ enum MesoLabel {
         setAnchor(week: week, day: day, on: date)
     }
 
+    /// Starts a brand new mesocycle anchored at W1D1 on the given date.
+    /// Does NOT touch any SwiftData history. Only affects labeling.
+    static func startNewMeso(on date: Date = Date()) {
+        setAnchor(week: 1, day: 1, on: date)
+    }
+
+    /// Clears the current anchor (debug / recovery).
+    static func clearAnchor() {
+        anchorDate = nil
+        anchorTrainingDayNumber = nil
+    }
+
+    /// Read-only: whether an anchor is currently set.
+    static var hasAnchor: Bool {
+        anchorDate != nil && anchorTrainingDayNumber != nil
+    }
+
+    /// Convenience: 1-based week index for a date (W1 => 1, W2 => 2).
+    static func weekIndex(for date: Date) -> Int {
+        weekDay(for: date).week
+    }
+    
     /// Returns (week, day) for any date, based on lift-day counting and Thu rest days.
     static func weekDay(for date: Date) -> (week: Int, day: Int) {
         guard let aDate = anchorDate,

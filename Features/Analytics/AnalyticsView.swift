@@ -5,7 +5,10 @@ struct AnalyticsView: View {
     @Query(sort: \Session.date, order: .reverse) private var sessions: [Session]
 
     @State private var selectedExerciseId: String? = nil
-    @State private var selectedExerciseName: String = ""
+
+    private var mesoCutoff: Date {
+        Calendar.current.startOfDay(for: MesoLifecycle.activeStartDate)
+    }
 
     var body: some View {
         NavigationStack {
@@ -18,10 +21,7 @@ struct AnalyticsView: View {
             .sheet(item: sheetItemBinding) { item in
                 ExerciseHistorySheet(
                     exerciseName: item.exerciseName,
-                    onClose: {
-                        selectedExerciseId = nil
-                        selectedExerciseName = ""
-                    }
+                    onClose: { selectedExerciseId = nil }
                 )
             }
         }
@@ -30,30 +30,26 @@ struct AnalyticsView: View {
     // MARK: - Sections
 
     private var summarySection: some View {
-        Section("Summary") {
-            let completed = sessions.filter { $0.status == .completed }
-            let totalSessions = sessions.count
-            let completedCount = completed.count
-            let totalLoggedItems = computeLoggedSetCount(from: sessions)
+        Section("Summary (this meso)") {
+            let mesoSessions = sessions.filter { $0.date >= mesoCutoff }
+            let completed = mesoSessions.filter { $0.status == .completed }
 
-            row("Total sessions", "\(totalSessions)")
-            row("Completed sessions", "\(completedCount)")
-            row("Logged items", "\(totalLoggedItems)")
+            row("Active since", mesoCutoff.formatted(date: .abbreviated, time: .omitted))
+            row("Total sessions", "\(mesoSessions.count)")
+            row("Completed sessions", "\(completed.count)")
+            row("Logged exercise entries", "\(computeLoggedExerciseEntryCount(from: mesoSessions))")
         }
     }
 
     private var activitySection: some View {
-        Section("Activity") {
-            let last7 = completedSessions(inLastDays: 7)
-            let last30 = completedSessions(inLastDays: 30)
-
-            row("Completed (7 days)", "\(last7)")
-            row("Completed (30 days)", "\(last30)")
+        Section("Activity (this meso)") {
+            row("Completed (7 days)", "\(completedSessions(inLastDays: 7))")
+            row("Completed (30 days)", "\(completedSessions(inLastDays: 30))")
         }
     }
 
     private var topExercisesSection: some View {
-        Section("Top exercises (last 30 days)") {
+        Section("Top exercises (last 30 days, this meso)") {
             let rows = topExercises(lastDays: 30, limit: 12)
 
             if rows.isEmpty {
@@ -63,13 +59,12 @@ struct AnalyticsView: View {
                 ForEach(rows) { r in
                     Button {
                         selectedExerciseId = r.exerciseId
-                        selectedExerciseName = r.exerciseName
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(r.exerciseName)
                                     .font(.body)
-                                Text("\(r.loggedItems) logged items")
+                                Text("\(r.loggedEntries) logged entries")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -95,12 +90,15 @@ struct AnalyticsView: View {
     }
 
     private func completedSessions(inLastDays days: Int) -> Int {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let cal = Calendar.current
+        let daysCutoff = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let cutoff = max(cal.startOfDay(for: daysCutoff), mesoCutoff)
+
         return sessions.filter { $0.status == .completed && $0.date >= cutoff }.count
     }
 
-    /// Counts "logged items" using your same heuristic: any set with load>0 OR reps>0
-    private func computeLoggedSetCount(from sessions: [Session]) -> Int {
+    /// Counts "logged exercise entries" using the same heuristic: any set-array with load>0 OR reps>0.
+    private func computeLoggedExerciseEntryCount(from sessions: [Session]) -> Int {
         var count = 0
         for s in sessions {
             for item in s.items {
@@ -113,8 +111,11 @@ struct AnalyticsView: View {
     }
 
     private func topExercises(lastDays days: Int, limit: Int) -> [TopExerciseRow] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        let recent = sessions.filter { $0.date >= cutoff && $0.status == .completed }
+        let cal = Calendar.current
+        let daysCutoff = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let cutoff = max(cal.startOfDay(for: daysCutoff), mesoCutoff)
+
+        let recent = sessions.filter { $0.status == .completed && $0.date >= cutoff }
 
         // Map: exerciseId -> accumulator
         var map: [String: Accum] = [:]
@@ -122,9 +123,16 @@ struct AnalyticsView: View {
         for s in recent {
             for item in s.items {
                 let exId = item.exerciseId
-                let name = ExerciseCatalog.displayName(for: item.exerciseId)
 
-                // estimate "volume" = sum(load * reps) across set arrays
+                // Cache/lookup name once per exerciseId
+                let name: String
+                if let existing = map[exId]?.exerciseName {
+                    name = existing
+                } else {
+                    name = ExerciseCatalog.displayName(for: exId)
+                }
+
+                // Estimate volume = sum(load * reps)
                 var volume: Double = 0
                 let loads = item.actualLoads
                 let reps = item.actualReps
@@ -135,13 +143,12 @@ struct AnalyticsView: View {
                     }
                 }
 
-                // logged item heuristic (same as above)
                 let logged = (loads.contains(where: { $0 > 0 }) || reps.contains(where: { $0 > 0 })) ? 1 : 0
 
                 if map[exId] == nil {
-                    map[exId] = Accum(exerciseId: exId, exerciseName: name, loggedItems: 0, volume: 0)
+                    map[exId] = Accum(exerciseId: exId, exerciseName: name, loggedEntries: 0, volume: 0)
                 }
-                map[exId]?.loggedItems += logged
+                map[exId]?.loggedEntries += logged
                 map[exId]?.volume += volume
             }
         }
@@ -150,13 +157,13 @@ struct AnalyticsView: View {
             TopExerciseRow(
                 exerciseId: a.exerciseId,
                 exerciseName: a.exerciseName,
-                loggedItems: a.loggedItems,
+                loggedEntries: a.loggedEntries,
                 estimatedVolumeK: Int((a.volume / 1000.0).rounded())
             )
         }
 
         rows.sort {
-            if $0.loggedItems != $1.loggedItems { return $0.loggedItems > $1.loggedItems }
+            if $0.loggedEntries != $1.loggedEntries { return $0.loggedEntries > $1.loggedEntries }
             return $0.estimatedVolumeK > $1.estimatedVolumeK
         }
 
@@ -164,12 +171,10 @@ struct AnalyticsView: View {
         return rows
     }
 
-    
-    
     private struct Accum {
         let exerciseId: String
         let exerciseName: String
-        var loggedItems: Int
+        var loggedEntries: Int
         var volume: Double
     }
 
@@ -177,7 +182,7 @@ struct AnalyticsView: View {
         var id: String { exerciseId }
         let exerciseId: String
         let exerciseName: String
-        let loggedItems: Int
+        let loggedEntries: Int
         let estimatedVolumeK: Int
     }
 
@@ -187,13 +192,11 @@ struct AnalyticsView: View {
         Binding<ExerciseSheetItem?>(
             get: {
                 guard let id = selectedExerciseId else { return nil }
-                return ExerciseSheetItem(exerciseId: id, exerciseName: selectedExerciseName)
+                let name = ExerciseCatalog.displayName(for: id)
+                return ExerciseSheetItem(exerciseId: id, exerciseName: name)
             },
             set: { newValue in
-                if newValue == nil {
-                    selectedExerciseId = nil
-                    selectedExerciseName = ""
-                }
+                if newValue == nil { selectedExerciseId = nil }
             }
         )
     }
