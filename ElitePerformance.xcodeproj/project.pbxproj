@@ -18,6 +18,9 @@
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
+		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
+		D55002092F43D6A300908F53 /* MesoIndexBackfillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */; };
+		D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020A2F43D6E000908F53 /* ProgramState.swift */; };
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
@@ -100,6 +103,9 @@
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
 		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
+		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
+		D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoIndexBackfillEngine.swift; sourceTree = "<group>"; };
+		D550020A2F43D6E000908F53 /* ProgramState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramState.swift; sourceTree = "<group>"; };
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
@@ -332,6 +338,9 @@
 		D5E293522EC410DD00034D78 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				D550020A2F43D6E000908F53 /* ProgramState.swift */,
+				D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */,
+				D55002062F43883B00908F53 /* MesoBlock.swift */,
 				D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */,
 				D5C4464F2ED7C55E00D7BE41 /* LoggedSet.swift */,
 				D550F56E2ED60DA40011D54B /* CoachingModels.swift */,
@@ -633,6 +642,7 @@
 				D5E2936E2EC410DD00034D78 /* PrimaryButton.swift in Sources */,
 				D5A810EF2EE644CE00130345 /* ExerciseHistoryView.swift in Sources */,
 				D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */,
+				D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */,
 				D5C48EF82F1C05D900495C46 /* SessionNotesStore.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
 				D5C48EFC2F1C0F6E00495C46 /* ExerciseHistorySheet.swift in Sources */,
@@ -674,9 +684,11 @@
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */,
+				D55002092F43D6A300908F53 /* MesoIndexBackfillEngine.swift in Sources */,
 				D58476F02F410AF200FE3F46 /* ShareSheet.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
+				D55002072F43883F00908F53 /* MesoBlock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

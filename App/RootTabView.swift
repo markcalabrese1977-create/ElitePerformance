@@ -13,6 +13,7 @@ struct RootTabView: View {
     RootTabView()
         .modelContainer(for: [
             User.self,
+            ProgramState.self,   // ✅ add
             Session.self,
             SessionItem.self,
             SetLog.self,

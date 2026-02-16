@@ -1265,9 +1265,11 @@ final class SessionScreenViewModel: ObservableObject {
             session.status = .planned
         }
 
-        // ✅ Plan Memory v1 – always attempt to carry plans forward.
-        let planMemory = PlanMemoryEngine(context: context)
-        planMemory.carryForwardPlans(from: session)
+        // ✅ Plan Memory v1 – only carry plans forward once the session is completed.
+        if session.status == .completed {
+            let planMemory = PlanMemoryEngine(context: context)
+            planMemory.carryForwardPlans(from: session)
+        }
 
         do {
             try context.save()

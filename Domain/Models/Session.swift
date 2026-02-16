@@ -27,6 +27,12 @@ final class Session {
     /// ✅ STORED property (keep this name to match the existing on-device SwiftData store)
     /// IMPORTANT: Optional so old records without this field can migrate.
     var weekInMeso: Int?
+    
+    var meso: MesoBlock?
+    
+    /// Stable order within a mesocycle: 1...N
+    /// Optional for migration safety with existing stores.
+    var programIndex: Int?
 
     /// ✅ Alias used throughout the app (does NOT change the stored schema)
     var weekIndex: Int {
@@ -81,6 +87,7 @@ final class Session {
         weekIndex: Int = 1,
         items: [SessionItem] = [],
         completedAt: Date? = nil,
+        programIndex: Int? = nil,
 
         // HK defaults
         hkWorkoutUUID: String? = nil,
@@ -115,6 +122,8 @@ final class Session {
         self.weekInMeso = weekIndex
 
         self.items = items
+        
+        self.programIndex = programIndex
 
         self.hkWorkoutUUID = hkWorkoutUUID
         self.hkWorkoutStart = hkWorkoutStart

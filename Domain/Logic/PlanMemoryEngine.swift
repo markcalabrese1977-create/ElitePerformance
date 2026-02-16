@@ -19,6 +19,7 @@ struct PlanMemoryEngine {
     /// Carry today's plan forward into the next future session(s)
     /// where plan is still empty.
     func carryForwardPlans(from session: Session) {
+        guard session.status == .completed else { return }
         // Fetch all sessions in chronological order
         let descriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]

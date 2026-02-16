@@ -10,6 +10,7 @@ struct ElitePerformanceApp: App {
         // ✅ Define schema explicitly (matches your models)
         let schema = Schema([
             User.self,
+            ProgramState.self,   // ✅ add
             Session.self,
             SessionItem.self,
             SetLog.self,
