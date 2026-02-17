@@ -1045,38 +1045,43 @@ final class SessionScreenViewModel: ObservableObject {
         var exercise = exercises[exerciseIdx]
         var set = exercise.sets[setIdx]
 
-        // Try to parse actuals (already prefilled from PLAN by default)
-        let actualLoad = Double(set.actualLoadText)
-        let actualReps = Int(set.actualRepsText)
+        let parsedLoad = Double(set.actualLoadText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let parsedReps = Int(set.actualRepsText.trimmingCharacters(in: .whitespacesAndNewlines))
 
-        // CASE 1: User entered valid numbers → full logging + coaching
-        if let load = actualLoad,
-           let reps = actualReps,
-           load > 0,
-           reps > 0 {
-
-            set.actualLoad = load
+        // ✅ A set is executed if reps > 0. Load may be 0 (BW/no-load work).
+        if let reps = parsedReps, reps > 0 {
+            
+            // ✅ If user typed a load, use it.
+            // ✅ If they didn't type a load (parsedLoad == nil), DO NOT overwrite with 0.
+            //    Keep whatever we already had (actualLoad or plannedLoad).
+            let loadToStore: Double = {
+                if let parsedLoad { return max(0, parsedLoad) }
+                let existing = set.actualLoad ?? 0
+                if existing > 0 { return existing }
+                let planned = set.plannedLoad ?? 0
+                if planned > 0 { return planned }
+                return 0
+            }()
+            
             set.actualReps = reps
+            set.actualLoad = loadToStore
             set.status = .completed
-
+            
+            // Only generate coaching when load is meaningful (> 0)
+            if loadToStore > 0 {
+                exercise.coachMessage = coachMessage(for: exercise, recentSetIndex: set.index)
+            }
+            
             exercise.sets[setIdx] = set
-            exercise.coachMessage = coachMessage(for: exercise, recentSetIndex: set.index)
-
             exercises[exerciseIdx] = exercise
+            
             onSetCompleted(exercise: exercise, set: set)
-
             persist(using: context)
+        }
             return
         }
 
-        // CASE 2: No numbers (or invalid) → just mark the set done, no coaching change
-        set.status = .completed
-        exercise.sets[setIdx] = set
-        exercises[exerciseIdx] = exercise
-        onSetCompleted(exercise: exercise, set: set)
-
-        persist(using: context)
-    }
+        
 
     private func onSetCompleted(exercise: UISessionExercise, set: UISessionSet) {
         // Hook for timers / haptics later if we want.
@@ -1229,9 +1234,8 @@ final class SessionScreenViewModel: ObservableObject {
                 // Actuals (only persist meaningful values)
                 if let reps = uiSet.actualReps, reps > 0 {
                     item.actualReps[idx] = reps
-                }
-                if let load = uiSet.actualLoad, load > 0 {
-                    item.actualLoads[idx] = load
+                    // Persist load even if 0 when reps exist (BW/no-load work)
+                    item.actualLoads[idx] = uiSet.actualLoad ?? 0
                 }
                 if let rir = uiSet.actualRIR, rir >= 0 {
                     item.actualRIRs[idx] = rir

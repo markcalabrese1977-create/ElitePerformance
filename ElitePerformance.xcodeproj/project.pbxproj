@@ -19,8 +19,8 @@
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
-		D55002092F43D6A300908F53 /* MesoIndexBackfillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */; };
 		D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020A2F43D6E000908F53 /* ProgramState.swift */; };
+		D550020F2F43E56F00908F53 /* LoadDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020E2F43E56D00908F53 /* LoadDisplay.swift */; };
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
@@ -106,6 +106,7 @@
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
 		D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoIndexBackfillEngine.swift; sourceTree = "<group>"; };
 		D550020A2F43D6E000908F53 /* ProgramState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramState.swift; sourceTree = "<group>"; };
+		D550020E2F43E56D00908F53 /* LoadDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadDisplay.swift; sourceTree = "<group>"; };
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
@@ -315,6 +316,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D550020E2F43E56D00908F53 /* LoadDisplay.swift */,
 				D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */,
 				D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */,
 				D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */,
@@ -666,6 +668,7 @@
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D5E293732EC410DD00034D78 /* Theme.swift in Sources */,
 				D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */,
+				D550020F2F43E56F00908F53 /* LoadDisplay.swift in Sources */,
 				D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */,
 				D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */,
 				D503127F2F12BE7800980F64 /* AddExerciseSheet.swift in Sources */,
@@ -684,7 +687,6 @@
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* AnalyticsView.swift in Sources */,
-				D55002092F43D6A300908F53 /* MesoIndexBackfillEngine.swift in Sources */,
 				D58476F02F410AF200FE3F46 /* ShareSheet.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,

@@ -4,20 +4,18 @@ import SwiftData
 // MARK: - History List
 
 struct HistoryView: View {
-    @Environment(\.modelContext) private var context
     @Query(sort: \SessionHistory.date, order: .reverse)
     private var sessions: [SessionHistory]
 
-    /// Group by calendar day so the header shows "December 9, 2025"
+    /// Group by day for headers like "December 9, 2025"
     private var groupedSessions: [(date: Date, sessions: [SessionHistory])] {
         let calendar = Calendar.current
-        let groups = Dictionary(grouping: sessions) { session in
-            calendar.startOfDay(for: session.date)
+        let groups = Dictionary(grouping: sessions) { s in
+            calendar.startOfDay(for: s.date)
         }
 
         return groups
-            .map { (date: $0.key,
-                    sessions: $0.value.sorted { $0.date > $1.date }) }
+            .map { (date: $0.key, sessions: $0.value.sorted { $0.date > $1.date }) }
             .sorted { $0.date > $1.date }
     }
 
@@ -26,7 +24,6 @@ struct HistoryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
 
-                    // Block recap card at the top of History
                     NavigationLink {
                         HistorySummaryView()
                     } label: {
@@ -55,7 +52,6 @@ struct HistoryView: View {
                         Text("Complete a session from the Today tab and it will appear here.")
                             .foregroundStyle(.secondary)
                     } else {
-                        // Existing per-day history list
                         ForEach(groupedSessions, id: \.date) { group in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(group.date, format: .dateTime.month(.wide).day().year())
@@ -83,7 +79,7 @@ struct HistoryView: View {
     }
 }
 
-// MARK: - History Row (summary card per day)
+// MARK: - History Row
 
 private struct HistoryRow: View {
     let history: SessionHistory
@@ -128,7 +124,7 @@ private struct HistoryRow: View {
     }
 }
 
-// MARK: - Per-set detail models
+// MARK: - Per-set detail structs (UI-only)
 
 private struct HistorySetDetail: Identifiable {
     let id = UUID()
@@ -138,27 +134,27 @@ private struct HistorySetDetail: Identifiable {
     let rir: Int?
     let isSkipped: Bool
 
-    // RP display (pulled from UISessionSet → persisted in SessionItem arrays)
     let rpUsed: Bool
     let rpPattern: String
 
+    private func loadText(_ load: Double) -> String {
+        load == 0 ? "BW" : String(format: "%.0f", load)
+    }
+
     var lineText: String {
         if isSkipped {
-            let loadString = load == 0 ? "BW" : String(format: "%.1f", load)
-            var planned = "planned \(loadString) × \(reps)"
-            if let rir { planned += " @ \(rir) RIR" }
-            return "Set \(index)  — skipped (\(planned))"
+            var s = "Set \(index) — skipped (planned \(loadText(load)) × \(reps)"
+            if let rir { s += " @ \(rir) RIR" }
+            s += ")"
+            return s
         } else {
-            let loadString = load == 0 ? "BW" : String(format: "%.1f", load)
-            var base = "Set \(index)  \(loadString) × \(reps)"
-            if let rir { base += " @ \(rir) RIR" }
-
+            var s = "Set \(index)  \(loadText(load)) × \(reps)"
+            if let rir { s += " @ \(rir) RIR" }
             if rpUsed {
                 let trimmed = rpPattern.trimmingCharacters(in: .whitespacesAndNewlines)
-                base += trimmed.isEmpty ? " (RP)" : " (RP: \(trimmed))"
+                s += trimmed.isEmpty ? " (RP)" : " (RP: \(trimmed))"
             }
-
-            return base
+            return s
         }
     }
 }
@@ -173,7 +169,7 @@ private struct HistoryExerciseDetail: Identifiable {
     let sets: [HistorySetDetail]
 }
 
-// MARK: - Day Detail (per-exercise + per-set breakdown)
+// MARK: - Day Detail
 
 private struct HistoryDayDetailView: View {
     @Environment(\.modelContext) private var context
@@ -187,81 +183,88 @@ private struct HistoryDayDetailView: View {
     }
 
     private var exerciseDetails: [HistoryExerciseDetail] {
-        guard let session = sourceSession else {
-            return history.exercises.map { ex in
-                HistoryExerciseDetail(
-                    name: ex.name,
-                    primaryMuscle: ex.primaryMuscle,
-                    totalSets: ex.sets,
-                    totalReps: ex.reps,
-                    totalVolume: ex.volume,
-                    sets: []
+        // If we can reconstruct from the original Session, do it (gives per-set loads).
+        if let session = sourceSession {
+            let vm = SessionScreenViewModel(session: session)
+
+            return vm.exercises.map { uiEx in
+                let catalog = ExerciseCatalog.all.first(where: { $0.id == uiEx.exerciseId })
+                let primary = catalog?.primaryMuscle.rawValue.capitalized
+
+                var totalReps = 0
+                var totalVol: Double = 0
+                var setDetails: [HistorySetDetail] = []
+
+                let working = min(uiEx.targetSets, uiEx.sets.count)
+
+                for idx in 0..<working {
+                    let set = uiEx.sets[idx]
+
+                    let actualReps = set.actualReps ?? 0
+                    let actualLoad = set.actualLoad ?? 0
+
+                    let plannedReps = set.plannedReps ?? 0
+                    let plannedLoad = set.plannedLoad ?? 0
+
+                    if actualReps > 0 {
+                        let rir = set.actualRIR ?? set.plannedRIR
+
+                        // ✅ If actual load isn't present, fall back to planned load for display + volume.
+                        let displayLoad: Double = {
+                            if actualLoad > 0 { return actualLoad }
+                            if plannedLoad > 0 { return plannedLoad }
+                            return 0
+                        }()
+
+                        totalReps += actualReps
+                        totalVol += Double(actualReps) * displayLoad
+
+                        setDetails.append(
+                            HistorySetDetail(
+                                index: set.index,
+                                load: displayLoad,
+                                reps: actualReps,
+                                rir: rir,
+                                isSkipped: false,
+                                rpUsed: set.usedRestPause,
+                                rpPattern: set.restPausePattern
+                            )
+                        )
+                    } else if plannedReps > 0 {
+                        setDetails.append(
+                            HistorySetDetail(
+                                index: set.index,
+                                load: plannedLoad,
+                                reps: plannedReps,
+                                rir: set.plannedRIR,
+                                isSkipped: true,
+                                rpUsed: false,
+                                rpPattern: ""
+                            )
+                        )
+                    }
+                }
+
+                return HistoryExerciseDetail(
+                    name: uiEx.name,
+                    primaryMuscle: primary,
+                    totalSets: setDetails.filter { !$0.isSkipped }.count,
+                    totalReps: totalReps,
+                    totalVolume: totalVol,
+                    sets: setDetails
                 )
             }
         }
 
-        // Reuse the same reconstruction logic as the live Session screen.
-        let vm = SessionScreenViewModel(session: session)
-
-        return vm.exercises.map { uiEx in
-            let catalog = ExerciseCatalog.all.first(where: { $0.id == uiEx.exerciseId })
-            let primary = catalog?.primaryMuscle.rawValue.capitalized
-
-            var totalReps = 0
-            var totalVolume: Double = 0
-            var setDetails: [HistorySetDetail] = []
-
-            for set in uiEx.sets where set.index <= uiEx.targetSets {
-                let actualReps = set.actualReps ?? 0
-                let actualLoad = set.actualLoad ?? 0.0
-
-                let plannedReps = set.plannedReps ?? 0
-                let plannedLoad = set.plannedLoad ?? 0.0
-
-                // ✅ A set is executed if reps exist. Load can be 0 for BW/no-load work.
-                let didExecute = actualReps > 0
-
-                if didExecute {
-                    let rir = set.actualRIR ?? set.plannedRIR
-
-                    totalReps += actualReps
-                    totalVolume += Double(actualReps) * actualLoad
-
-                    setDetails.append(
-                        HistorySetDetail(
-                            index: set.index,
-                            load: actualLoad,
-                            reps: actualReps,
-                            rir: rir,
-                            isSkipped: false,
-                            rpUsed: set.usedRestPause,
-                            rpPattern: set.restPausePattern
-                        )
-                    )
-                } else {
-                    guard plannedReps > 0 else { continue }   // ✅ plannedLoad can be 0 (BW)
-
-                    setDetails.append(
-                        HistorySetDetail(
-                            index: set.index,
-                            load: plannedLoad,
-                            reps: plannedReps,
-                            rir: set.plannedRIR,
-                            isSkipped: true,
-                            rpUsed: false,
-                            rpPattern: ""
-                        )
-                    )
-                }
-            }
-
-            return HistoryExerciseDetail(
-                name: uiEx.name,
-                primaryMuscle: primary,
-                totalSets: setDetails.filter { !$0.isSkipped }.count,
-                totalReps: totalReps,
-                totalVolume: totalVolume,
-                sets: setDetails
+        // Fallback: use the persisted summary only (no per-set loads exist in SessionHistoryExercise).
+        return history.exercises.map { ex in
+            HistoryExerciseDetail(
+                name: ex.name,
+                primaryMuscle: ex.primaryMuscle,
+                totalSets: ex.sets,
+                totalReps: ex.reps,
+                totalVolume: ex.volume,
+                sets: []
             )
         }
     }
@@ -275,6 +278,7 @@ private struct HistoryDayDetailView: View {
             VStack(spacing: 16) {
                 headerCard
                 workoutMetricsCard
+
                 if let s = sourceSession {
                     NavigationLink {
                         SessionView(session: s)
@@ -286,6 +290,7 @@ private struct HistoryDayDetailView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+
                 Button {
                     applyForwardToFutureSessions()
                 } label: {
@@ -324,42 +329,30 @@ private struct HistoryDayDetailView: View {
 
             HStack {
                 VStack(alignment: .leading) {
-                    Text("Exercises")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(history.totalExercises)")
-                        .font(.headline)
+                    Text("Exercises").font(.caption).foregroundStyle(.secondary)
+                    Text("\(history.totalExercises)").font(.headline)
                 }
 
                 Spacer()
 
                 VStack(alignment: .leading) {
-                    Text("Sets completed")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(history.totalSets)")
-                        .font(.headline)
+                    Text("Sets completed").font(.caption).foregroundStyle(.secondary)
+                    Text("\(history.totalSets)").font(.headline)
                 }
 
                 Spacer()
 
                 VStack(alignment: .leading) {
-                    Text("Total volume")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(history.totalVolume))")
-                        .font(.headline)
+                    Text("Total volume").font(.caption).foregroundStyle(.secondary)
+                    Text("\(Int(history.totalVolume))").font(.headline)
                 }
             }
 
             if totalReps > 0 {
                 HStack {
-                    Text("Total reps")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Total reps").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(totalReps)")
-                        .font(.caption)
+                    Text("\(totalReps)").font(.caption)
                 }
             }
         }
@@ -371,19 +364,13 @@ private struct HistoryDayDetailView: View {
         )
     }
 
-    // HealthKit / Apple Fitness metrics for this session (if linked).
     @ViewBuilder
     private var workoutMetricsCard: some View {
         if let s = sourceSession {
             if s.hkWorkoutUUID == nil {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Workout metrics")
-                        .font(.headline)
-
-                    Text("Not linked yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+                    Text("Workout metrics").font(.headline)
+                    Text("Not linked yet.").font(.caption).foregroundStyle(.secondary)
                     Text("Finish your Apple Watch workout, then tap below to pull in Apple Health metrics.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -405,8 +392,7 @@ private struct HistoryDayDetailView: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Workout metrics")
-                        .font(.headline)
+                    Text("Workout metrics").font(.headline)
 
                     HStack {
                         metricBlock(title: "Duration", value: formatDuration(s.hkDuration))
@@ -420,30 +406,6 @@ private struct HistoryDayDetailView: View {
                         metricBlock(title: "Avg HR", value: formatNumber(s.hkAvgHeartRate))
                         Spacer()
                         metricBlock(title: "Max HR", value: formatNumber(s.hkMaxHeartRate))
-                    }
-
-                    if let start = s.hkWorkoutStart, let end = s.hkWorkoutEnd {
-                        Text("\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if !s.hkHeartRateSeriesBPM.isEmpty {
-                        HeartRateSparkline(values: s.hkHeartRateSeriesBPM)
-                    }
-
-                    if (s.hkZone1Seconds + s.hkZone2Seconds + s.hkZone3Seconds + s.hkZone4Seconds + s.hkZone5Seconds) > 0 {
-                        HeartRateZonesBar(
-                            z1: s.hkZone1Seconds,
-                            z2: s.hkZone2Seconds,
-                            z3: s.hkZone3Seconds,
-                            z4: s.hkZone4Seconds,
-                            z5: s.hkZone5Seconds
-                        )
-                    }
-
-                    if !s.hkPostWorkoutHeartRateBPM.isEmpty {
-                        PostWorkoutHRMiniChart(values: s.hkPostWorkoutHeartRateBPM)
                     }
                 }
                 .padding()
@@ -460,11 +422,8 @@ private struct HistoryDayDetailView: View {
 
     private func metricBlock(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline)
         }
     }
 
@@ -490,8 +449,7 @@ private struct HistoryDayDetailView: View {
             VStack(spacing: 0) {
                 ForEach(Array(exerciseDetails.enumerated()), id: \.element.id) { index, ex in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(ex.name)
-                            .font(.body)
+                        Text(ex.name).font(.body)
 
                         HStack(spacing: 12) {
                             if let primary = ex.primaryMuscle { Text(primary) }
@@ -529,9 +487,8 @@ private struct HistoryDayDetailView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Session matching
 
-    /// Safer: match by day only, then choose the best candidate if duplicates exist.
     private func fetchSourceSession() -> Session? {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: history.date)
@@ -539,12 +496,9 @@ private struct HistoryDayDetailView: View {
 
         var descriptor = FetchDescriptor<Session>(
             predicate: #Predicate<Session> { s in
-                s.date >= start &&
-                s.date < end
+                s.date >= start && s.date < end
             }
         )
-
-        // If there are duplicates, we need all of them so we can pick the best.
         descriptor.fetchLimit = 50
 
         let matches = (try? context.fetch(descriptor)) ?? []
@@ -563,7 +517,7 @@ private struct HistoryDayDetailView: View {
             if s.status == .completed { x += 100 }
             if hasAnyActuals(s) { x += 50 }
             if s.hkWorkoutUUID != nil { x += 10 }
-            x += min(10, s.items.count) // small tie-breaker
+            x += min(10, s.items.count)
             return x
         }
 
@@ -573,6 +527,8 @@ private struct HistoryDayDetailView: View {
             return $0.date > $1.date
         }.first
     }
+
+    // MARK: - Apply forward
 
     private func applyForwardToFutureSessions() {
         let calendar = Calendar.current
@@ -587,79 +543,76 @@ private struct HistoryDayDetailView: View {
             let vm = SessionScreenViewModel(session: sourceSession)
             let weekday = calendar.component(.weekday, from: sourceSession.date)
 
-            let descriptor = FetchDescriptor<Session>()
-            let allSessions = try context.fetch(descriptor)
-
-            let targetSessions = allSessions.filter { other in
+            let allSessions = try context.fetch(FetchDescriptor<Session>())
+            let targets = allSessions.filter { other in
                 other.id != sourceSession.id &&
                 other.date > sourceSession.date &&
                 other.status != .completed &&
                 calendar.component(.weekday, from: other.date) == weekday
             }
 
-            guard !targetSessions.isEmpty else {
+            guard !targets.isEmpty else {
                 applyAlertMessage = "No future sessions on this day pattern to update."
                 showApplyAlert = true
                 return
             }
 
-            for target in targetSessions {
+            for target in targets {
                 for uiEx in vm.exercises {
-                    guard let targetItem = target.items.first(where: { $0.exerciseId == uiEx.exerciseId }) else { continue }
+                    guard let item = target.items.first(where: { $0.exerciseId == uiEx.exerciseId }) else { continue }
 
-                    let workingSetCount = max(1, min(uiEx.targetSets, uiEx.sets.count))
+                    let working = max(1, min(uiEx.targetSets, uiEx.sets.count))
 
                     var plannedLoads: [Double] = []
                     var plannedReps: [Int] = []
                     var plannedRIRs: [Int] = []
 
-                    for idx in 0..<workingSetCount {
+                    for idx in 0..<working {
                         let set = uiEx.sets[idx]
                         let reps = (set.actualReps ?? set.plannedReps) ?? 0
-                        let load = (set.actualLoad ?? set.plannedLoad) ?? 0.0
-                        let rir  = (set.actualRIR ?? set.plannedRIR) ?? 0
+                        let load = (set.actualLoad ?? set.plannedLoad) ?? 0
+                        let rir  = (set.actualRIR ?? set.plannedRIR) ?? 2
 
-                        guard reps > 0 else { continue }   // ✅ allow load == 0
+                        guard reps > 0 else { continue }   // allow load == 0
 
                         plannedReps.append(reps)
                         plannedLoads.append(load)
                         plannedRIRs.append(rir)
                     }
 
-                    guard !plannedReps.isEmpty, !plannedLoads.isEmpty else { continue }
+                    guard !plannedReps.isEmpty else { continue }
 
                     let fallbackReps = plannedReps.first ?? 10
                     let fallbackRIR  = plannedRIRs.first ?? 2
 
-                    let setCount = max(4, max(targetItem.targetSets, plannedLoads.count))
+                    let setCount = max(4, max(item.targetSets, plannedLoads.count))
 
                     if plannedReps.count < setCount {
                         plannedReps.append(contentsOf: repeatElement(fallbackReps, count: setCount - plannedReps.count))
                     }
                     if plannedLoads.count < setCount {
-                        plannedLoads.append(contentsOf: repeatElement(plannedLoads.last ?? 0.0, count: setCount - plannedLoads.count))
+                        plannedLoads.append(contentsOf: repeatElement(plannedLoads.last ?? 0, count: setCount - plannedLoads.count))
                     }
                     if plannedRIRs.count < setCount {
                         plannedRIRs.append(contentsOf: repeatElement(fallbackRIR, count: setCount - plannedRIRs.count))
                     }
 
-                    targetItem.plannedRepsBySet  = Array(plannedReps.prefix(setCount))
-                    targetItem.plannedLoadsBySet = Array(plannedLoads.prefix(setCount))
+                    item.plannedRepsBySet  = Array(plannedReps.prefix(setCount))
+                    item.plannedLoadsBySet = Array(plannedLoads.prefix(setCount))
+                    item.targetReps = fallbackReps
+                    item.targetRIR  = fallbackRIR
 
-                    targetItem.targetReps = fallbackReps
-                    targetItem.targetRIR  = fallbackRIR
-
-                    if let lastWorkingLoad = plannedLoads.prefix(workingSetCount).last {
-                        targetItem.suggestedLoad = lastWorkingLoad
+                    if let last = plannedLoads.prefix(working).last {
+                        item.suggestedLoad = last
                     }
                 }
             }
 
             try context.save()
-            applyAlertMessage = "Applied today’s plan to \(targetSessions.count) future session(s) on this day."
+            applyAlertMessage = "Applied today’s plan to \(targets.count) future session(s) on this day."
             showApplyAlert = true
         } catch {
-            print("⚠️ Failed to apply forward from history: \(error)")
+            print("⚠️ Apply forward failed: \(error)")
             applyAlertMessage = "Something went wrong while updating future sessions."
             showApplyAlert = true
         }
