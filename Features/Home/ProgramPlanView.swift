@@ -5,8 +5,9 @@ import SwiftData
 /// Change-program actions are owned by `HomeView`.
 struct ProgramPlanView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
-    @State private var didAttemptRealign = false
+    @Query(sort: \Session.date, order: .forward)
+    private var sessions: [Session]
+    
 
     // Swipe delete (surgical)
     @State private var sessionPendingDelete: Session?
@@ -21,13 +22,18 @@ struct ProgramPlanView: View {
 
     // MARK: - Body
 
+    private var visibleSessions: [Session] {
+        let today0 = Calendar.current.startOfDay(for: Date())
+        return sessions.filter { $0.status != .completed && $0.date >= today0 }
+    }
+    
     var body: some View {
         content
     }
 
     private var content: some View {
         List {
-            if sessions.isEmpty {
+            if visibleSessions.isEmpty {
                 emptyStateSection
             } else {
                 ForEach(weekGroups) { weekGroup in
@@ -104,12 +110,6 @@ struct ProgramPlanView: View {
                 }
             }
         }
-        .onChange(of: sessions.count) { _ in
-            if !didAttemptRealign {
-                didAttemptRealign = true
-                realignStoredWeekIndexesIfNeeded()
-            }
-        }
     }
 
     private var addSessionSheet: some View {
@@ -170,26 +170,7 @@ struct ProgramPlanView: View {
 
     // MARK: - Optional: realign stored weekIndex so other screens match
 
-    private func realignStoredWeekIndexesIfNeeded() {
-        guard !sessions.isEmpty else { return }
-
-        let needsRealign = sessions.contains { s in
-            s.weekIndex != MesoLabel.weekIndex(for: s.date)
-        }
-
-        guard needsRealign else { return }
-
-        for s in sessions {
-            s.weekIndex = MesoLabel.weekIndex(for: s.date)
-        }
-
-        do {
-            try modelContext.save()
-            print("✅ Realigned stored Session.weekIndex using MesoLabel anchor.")
-        } catch {
-            print("⚠️ Failed to realign weekIndex: \(error)")
-        }
-    }
+    
 
     // MARK: - Add Session (date-targeted)
 
@@ -331,7 +312,8 @@ struct ProgramPlanView: View {
     // MARK: - Grouping (computed)
 
     private var weekGroups: [WeekGroup] {
-        let grouped = Dictionary(grouping: sessions) { MesoLabel.weekIndex(for: $0.date) }
+        let grouped = Dictionary(grouping: visibleSessions) { MesoLabel.weekIndex(for: $0.date) }
+
 
         return grouped.keys.sorted().map { week in
             let daySessions = (grouped[week] ?? [])
