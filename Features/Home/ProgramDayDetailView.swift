@@ -41,8 +41,8 @@ struct ProgramDayDetailView: View {
                             onMoveUp:  { move(item, direction: -1) },
                             onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { delete(item) },
-                            onHistoryTapped: { exerciseName in
-                                historyTarget = HistoryTarget(exerciseName: exerciseName)
+                            onHistoryTapped: { exerciseId, exerciseName in
+                                historyTarget = HistoryTarget(exerciseId: exerciseId, exerciseName: exerciseName)
                             },
                             onNoteTapped: {
                                 let name = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name ?? "Exercise"
@@ -92,13 +92,19 @@ struct ProgramDayDetailView: View {
         }
         // ✅ ADD THIS
         .sheet(isPresented: $showingAddExerciseSheet) {
-            ExercisePickerView { catalogExercise in
-                addExercise(from: catalogExercise)
-                showingAddExerciseSheet = false
-            }
+            AddExerciseSheet(
+                onSelect: { catalogExercise in
+                    addExercise(from: catalogExercise)
+                    showingAddExerciseSheet = false
+                },
+                onCancel: {
+                    showingAddExerciseSheet = false
+                }
+            )
         }
         .sheet(item: $historyTarget) { target in
             ExerciseHistorySheet(
+                exerciseId: target.exerciseId,
                 exerciseName: target.exerciseName,
                 onClose: { historyTarget = nil }
             )
@@ -639,6 +645,7 @@ struct ProgramDayDetailView: View {
 }
 private struct HistoryTarget: Identifiable {
     let id = UUID()
+    let exerciseId: String
     let exerciseName: String
 }
 private struct NoteTarget: Identifiable {
@@ -655,7 +662,7 @@ private struct ProgramExercisePlanRow: View {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onDelete: () -> Void
-    let onHistoryTapped: (_ exerciseName: String) -> Void
+    let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
 
     /// Local text versions of loads so 0.5 / 2.5 / 47.5 all work consistently.
@@ -702,7 +709,7 @@ private struct ProgramExercisePlanRow: View {
 
             HStack(spacing: 4) {
                 Button {
-                    onHistoryTapped(displayName)
+                    onHistoryTapped(item.exerciseId, displayName)
                 } label: {
                     Image(systemName: "clock.arrow.circlepath")
                 }
@@ -1049,43 +1056,3 @@ private struct ProgramExercisePlanRow: View {
     }
 }
 
-// MARK: - Exercise Picker used by "Add exercise"
-
-private struct ExercisePickerView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let onSelect: (CatalogExercise) -> Void
-
-    private var exercises: [CatalogExercise] {
-        ExerciseCatalog.all
-    }
-
-    var body: some View {
-        NavigationStack {
-            List(exercises) { exercise in
-                Button {
-                    onSelect(exercise)
-                    dismiss()
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(exercise.name)
-                            .font(.body)
-
-                        Text(exercise.primaryMuscle.rawValue.capitalized)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("Add Exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}

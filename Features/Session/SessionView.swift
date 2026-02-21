@@ -109,7 +109,7 @@ struct SessionView: View {
                             activeSheet = .swap(SwapTarget(exerciseIndex: index))
                         },
                         onHistoryTapped: {
-                            activeSheet = .history(exerciseName: exercise.name)
+                            activeSheet = .history(exerciseId: exercise.exerciseId, exerciseName: exercise.name)
                         },
                         onNoteTapped: {
                             activeSheet = .note(
@@ -190,12 +190,14 @@ struct SessionView: View {
     private func sheetView(for sheet: ActiveSheet) -> some View {
         switch sheet {
         case .addExercise:
-            AddExercisePickerSheet(
+            AddExerciseSheet(
                 onSelect: { catalogExercise in
                     viewModel.addExercise(catalogExercise, context: modelContext)
                     activeSheet = nil
                 },
-                onCancel: { activeSheet = nil }
+                onCancel: {
+                    activeSheet = nil
+                }
             )
 
         case .swap(let target):
@@ -229,8 +231,9 @@ struct SessionView: View {
                 }
             )
 
-        case .history(let exerciseName):
+        case .history(let exerciseId, let exerciseName):
             ExerciseHistorySheet(
+                exerciseId: exerciseId,
                 exerciseName: exerciseName,
                 onClose: { activeSheet = nil }
             )
@@ -346,7 +349,7 @@ private enum ActiveSheet: Identifiable {
 
     case swap(SwapTarget)
     case recap(SessionRecap)
-    case history(exerciseName: String)
+    case history(exerciseId: String, exerciseName: String)
     case note(exerciseId: String, exerciseName: String)
     case addExercise
 
@@ -356,8 +359,8 @@ private enum ActiveSheet: Identifiable {
             return "swap-\(target.id)"
         case .recap(let recap):
             return "recap-\(recap.id)"
-        case .history(let exerciseName):
-            return "history-\(exerciseName)"
+        case .history(let exerciseId, _):
+            return "history-\(exerciseId)"
         case .note(let exerciseId, _):
             return "note-\(exerciseId)"
         case .addExercise:
@@ -895,54 +898,7 @@ private struct SessionSetRowView: View {
 
 // MARK: - Swap Sheet
 
-private struct AddExercisePickerSheet: View {
-    let onSelect: (CatalogExercise) -> Void
-    let onCancel: () -> Void
 
-    @State private var searchText: String = ""
-
-    private var options: [CatalogExercise] {
-        let all = ExerciseCatalog.all
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return all
-        }
-        let q = searchText.lowercased()
-        return all.filter {
-            $0.name.lowercased().contains(q) || $0.id.lowercased().contains(q)
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Pick an exercise") {
-                    ForEach(options) { ex in
-                        Button {
-                            onSelect(ex)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ex.name)
-                                    .font(.body)
-
-                                Text(ex.primaryMuscle.rawValue.capitalized + (ex.isCompound ? " · Compound" : " · Isolation"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Add Exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search exercises")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel() }
-                }
-            }
-        }
-    }
-}
 
 /// Sheet to pick a replacement exercise from the catalog.
 /// Shows "recommended" (same primary muscle group) first, then all others.

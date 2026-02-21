@@ -2,35 +2,35 @@ import SwiftUI
 import SwiftData
 
 struct ExerciseHistorySheet: View {
+    let exerciseId: String
     let exerciseName: String
     let onClose: () -> Void
 
     @Environment(\.modelContext) private var context
 
-    // Fetch all SessionHistory rows; we’ll filter per-exercise in memory.
-    private var history: [SessionHistory] {
-        let descriptor = FetchDescriptor<SessionHistory>()
-        do {
-            return try context.fetch(descriptor)
-        } catch {
-            print("⚠️ Failed to fetch SessionHistory: \(error)")
-            return []
-        }
-    }
+    // MARK: - Row model
 
-    // One row in the history list
     private struct ExerciseHistoryEntry: Identifiable {
         let id = UUID()
         let date: Date
         let weekIndex: Int
+
         let sets: Int
         let reps: Int
         let volume: Double
-        let detail: String          // e.g. "140×12, 140×12, 140×12, 140×12"
-        let estimated1RM: Double?   // top e1RM for that day
+
+        /// Executed sets only (includes RP tokens)
+        let detail: String
+
+        /// Best e1RM for the day (computed from executed sets where load > 0)
+        let bestE1RM: Double?
+
+        /// Used for drill-in
+        let session: Session
     }
 
-    // Date formatter to match 12/7/25 style
+    // MARK: - Date format
+
     private static let df: DateFormatter = {
         let df = DateFormatter()
         df.dateStyle = .short
@@ -38,124 +38,33 @@ struct ExerciseHistorySheet: View {
         return df
     }()
 
-    private var entries: [ExerciseHistoryEntry] {
-        history.compactMap { sessionHistory in
-            // Find this exercise in the recap for set/rep/volume totals
-            guard let ex = sessionHistory.exercises.first(where: { $0.name == exerciseName }) else {
-                return nil
-            }
+    // MARK: - State
 
-            var detailParts: [String] = []
-            var bestE1RM: Double? = nil
-
-            // Try to find the underlying Session so we can reconstruct set-by-set detail (including RP)
-            do {
-                // Fetch all sessions, then filter in memory to match this history row
-                let descriptor = FetchDescriptor<Session>()
-                let sessions = try context.fetch(descriptor)
-
-                if let session = sessions.first(where: {
-                    $0.date == sessionHistory.date && $0.weekIndex == sessionHistory.weekIndex
-                }) {
-
-                    // ✅ Use the same reconstruction pipeline as the live Session screen so we get RP fields.
-                    let vm = SessionScreenViewModel(session: session)
-
-                    // Try to match the exercise by name in the reconstructed UI list
-                    if let uiEx = vm.exercises.first(where: { $0.name == exerciseName }) {
-
-                        for set in uiEx.sets where set.index <= uiEx.targetSets {
-                            // Executed set = has actual reps
-                            let actualReps = set.actualReps ?? 0
-                            let didExecute = actualReps > 0
-                            guard didExecute else { continue }   // program history: show executed sets only
-
-                            let reps = actualReps
-                            let load = set.actualLoad ?? 0
-                            let rir = set.actualRIR ?? set.plannedRIR
-
-                            // --- e1RM tracking (Epley) --- (only meaningful when load > 0)
-                            if load > 0 {
-                                let e1rm = load * (1.0 + Double(reps) / 30.0)
-                                if let currentBest = bestE1RM {
-                                    if e1rm > currentBest { bestE1RM = e1rm }
-                                } else {
-                                    bestE1RM = e1rm
-                                }
-                            }
-
-                            // --- Detail string for this set (✅ now includes RP) ---
-                            let part = formatSetToken(
-                                load: load,
-                                reps: reps,
-                                rir: rir,
-                                usedRP: set.usedRestPause,
-                                rpPattern: set.restPausePattern
-                            )
-
-                            detailParts.append(part)
-                        }
-                    }
-                }
-            } catch {
-                print("⚠️ Failed to fetch Session for history row: \(error)")
-            }
-
-            let detailText = detailParts.isEmpty
-                ? ""
-                : detailParts.joined(separator: ", ")
-
-            return ExerciseHistoryEntry(
-                date: sessionHistory.date,
-                weekIndex: sessionHistory.weekIndex,
-                sets: ex.sets,
-                reps: ex.reps,
-                volume: ex.volume,
-                detail: detailText,
-                estimated1RM: bestE1RM
-            )
-        }
-        // Newest first
-        .sorted { $0.date > $1.date }
-    }
+    @State private var entries: [ExerciseHistoryEntry] = []
 
     private var bestOverallE1RM: Double? {
-        entries.compactMap { $0.estimated1RM }.max()
+        entries.compactMap { $0.bestE1RM }.max()
     }
+
+    // MARK: - View
 
     var body: some View {
         ZStack {
-            Color(.systemBackground)
-                .ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: 16) {
-                // Header with Close + title
-                HStack {
-                    Button(action: onClose) {
-                        Text("Close")
-                            .font(.headline)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(Capsule())
-                    }
-
-                    Spacer()
-
-                    Text(exerciseName)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-
-                    Spacer()
-                    Color.clear.frame(width: 80) // balance Close button
-                }
-                .padding(.horizontal)
-                .padding(.top, 12)
+                header
 
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(entries) { entry in
-                            historyRow(entry)
+                        if entries.isEmpty {
+                            Text("No logged sets yet for \(exerciseName).")
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 30)
+                        } else {
+                            ForEach(entries) { entry in
+                                historyRow(entry)
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -163,63 +72,197 @@ struct ExerciseHistorySheet: View {
                 }
             }
         }
+        .task { loadHistory() }
     }
+
+    private var header: some View {
+        HStack {
+            Button(action: onClose) {
+                Text("Close")
+                    .font(.headline)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(Capsule())
+            }
+
+            Spacer()
+
+            Text(exerciseName)
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            Spacer()
+            Color.clear.frame(width: 80) // balance Close button
+        }
+        .padding(.horizontal)
+        .padding(.top, 12)
+    }
+
+    // MARK: - Loading
+
+    private func loadHistory() {
+        do {
+            var descriptor = FetchDescriptor<Session>()
+            descriptor.sortBy = [SortDescriptor(\Session.date, order: .reverse)]
+
+            let sessions = try context.fetch(descriptor)
+            var built: [ExerciseHistoryEntry] = []
+
+            for session in sessions {
+                // Must contain this exercise (by ID) in persisted items
+                guard session.items.contains(where: { $0.exerciseId == exerciseId }) else { continue }
+
+                // Reconstruct with the same pipeline as live session screen (gives RP fields)
+                let vm = SessionScreenViewModel(session: session)
+
+                // Find the reconstructed UI exercise by ID first, then fallback by name
+                let uiEx =
+                    vm.exercises.first(where: { $0.exerciseId == exerciseId }) ??
+                    vm.exercises.first(where: { $0.name == exerciseName })
+
+                guard let uiEx else { continue }
+
+                // Build executed set tokens + totals from executed sets only
+                let target = max(0, uiEx.targetSets)
+                var executedTokens: [String] = []
+                var repsTotal = 0
+                var volumeTotal: Double = 0
+                var executedSetCount = 0
+                var bestE1RM: Double? = nil
+
+                for set in uiEx.sets where set.index <= target {
+                    let reps = set.actualReps ?? 0
+                    guard reps > 0 else { continue } // executed only
+
+                    let load = set.actualLoad ?? 0
+                    let rir = set.actualRIR ?? set.plannedRIR
+
+                    executedSetCount += 1
+                    repsTotal += reps
+                    volumeTotal += load * Double(reps)
+
+                    if load > 0 {
+                        let e1 = estimate1RM(load: load, reps: reps)
+                        bestE1RM = max(bestE1RM ?? 0, e1)
+                    }
+
+                    executedTokens.append(
+                        formatSetToken(
+                            load: load,
+                            reps: reps,
+                            rir: rir,
+                            usedRP: set.usedRestPause,
+                            rpPattern: set.restPausePattern
+                        )
+                    )
+                }
+
+                // If there are no executed sets, skip showing the day (keeps history clean)
+                guard executedSetCount > 0 else { continue }
+
+                let detailText = executedTokens.joined(separator: ", ")
+
+                built.append(
+                    ExerciseHistoryEntry(
+                        date: session.date,
+                        weekIndex: session.weekIndex,
+                        sets: executedSetCount,
+                        reps: repsTotal,
+                        volume: volumeTotal,
+                        detail: detailText,
+                        bestE1RM: (bestE1RM == 0 ? nil : bestE1RM),
+                        session: session
+                    )
+                )
+            }
+
+            entries = built
+        } catch {
+            print("⚠️ Failed to load ExerciseHistorySheet sessions: \(error)")
+        }
+    }
+
+    // MARK: - Row UI
 
     @ViewBuilder
     private func historyRow(_ entry: ExerciseHistoryEntry) -> some View {
         let isBest: Bool = {
             guard let best = bestOverallE1RM,
-                  let e1 = entry.estimated1RM else { return false }
-            return abs(e1 - best) < 0.5   // fuzzy match
+                  let e1 = entry.bestE1RM else { return false }
+            return abs(e1 - best) < 0.5
         }()
 
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(Self.df.string(from: entry.date))
-                    .font(.headline)
-                Spacer()
-                Text("Week \(entry.weekIndex)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        // If you DON'T want drill-in, replace NavigationLink with a plain VStack.
+        NavigationLink {
+            ExerciseSessionDetailView(
+                session: entry.session,
+                exerciseId: exerciseId,
+                exerciseName: exerciseName
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(Self.df.string(from: entry.date))
+                        .font(.headline)
+                    Spacer()
+                    Text("Week \(entry.weekIndex)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
 
-            HStack(spacing: 12) {
-                Text("Sets: \(entry.sets)")
-                Text("Reps: \(entry.reps)")
-                Text("Vol: \(Int(entry.volume))")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Text("Sets: \(entry.sets)")
+                    Text("Reps: \(entry.reps)")
+                    Text("Vol: \(formatVolume(entry.volume))")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-            if !entry.detail.isEmpty {
-                Text(entry.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
+                if !entry.detail.isEmpty {
+                    Text(entry.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
 
-            if let e1 = entry.estimated1RM {
-                HStack(spacing: 6) {
-                    Text("Top est 1RM: \(Int(e1.rounded()))")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-
-                    if isBest {
-                        Text("Best so far")
+                if let e1 = entry.bestE1RM {
+                    HStack(spacing: 6) {
+                        Text("Top est 1RM: \(Int(e1.rounded()))")
                             .font(.caption2)
                             .fontWeight(.semibold)
-                            .foregroundStyle(.green)
+
+                        if isBest {
+                            Text("Best so far")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.green)
+                        }
                     }
+                    .padding(.top, 2)
                 }
-                .padding(.top, 2)
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(.secondarySystemBackground))
+            )
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .buttonStyle(.plain) // keeps your card style
     }
+
+    // MARK: - Helpers
+
+    private func estimate1RM(load: Double, reps: Int) -> Double {
+        let r = max(1, reps)
+        return load * (1.0 + Double(r) / 30.0)
+    }
+
+    private func formatVolume(_ v: Double) -> String {
+        let iv = Int(v.rounded())
+        return NumberFormatter.localizedString(from: NSNumber(value: iv), number: .decimal)
+    }
+
     private func formatSetToken(load: Double, reps: Int, rir: Int?, usedRP: Bool, rpPattern: String) -> String {
         let loadString: String = {
             if load == 0 { return "BW" }
