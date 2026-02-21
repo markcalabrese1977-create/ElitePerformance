@@ -394,6 +394,25 @@ private struct HistoryDayDetailView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Workout metrics").font(.headline)
 
+                    // HR sparklines (only when series exists)
+                    if !s.hkHeartRateSeriesBPM.isEmpty, s.hkHeartRateSeriesStepSeconds > 0 {
+                        HeartRateSparklineView(
+                            title: "Heart rate (workout)",
+                            series: s.hkHeartRateSeriesBPM,
+                            stepSeconds: s.hkHeartRateSeriesStepSeconds,
+                            height: 84
+                        )
+                    }
+
+                    if !s.hkPostWorkoutHeartRateBPM.isEmpty, s.hkPostWorkoutHeartRateStepSeconds > 0 {
+                        HeartRateSparklineView(
+                            title: "Recovery (post-workout)",
+                            series: s.hkPostWorkoutHeartRateBPM,
+                            stepSeconds: s.hkPostWorkoutHeartRateStepSeconds,
+                            height: 72
+                        )
+                    }
+
                     HStack {
                         metricBlock(title: "Duration", value: formatDuration(s.hkDuration))
                         Spacer()

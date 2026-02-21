@@ -20,6 +20,7 @@ struct AnalyticsView: View {
             .navigationTitle("Analytics")
             .sheet(item: sheetItemBinding) { item in
                 ExerciseHistorySheet(
+                    exerciseId: item.exerciseId,
                     exerciseName: item.exerciseName,
                     onClose: { selectedExerciseId = nil }
                 )
