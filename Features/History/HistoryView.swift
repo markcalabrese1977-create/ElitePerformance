@@ -391,9 +391,34 @@ private struct HistoryDayDetailView: View {
                         .fill(Color(.systemBackground))
                 )
             } else {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Workout metrics").font(.headline)
 
+                    // HR charts (only show if we have data)
+                    if !s.hkHeartRateSeriesBPM.isEmpty {
+                        HeartRateSparklineView(
+                            title: "Heart rate (workout)",
+                            series: s.hkHeartRateSeriesBPM,
+                            stepSeconds: s.hkHeartRateSeriesStepSeconds,
+                            height: 72
+                        )
+                    }
+
+                    if !s.hkPostWorkoutHeartRateBPM.isEmpty {
+                        HeartRateSparklineView(
+                            title: "Recovery (post-workout)",
+                            series: s.hkPostWorkoutHeartRateBPM,
+                            stepSeconds: s.hkPostWorkoutHeartRateStepSeconds,
+                            height: 64
+                        )
+                    }
+
+                    // Divider between charts + metrics (only if any chart is shown)
+                    if !s.hkHeartRateSeriesBPM.isEmpty || !s.hkPostWorkoutHeartRateBPM.isEmpty {
+                        Divider().padding(.top, 4)
+                    }
+
+                    // Metrics grid
                     HStack {
                         metricBlock(title: "Duration", value: formatDuration(s.hkDuration))
                         Spacer()
