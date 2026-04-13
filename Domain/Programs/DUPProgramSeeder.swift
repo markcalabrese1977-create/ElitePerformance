@@ -11,13 +11,16 @@ enum DUPProgramSeeder {
     /// Important:
     /// - This does NOT delete existing sessions.
     /// - This does NOT replace the old generator yet.
-    /// - Use it only when you intentionally want to create a fresh DUP block.
+    /// - It now creates a MesoBlock and attaches each seeded session to it.
     static func seed(
         startDate: Date,
         trainingWeekdays: [Int],
         context: ModelContext,
         template: ProgramTemplate = DUP10WeekTemplate.template,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        mesoName: String? = nil,
+        mesoStatus: MesoStatus = .draft,
+        mesoNotes: String? = nil
     ) throws {
         let normalizedWeekdays = Array(Set(trainingWeekdays)).sorted()
 
@@ -28,13 +31,24 @@ enum DUPProgramSeeder {
             )
         }
 
+        let startDay = calendar.startOfDay(for: startDate)
+
         let scheduledDays = try DUPProgramScheduler.buildSchedule(
-            startDate: startDate,
+            startDate: startDay,
             totalWeeks: template.totalWeeks,
             trainingWeekdays: normalizedWeekdays,
             template: template,
             calendar: calendar
         )
+
+        let blockName = mesoName ?? template.name
+        let mesoBlock = MesoBlock(
+            name: blockName,
+            startDate: startDay,
+            status: mesoStatus,
+            notes: mesoNotes
+        )
+        context.insert(mesoBlock)
 
         var createdCount = 0
 
@@ -47,11 +61,13 @@ enum DUPProgramSeeder {
             )
 
             session.programIndex = scheduled.sessionIndex
+            session.meso = mesoBlock
+
             context.insert(session)
             createdCount += 1
         }
 
         try context.save()
-        print("✅ DUPProgramSeeder created \(createdCount) planned sessions.")
+        print("✅ DUPProgramSeeder created \(createdCount) planned sessions in meso block '\(blockName)'.")
     }
 }

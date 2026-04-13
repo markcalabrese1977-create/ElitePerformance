@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Shows your current block grouped by week.
+/// Shows the active future block when available, otherwise falls back to legacy future sessions.
 /// Change-program actions are owned by `HomeView`.
 struct ProgramPlanView: View {
     @Environment(\.modelContext) private var modelContext
@@ -22,9 +22,30 @@ struct ProgramPlanView: View {
 
     // MARK: - Body
 
-    private var visibleSessions: [Session] {
+    private var activeBlockFutureSessions: [Session] {
         let today0 = Calendar.current.startOfDay(for: Date())
-        return sessions.filter { $0.status != .completed && $0.date >= today0 }
+
+        return sessions.filter { session in
+            session.status != .completed &&
+            session.date >= today0 &&
+            session.meso?.status == .active
+        }
+    }
+
+    private var legacyFutureSessions: [Session] {
+        let today0 = Calendar.current.startOfDay(for: Date())
+
+        return sessions.filter { session in
+            session.status != .completed &&
+            session.date >= today0
+        }
+    }
+
+    private var visibleSessions: [Session] {
+        if !activeBlockFutureSessions.isEmpty {
+            return activeBlockFutureSessions
+        }
+        return legacyFutureSessions
     }
     
     var body: some View {
@@ -159,7 +180,7 @@ struct ProgramPlanView: View {
     // MARK: - Week math (MesoLabel)
 
     private func weekIndex(for date: Date) -> Int {
-        if let exact = sessions.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
+        if let exact = visibleSessions.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
             return exact.weekIndex
         }
         return 1
@@ -169,7 +190,7 @@ struct ProgramPlanView: View {
     private func dayIndexInWeek(for date: Date) -> Int {
         let day = Calendar.current.startOfDay(for: date)
 
-        let sameWeekSessions = sessions
+        let sameWeekSessions = visibleSessions
             .filter {
                 $0.weekIndex == weekIndex(for: day) &&
                 $0.status != .completed

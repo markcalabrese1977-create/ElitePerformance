@@ -72,29 +72,48 @@ struct TodayTabView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
+    private var activeBlockSessions: [Session] {
+        sessions.filter { $0.meso?.status == .active }
+    }
+
+    private var visibleSessions: [Session] {
+        if !activeBlockSessions.isEmpty {
+            return activeBlockSessions
+        }
+        return sessions
+    }
+
     private var upcomingSessions: [Session] {
         let cal = Calendar.current
         let todayStart = cal.startOfDay(for: Date())
         let tomorrowStart = cal.date(byAdding: .day, value: 1, to: todayStart)!
-        return sessions.filter { $0.date >= tomorrowStart }
+
+        return visibleSessions.filter { session in
+            session.date >= tomorrowStart
+        }
     }
 
     private var todaySession: Session? {
         let todayStart = Calendar.current.startOfDay(for: Date())
         let todayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)!
 
-        return sessions.first(where: { $0.date >= todayStart && $0.date < todayEnd })
+        return visibleSessions.first(where: { session in
+            session.date >= todayStart && session.date < todayEnd
+        })
     }
     
     private func dayIndexInWeek(for session: Session) -> Int? {
-        // Determine D1..D6 by sorting sessions in the same meso week by date.
-        // Uses session.weekIndex (alias to weekInMeso).
-        let sameWeek = sessions
+        let sameWeek = visibleSessions
             .filter { $0.weekIndex == session.weekIndex }
-            .sorted { $0.date < $1.date }
+            .sorted { lhs, rhs in
+                if let l = lhs.programIndex, let r = rhs.programIndex {
+                    return l < r
+                }
+                return lhs.date < rhs.date
+            }
 
         guard let idx = sameWeek.firstIndex(where: { $0.id == session.id }) else { return nil }
-        return idx + 1 // 1-based: D1..D6
+        return idx + 1
     }
 
     private func plannedZone2Targets(forWeek week: Int) -> [Int] {
