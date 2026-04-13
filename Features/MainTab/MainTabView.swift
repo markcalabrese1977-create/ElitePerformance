@@ -149,7 +149,7 @@ struct TodayTabView: View {
                     .font(.headline)
 
                 if let session = todaySession {
-                    Text(MesoLabel.label(for: session.date))
+                    Text("Week \(session.weekIndex)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {

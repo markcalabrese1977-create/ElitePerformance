@@ -1645,7 +1645,7 @@ final class SessionScreenViewModel: ObservableObject {
 extension SessionScreenViewModel {
     convenience init(session: Session) {
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
-        let subtitle = MesoLabel.label(for: session.date)
+        let subtitle = "Week \(session.weekIndex)"
         let items = session.items.sorted { $0.order < $1.order }
 
         let exercises: [UISessionExercise] = items.map { item in
