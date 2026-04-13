@@ -144,6 +144,19 @@ final class Session {
     }
 }
 
+extension Session {
+    /// Truthful DUP label derived from seeded session order.
+    /// Current DUP templates are 6 training days per week.
+    var weekDayLabel: String {
+        guard let programIndex, programIndex > 0 else {
+            return "Week \(weekIndex)"
+        }
+
+        let dayIndex = ((programIndex - 1) % 6) + 1
+        return "W\(weekIndex)D\(dayIndex)"
+    }
+}
+
 // MARK: - Session Item (per-exercise)
 
 @Model

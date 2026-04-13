@@ -149,7 +149,7 @@ struct TodayTabView: View {
                     .font(.headline)
 
                 if let session = todaySession {
-                    Text("Week \(session.weekIndex)")
+                    Text(session.weekDayLabel)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
