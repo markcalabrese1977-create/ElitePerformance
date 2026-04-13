@@ -47,15 +47,14 @@ struct ProgramPlanView: View {
                                 .foregroundStyle(.secondary)
                         }
                     ) {
-                        ForEach(weekGroup.sessions) { session in
+                        ForEach(Array(weekGroup.sessions.enumerated()), id: \.element.id) { index, session in
                             NavigationLink {
                                 ProgramDayDetailView(session: session)
                             } label: {
-                                let wd = MesoLabel.weekDay(for: session.date)
                                 programRow(
                                     for: session,
-                                    computedWeek: wd.week,
-                                    computedDay: wd.day
+                                    computedWeek: weekGroup.weekIndex,
+                                    computedDay: index + 1
                                 )
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -160,12 +159,30 @@ struct ProgramPlanView: View {
     // MARK: - Week math (MesoLabel)
 
     private func weekIndex(for date: Date) -> Int {
-        MesoLabel.weekIndex(for: date)
+        if let exact = sessions.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
+            return exact.weekIndex
+        }
+        return 1
     }
 
     /// 1–6 training day within a training week (Thu rest is skipped by lift-day counting)
     private func dayIndexInWeek(for date: Date) -> Int {
-        MesoLabel.weekDay(for: date).day
+        let day = Calendar.current.startOfDay(for: date)
+
+        let sameWeekSessions = sessions
+            .filter {
+                $0.weekIndex == weekIndex(for: day) &&
+                $0.status != .completed
+            }
+            .sorted { $0.date < $1.date }
+
+        if let idx = sameWeekSessions.firstIndex(where: {
+            Calendar.current.isDate($0.date, inSameDayAs: day)
+        }) {
+            return idx + 1
+        }
+
+        return 1
     }
 
     // MARK: - Optional: realign stored weekIndex so other screens match
@@ -312,14 +329,17 @@ struct ProgramPlanView: View {
     // MARK: - Grouping (computed)
 
     private var weekGroups: [WeekGroup] {
-        let grouped = Dictionary(grouping: visibleSessions) { MesoLabel.weekIndex(for: $0.date) }
-
+        let grouped = Dictionary(grouping: visibleSessions) { $0.weekIndex }
 
         return grouped.keys.sorted().map { week in
             let daySessions = (grouped[week] ?? [])
-                .sorted { $0.date < $1.date }
+                .sorted { lhs, rhs in
+                    if let l = lhs.programIndex, let r = rhs.programIndex {
+                        return l < r
+                    }
+                    return lhs.date < rhs.date
+                }
 
-            // Truthful header range: reflect actual dates present in this group.
             let start = daySessions.first?.date ?? Date()
             let end = daySessions.last?.date ?? start
 

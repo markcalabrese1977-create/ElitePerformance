@@ -24,17 +24,16 @@ final class Session {
     /// Optional text recap / notes for this session (end-of-workout recap writes here).
     var sessionNotes: String?
 
-    /// ✅ STORED property (keep this name to match the existing on-device SwiftData store)
-    /// IMPORTANT: Optional so old records without this field can migrate.
+    /// Stored property kept for migration compatibility.
     var weekInMeso: Int?
-    
+
     var meso: MesoBlock?
-    
+
     /// Stable order within a mesocycle: 1...N
     /// Optional for migration safety with existing stores.
     var programIndex: Int?
 
-    /// ✅ Alias used throughout the app (does NOT change the stored schema)
+    /// Alias used throughout the app.
     var weekIndex: Int {
         get { weekInMeso ?? 1 }
         set { weekInMeso = newValue }
@@ -43,7 +42,7 @@ final class Session {
     /// Exercises for this session.
     @Relationship(deleteRule: .cascade) var items: [SessionItem] = []
 
-    // MARK: - HealthKit / Apple Workout Summary (stored on Session)
+    // MARK: - HealthKit / Apple Workout Summary
 
     /// Linked HealthKit workout UUID (string form). Used as our “already synced” flag.
     var hkWorkoutUUID: String?
@@ -62,7 +61,7 @@ final class Session {
     var hkAvgHeartRate: Double
     var hkMaxHeartRate: Double
 
-    // MARK: - HealthKit HR UI series (optional)
+    // MARK: - HealthKit HR UI series
 
     /// Zone durations in seconds
     var hkZone1Seconds: Double
@@ -89,7 +88,6 @@ final class Session {
         completedAt: Date? = nil,
         programIndex: Int? = nil,
 
-        // HK defaults
         hkWorkoutUUID: String? = nil,
         hkWorkoutStart: Date? = nil,
         hkWorkoutEnd: Date? = nil,
@@ -117,12 +115,8 @@ final class Session {
 
         self.readinessStars = readinessStars
         self.sessionNotes = sessionNotes
-
-        // ✅ Write the STORED legacy field directly (never touch the computed alias in init)
         self.weekInMeso = weekIndex
-
         self.items = items
-        
         self.programIndex = programIndex
 
         self.hkWorkoutUUID = hkWorkoutUUID
@@ -160,11 +154,28 @@ final class SessionItem {
     /// ID of the exercise in `ExerciseCatalog` / `CatalogExercise`.
     var exerciseId: String
 
-    // Planned targets (aggregate)
+    // Planned targets (flattened execution defaults)
     var targetReps: Int
     var targetSets: Int
     var targetRIR: Int
     var suggestedLoad: Double
+
+    // Resolved DUP prescription metadata (optional for migration safety)
+    var waveRaw: String?
+    var priorityRaw: String?
+
+    var setMin: Int?
+    var setMax: Int?
+
+    var repMin: Int?
+    var repMax: Int?
+
+    var targetRIRMin: Int?
+    var targetRIRMax: Int?
+
+    var intensifierRaw: String?
+    var intensifierNotes: String?
+    var prescriptionNotes: String?
 
     /// Optional per-set logs (for future richer analytics).
     @Relationship(deleteRule: .cascade) var logs: [SetLog] = []
@@ -172,6 +183,7 @@ final class SessionItem {
     // Planned pattern per set (v1)
     var plannedRepsBySet: [Int] = []
     var plannedLoadsBySet: [Double] = []
+    var plannedRIRsBySet: [Int] = []
 
     // Simple inline logging (what you’re using now)
     var actualReps: [Int] = []
@@ -193,8 +205,22 @@ final class SessionItem {
         targetSets: Int,
         targetRIR: Int,
         suggestedLoad: Double,
+
+        waveRaw: String? = nil,
+        priorityRaw: String? = nil,
+        setMin: Int? = nil,
+        setMax: Int? = nil,
+        repMin: Int? = nil,
+        repMax: Int? = nil,
+        targetRIRMin: Int? = nil,
+        targetRIRMax: Int? = nil,
+        intensifierRaw: String? = nil,
+        intensifierNotes: String? = nil,
+        prescriptionNotes: String? = nil,
+
         plannedRepsBySet: [Int] = [],
         plannedLoadsBySet: [Double] = [],
+        plannedRIRsBySet: [Int] = [],
         logs: [SetLog] = [],
         actualReps: [Int] = [],
         actualLoads: [Double] = [],
@@ -214,8 +240,21 @@ final class SessionItem {
         self.targetRIR = targetRIR
         self.suggestedLoad = suggestedLoad
 
+        self.waveRaw = waveRaw
+        self.priorityRaw = priorityRaw
+        self.setMin = setMin
+        self.setMax = setMax
+        self.repMin = repMin
+        self.repMax = repMax
+        self.targetRIRMin = targetRIRMin
+        self.targetRIRMax = targetRIRMax
+        self.intensifierRaw = intensifierRaw
+        self.intensifierNotes = intensifierNotes
+        self.prescriptionNotes = prescriptionNotes
+
         self.plannedRepsBySet = plannedRepsBySet
         self.plannedLoadsBySet = plannedLoadsBySet
+        self.plannedRIRsBySet = plannedRIRsBySet
         self.logs = logs
 
         self.actualReps = actualReps

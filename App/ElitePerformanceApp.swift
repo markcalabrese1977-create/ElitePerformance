@@ -23,7 +23,7 @@ struct ElitePerformanceApp: App {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first!
-
+        
         // ✅ Store pin (prevents “accidental flip” between stores)
         let pinKey = "activeSwiftDataStoreLabel.v1"
 

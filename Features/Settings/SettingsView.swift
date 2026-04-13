@@ -11,6 +11,8 @@ struct SettingsView: View {
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
+    
+    
 
     // MARK: - Mesocycle state (bind to the SAME key MesoLifecycle uses)
     @AppStorage("meso.scheduledStartDateEpoch") private var scheduledStartEpoch: Double = 0
@@ -120,7 +122,9 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
+            
+            
+            
             // MARK: - Export
             Section("Export") {
                 Button("Export Completed Sessions (CSV)") {

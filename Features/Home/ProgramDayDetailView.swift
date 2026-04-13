@@ -11,7 +11,8 @@ struct ProgramDayDetailView: View {
 
     @State private var showingAddExerciseSheet = false
     @State private var showingApplyScopeDialog = false
-    @State private var showAppliedToast = false
+    @State private var feedbackMessage: String = ""
+    @State private var showFeedbackAlert = false
     @State private var historyTarget: HistoryTarget?
     @State private var noteTarget: NoteTarget?
 
@@ -90,6 +91,13 @@ struct ProgramDayDetailView: View {
 
             Button("Cancel", role: .cancel) { }
         }
+        
+        .alert("Plan Update", isPresented: $showFeedbackAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(feedbackMessage)
+        }
+        
         // ✅ ADD THIS
         .sheet(isPresented: $showingAddExerciseSheet) {
             AddExerciseSheet(
@@ -117,7 +125,10 @@ struct ProgramDayDetailView: View {
             )
         }
     }
-
+    private func presentFeedback(_ message: String) {
+        feedbackMessage = message
+        showFeedbackAlert = true
+    }
     // MARK: - Header / Summary
 
     private var headerSection: some View {
@@ -130,7 +141,7 @@ struct ProgramDayDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Text("Adjust PLAN loads, reps, and RIR here. Logging happens on the Today tab.")
+                Text("Adjust plan defaults here. Logging happens on the Today tab.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -160,12 +171,13 @@ struct ProgramDayDetailView: View {
     // MARK: - Auto+ (From History): update suggestedLoad from last logged performance
 
     private func autoGenerateSuggestedLoadsFromHistoryForThisDay() {
-        // Pull recent past sessions once (status is not reliable)
         let sessions = fetchRecentSessions(limit: 60)
+        var foundHistory = false
 
         for item in orderedItems {
-
             if let lastLogged = findMostRecentLoggedItem(exerciseId: item.exerciseId, in: sessions) {
+                foundHistory = true
+
                 let range = repRange(for: item)
 
                 let nextLoad = computeNextSuggestedLoad(
@@ -174,26 +186,28 @@ struct ProgramDayDetailView: View {
                     repRange: range
                 )
 
-                // ✅ Always overwrite suggestedLoad when we have real history
                 if nextLoad > 0 {
                     item.suggestedLoad = nextLoad
                 }
             } else {
-                // No history → only seed if user already has something (don’t guess)
                 seedSuggestedLoadIfNeeded(item)
             }
 
-            // ✅ Don’t stomp an already-programmed plan.
-            // Only fill per-set loads if they're currently blank.
-            // Fill only missing loads (don’t overwrite already-programmed ones)
-            fillBlankPlannedLoadsFromSuggestedLoad(for: item)
+            autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
         }
 
         do {
             try modelContext.save()
-            print("✅ Auto+ applied (suggestedLoad updated from history)")
+            print("✅ Auto+ applied (history-informed load + per-set plan refresh)")
+
+            if foundHistory {
+                presentFeedback("Updated suggested loads from history and refreshed per-set defaults.")
+            } else {
+                presentFeedback("No exercise history found. Kept current defaults and refreshed the plan structure.")
+            }
         } catch {
             print("⚠️ Auto+ save failed: \(error)")
+            presentFeedback("Couldn’t update Auto+ plan: \(error.localizedDescription)")
         }
     }
     
@@ -205,13 +219,14 @@ struct ProgramDayDetailView: View {
         do {
             try modelContext.save()
             print("✅ Auto-generated per-set plan for this day")
+            presentFeedback("Reset plan defaults to the stored prescription structure.")
         } catch {
             print("⚠️ Auto-generate save failed: \(error)")
+            presentFeedback("Couldn’t reset plan defaults: \(error.localizedDescription)")
         }
     }
 
     private func autoGeneratePerSetPlan(for item: SessionItem, overwriteLoadsFromSuggested: Bool) {
-        // Ensure arrays are large enough for editing UI + target sets
         let setCount = max(4, item.targetSets)
 
         func ensureIntArray(_ array: inout [Int]) {
@@ -232,22 +247,56 @@ struct ProgramDayDetailView: View {
 
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
-        ensureIntArray(&item.actualRIRs) // (used as per-set RIR override in this screen)
+        ensureIntArray(&item.plannedRIRsBySet)
 
-        // Choose a base load to spread across sets:
-        // 1) suggestedLoad if present
-        // 2) first non-zero planned set load
-        // 3) otherwise 0 (leave as-is)
-        // Choose a base load to spread across sets
         let firstPlannedNonZero = item.plannedLoadsBySet.first(where: { $0 > 0 }) ?? 0
 
         let baseLoad: Double
         if overwriteLoadsFromSuggested {
-            // Auto+ mode: ONLY use suggestedLoad (this is the key change)
             baseLoad = item.suggestedLoad
         } else {
-            // Auto mode: keep existing behavior
             baseLoad = item.suggestedLoad > 0 ? item.suggestedLoad : firstPlannedNonZero
+        }
+
+        let defaultRepTarget: Int = {
+            if let repMin = item.repMin, repMin > 0 { return repMin }
+            return item.targetReps
+        }()
+
+        let defaultRIRTarget: Int = {
+            if let rirMax = item.targetRIRMax, rirMax >= 0 { return rirMax }
+            return item.targetRIR
+        }()
+
+        let workingSetCount = min(item.targetSets, setCount)
+
+        guard workingSetCount > 0 else { return }
+
+        for idx in 0..<workingSetCount {
+            item.plannedRepsBySet[idx] = defaultRepTarget
+
+            if overwriteLoadsFromSuggested {
+                item.plannedLoadsBySet[idx] = baseLoad
+            } else if item.plannedLoadsBySet[idx] == 0, baseLoad > 0 {
+                item.plannedLoadsBySet[idx] = baseLoad
+            }
+
+            item.plannedRIRsBySet[idx] = defaultRIRTarget
+        }
+
+        // Clear non-working extra rows in the editable 4-set UI tail
+        if workingSetCount < setCount {
+            for idx in workingSetCount..<setCount {
+                if idx < item.plannedRepsBySet.count {
+                    item.plannedRepsBySet[idx] = 0
+                }
+                if overwriteLoadsFromSuggested, idx < item.plannedLoadsBySet.count {
+                    item.plannedLoadsBySet[idx] = 0
+                }
+                if idx < item.plannedRIRsBySet.count {
+                    item.plannedRIRsBySet[idx] = defaultRIRTarget
+                }
+            }
         }
     }
     
@@ -289,7 +338,7 @@ struct ProgramDayDetailView: View {
 
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
-        ensureIntArray(&item.actualRIRs)
+        ensureIntArray(&item.plannedRIRsBySet)
     }
     
     private func fetchRecentSessions(limit: Int) -> [Session] {
@@ -451,6 +500,7 @@ struct ProgramDayDetailView: View {
         let setCount = 4
         newItem.plannedRepsBySet       = Array(repeating: newItem.targetReps, count: setCount)
         newItem.plannedLoadsBySet      = Array(repeating: 0.0,               count: setCount)
+        newItem.plannedRIRsBySet       = Array(repeating: newItem.targetRIR, count: setCount)
         newItem.actualReps             = Array(repeating: 0,                 count: setCount)
         newItem.actualLoads            = Array(repeating: 0.0,               count: setCount)
         newItem.actualRIRs             = Array(repeating: 0,                 count: setCount)
@@ -556,53 +606,52 @@ struct ProgramDayDetailView: View {
 
     /// Apply the current day's PLAN to other sessions in the same block that share the same weekday.
     ///
-    /// Copies PLAN fields only (sets / reps / RIR / suggested load / per-set plan) and
-    /// does NOT touch logged Actuals.
+    /// Copies PLAN fields only (sets / reps / RIR / suggested load / per-set plan / DUP prescription metadata)
+    /// and does NOT touch logged Actuals.
     private func applyPlanChangesToBlock() {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let weekday = calendar.component(.weekday, from: session.date) // 1=Sun...7=Sat
-        
-        // Fetch only future sessions (predicate is safe/simple)
+
         let descriptor = FetchDescriptor<Session>(
             predicate: #Predicate { s in
                 s.date > today
             },
             sortBy: [SortDescriptor(\.date, order: .forward)]
         )
-        
+
         do {
             let futureSessions = try modelContext.fetch(descriptor)
-            
-            // Only planned, same weekday, exclude the session you're editing
+
             let targets = futureSessions.filter { other in
                 other.id != session.id &&
                 other.status == .planned &&
                 calendar.component(.weekday, from: other.date) == weekday
             }
-            
+
             guard !targets.isEmpty else {
                 print("ℹ️ No future planned sessions matched for applyPlanChangesToBlock.")
+                presentFeedback("No future planned sessions matched this weekday.")
                 return
             }
-            
-            // Source = this Program day, ordered by 'order'
+
             let sourceItems = orderedItems
-            
+
             for other in targets {
                 let targetItemsSorted = other.items.sorted { $0.order < $1.order }
-                
+
                 // 1) Delete extras
                 if targetItemsSorted.count > sourceItems.count {
                     for extra in targetItemsSorted[sourceItems.count...] {
                         modelContext.delete(extra)
                     }
                 }
-                
+
                 // 2) Add missing
                 if targetItemsSorted.count < sourceItems.count {
                     for idx in targetItemsSorted.count..<sourceItems.count {
                         let src = sourceItems[idx]
+
                         let newItem = SessionItem(
                             order: idx + 1,
                             exerciseId: src.exerciseId,
@@ -610,36 +659,68 @@ struct ProgramDayDetailView: View {
                             targetSets: src.targetSets,
                             targetRIR: src.targetRIR,
                             suggestedLoad: src.suggestedLoad,
+
+                            waveRaw: src.waveRaw,
+                            priorityRaw: src.priorityRaw,
+                            setMin: src.setMin,
+                            setMax: src.setMax,
+                            repMin: src.repMin,
+                            repMax: src.repMax,
+                            targetRIRMin: src.targetRIRMin,
+                            targetRIRMax: src.targetRIRMax,
+                            intensifierRaw: src.intensifierRaw,
+                            intensifierNotes: src.intensifierNotes,
+                            prescriptionNotes: src.prescriptionNotes,
+
                             plannedRepsBySet: src.plannedRepsBySet,
                             plannedLoadsBySet: src.plannedLoadsBySet
                         )
+
                         other.items.append(newItem)
                     }
                 }
-                
+
                 // 3) Align & copy by order
                 let aligned = other.items.sorted { $0.order < $1.order }
-                
+
                 for (idx, src) in sourceItems.enumerated() {
                     guard idx < aligned.count else { continue }
                     let dst = aligned[idx]
-                    
+
                     dst.order = idx + 1
                     dst.exerciseId = src.exerciseId
-                    
+
+                    // Flattened execution defaults
                     dst.targetReps = src.targetReps
                     dst.targetSets = src.targetSets
                     dst.targetRIR = src.targetRIR
                     dst.suggestedLoad = src.suggestedLoad
+
+                    // Rich DUP prescription metadata
+                    dst.waveRaw = src.waveRaw
+                    dst.priorityRaw = src.priorityRaw
+                    dst.setMin = src.setMin
+                    dst.setMax = src.setMax
+                    dst.repMin = src.repMin
+                    dst.repMax = src.repMax
+                    dst.targetRIRMin = src.targetRIRMin
+                    dst.targetRIRMax = src.targetRIRMax
+                    dst.intensifierRaw = src.intensifierRaw
+                    dst.intensifierNotes = src.intensifierNotes
+                    dst.prescriptionNotes = src.prescriptionNotes
+
+                    // Planned per-set editor state
                     dst.plannedRepsBySet = src.plannedRepsBySet
                     dst.plannedLoadsBySet = src.plannedLoadsBySet
                 }
             }
-            
+
             try modelContext.save()
             print("✅ Applied plan changes from \(session.date) to \(targets.count) future planned sessions.")
+            presentFeedback("Applied plan changes to \(targets.count) future session\(targets.count == 1 ? "" : "s").")
         } catch {
             print("⚠️ Failed to apply plan changes to block: \(error)")
+            presentFeedback("Couldn’t apply changes: \(error.localizedDescription)")
         }
     }
 }
@@ -703,6 +784,12 @@ private struct ProgramExercisePlanRow: View {
                 Text(detailLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let intensifierLine {
+                    Text(intensifierLine)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
@@ -751,12 +838,56 @@ private struct ProgramExercisePlanRow: View {
         ExerciseNotesStore.hasNote(exerciseId: item.exerciseId) ? "note.text" : "note"
     }
     
+    private var prescriptionSummaryRow: some View {
+        HStack(spacing: 8) {
+            Text("Prescription")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Text(prescriptionSummaryText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var prescriptionSummaryText: String {
+        let setsText: String = {
+            if let min = item.setMin, let max = item.setMax {
+                return min == max ? "\(min) sets" : "\(min)–\(max) sets"
+            } else {
+                return "\(item.targetSets) sets"
+            }
+        }()
+
+        let repsText: String = {
+            if let min = item.repMin, let max = item.repMax {
+                return min == max ? "\(min) reps" : "\(min)–\(max) reps"
+            } else {
+                return "\(item.targetReps) reps"
+            }
+        }()
+
+        let rirText: String = {
+            if let min = item.targetRIRMin, let max = item.targetRIRMax {
+                return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
+            } else {
+                return "\(item.targetRIR) RIR"
+            }
+        }()
+
+        return "\(setsText) · \(repsText) · \(rirText)"
+    }
+    
     private var planRow: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
 
             // Sets
             VStack(alignment: .leading, spacing: 4) {
-                Text("Sets")
+                Text("Work sets")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -773,7 +904,7 @@ private struct ProgramExercisePlanRow: View {
 
             // Reps (clean option: show ONLY the editable number here)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Reps")
+                Text("Default reps")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -790,7 +921,7 @@ private struct ProgramExercisePlanRow: View {
 
             // RIR
             VStack(alignment: .leading, spacing: 4) {
-                Text("RIR")
+                Text("Default RIR")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -877,17 +1008,73 @@ private struct ProgramExercisePlanRow: View {
             muscle = "—"
         }
 
-        let repsDisplay = RepRangeRulebook.display(targetReps: item.targetReps, range: repRange)
-        return "\(muscle) · Target \(repsDisplay) @ \(item.targetRIR) RIR"
-        
+        let setsText: String = {
+            if let min = item.setMin, let max = item.setMax {
+                if min == max {
+                    return "\(min) sets"
+                } else {
+                    return "\(min)–\(max) sets"
+                }
+            } else {
+                return "\(item.targetSets) sets"
+            }
+        }()
+
+        let repsText: String = {
+            if let min = item.repMin, let max = item.repMax {
+                if min == max {
+                    return "\(min) reps"
+                } else {
+                    return "\(min)–\(max) reps"
+                }
+            } else {
+                return "\(item.targetReps) reps"
+            }
+        }()
+
+        let rirText: String = {
+            if let min = item.targetRIRMin, let max = item.targetRIRMax {
+                if min == max {
+                    return "\(min) RIR"
+                } else {
+                    return "\(min)–\(max) RIR"
+                }
+            } else {
+                return "\(item.targetRIR) RIR"
+            }
+        }()
+
+        return "\(muscle) · \(setsText) · \(repsText) · \(rirText)"
     }
-    private var repRange: RepRange {
-        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
-            return RepRangeRulebook.range(forExerciseId: catalog.id, exerciseName: catalog.name)
-        } else {
-            return RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: "Exercise")
+
+    private var intensifierLine: String? {
+        guard
+            let raw = item.intensifierRaw,
+            let intensifier = IntensifierType(rawValue: raw),
+            intensifier != .none
+        else {
+            return nil
+        }
+
+        if let notes = item.intensifierNotes,
+           !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return notes
+        }
+
+        switch intensifier {
+        case .dropSetLast:
+            return "Drop set on final set only."
+        case .restPauseLast:
+            return "Rest-pause on final set only."
+        case .squeezePauseLast:
+            return "Pause/squeeze on final set only."
+        case .customNoteOnly:
+            return "Special instruction applies."
+        case .none:
+            return nil
         }
     }
+    
     // MARK: - Array helpers
 
     private func normalizeArraySizes() {
@@ -898,6 +1085,7 @@ private struct ProgramExercisePlanRow: View {
             item.plannedLoadsBySet.count,
             item.actualReps.count,
             item.actualLoads.count,
+            item.plannedRIRsBySet.count,
             item.actualRIRs.count,
             item.usedRestPauseFlags.count,
             item.restPausePatternsBySet.count,
@@ -924,6 +1112,7 @@ private struct ProgramExercisePlanRow: View {
 
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
+        ensureIntArray(&item.plannedRIRsBySet)
         ensureIntArray(&item.actualReps)
         ensureDoubleArray(&item.actualLoads)
         ensureIntArray(&item.actualRIRs)
@@ -1026,20 +1215,20 @@ private struct ProgramExercisePlanRow: View {
     private func bindingForRIR(at index: Int) -> Binding<Int> {
         Binding(
             get: {
-                guard index < item.actualRIRs.count else {
+                guard index < item.plannedRIRsBySet.count else {
                     return item.targetRIR
                 }
 
-                let stored = item.actualRIRs[index]
+                let stored = item.plannedRIRsBySet[index]
                 return stored == 0 ? item.targetRIR : stored
             },
             set: { newValue in
-                if index >= item.actualRIRs.count {
-                    let extra = index + 1 - item.actualRIRs.count
-                    item.actualRIRs.append(contentsOf: repeatElement(0, count: extra))
+                if index >= item.plannedRIRsBySet.count {
+                    let extra = index + 1 - item.plannedRIRsBySet.count
+                    item.plannedRIRsBySet.append(contentsOf: repeatElement(0, count: extra))
                 }
 
-                item.actualRIRs[index] = newValue
+                item.plannedRIRsBySet[index] = newValue
                 save()
             }
         )

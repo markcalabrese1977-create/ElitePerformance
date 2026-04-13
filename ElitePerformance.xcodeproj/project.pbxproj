@@ -225,6 +225,11 @@
 			path = Debug;
 			sourceTree = "<group>";
 		};
+		D5F89BB72F8AD54900D44DCB /* Programs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Programs;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -370,6 +375,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D5F89BB72F8AD54900D44DCB /* Programs */,
 				D5813F972F4910A500CCE909,
 				D58476EC2F410AC300FE3F46 /* Export */,
 				D585D59C2F043BC70073DFE3 /* Catalog */,
@@ -538,6 +544,7 @@
 				D5E2937D2EC6B51200034D78 /* MainTab */,
 				D5E293952EC7BBFB00034D78 /* Engines */,
 				D5E2939B2EC7BCFC00034D78 /* Debug */,
+				D5F89BB72F8AD54900D44DCB /* Programs */,
 			);
 			name = ElitePerformance;
 			packageProductDependencies = (

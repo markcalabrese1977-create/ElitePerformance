@@ -493,34 +493,50 @@ private struct SessionExerciseCardView: View {
             exerciseName: exercise.name
         )
     }
-   
-
-    private var targetRepsForDisplay: Int {
-        // Prefer first planned reps (set 1). Fallback to 10.
-        exercise.sets.first(where: { $0.index == 1 })?.plannedReps
-        ?? exercise.sets.first?.plannedReps
-        ?? 10
-    }
-
-    private var rirForDisplay: Int? {
-        exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
-        ?? exercise.sets.first?.plannedRIR
-    }
 
     private var todayDetailLine: String {
-        // Preserve "Week X · Muscle" prefix if it exists, replace reps portion.
         let parts = exercise.detail.components(separatedBy: " · ")
-        let prefix: String = {
-            if parts.count >= 2 { return "\(parts[0]) · \(parts[1]) · " }
-            return parts.first.map { "\($0) · " } ?? ""
+
+        let weekText = parts.indices.contains(0) ? parts[0] : "Week \(exercise.weekIndex)"
+        let muscleText = parts.indices.contains(1) ? parts[1] : nil
+
+        let setsText: String = {
+            if let min = exercise.setMin, let max = exercise.setMax {
+                return min == max ? "\(min) sets" : "\(min)–\(max) sets"
+            }
+            return "\(exercise.targetSets) sets"
         }()
 
-        let repsLabel = RepRangeRulebook.display(targetReps: targetRepsForDisplay, range: repRange)
+        let repsText: String = {
+            if let min = exercise.repMin, let max = exercise.repMax {
+                return min == max ? "\(min) reps" : "\(min)–\(max) reps"
+            }
 
-        if let rirForDisplay {
-            return "\(prefix)\(repsLabel) @ \(rirForDisplay) RIR"
+            let planned = exercise.sets.first(where: { $0.index == 1 })?.plannedReps
+                ?? exercise.sets.first?.plannedReps
+                ?? 10
+
+            let repsLabel = RepRangeRulebook.display(targetReps: planned, range: repRange)
+            return "\(repsLabel) reps"
+        }()
+
+        let rirText: String = {
+            if let min = exercise.targetRIRMin, let max = exercise.targetRIRMax {
+                return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
+            }
+
+            if let rir = exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
+                ?? exercise.sets.first?.plannedRIR {
+                return "\(rir) RIR"
+            }
+
+            return "—"
+        }()
+
+        if let muscleText {
+            return "\(weekText) · \(muscleText) · \(setsText) · \(repsText) · \(rirText)"
         } else {
-            return "\(prefix)\(repsLabel)"
+            return "\(weekText) · \(setsText) · \(repsText) · \(rirText)"
         }
     }
     
@@ -530,6 +546,24 @@ private struct SessionExerciseCardView: View {
 
     private var noteIconName: String {
         hasExerciseNote ? "note.text" : "note"
+    }
+    
+    private var executionNoteLine: String? {
+        let intensifier = exercise.intensifierNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let intensifier, !intensifier.isEmpty {
+            return intensifier
+        }
+
+        let prescription = exercise.prescriptionNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let prescription, !prescription.isEmpty {
+            return prescription
+        }
+
+        return nil
     }
     
     var body: some View {
@@ -543,20 +577,29 @@ private struct SessionExerciseCardView: View {
                     Text(todayDetailLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                        .allowsTightening(true)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .minimumScaleFactor(0.9)
+
+                    if let executionNoteLine {
+                        Text(executionNoteLine)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .italic()
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Spacer()
 
                 HStack(spacing: 8) {
-                    Text("\(exercise.targetSets) sets")
+                    Text({
+                        if let min = exercise.setMin, let max = exercise.setMax {
+                            return min == max ? "\(min) sets" : "\(min)–\(max) sets"
+                        } else {
+                            return "\(exercise.targetSets) sets"
+                        }
+                    }())
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -831,15 +874,29 @@ private struct SessionSetRowView: View {
         }
         .padding(.vertical, 4)
         .onAppear {
-            // Pre-fill RIR from actual (if any) or from plan
-            if actualRIRText.isEmpty {
-                if let rir = uiSet.actualRIR {
-                    actualRIRText = "\(rir)"
-                } else if let planned = uiSet.plannedRIR {
-                    actualRIRText = "\(planned)"
-                } else {
-                    actualRIRText = ""
-                }
+            if let rir = uiSet.actualRIR {
+                actualRIRText = "\(rir)"
+            } else if let planned = uiSet.plannedRIR {
+                actualRIRText = "\(planned)"
+            } else {
+                actualRIRText = ""
+            }
+        }
+        .onChange(of: uiSet.plannedRIR) { newValue in
+            guard uiSet.actualRIR == nil else { return }
+            if let planned = newValue {
+                actualRIRText = "\(planned)"
+            } else {
+                actualRIRText = ""
+            }
+        }
+        .onChange(of: uiSet.actualRIR) { newValue in
+            if let rir = newValue {
+                actualRIRText = "\(rir)"
+            } else if let planned = uiSet.plannedRIR {
+                actualRIRText = "\(planned)"
+            } else {
+                actualRIRText = ""
             }
         }
         .onChange(of: actualRIRText) { newValue in
@@ -1073,7 +1130,7 @@ final class SessionScreenViewModel: ObservableObject {
 
         let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
         let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
-        exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
+        exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(exercise.prescriptionDetailLine.replacingOccurrences(of: "Week \(exercise.weekIndex) · ", with: ""))"
         exercise.coachMessage = ""
 
         exercises[index] = exercise
@@ -1131,13 +1188,26 @@ final class SessionScreenViewModel: ObservableObject {
 
         let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
         let repsLabel = RepRangeRulebook.display(targetReps: defaultReps, range: range)
-        let detail = "Week \(session.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(defaultRIR)"
+        let detail = "Week \(session.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(defaultSets) sets · \(defaultReps) reps · \(defaultRIR) RIR"
 
         let uiExercise = UISessionExercise(
             exerciseId: catalogExercise.id,
             name: catalogExercise.name,
             detail: detail,
             weekInMeso: session.weekIndex,
+
+            waveRaw: nil,
+            priorityRaw: nil,
+            setMin: nil,
+            setMax: nil,
+            repMin: nil,
+            repMax: nil,
+            targetRIRMin: nil,
+            targetRIRMax: nil,
+            intensifierRaw: nil,
+            intensifierNotes: nil,
+            prescriptionNotes: nil,
+
             targetSets: defaultSets,
             sets: uiSets,
             coachMessage: ""
@@ -1614,7 +1684,12 @@ extension SessionScreenViewModel {
                     }
                 }()
 
-                let plannedRIR = baseRIR
+                let plannedRIR: Int? = {
+                    if idx < item.plannedRIRsBySet.count {
+                        return item.plannedRIRsBySet[idx]
+                    }
+                    return baseRIR
+                }()
 
                 // ---- Actual values (read back from SwiftData) ----
                 let actualReps: Int? = {
@@ -1635,12 +1710,11 @@ extension SessionScreenViewModel {
 
                 let actualRIR: Int? = {
                     guard idx < item.actualRIRs.count else { return nil }
-                    let stored = item.actualRIRs[idx]
-                    // Treat 0 as “real” only if a set is actually logged
-                    if stored > 0 || ((actualReps != nil || actualLoad != nil) && stored == 0) {
-                        return stored
-                    }
-                    return nil
+
+                    // Only treat actual RIR as real if the set itself was actually logged.
+                    guard actualReps != nil || actualLoad != nil else { return nil }
+
+                    return item.actualRIRs[idx]
                 }()
 
                 // ---- RP flags/patterns ----
@@ -1687,10 +1761,31 @@ extension SessionScreenViewModel {
             let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
 
             let detail: String
+            let setsText: String = {
+                if let min = item.setMin, let max = item.setMax {
+                    return min == max ? "\(min) sets" : "\(min)–\(max) sets"
+                }
+                return "\(item.targetSets) sets"
+            }()
+
+            let repsText: String = {
+                if let min = item.repMin, let max = item.repMax {
+                    return min == max ? "\(min) reps" : "\(min)–\(max) reps"
+                }
+                return "\(baseReps) reps"
+            }()
+
+            let rirText: String = {
+                if let min = item.targetRIRMin, let max = item.targetRIRMax {
+                    return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
+                }
+                return "\(baseRIR) RIR"
+            }()
+
             if let ce = catalogExercise {
-                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · Target \(repsLabel) @ RIR \(baseRIR)"
+                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(setsText) · \(repsText) · \(rirText)"
             } else {
-                detail = "Week \(session.weekIndex) · Target \(repsLabel) @ RIR \(baseRIR)"
+                detail = "Week \(session.weekIndex) · \(setsText) · \(repsText) · \(rirText)"
             }
 
             return UISessionExercise(
@@ -1698,7 +1793,20 @@ extension SessionScreenViewModel {
                 name: name,
                 detail: detail,
                 weekInMeso: session.weekIndex,
-                targetSets: targetSets,
+
+                waveRaw: item.waveRaw,
+                priorityRaw: item.priorityRaw,
+                setMin: item.setMin,
+                setMax: item.setMax,
+                repMin: item.repMin,
+                repMax: item.repMax,
+                targetRIRMin: item.targetRIRMin,
+                targetRIRMax: item.targetRIRMax,
+                intensifierRaw: item.intensifierRaw,
+                intensifierNotes: item.intensifierNotes,
+                prescriptionNotes: item.prescriptionNotes,
+
+                targetSets: item.targetSets,
                 sets: uiSets,
                 coachMessage: item.coachNote ?? ""
             )
@@ -1744,9 +1852,73 @@ struct UISessionExercise: Identifiable {
         set { weekInMeso = newValue }
     }
 
+    // Resolved prescription metadata
+    var waveRaw: String?
+    var priorityRaw: String?
+
+    var setMin: Int?
+    var setMax: Int?
+
+    var repMin: Int?
+    var repMax: Int?
+
+    var targetRIRMin: Int?
+    var targetRIRMax: Int?
+
+    var intensifierRaw: String?
+    var intensifierNotes: String?
+    var prescriptionNotes: String?
+
     var targetSets: Int
     var sets: [UISessionSet]
     var coachMessage: String
+    
+    private var setsText: String {
+        if let min = setMin, let max = setMax {
+            if min == max {
+                return "\(min) sets"
+            } else {
+                return "\(min)–\(max) sets"
+            }
+        }
+        return "\(targetSets) sets"
+    }
+
+    private var repsText: String {
+        if let min = repMin, let max = repMax {
+            if min == max {
+                return "\(min) reps"
+            } else {
+                return "\(min)–\(max) reps"
+            }
+        }
+
+        if let first = sets.first {
+            return "\(first.plannedReps) reps"
+        }
+
+        return "—"
+    }
+
+    private var rirText: String {
+        if let min = targetRIRMin, let max = targetRIRMax {
+            if min == max {
+                return "\(min) RIR"
+            } else {
+                return "\(min)–\(max) RIR"
+            }
+        }
+
+        if let first = sets.first, let rir = first.plannedRIR {
+            return "\(rir) RIR"
+        }
+
+        return "—"
+    }
+
+    var prescriptionDetailLine: String {
+        "Week \(weekIndex) · \(setsText) · \(repsText) · \(rirText)"
+    }
 
     /// A session exercise is "complete" when all working sets (up to `targetSets`)
     /// are either completed or explicitly skipped.
@@ -1764,6 +1936,19 @@ struct UISessionExercise: Identifiable {
         name: String,
         detail: String,
         weekInMeso: Int,
+
+        waveRaw: String? = nil,
+        priorityRaw: String? = nil,
+        setMin: Int? = nil,
+        setMax: Int? = nil,
+        repMin: Int? = nil,
+        repMax: Int? = nil,
+        targetRIRMin: Int? = nil,
+        targetRIRMax: Int? = nil,
+        intensifierRaw: String? = nil,
+        intensifierNotes: String? = nil,
+        prescriptionNotes: String? = nil,
+
         targetSets: Int,
         sets: [UISessionSet],
         coachMessage: String = ""
@@ -1772,10 +1957,20 @@ struct UISessionExercise: Identifiable {
         self.name = name
         self.detail = detail
 
-        // ✅ Correct: set the stored property
         self.weekInMeso = weekInMeso
 
-        // clamp sets
+        self.waveRaw = waveRaw
+        self.priorityRaw = priorityRaw
+        self.setMin = setMin
+        self.setMax = setMax
+        self.repMin = repMin
+        self.repMax = repMax
+        self.targetRIRMin = targetRIRMin
+        self.targetRIRMax = targetRIRMax
+        self.intensifierRaw = intensifierRaw
+        self.intensifierNotes = intensifierNotes
+        self.prescriptionNotes = prescriptionNotes
+
         self.targetSets = max(1, min(targetSets, 6))
         self.sets = sets.sorted(by: { $0.index < $1.index })
         self.coachMessage = coachMessage
@@ -1871,12 +2066,17 @@ struct UISessionSet: Identifiable {
     func plannedDescription(with repRange: RepRange) -> String {
         if plannedLoad == 0 && plannedReps == 0 { return "—" }
 
-        let repsLabel = RepRangeRulebook.display(targetReps: plannedReps, range: repRange)
+        let loadText: String
+        if plannedLoad == 0 {
+            loadText = "0.0"
+        } else {
+            loadText = String(format: "%.1f", plannedLoad)
+        }
 
         if let plannedRIR {
-            return String(format: "%.1f × %@ @ %d RIR", plannedLoad, repsLabel, plannedRIR)
+            return "\(loadText) × \(plannedReps) @ \(plannedRIR) RIR"
         } else {
-            return String(format: "%.1f × %@", plannedLoad, repsLabel)
+            return "\(loadText) × \(plannedReps)"
         }
     }
         }
@@ -2128,6 +2328,19 @@ extension SessionScreenViewModel {
             name: "Barbell Bench Press",
             detail: "Week 1 · Chest · 8–12 reps @ 2–3 RIR",
             weekInMeso: 1,
+
+            waveRaw: nil,
+            priorityRaw: nil,
+            setMin: nil,
+            setMax: nil,
+            repMin: nil,
+            repMax: nil,
+            targetRIRMin: nil,
+            targetRIRMax: nil,
+            intensifierRaw: nil,
+            intensifierNotes: nil,
+            prescriptionNotes: nil,
+
             targetSets: 3,
             sets: benchSets
         )

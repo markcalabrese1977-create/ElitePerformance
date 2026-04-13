@@ -322,12 +322,24 @@ struct OnboardingFlowView: View {
         print("DEBUG Onboarding.finish – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(weekdays)")
 
         // 1) Seed a fresh block
-        ProgramCatalog.applyOnboardingResult(
-            result,
-            context: modelContext
-        )
-
-        print("DEBUG Onboarding.finish – completed applyOnboardingResult")
+        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
+            do {
+                try DUPProgramReplaceService.replacePlannedProgram(
+                    startDate: Date(),
+                    trainingWeekdays: weekdays,
+                    context: modelContext
+                )
+                print("DEBUG Onboarding.finish – completed DUP replace flow")
+            } catch {
+                print("ERROR Onboarding.finish – DUP replace failed: \(error)")
+            }
+        } else {
+            ProgramCatalog.applyOnboardingResult(
+                result,
+                context: modelContext
+            )
+            print("DEBUG Onboarding.finish – completed applyOnboardingResult")
+        }
 
         // 2) Close the sheet / nav stack (no-op on first-run root, but should close sheets)
         dismiss()

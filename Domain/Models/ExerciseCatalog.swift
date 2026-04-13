@@ -134,6 +134,12 @@ struct ExerciseCatalog {
         primaryMuscle: .chest,
         isCompound: true
     )
+    static let seatedCablePress = CatalogExercise(
+        id: "seated_cable_press",
+        name: "Seated Cable Press",
+        primaryMuscle: .chest,
+        isCompound: true
+    )
     // MARK: - Triceps
 
     static let cableTricepRopePushdown = CatalogExercise(
@@ -404,7 +410,20 @@ struct ExerciseCatalog {
         primaryMuscle: .shoulders,
         isCompound: true
     )
+    
+    static let arnoldPress = CatalogExercise(
+        id: "arnold_press",
+        name: "Arnold Press",
+        primaryMuscle: .shoulders,
+        isCompound: true
+    )
 
+    static let singleArmCableLateralRaise = CatalogExercise(
+        id: "single_arm_cable_lateral_raise",
+        name: "Single-Arm Cable Lateral Raise",
+        primaryMuscle: .shoulders,
+        isCompound: false
+    )
     // MARK: - Biceps / Forearms
 
     static let ezBarCurl = CatalogExercise(
@@ -433,6 +452,12 @@ struct ExerciseCatalog {
         primaryMuscle: .biceps,
         isCompound: false
     )
+    static let supinationPronationCurl = CatalogExercise(
+        id: "supination_pronation_curl",
+        name: "Supination / Pronation Curl",
+        primaryMuscle: .biceps,
+        isCompound: false
+    )
     static let ezBarReverseCurl = CatalogExercise(
         id: "ez_bar_reverse_curl",
         name: "EZ Bar Reverse Curl",
@@ -452,6 +477,7 @@ struct ExerciseCatalog {
         seatedCableFly,
         dumbbellPress,
         machineChestPress,
+        seatedCablePress,
 
         // Triceps
         cableTricepRopePushdown,
@@ -502,13 +528,16 @@ struct ExerciseCatalog {
         inclineRearDeltFly,
         dumbbellLateralRaise,
         seatedSmithMachineShoulderPress,
+        arnoldPress,
+        singleArmCableLateralRaise,
 
         // Biceps / forearms
         ezBarCurl,
         hammerCurl,
         cableRopeHammerCurl,
         ezBarReverseCurl,
-        singleArmCableCurl
+        singleArmCableCurl,
+        supinationPronationCurl
     ]
     static var all: [CatalogExercise] {
         builtIn + customExercises()
