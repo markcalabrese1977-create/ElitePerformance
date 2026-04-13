@@ -224,7 +224,7 @@ struct ProgramPlanView: View {
             return
         }
 
-        let computedWeek = weekIndex(for: day)
+        let computedWeek = insertionWeekIndex(for: day)
 
         let newSession = Session(
             date: day,
@@ -235,6 +235,8 @@ struct ProgramPlanView: View {
             items: [],
             completedAt: nil
         )
+
+        newSession.meso = activeMesoBlock
 
         modelContext.insert(newSession)
 
@@ -293,7 +295,7 @@ struct ProgramPlanView: View {
             if !alreadyExists { break }
         }
 
-        let computedWeek = weekIndex(for: candidate)
+        let computedWeek = insertionWeekIndex(for: candidate)
 
         let newSession = Session(
             date: candidate,
@@ -305,6 +307,8 @@ struct ProgramPlanView: View {
             completedAt: nil
         )
 
+        newSession.meso = activeMesoBlock
+
         modelContext.insert(newSession)
 
         do {
@@ -315,7 +319,8 @@ struct ProgramPlanView: View {
             print("⚠️ Failed to save extra session: \(error)")
         }
     }
-
+    
+    
     // MARK: - Delete handler
 
     private func deletePendingSession() {
@@ -422,6 +427,32 @@ struct ProgramPlanView: View {
 
     // MARK: - Helpers
 
+    private func insertionWeekIndex(for date: Date) -> Int {
+        let day = Calendar.current.startOfDay(for: date)
+
+        if let exact = visibleSessions.first(where: {
+            Calendar.current.isDate($0.date, inSameDayAs: day)
+        }) {
+            return exact.weekIndex
+        }
+
+        let sorted = visibleSessions.sorted { $0.date < $1.date }
+
+        if let previous = sorted.last(where: { $0.date < day }) {
+            return previous.weekIndex
+        }
+
+        if let next = sorted.first(where: { $0.date > day }) {
+            return next.weekIndex
+        }
+
+        return 1
+    }
+    
+    private var activeMesoBlock: MesoBlock? {
+        sessions.first(where: { $0.meso?.status == .active })?.meso
+    }
+    
     private func dayName(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = .current
