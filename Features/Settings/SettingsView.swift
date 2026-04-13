@@ -4,6 +4,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var users: [User]
+    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
     private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
@@ -11,6 +12,10 @@ struct SettingsView: View {
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
+
+    // MARK: - Meso generation feedback
+    @State private var mesoGenerationMessage: String = ""
+    @State private var showMesoGenerationAlert = false
     
     
 
@@ -77,6 +82,17 @@ struct SettingsView: View {
                     // Mirror so the UI updates immediately (AppStorage is reactive)
                     scheduledStartEpoch = d0.timeIntervalSince1970
                 }
+
+                Button("Generate Next Mesocycle Block") {
+                    presentMesoGenerationMessage(
+                        "Not available yet. Future meso generation is temporarily disabled until multi-mesocycle session grouping is fully supported."
+                    )
+                }
+                .disabled(true)
+
+                Text("Temporarily disabled until multi-mesocycle support is complete.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if let scheduled = scheduledStartDate {
                     Text("Scheduled for \(scheduled.formatted(date: .long, time: .omitted))")
@@ -166,12 +182,88 @@ struct SettingsView: View {
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
         }
+        .alert("Mesocycle", isPresented: $showMesoGenerationAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(mesoGenerationMessage)
+        }
         .onAppear {
             // If a schedule exists, reflect it in the DatePicker.
             if let scheduled = MesoLifecycle.scheduledStartDate {
                 nextMesoDate = scheduled
                 scheduledStartEpoch = Calendar.current.startOfDay(for: scheduled).timeIntervalSince1970
             }
+        }
+    }
+    // MARK: - Safe next-meso generation
+
+    private func presentMesoGenerationMessage(_ message: String) {
+        mesoGenerationMessage = message
+        showMesoGenerationAlert = true
+    }
+
+    private func inferredTrainingWeekdays() -> [Int] {
+        let cal = Calendar.current
+
+        // Prefer future/planned-ish sessions first, because they reflect the active template.
+        let candidateSessions = sessions
+            .filter { $0.items.isEmpty == false }
+            .sorted { $0.date < $1.date }
+
+        let weekdays = Array(
+            Set(candidateSessions.map { cal.component(.weekday, from: $0.date) })
+        ).sorted()
+
+        return weekdays
+    }
+
+    private func hasSessionsOnOrAfter(_ startDate: Date) -> Bool {
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: startDate)
+
+        return sessions.contains { session in
+            cal.startOfDay(for: session.date) >= startDay
+        }
+    }
+
+    private func generateNextMesocycleBlock() {
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: nextMesoDate)
+
+        // Safety 1: do not generate over existing sessions
+        guard !hasSessionsOnOrAfter(startDay) else {
+            presentMesoGenerationMessage(
+                "Sessions already exist on or after \(startDay.formatted(date: .long, time: .omitted)). Choose a later start date or clear the overlap first."
+            )
+            return
+        }
+
+        // Safety 2: infer weekdays from current schedule
+        let weekdays = inferredTrainingWeekdays()
+
+        guard weekdays.count == DUP10WeekTemplate.template.trainingDaysPerWeek else {
+            presentMesoGenerationMessage(
+                "Could not infer a valid \(DUP10WeekTemplate.template.trainingDaysPerWeek)-day training schedule from existing sessions."
+            )
+            return
+        }
+
+        do {
+            try DUPProgramSeeder.seed(
+                startDate: startDay,
+                trainingWeekdays: weekdays,
+                context: context,
+                template: DUP10WeekTemplate.template,
+                calendar: cal
+            )
+
+            presentMesoGenerationMessage(
+                "Generated a new 10-week DUP block starting \(startDay.formatted(date: .long, time: .omitted))."
+            )
+        } catch {
+            presentMesoGenerationMessage(
+                "Couldn’t generate the next mesocycle: \(error.localizedDescription)"
+            )
         }
     }
 }
