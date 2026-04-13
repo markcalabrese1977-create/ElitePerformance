@@ -563,11 +563,27 @@ private struct HistoryDayDetailView: View {
             let weekday = calendar.component(.weekday, from: sourceSession.date)
 
             let allSessions = try context.fetch(FetchDescriptor<Session>())
+            let sourceMesoID = sourceSession.meso?.persistentModelID
+
             let targets = allSessions.filter { other in
-                other.id != sourceSession.id &&
-                other.date > sourceSession.date &&
-                other.status != .completed &&
-                calendar.component(.weekday, from: other.date) == weekday
+                let sameBlock: Bool = {
+                    switch (sourceMesoID, other.meso?.persistentModelID) {
+                    case let (lhs?, rhs?):
+                        return lhs == rhs
+                    case (nil, nil):
+                        // Legacy fallback: if neither session belongs to a block yet,
+                        // preserve the old behavior within the legacy dataset.
+                        return true
+                    default:
+                        return false
+                    }
+                }()
+
+                return other.id != sourceSession.id &&
+                    other.date > sourceSession.date &&
+                    other.status != .completed &&
+                    calendar.component(.weekday, from: other.date) == weekday &&
+                    sameBlock
             }
 
             guard !targets.isEmpty else {
@@ -628,7 +644,7 @@ private struct HistoryDayDetailView: View {
             }
 
             try context.save()
-            applyAlertMessage = "Applied today’s plan to \(targets.count) future session(s) on this day."
+            applyAlertMessage = "Applied today’s plan to \(targets.count) future session(s) in this block."
             showApplyAlert = true
         } catch {
             print("⚠️ Apply forward failed: \(error)")
