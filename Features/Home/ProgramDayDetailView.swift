@@ -263,10 +263,7 @@ struct ProgramDayDetailView: View {
             return item.targetReps
         }()
 
-        let defaultRIRTarget: Int = {
-            if let rirMax = item.targetRIRMax, rirMax >= 0 { return rirMax }
-            return item.targetRIR
-        }()
+        let defaultRIRTarget = item.targetRIR
 
         let workingSetCount = min(item.targetSets, setCount)
 
@@ -984,6 +981,18 @@ private struct ProgramExercisePlanRow: View {
                 if item.plannedRepsBySet[idx] == 0 {
                     item.plannedRepsBySet[idx] = newValue
                 }
+            }
+
+            save()
+        }
+        .onChange(of: item.targetRIR) { newValue in
+            normalizeArraySizes()
+
+            let setRows = max(4, item.targetSets)
+            let limit = min(setRows, item.plannedRIRsBySet.count)
+
+            for idx in 0..<limit {
+                item.plannedRIRsBySet[idx] = newValue
             }
 
             save()
