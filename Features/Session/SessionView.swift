@@ -20,6 +20,7 @@ import Combine
 /// ```
 struct SessionView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: SessionScreenViewModel
     @State private var hasDisabledIdleTimer = false
     @AppStorage("warmup.isHidden.v1") private var isWarmupHidden = false
@@ -158,8 +159,16 @@ struct SessionView: View {
                 )
             }
         }
-        .onAppear(perform: disableIdleTimerIfNeeded)
+        .onAppear {
+            disableIdleTimerIfNeeded()
+            viewModel.refreshFromSession()
+        }
         .onDisappear(perform: restoreIdleTimerIfNeeded)
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                viewModel.refreshFromSession()
+            }
+        }
         .sheet(item: $activeSheet) { sheet in
             sheetView(for: sheet)
         }
@@ -1035,6 +1044,13 @@ final class SessionScreenViewModel: ObservableObject {
         self.title = title
         self.subtitle = subtitle
         self.exercises = exercises
+    }
+
+    func refreshFromSession() {
+        let refreshed = SessionScreenViewModel(session: session)
+        self.title = refreshed.title
+        self.subtitle = refreshed.subtitle
+        self.exercises = refreshed.exercises
     }
 
     /// Summary line under the header.
