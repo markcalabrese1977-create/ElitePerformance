@@ -18,6 +18,7 @@
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
 		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
 		D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548927E2F8E7F1A00F2C30A /* AppState.swift */; };
+		D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
@@ -106,6 +107,7 @@
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
 		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
 		D548927E2F8E7F1A00F2C30A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveAwareComparisonEngine.swift; sourceTree = "<group>"; };
 		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
@@ -342,6 +344,7 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */,
 				D550020E2F43E56D00908F53 /* LoadDisplay.swift */,
 				D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */,
 				D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */,
@@ -697,6 +700,7 @@
 				D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
+				D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */,
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */,
 				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
 				D5E293722EC410DD00034D78 /* Haptics.swift in Sources */,

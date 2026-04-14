@@ -15,6 +15,10 @@ struct ExerciseHistorySheet: View {
         let date: Date
         let weekIndex: Int
 
+        let waveLabel: String?
+        let prescriptionLabel: String?
+        let executionNote: String?
+
         let sets: Int
         let reps: Int
         let volume: Double
@@ -101,6 +105,72 @@ struct ExerciseHistorySheet: View {
 
     // MARK: - Loading
 
+    private func waveDisplayName(from raw: String?) -> String? {
+        guard let raw else { return nil }
+
+        switch raw.lowercased() {
+        case "a":
+            return "Strength"
+        case "b":
+            return "Hypertrophy"
+        case "c":
+            return "Intensification"
+        case "deload":
+            return "Deload"
+        default:
+            return raw.capitalized
+        }
+    }
+
+    private func prescriptionLabel(
+        repMin: Int?,
+        repMax: Int?,
+        rirMin: Int?,
+        rirMax: Int?
+    ) -> String? {
+        var parts: [String] = []
+
+        if let repMin, let repMax {
+            if repMin == repMax {
+                parts.append("\(repMin) reps")
+            } else {
+                parts.append("\(repMin)–\(repMax) reps")
+            }
+        }
+
+        if let rirMin, let rirMax {
+            if rirMin == rirMax {
+                parts.append("\(rirMin) RIR")
+            } else {
+                parts.append("\(rirMin)–\(rirMax) RIR")
+            }
+        }
+
+        if parts.isEmpty { return nil }
+        return parts.joined(separator: " · ")
+    }
+
+    private func executionNote(
+        intensifierNotes: String?,
+        prescriptionNotes: String?
+    ) -> String? {
+        let intensifier = intensifierNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let intensifier, !intensifier.isEmpty {
+            return intensifier
+        }
+
+        let prescription = prescriptionNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let prescription, !prescription.isEmpty {
+            return prescription
+        }
+
+        return nil
+    }
+    
     private func loadHistory() {
         do {
             var descriptor = FetchDescriptor<Session>()
@@ -122,6 +192,18 @@ struct ExerciseHistorySheet: View {
                     vm.exercises.first(where: { $0.name == exerciseName })
 
                 guard let uiEx else { continue }
+                
+                let waveLabel = waveDisplayName(from: uiEx.waveRaw)
+                let prescription = prescriptionLabel(
+                    repMin: uiEx.repMin,
+                    repMax: uiEx.repMax,
+                    rirMin: uiEx.targetRIRMin,
+                    rirMax: uiEx.targetRIRMax
+                )
+                let note = executionNote(
+                    intensifierNotes: uiEx.intensifierNotes,
+                    prescriptionNotes: uiEx.prescriptionNotes
+                )
 
                 // Build executed set tokens + totals from executed sets only
                 let target = max(0, uiEx.targetSets)
@@ -167,6 +249,9 @@ struct ExerciseHistorySheet: View {
                     ExerciseHistoryEntry(
                         date: session.date,
                         weekIndex: session.weekIndex,
+                        waveLabel: waveLabel,
+                        prescriptionLabel: prescription,
+                        executionNote: note,
                         sets: executedSetCount,
                         reps: repsTotal,
                         volume: volumeTotal,
@@ -209,6 +294,27 @@ struct ExerciseHistorySheet: View {
                     Text("Week \(entry.weekIndex)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                }
+
+                if let wave = entry.waveLabel {
+                    Text(wave)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.blue)
+                }
+
+                if let prescription = entry.prescriptionLabel {
+                    Text(prescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let note = entry.executionNote {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .italic()
+                        .lineLimit(2)
                 }
 
                 HStack(spacing: 12) {

@@ -457,46 +457,9 @@ private struct SessionExerciseCardView: View {
         }
     }
 
-    /// One-line summary from the global ProgressionEngine for this exercise.
-    /// Returns nil if we don't have enough logged data yet.
-    private var coachV5Line: String? {
-        guard let cluster = exerciseCluster else { return nil }
 
-        // Build history from completed working sets (up to targetSets)
-        let workingSets = exercise.sets.filter { uiSet in
-            uiSet.index <= exercise.targetSets && uiSet.status == .completed
-        }
-
-        let snapshots: [SetSnapshot] = workingSets.compactMap { uiSet in
-            let reps = uiSet.actualReps ?? uiSet.plannedReps
-            let load = uiSet.actualLoad ?? uiSet.plannedLoad
-            let rir  = uiSet.actualRIR
-
-            guard reps > 0, load > 0 else { return nil }
-
-            return SetSnapshot(
-                load: load,
-                reps: reps,
-                rir: rir.map { Double($0) }
-            )
-        }
-
-        guard !snapshots.isEmpty else { return nil }
-
-        let weekIndex = exercise.weekIndex
-        let phase = ChestArmsLowBackMesoProfile.phase(forWeek: weekIndex)
-        let config = ChestArmsLowBackMesoProfile.config(for: cluster)
-
-        let decision = ProgressionEngine.suggestNext(
-            history: snapshots,
-            currentSets: exercise.targetSets,
-            config: config,
-            phase: phase
-        )
-
-        let loadString = String(format: "%.1f", decision.nextLoad)
-        return "Coach v5: \(decision.action.rawValue) → next \(loadString), sets \(decision.nextSets)"
-    }
+    private var coachV5Line: String? { nil }
+    
     private var repRange: RepRange {
         RepRangeRulebook.range(
             forExerciseId: exercise.exerciseId,
@@ -668,25 +631,6 @@ private struct SessionExerciseCardView: View {
                     )
                     .opacity(set.index <= exercise.targetSets ? 1.0 : 0.35)
                 }
-            }
-
-            // Legacy coach message (plan vs actual) – hide on low-back/stability work
-            if exerciseCluster != .lowBackStability,
-               !exercise.coachMessage.isEmpty {
-                Text(exercise.coachMessage)
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-                    .padding(.top, 4)
-            }
-
-            // New global progression coach (v5)
-            if let coachV5Line {
-                Text(coachV5Line)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.top,
-                             (exercise.coachMessage.isEmpty || exerciseCluster == .lowBackStability) ? 4 : 2
-                    )
             }
         }
         .padding(12)
@@ -1098,9 +1042,7 @@ final class SessionScreenViewModel: ObservableObject {
             set.status = .completed
             
             // Only generate coaching when load is meaningful (> 0)
-            if loadToStore > 0 {
-                exercise.coachMessage = coachMessage(for: exercise, recentSetIndex: set.index)
-            }
+            exercise.coachMessage = ""
             
             exercise.sets[setIdx] = set
             exercises[exerciseIdx] = exercise
@@ -1325,9 +1267,155 @@ final class SessionScreenViewModel: ObservableObject {
         }
     }
 
+    private func currentExposure(
+        for exercise: UISessionExercise,
+        recentSet: UISessionSet
+    ) -> ExerciseExposure? {
+        let reps = recentSet.actualReps ?? recentSet.plannedReps
+        let load = recentSet.actualLoad ?? recentSet.plannedLoad
+        let rir = recentSet.actualRIR ?? recentSet.plannedRIR
+
+        guard reps > 0 else { return nil }
+
+        return ExerciseExposure(
+            date: session.date,
+            waveRaw: exercise.waveRaw,
+            repMin: exercise.repMin,
+            repMax: exercise.repMax,
+            rirMin: exercise.targetRIRMin,
+            rirMax: exercise.targetRIRMax,
+            load: load,
+            reps: reps,
+            rir: rir
+        )
+    }
+
+    private func priorExposures(
+        for exercise: UISessionExercise,
+        context: ModelContext
+    ) -> [ExerciseExposure] {
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+
+        let sourceMesoID = session.meso?.persistentModelID
+
+        func sameBlock(_ other: Session) -> Bool {
+            switch (sourceMesoID, other.meso?.persistentModelID) {
+            case let (lhs?, rhs?):
+                return lhs == rhs
+            case (nil, nil):
+                return true
+            default:
+                return false
+            }
+        }
+
+        var exposures: [ExerciseExposure] = []
+
+        for other in allSessions {
+            guard other.date < session.date else { continue }
+            guard sameBlock(other) else { continue }
+
+            guard let item = other.items.first(where: { $0.exerciseId == exercise.exerciseId }) else {
+                continue
+            }
+
+            let workingSetCount = max(1, min(item.targetSets, max(
+                item.actualReps.count,
+                item.actualLoads.count,
+                item.actualRIRs.count
+            )))
+
+            var best: ExerciseExposure?
+
+            for idx in 0..<workingSetCount {
+                let reps = (idx < item.actualReps.count) ? item.actualReps[idx] : 0
+                guard reps > 0 else { continue }
+
+                let load = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
+                let rir: Int? = {
+                    guard idx < item.actualRIRs.count else { return nil }
+                    let raw = item.actualRIRs[idx]
+                    return raw >= 0 ? raw : nil
+                }()
+
+                let exposure = ExerciseExposure(
+                    date: other.date,
+                    waveRaw: item.waveRaw,
+                    repMin: item.repMin,
+                    repMax: item.repMax,
+                    rirMin: item.targetRIRMin,
+                    rirMax: item.targetRIRMax,
+                    load: load,
+                    reps: reps,
+                    rir: rir
+                )
+
+                if let existing = best {
+                    if load > existing.load || (load == existing.load && reps > existing.reps) {
+                        best = exposure
+                    }
+                } else {
+                    best = exposure
+                }
+            }
+
+            if let best {
+                exposures.append(best)
+            }
+        }
+
+        return exposures
+    }
+
+    private func comparisonNote(
+        for exercise: UISessionExercise,
+        recentSet: UISessionSet,
+        context: ModelContext
+    ) -> String? {
+        guard let current = currentExposure(for: exercise, recentSet: recentSet) else { return nil }
+
+        let prior = priorExposures(for: exercise, context: context)
+        guard let reference = WaveAwareComparisonEngine.bestReference(current: current, prior: prior) else {
+            return nil
+        }
+
+        let ref = reference.exposure
+        let waveText = WaveAwareComparisonEngine.displayWave(ref.waveRaw) ?? "Closest match"
+        let dateText = ref.date.formatted(date: .numeric, time: .omitted)
+
+        let loadDelta = current.load - ref.load
+        let repsDelta = current.reps - ref.reps
+
+        let loadDeltaText: String = {
+            if abs(loadDelta) < 0.1 { return "same load" }
+            if loadDelta > 0 { return "+\(Int(loadDelta.rounded())) lb" }
+            return "\(Int(loadDelta.rounded())) lb"
+        }()
+
+        let repsDeltaText: String = {
+            if repsDelta == 0 { return "same reps" }
+            if repsDelta > 0 { return "+\(repsDelta) reps" }
+            return "\(repsDelta) reps"
+        }()
+
+        var refLine = "\(waveText) reference (\(dateText)): \(formatLoad(ref.load)) × \(ref.reps)"
+        if let rir = ref.rir {
+            refLine += " @ \(rir) RIR"
+        }
+
+        return "\(refLine). Delta: \(loadDeltaText), \(repsDeltaText)."
+    }
+    private func withComparison(_ base: String, comparison: String?) -> String {
+        guard let comparison, !comparison.isEmpty else { return base }
+        return "\(base) \(comparison)"
+    }
     // MARK: - Plan vs Actual Coaching Logic (legacy)
 
-    private func coachMessage(for exercise: UISessionExercise, recentSetIndex: Int) -> String {
+    private func coachMessage(
+        for exercise: UISessionExercise,
+        recentSetIndex: Int,
+        context: ModelContext
+    ) -> String {
         guard let recentSet = exercise.sets.first(where: { $0.index == recentSetIndex }) else {
             return ""
         }
@@ -1343,6 +1431,12 @@ final class SessionScreenViewModel: ObservableObject {
         let loadString = formatLoad(displayLoad)
         let nextLoad = nextLoadSuggestion(for: recentSet, outcome: outcome)
         let nextLoadString = formatLoad(nextLoad)
+
+        let comparison = comparisonNote(
+            for: exercise,
+            recentSet: recentSet,
+            context: context
+        )
 
         let repsDiff = actualReps - plannedReps
         let loadDiff = actualLoad - plannedLoad
@@ -1380,7 +1474,10 @@ final class SessionScreenViewModel: ObservableObject {
                     let targetLow = max(6, plannedReps)
                     let targetHigh = targetLow + 2
 
-                    return "Set \(recentSet.index): You had far more than needed at \(loadString) × \(actualReps). Use this as a baseline. Next time, pick a weight where your hardest working set lands around \(targetLow)–\(targetHigh) solid reps, not 20+."
+                    return withComparison(
+                        "Set \(recentSet.index): You had far more than needed at \(loadString) × \(actualReps). Use this as a baseline. Next time, pick a weight where your hardest working set lands around \(targetLow)–\(targetHigh) solid reps, not 20+.",
+                        comparison: comparison
+                    )
                 }
 
                 let lower = max(plannedReps + 1, actualReps - 3)
@@ -1390,22 +1487,41 @@ final class SessionScreenViewModel: ObservableObject {
                 let heavierLoadString = formatLoad(heavierLoad)
 
                 if lower < upper {
-                    return "Set \(recentSet.index): Plan was too easy at \(loadString) × \(actualReps). Next time, set your plan around \(loadString) × \(lower)–\(upper), or bump to \(heavierLoadString) × \(plannedReps)–\(lower) if that still feels smooth."
+                    return withComparison(
+                        "Set \(recentSet.index): Plan was too easy at \(loadString) × \(actualReps). Next time, set your plan around \(loadString) × \(lower)–\(upper), or bump to \(heavierLoadString) × \(plannedReps)–\(lower) if that still feels smooth.",
+                        comparison: comparison
+                    )
                 } else {
-                    return "Set \(recentSet.index): Plan was too easy at \(loadString) × \(actualReps). Next time, either repeat \(loadString) × \(actualReps) or try \(heavierLoadString) × \(plannedReps)–\(actualReps)."
+                    return withComparison(
+                        "Set \(recentSet.index): Plan was too easy at \(loadString) × \(actualReps). Next time, either repeat \(loadString) × \(actualReps) or try \(heavierLoadString) × \(plannedReps)–\(actualReps).",
+                        comparison: comparison
+                    )
                 }
             }
+
             if planTooHard {
-                return "Set \(recentSet.index): Plan overshot today at \(loadString) × \(actualReps). Next time, set your plan around \(easierPlanString) × \(plannedReps) or keep load and aim for fewer reps."
+                return withComparison(
+                    "Set \(recentSet.index): Plan overshot today at \(loadString) × \(actualReps). Next time, set your plan around \(easierPlanString) × \(plannedReps) or keep load and aim for fewer reps.",
+                    comparison: comparison
+                )
             }
 
             switch outcome {
             case .matchedPlan:
-                return "Set \(recentSet.index): On target at \(loadString) × \(plannedReps). Next set: repeat \(loadString) × \(plannedReps)."
+                return withComparison(
+                    "Set \(recentSet.index): On target at \(loadString) × \(plannedReps). Next set: repeat \(loadString) × \(plannedReps).",
+                    comparison: comparison
+                )
             case .exceededPlan:
-                return "Set \(recentSet.index): You beat your plan at \(loadString) × \(actualReps). Next set: stay at \(loadString) and aim to hold or add a rep."
+                return withComparison(
+                    "Set \(recentSet.index): You beat your plan at \(loadString) × \(actualReps). Next set: stay at \(loadString) and aim to hold or add a rep.",
+                    comparison: comparison
+                )
             case .fellShort:
-                return "Set \(recentSet.index): You fell short of plan (\(actualReps) vs \(plannedReps)). Next set: stay at \(loadString) and aim to match \(plannedReps). If this repeats next session, drop to \(nextLoadString)."
+                return withComparison(
+                    "Set \(recentSet.index): You fell short of plan (\(actualReps) vs \(plannedReps)). Next set: stay at \(loadString) and aim to match \(plannedReps). If this repeats next session, drop to \(nextLoadString).",
+                    comparison: comparison
+                )
             }
 
         case 4:
@@ -1414,7 +1530,10 @@ final class SessionScreenViewModel: ObservableObject {
                     let targetLow = max(6, plannedReps)
                     let targetHigh = targetLow + 2
 
-                    return "Test set (Set 4): This blew past a normal working set at \(loadString) × \(actualReps). Treat it as a scouting set. Next session, choose a load where your toughest set lands around \(targetLow)–\(targetHigh) clean reps and use that as your baseline."
+                    return withComparison(
+                        "Test set (Set 4): This blew past a normal working set at \(loadString) × \(actualReps). Treat it as a scouting set. Next session, choose a load where your toughest set lands around \(targetLow)–\(targetHigh) clean reps and use that as your baseline.",
+                        comparison: comparison
+                    )
                 }
 
                 let lower = max(plannedReps + 1, actualReps - 3)
@@ -1424,30 +1543,55 @@ final class SessionScreenViewModel: ObservableObject {
                 let heavierLoadString = formatLoad(heavierLoad)
 
                 if lower < upper {
-                    return "Test set (Set 4): Plan was clearly too easy at \(loadString) × \(actualReps). Next session, set your baseline around \(loadString) × \(lower)–\(upper), or try \(heavierLoadString) × \(plannedReps)–\(lower) if recovery and bar speed are strong."
+                    return withComparison(
+                        "Test set (Set 4): Plan was clearly too easy at \(loadString) × \(actualReps). Next session, set your baseline around \(loadString) × \(lower)–\(upper), or try \(heavierLoadString) × \(plannedReps)–\(lower) if recovery and bar speed are strong.",
+                        comparison: comparison
+                    )
                 } else {
-                    return "Test set (Set 4): Plan was clearly too easy at \(loadString) × \(actualReps). Next session, either repeat \(loadString) × \(actualReps) or push to \(heavierLoadString) × \(plannedReps)–\(actualReps) as your new baseline."
+                    return withComparison(
+                        "Test set (Set 4): Plan was clearly too easy at \(loadString) × \(actualReps). Next session, either repeat \(loadString) × \(actualReps) or push to \(heavierLoadString) × \(plannedReps)–\(actualReps) as your new baseline.",
+                        comparison: comparison
+                    )
                 }
             }
+
             if planTooHard {
-                return "Test set (Set 4): Plan overshot at \(loadString) × \(actualReps). Next session, set your plan around \(easierPlanString) × \(plannedReps) so you’re not grinding every set."
+                return withComparison(
+                    "Test set (Set 4): Plan overshot at \(loadString) × \(actualReps). Next session, set your plan around \(easierPlanString) × \(plannedReps) so you’re not grinding every set.",
+                    comparison: comparison
+                )
             }
 
             switch outcome {
             case .matchedPlan, .exceededPlan:
-                return "Test set (Set 4): Strong at \(loadString) × \(plannedReps) for \(actualReps) reps. Next session: try \(nextLoadString) × \(plannedReps) if recovery is solid."
+                return withComparison(
+                    "Test set (Set 4): Strong at \(loadString) × \(plannedReps) for \(actualReps) reps. Next session: try \(nextLoadString) × \(plannedReps) if recovery is solid.",
+                    comparison: comparison
+                )
             case .fellShort:
-                return "Test set (Set 4): Right at the edge (\(actualReps) vs \(plannedReps)). Next session: hold at \(loadString) × \(plannedReps) or drop to \(nextLoadString) if fatigue stays high."
+                return withComparison(
+                    "Test set (Set 4): Right at the edge (\(actualReps) vs \(plannedReps)). Next session: hold at \(loadString) × \(plannedReps) or drop to \(nextLoadString) if fatigue stays high.",
+                    comparison: comparison
+                )
             }
 
         default:
             switch outcome {
             case .matchedPlan:
-                return "Set \(recentSet.index): Solid extra work at \(loadString) × \(plannedReps). Don’t chase fatigue—shut it down if performance slips."
+                return withComparison(
+                    "Set \(recentSet.index): Solid extra work at \(loadString) × \(plannedReps). Don’t chase fatigue—shut it down if performance slips.",
+                    comparison: comparison
+                )
             case .exceededPlan:
-                return "Set \(recentSet.index): Over-delivering at \(loadString) × \(actualReps). Make sure this doesn’t compromise your next session."
+                return withComparison(
+                    "Set \(recentSet.index): Over-delivering at \(loadString) × \(actualReps). Make sure this doesn’t compromise your next session.",
+                    comparison: comparison
+                )
             case .fellShort:
-                return "Set \(recentSet.index): Fatigue is showing at \(loadString). This is bonus volume—better to stop than force junk reps."
+                return withComparison(
+                    "Set \(recentSet.index): Fatigue is showing at \(loadString). This is bonus volume—better to stop than force junk reps.",
+                    comparison: comparison
+                )
             }
         }
     }

@@ -163,6 +163,11 @@ private struct HistoryExerciseDetail: Identifiable {
     let id = UUID()
     let name: String
     let primaryMuscle: String?
+
+    let waveLabel: String?
+    let prescriptionLabel: String?
+    let executionNote: String?
+
     let totalSets: Int
     let totalReps: Int
     let totalVolume: Double
@@ -182,6 +187,72 @@ private struct HistoryDayDetailView: View {
         fetchSourceSession()
     }
 
+    private func waveDisplayName(from raw: String?) -> String? {
+        guard let raw else { return nil }
+
+        switch raw.lowercased() {
+        case "a":
+            return "Strength"
+        case "b":
+            return "Hypertrophy"
+        case "c":
+            return "Intensification"
+        case "deload":
+            return "Deload"
+        default:
+            return raw.capitalized
+        }
+    }
+
+    private func prescriptionLabel(
+        repMin: Int?,
+        repMax: Int?,
+        rirMin: Int?,
+        rirMax: Int?
+    ) -> String? {
+        var parts: [String] = []
+
+        if let repMin, let repMax {
+            if repMin == repMax {
+                parts.append("\(repMin) reps")
+            } else {
+                parts.append("\(repMin)–\(repMax) reps")
+            }
+        }
+
+        if let rirMin, let rirMax {
+            if rirMin == rirMax {
+                parts.append("\(rirMin) RIR")
+            } else {
+                parts.append("\(rirMin)–\(rirMax) RIR")
+            }
+        }
+
+        if parts.isEmpty { return nil }
+        return parts.joined(separator: " · ")
+    }
+
+    private func executionNote(
+        intensifierNotes: String?,
+        prescriptionNotes: String?
+    ) -> String? {
+        let intensifier = intensifierNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let intensifier, !intensifier.isEmpty {
+            return intensifier
+        }
+
+        let prescription = prescriptionNotes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let prescription, !prescription.isEmpty {
+            return prescription
+        }
+
+        return nil
+    }
+    
     private var exerciseDetails: [HistoryExerciseDetail] {
         // If we can reconstruct from the original Session, do it (gives per-set loads).
         if let session = sourceSession {
@@ -190,6 +261,18 @@ private struct HistoryDayDetailView: View {
             return vm.exercises.map { uiEx in
                 let catalog = ExerciseCatalog.all.first(where: { $0.id == uiEx.exerciseId })
                 let primary = catalog?.primaryMuscle.rawValue.capitalized
+
+                let waveLabel = waveDisplayName(from: uiEx.waveRaw)
+                let prescription = prescriptionLabel(
+                    repMin: uiEx.repMin,
+                    repMax: uiEx.repMax,
+                    rirMin: uiEx.targetRIRMin,
+                    rirMax: uiEx.targetRIRMax
+                )
+                let note = executionNote(
+                    intensifierNotes: uiEx.intensifierNotes,
+                    prescriptionNotes: uiEx.prescriptionNotes
+                )
 
                 var totalReps = 0
                 var totalVol: Double = 0
@@ -248,6 +331,9 @@ private struct HistoryDayDetailView: View {
                 return HistoryExerciseDetail(
                     name: uiEx.name,
                     primaryMuscle: primary,
+                    waveLabel: waveLabel,
+                    prescriptionLabel: prescription,
+                    executionNote: note,
                     totalSets: setDetails.filter { !$0.isSkipped }.count,
                     totalReps: totalReps,
                     totalVolume: totalVol,
@@ -261,6 +347,9 @@ private struct HistoryDayDetailView: View {
             HistoryExerciseDetail(
                 name: ex.name,
                 primaryMuscle: ex.primaryMuscle,
+                waveLabel: nil,
+                prescriptionLabel: nil,
+                executionNote: nil,
                 totalSets: ex.sets,
                 totalReps: ex.reps,
                 totalVolume: ex.volume,
@@ -468,7 +557,29 @@ private struct HistoryDayDetailView: View {
             VStack(spacing: 0) {
                 ForEach(Array(exerciseDetails.enumerated()), id: \.element.id) { index, ex in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(ex.name).font(.body)
+                        Text(ex.name)
+                            .font(.body)
+
+                        if let wave = ex.waveLabel {
+                            Text(wave)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.blue)
+                        }
+
+                        if let prescription = ex.prescriptionLabel {
+                            Text(prescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let note = ex.executionNote {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .italic()
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
                         HStack(spacing: 12) {
                             if let primary = ex.primaryMuscle { Text(primary) }
