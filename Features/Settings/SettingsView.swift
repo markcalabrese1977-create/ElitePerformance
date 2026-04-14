@@ -4,12 +4,8 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var users: [User]
-    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
-    
     @Query private var appStates: [AppState]
-
-    @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
-    private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
+    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
@@ -18,16 +14,28 @@ struct SettingsView: View {
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
-    
-    
-
-    // MARK: - Mesocycle state (bind to the SAME key MesoLifecycle uses)
-    @AppStorage("meso.scheduledStartDateEpoch") private var scheduledStartEpoch: Double = 0
 
     @State private var nextMesoDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
 
+    private var appState: AppState? {
+        appStates.first
+    }
+
+    private var appModeBinding: Binding<String> {
+        Binding(
+            get: {
+                appState?.appModeRaw
+                    ?? UserDefaults.standard.string(forKey: AppStorageKeys.appMode)
+                    ?? AppMode.mark.rawValue
+            },
+            set: { newValue in
+                AppStateBridge.setAppMode(newValue, in: context)
+            }
+        )
+    }
+
     private var scheduledStartDate: Date? {
-        scheduledStartEpoch > 0 ? Date(timeIntervalSince1970: scheduledStartEpoch) : nil
+        appState?.scheduledNextMesoStartDate ?? MesoLifecycle.scheduledStartDate
     }
 
     var body: some View {
@@ -35,7 +43,7 @@ struct SettingsView: View {
 
         Form {
             Section("App Mode") {
-                Picker("Mode", selection: $appModeRaw) {
+                Picker("Mode", selection: appModeBinding) {
                     ForEach(AppMode.allCases) { m in
                         Text(m.title).tag(m.rawValue)
                     }
@@ -81,7 +89,6 @@ struct SettingsView: View {
                     let d0 = Calendar.current.startOfDay(for: nextMesoDate)
                     MesoLifecycle.scheduleNextMeso(on: d0)
                     AppStateBridge.setScheduledNextMesoStartDate(d0, in: context)
-                    scheduledStartEpoch = d0.timeIntervalSince1970
                 }
 
                 Button("Generate Next Mesocycle Block") {
@@ -104,7 +111,6 @@ struct SettingsView: View {
                         MesoLifecycle.clearScheduledNextMeso()
                         AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
                         AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
-                        scheduledStartEpoch = 0
                     } label: {
                         Text("Cancel Scheduled Start")
                     }
@@ -124,7 +130,6 @@ struct SettingsView: View {
                     AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
                     AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
                     AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
-                    scheduledStartEpoch = 0
                 } label: {
                     Text("Start New Mesocycle Now (Reset to W1D1)")
                 }
@@ -198,10 +203,8 @@ struct SettingsView: View {
             Text(mesoGenerationMessage)
         }
         .onAppear {
-            // If a schedule exists, reflect it in the DatePicker.
-            if let scheduled = MesoLifecycle.scheduledStartDate {
-                nextMesoDate = scheduled
-                scheduledStartEpoch = Calendar.current.startOfDay(for: scheduled).timeIntervalSince1970
+            if let scheduled = scheduledStartDate {
+                nextMesoDate = Calendar.current.startOfDay(for: scheduled)
             }
         }
     }
@@ -275,9 +278,6 @@ struct SettingsView: View {
                 "Couldn’t generate the next mesocycle: \(error.localizedDescription)"
             )
         }
-    }
-    private var appState: AppState? {
-        appStates.first
     }
 }
 

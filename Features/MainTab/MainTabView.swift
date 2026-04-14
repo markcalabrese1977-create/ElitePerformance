@@ -3,18 +3,18 @@ import SwiftData
 
 // MARK: - Main Tab View
 
-
-
-import SwiftUI
-import SwiftData
-
-// MARK: - Main Tab View
-
 struct MainTabView: View {
-    @Environment(\.modelContext) private var modelContext
     @Query private var appStates: [AppState]
-    @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
-    private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
+
+    private var appModeRaw: String {
+        appStates.first?.appModeRaw
+            ?? UserDefaults.standard.string(forKey: AppStorageKeys.appMode)
+            ?? AppMode.mark.rawValue
+    }
+
+    private var mode: AppMode {
+        AppMode(rawValue: appModeRaw) ?? .mark
+    }
 
     var body: some View {
         TabView {
@@ -24,9 +24,6 @@ struct MainTabView: View {
             case .angela:
                 plannerTabs
             }
-        }
-        .onChange(of: appModeRaw) {
-            AppStateBridge.setAppMode(appModeRaw, in: modelContext)
         }
     }
 
@@ -46,13 +43,28 @@ struct MainTabView: View {
         HistoryView()
             .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
 
-        // ✅ NEW: Analytics tab v1
         AnalyticsView()
             .tabItem { Label("Analytics", systemImage: "chart.bar") }
 
         SettingsView()
             .tabItem { Label("Settings", systemImage: "gearshape") }
     }
+
+    @ViewBuilder
+    private var plannerTabs: some View {
+        PlannerHomeView()
+            .tabItem { Label("Planner", systemImage: "calendar") }
+
+        HistoryView()
+            .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+
+        AnalyticsView()
+            .tabItem { Label("Analytics", systemImage: "chart.bar") }
+
+        SettingsView()
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+    }
+}
 
     @ViewBuilder
     private var plannerTabs: some View {
@@ -69,7 +81,7 @@ struct MainTabView: View {
         SettingsView()
             .tabItem { Label("Settings", systemImage: "gearshape") }
     }
-}
+
 
 // MARK: - Today Tab
 
