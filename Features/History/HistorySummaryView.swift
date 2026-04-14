@@ -11,7 +11,14 @@ struct HistorySummaryView: View {
     @Query(sort: \Session.date, order: .forward)
     private var sessions: [Session]
 
-    // MARK: - Scope (optional UI control)
+    private enum ExerciseSort: String, CaseIterable, Identifiable {
+        case sessions = "Most sessions"
+        case volume = "Most volume"
+        case e1rm = "Best e1RM"
+        case recent = "Recent"
+
+        var id: String { rawValue }
+    }
 
     private enum Scope: String, CaseIterable, Identifiable {
         case allTime = "All-time"
@@ -22,6 +29,7 @@ struct HistorySummaryView: View {
     }
 
     @State private var scope: Scope = .allTime
+    @State private var exerciseSort: ExerciseSort = .sessions
 
     // MARK: - Derived
 
@@ -39,13 +47,37 @@ struct HistorySummaryView: View {
         }
     }
 
-    private var exerciseSummaries: [ExerciseSummary] {
+    private var rawExerciseSummaries: [ExerciseSummary] {
         HistorySummaryBuilder.build(from: filteredCompletedSessions)
+    }
+
+    private var exerciseSummaries: [ExerciseSummary] {
+        switch exerciseSort {
+        case .sessions:
+            return rawExerciseSummaries.sorted {
+                if $0.totalSessions != $1.totalSessions { return $0.totalSessions > $1.totalSessions }
+                return $0.name < $1.name
+            }
+        case .volume:
+            return rawExerciseSummaries.sorted {
+                if $0.totalVolume != $1.totalVolume { return $0.totalVolume > $1.totalVolume }
+                return $0.name < $1.name
+            }
+        case .e1rm:
+            return rawExerciseSummaries.sorted {
+                if $0.bestE1RM != $1.bestE1RM { return $0.bestE1RM > $1.bestE1RM }
+                return $0.name < $1.name
+            }
+        case .recent:
+            return rawExerciseSummaries.sorted {
+                ($0.lastTrained ?? .distantPast) > ($1.lastTrained ?? .distantPast)
+            }
+        }
     }
 
     private var topCompounds: [ExerciseSummary] {
         Array(
-            exerciseSummaries
+            rawExerciseSummaries
                 .filter { $0.isCompound }
                 .sorted { $0.bestE1RM > $1.bestE1RM }
                 .prefix(5)
@@ -54,7 +86,7 @@ struct HistorySummaryView: View {
 
     private var topAccessories: [ExerciseSummary] {
         Array(
-            exerciseSummaries
+            rawExerciseSummaries
                 .filter { !$0.isCompound }
                 .sorted { $0.bestE1RM > $1.bestE1RM }
                 .prefix(5)
@@ -65,18 +97,19 @@ struct HistorySummaryView: View {
         var sets = 0
         var reps = 0
         var volume: Double = 0
-        for s in exerciseSummaries {
-            sets += s.totalSets
-            reps += s.totalReps
-            volume += s.totalVolume
+
+        for summary in rawExerciseSummaries {
+            sets += summary.totalSets
+            reps += summary.totalReps
+            volume += summary.totalVolume
         }
+
         return (sets, reps, volume)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-
                 scopePicker
 
                 if filteredCompletedSessions.isEmpty {
@@ -124,7 +157,7 @@ struct HistorySummaryView: View {
         let totals = overallTotals
 
         let firstDate = filteredCompletedSessions.first?.date
-        let lastDate  = filteredCompletedSessions.last?.date
+        let lastDate = filteredCompletedSessions.last?.date
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("Block overview")
@@ -175,7 +208,6 @@ struct HistorySummaryView: View {
 
     private var topLiftsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-
             if !topCompounds.isEmpty {
                 Text("Top lifts — Compounds (best e1RM)")
                     .font(.headline)
@@ -240,6 +272,13 @@ struct HistorySummaryView: View {
             Text("All exercises")
                 .font(.headline)
 
+            Picker("Sort", selection: $exerciseSort) {
+                ForEach(ExerciseSort.allCases) { sort in
+                    Text(sort.rawValue).tag(sort)
+                }
+            }
+            .pickerStyle(.segmented)
+
             if exerciseSummaries.isEmpty {
                 Text("No logged exercise data yet.")
                     .font(.caption)
@@ -259,16 +298,42 @@ struct HistorySummaryView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(String(format: "%.0f", summary.bestE1RM))
-                                .font(.body.bold())
-                            Text("e1RM")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-
-                            if let last = summary.lastTrained {
-                                Text(Self.shortDateFormatter.string(from: last))
+                            switch exerciseSort {
+                            case .sessions:
+                                Text("\(summary.totalSessions)")
+                                    .font(.body.bold())
+                                Text("sessions")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+
+                            case .volume:
+                                Text(String(format: "%.0f", summary.totalVolume))
+                                    .font(.body.bold())
+                                Text("volume")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                            case .e1rm:
+                                Text(String(format: "%.0f", summary.bestE1RM))
+                                    .font(.body.bold())
+                                Text("e1RM")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                            case .recent:
+                                if let last = summary.lastTrained {
+                                    Text(Self.shortDateFormatter.string(from: last))
+                                        .font(.body.bold())
+                                    Text("last trained")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("—")
+                                        .font(.body.bold())
+                                    Text("last trained")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -298,7 +363,7 @@ struct HistorySummaryView: View {
 // MARK: - Exercise summary model
 
 struct ExerciseSummary: Identifiable {
-    let id: String           // exerciseId
+    let id: String
     let name: String
     let primaryMuscle: String
     let isCompound: Bool
@@ -314,9 +379,7 @@ struct ExerciseSummary: Identifiable {
 // MARK: - Builder
 
 enum HistorySummaryBuilder {
-
     static func build(from sessions: [Session]) -> [ExerciseSummary] {
-        // O(1) catalog lookup by id (NO KVC / reflection)
         let catalogById: [String: CatalogExercise] = Dictionary(
             uniqueKeysWithValues: ExerciseCatalog.all.map { ($0.id, $0) }
         )
@@ -327,22 +390,37 @@ enum HistorySummaryBuilder {
             let sessionKey = String(describing: session.id)
             let sessionDate = session.date
 
+            let vm = SessionScreenViewModel(session: session)
+            let uiByExerciseId: [String: UISessionExercise] = Dictionary(
+                uniqueKeysWithValues: vm.exercises.map { ($0.exerciseId, $0) }
+            )
+
             for item in session.items {
                 let exerciseId = item.exerciseId
                 let catalog = catalogById[exerciseId]
+                let uiExercise = uiByExerciseId[exerciseId]
 
-                let name = catalog?.name ?? ExerciseCatalog.displayName(for: exerciseId)
-                let muscle = catalog?.primaryMuscle.rawValue.capitalized ?? "—"
-                let isCompound = catalog?.isCompound ?? false
+                let resolvedName = displayName(
+                    exerciseId: exerciseId,
+                    catalogName: catalog?.name,
+                    uiName: uiExercise?.name
+                )
+
+                let resolvedMuscle = primaryMuscle(
+                    catalog: catalog,
+                    uiExercise: uiExercise
+                )
+
+                let resolvedIsCompound = catalog?.isCompound ?? inferredIsCompound(from: resolvedName)
 
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
-                if setCount == 0 { continue }
+                guard setCount > 0 else { continue }
 
                 var bucket = buckets[exerciseId] ?? TempBucket(
                     exerciseId: exerciseId,
-                    name: name,
-                    primaryMuscle: muscle,
-                    isCompound: isCompound,
+                    name: resolvedName,
+                    primaryMuscle: resolvedMuscle,
+                    isCompound: resolvedIsCompound,
                     totalSets: 0,
                     totalReps: 0,
                     totalVolume: 0,
@@ -351,14 +429,21 @@ enum HistorySummaryBuilder {
                     sessionKeys: []
                 )
 
+                if bucket.name == bucket.exerciseId || bucket.name.isEmpty {
+                    bucket.name = resolvedName
+                }
+
+                if bucket.primaryMuscle == "—", resolvedMuscle != "—" {
+                    bucket.primaryMuscle = resolvedMuscle
+                }
+
                 var didRecordAnySet = false
 
                 for idx in 0..<setCount {
                     let reps = item.actualReps[idx]
                     let load = item.actualLoads[idx]
 
-                    // Only count real working sets
-                    if reps <= 0 || load <= 0 { continue }
+                    guard reps > 0, load > 0 else { continue }
 
                     didRecordAnySet = true
 
@@ -379,22 +464,25 @@ enum HistorySummaryBuilder {
             }
         }
 
-        let summaries = buckets.values.map { b in
+        let summaries = buckets.values.map { bucket in
             ExerciseSummary(
-                id: b.exerciseId,
-                name: b.name,
-                primaryMuscle: b.primaryMuscle,
-                isCompound: b.isCompound,
-                totalSessions: b.sessionKeys.count,
-                totalSets: b.totalSets,
-                totalReps: b.totalReps,
-                totalVolume: b.totalVolume,
-                bestE1RM: b.bestE1RM,
-                lastTrained: b.lastTrained
+                id: bucket.exerciseId,
+                name: bucket.name,
+                primaryMuscle: bucket.primaryMuscle,
+                isCompound: bucket.isCompound,
+                totalSessions: bucket.sessionKeys.count,
+                totalSets: bucket.totalSets,
+                totalReps: bucket.totalReps,
+                totalVolume: bucket.totalVolume,
+                bestE1RM: bucket.bestE1RM,
+                lastTrained: bucket.lastTrained
             )
         }
 
-        return summaries.sorted { $0.name < $1.name }
+        return summaries.sorted {
+            if $0.totalSessions != $1.totalSessions { return $0.totalSessions > $1.totalSessions }
+            return $0.name < $1.name
+        }
     }
 
     static func estimateE1RM(weight: Double, reps: Int) -> Double {
@@ -402,10 +490,83 @@ enum HistorySummaryBuilder {
         return weight * (1.0 + Double(reps) / 30.0)
     }
 
+    private static func displayName(
+        exerciseId: String,
+        catalogName: String?,
+        uiName: String?
+    ) -> String {
+        if let catalogName, !catalogName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return catalogName
+        }
+
+        if let uiName, !uiName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, uiName != "Exercise" {
+            return uiName
+        }
+
+        let readable = humanizeExerciseId(exerciseId)
+        if !readable.isEmpty {
+            return readable
+        }
+
+        return "Legacy / Custom Exercise"
+    }
+
+    private static func primaryMuscle(
+        catalog: CatalogExercise?,
+        uiExercise: UISessionExercise?
+    ) -> String {
+        if let catalog {
+            return catalog.primaryMuscle.rawValue.capitalized
+        }
+
+        let detail = uiExercise?.detail ?? ""
+        let parts = detail.components(separatedBy: " · ")
+
+        if parts.count >= 2 {
+            let candidate = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty,
+               !candidate.lowercased().contains("sets"),
+               !candidate.lowercased().contains("reps"),
+               !candidate.lowercased().contains("rir") {
+                return candidate
+            }
+        }
+
+        return "—"
+    }
+
+    private static func inferredIsCompound(from name: String) -> Bool {
+        let n = name.lowercased()
+        let compoundHints = [
+            "press", "row", "pulldown", "squat", "leg press", "hip thrust",
+            "rdl", "deadlift", "bench", "carry", "dip"
+        ]
+        return compoundHints.contains(where: { n.contains($0) })
+    }
+
+    private static func humanizeExerciseId(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        // UUID-like ids are not user-friendly
+        if trimmed.contains("-"), trimmed.count >= 24 {
+            return ""
+        }
+
+        let humanized = trimmed
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+
+        return humanized
+    }
+
     private struct TempBucket {
         let exerciseId: String
-        let name: String
-        let primaryMuscle: String
+        var name: String
+        var primaryMuscle: String
         let isCompound: Bool
 
         var totalSets: Int
