@@ -184,6 +184,11 @@
 			path = Sync;
 			sourceTree = "<group>";
 		};
+		D54892852F8E8DCA00F2C30A /* Backup */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Backup;
+			sourceTree = "<group>";
+		};
 		D5550A742F1D25EF00456F8C /* Health */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Health;
@@ -386,6 +391,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D54892852F8E8DCA00F2C30A /* Backup */,
 				D54892732F8E778600F2C30A /* Sync */,
 				D5F89BB72F8AD54900D44DCB /* Programs */,
 				D5813F972F4910A500CCE909,
@@ -548,6 +554,7 @@
 			fileSystemSynchronizedGroups = (
 				D536A6312EF4790E0036BB4E /* Components */,
 				D54892732F8E778600F2C30A /* Sync */,
+				D54892852F8E8DCA00F2C30A /* Backup */,
 				D5550A742F1D25EF00456F8C /* Health */,
 				D568F46C2F2D57C000108B45 /* Extras */,
 				D585D59C2F043BC70073DFE3 /* Catalog */,

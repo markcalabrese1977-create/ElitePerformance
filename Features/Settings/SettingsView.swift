@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
@@ -11,6 +12,10 @@ struct SettingsView: View {
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
 
+    @State private var showImportBackupPicker = false
+    @State private var importMessage: String = ""
+    @State private var showImportAlert = false
+    
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
@@ -158,6 +163,31 @@ struct SettingsView: View {
             
             // MARK: - Export
             Section("Export") {
+                
+                #if targetEnvironment(simulator)
+                Button("Import Full Backup (JSON)") {
+                    showImportBackupPicker = true
+                }
+                .foregroundStyle(.red)
+            #endif
+                Button("Export Full Backup (JSON)") {
+                    exportError = nil
+                    do {
+                        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
+
+                        guard FileManager.default.fileExists(atPath: result.url.path) else {
+                            exportItem = nil
+                            exportError = "Backup file was not created at:\n\(result.url.path)"
+                            return
+                        }
+
+                        exportItem = ExportShareItem(url: result.url)
+                    } catch {
+                        exportItem = nil
+                        exportError = error.localizedDescription
+                    }
+                }
+                
                 Button("Export Completed Sessions (CSV)") {
                     exportError = nil
                     do {
@@ -187,7 +217,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 } else {
-                    Text("Exports completed sessions only. One row per set (sets_v1).")
+                    Text("JSON backup exports app state, meso blocks, sessions, history, and notes. CSV exports completed sessions only in sets_v1 format.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -197,10 +227,50 @@ struct SettingsView: View {
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
         }
+        .fileImporter(
+            isPresented: $showImportBackupPicker,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            do {
+                let urls = try result.get()
+                guard let url = urls.first else { return }
+
+                let didAccess = url.startAccessingSecurityScopedResource()
+                defer {
+                    if didAccess {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                let restore = try BackupSnapshotImporter.importFullBackupJSON(
+                    from: url,
+                    modelContext: context
+                )
+
+                importMessage = """
+                Restored backup successfully.
+
+                Meso blocks: \(restore.mesoBlockCount)
+                Sessions: \(restore.sessionCount)
+                Session history: \(restore.sessionHistoryCount)
+                Exercise notes: \(restore.exerciseNoteCount)
+                """
+                showImportAlert = true
+            } catch {
+                importMessage = "Backup import failed: \(error.localizedDescription)"
+                showImportAlert = true
+            }
+        }
         .alert("Mesocycle", isPresented: $showMesoGenerationAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(mesoGenerationMessage)
+        }
+        .alert("Backup Import", isPresented: $showImportAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(importMessage)
         }
         .onAppear {
             if let scheduled = scheduledStartDate {
