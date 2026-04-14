@@ -13,6 +13,11 @@ enum SessionStatus: String, Codable, CaseIterable {
 
 @Model
 final class Session {
+    // Sync-safe identity (optional for migration safety)
+    var id: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+
     // Core
     var date: Date
     var status: SessionStatus
@@ -79,6 +84,10 @@ final class Session {
     var hkPostWorkoutHeartRateStepSeconds: Double
 
     init(
+        id: UUID? = UUID(),
+        createdAt: Date? = Date(),
+        updatedAt: Date? = Date(),
+
         date: Date,
         status: SessionStatus = .planned,
         readinessStars: Int = 0,
@@ -109,6 +118,10 @@ final class Session {
         hkPostWorkoutHeartRateBPM: [Double] = [],
         hkPostWorkoutHeartRateStepSeconds: Double = 0
     ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+
         self.date = date
         self.status = status
         self.completedAt = completedAt
@@ -144,23 +157,15 @@ final class Session {
     }
 }
 
-extension Session {
-    /// Truthful DUP label derived from seeded session order.
-    /// Current DUP templates are 6 training days per week.
-    var weekDayLabel: String {
-        guard let programIndex, programIndex > 0 else {
-            return "Week \(weekIndex)"
-        }
-
-        let dayIndex = ((programIndex - 1) % 6) + 1
-        return "W\(weekIndex)D\(dayIndex)"
-    }
-}
-
 // MARK: - Session Item (per-exercise)
 
 @Model
 final class SessionItem {
+    // Sync-safe identity (optional for migration safety)
+    var id: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+
     /// Display order within the session (1-based).
     var order: Int
 
@@ -212,6 +217,10 @@ final class SessionItem {
     var nextSuggestedLoad: Double?
 
     init(
+        id: UUID? = UUID(),
+        createdAt: Date? = Date(),
+        updatedAt: Date? = Date(),
+
         order: Int,
         exerciseId: String,
         targetReps: Int,
@@ -245,6 +254,10 @@ final class SessionItem {
         coachNote: String? = nil,
         nextSuggestedLoad: Double? = nil
     ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+
         self.order = order
         self.exerciseId = exerciseId
 
@@ -288,6 +301,11 @@ final class SessionItem {
 
 @Model
 final class SetLog {
+    // Sync-safe identity (optional for migration safety)
+    var id: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+
     var setNumber: Int
     var targetReps: Int
     var targetRIR: Int
@@ -297,6 +315,10 @@ final class SetLog {
     var actualLoad: Double
 
     init(
+        id: UUID? = UUID(),
+        createdAt: Date? = Date(),
+        updatedAt: Date? = Date(),
+
         setNumber: Int,
         targetReps: Int,
         targetRIR: Int,
@@ -305,6 +327,10 @@ final class SetLog {
         actualRIR: Int,
         actualLoad: Double
     ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+
         self.setNumber = setNumber
         self.targetReps = targetReps
         self.targetRIR = targetRIR
@@ -324,5 +350,36 @@ extension SessionStatus {
         case .inProgress:  return "In Progress"
         case .completed:   return "Completed"
         }
+    }
+}
+extension Session {
+    var weekDayLabel: String {
+        let week = weekIndex
+
+        let dayText: String = {
+            if let programIndex {
+                let day = ((programIndex - 1) % 6) + 1
+                return "D\(day)"
+            }
+
+            let weekdayName = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .none)
+            _ = weekdayName // keep compiler quiet if you later change this logic
+
+            let calendar = Calendar.current
+            let weekday = calendar.component(.weekday, from: date)
+
+            switch weekday {
+            case 1: return "D1" // Sunday
+            case 2: return "D2" // Monday
+            case 3: return "D3" // Tuesday
+            case 4: return "D4" // Wednesday
+            case 6: return "D5" // Friday
+            case 7: return "D6" // Saturday
+            case 5: return "Rest"
+            default: return "D?"
+            }
+        }()
+
+        return "W\(week)\(dayText)"
     }
 }

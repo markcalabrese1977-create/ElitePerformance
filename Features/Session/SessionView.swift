@@ -1087,7 +1087,7 @@ final class SessionScreenViewModel: ObservableObject {
                 if let parsedLoad { return max(0, parsedLoad) }
                 let existing = set.actualLoad ?? 0
                 if existing > 0 { return existing }
-                let planned = set.plannedLoad ?? 0
+                let planned = set.plannedLoad
                 if planned > 0 { return planned }
                 return 0
             }()

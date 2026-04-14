@@ -9,6 +9,11 @@ enum MesoStatus: String, Codable, CaseIterable {
 
 @Model
 final class MesoBlock {
+    // Sync-safe identity (optional for migration safety)
+    var id: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+
     var name: String
     var startDate: Date
     var status: MesoStatus
@@ -19,7 +24,19 @@ final class MesoBlock {
     /// Sessions that belong to this meso
     @Relationship(deleteRule: .cascade) var sessions: [Session] = []
 
-    init(name: String, startDate: Date, status: MesoStatus = .draft, notes: String? = nil) {
+    init(
+        id: UUID? = UUID(),
+        createdAt: Date? = Date(),
+        updatedAt: Date? = Date(),
+        name: String,
+        startDate: Date,
+        status: MesoStatus = .draft,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+
         self.name = name
         self.startDate = startDate
         self.status = status
