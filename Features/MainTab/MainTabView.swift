@@ -11,6 +11,8 @@ import SwiftData
 // MARK: - Main Tab View
 
 struct MainTabView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var appStates: [AppState]
     @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
     private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
 
@@ -22,6 +24,9 @@ struct MainTabView: View {
             case .angela:
                 plannerTabs
             }
+        }
+        .onChange(of: appModeRaw) {
+            AppStateBridge.setAppMode(appModeRaw, in: modelContext)
         }
     }
 

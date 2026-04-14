@@ -388,6 +388,7 @@ private struct SwapTarget {
 
 /// One card per exercise: header and set-by-set plan + actual logging.
 private struct SessionExerciseCardView: View {
+    @Environment(\.modelContext) private var modelContext
     @Binding var exercise: UISessionExercise
     let onSetLogged: (_ setIndex: Int) -> Void
     let onSkipSet: (_ setIndex: Int) -> Void
@@ -550,7 +551,7 @@ private struct SessionExerciseCardView: View {
     }
     
     private var hasExerciseNote: Bool {
-        ExerciseNotesStore.hasNote(exerciseId: exercise.exerciseId)
+        ExerciseNoteLookup.hasNote(exerciseId: exercise.exerciseId, in: modelContext)
     }
 
     private var noteIconName: String {

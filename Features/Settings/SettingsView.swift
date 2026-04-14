@@ -5,6 +5,8 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var users: [User]
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
+    
+    @Query private var appStates: [AppState]
 
     @AppStorage(AppStorageKeys.appMode) private var appModeRaw: String = AppMode.mark.rawValue
     private var mode: AppMode { AppMode(rawValue: appModeRaw) ?? .mark }
@@ -78,8 +80,7 @@ struct SettingsView: View {
                 Button("Schedule Next Mesocycle") {
                     let d0 = Calendar.current.startOfDay(for: nextMesoDate)
                     MesoLifecycle.scheduleNextMeso(on: d0)
-
-                    // Mirror so the UI updates immediately (AppStorage is reactive)
+                    AppStateBridge.setScheduledNextMesoStartDate(d0, in: context)
                     scheduledStartEpoch = d0.timeIntervalSince1970
                 }
 
@@ -101,6 +102,8 @@ struct SettingsView: View {
 
                     Button(role: .destructive) {
                         MesoLifecycle.clearScheduledNextMeso()
+                        AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
+                        AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
                         scheduledStartEpoch = 0
                     } label: {
                         Text("Cancel Scheduled Start")
@@ -115,7 +118,12 @@ struct SettingsView: View {
 
                 // Full rollover (label reset + activeStartDate metrics cutoff + clear schedule)
                 Button(role: .destructive) {
-                    MesoLifecycle.confirmStartNewMeso(on: Date())
+                    let today = Calendar.current.startOfDay(for: Date())
+                    MesoLifecycle.confirmStartNewMeso(on: today)
+                    AppStateBridge.setActiveMesoStartDate(today, in: context)
+                    AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
+                    AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
+                    AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
                     scheduledStartEpoch = 0
                 } label: {
                     Text("Start New Mesocycle Now (Reset to W1D1)")
@@ -129,7 +137,9 @@ struct SettingsView: View {
 
                 // Optional: label-only reset (keep if you want)
                 Button(role: .destructive) {
-                    MesoLabel.startNewMeso(on: Date())
+                    let today = Calendar.current.startOfDay(for: Date())
+                    MesoLabel.startNewMeso(on: today)
+                    AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
                 } label: {
                     Text("Reset Labels Only (W1D1 from Today)")
                 }
@@ -265,6 +275,9 @@ struct SettingsView: View {
                 "Couldn’t generate the next mesocycle: \(error.localizedDescription)"
             )
         }
+    }
+    private var appState: AppState? {
+        appStates.first
     }
 }
 

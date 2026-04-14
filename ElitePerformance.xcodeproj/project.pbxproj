@@ -16,6 +16,8 @@
 		D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D536A6A12EF7265F0036BB4E /* MesoLabel.swift */; };
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D5441E062EDA41F600BBE02D /* ExerciseAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */; };
+		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
+		D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548927E2F8E7F1A00F2C30A /* AppState.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
@@ -102,6 +104,8 @@
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D537C68F2EE3AE3F006C16F7 /* Untitled.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Untitled.swift; sourceTree = "<group>"; };
 		D5441E052EDA41F500BBE02D /* ExerciseAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseAlternatives.swift; sourceTree = "<group>"; };
+		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
+		D548927E2F8E7F1A00F2C30A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
@@ -173,6 +177,11 @@
 		D536A6312EF4790E0036BB4E /* Components */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Components;
+			sourceTree = "<group>";
+		};
+		D54892732F8E778600F2C30A /* Sync */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Sync;
 			sourceTree = "<group>";
 		};
 		D5550A742F1D25EF00456F8C /* Health */ = {
@@ -352,6 +361,8 @@
 		D5E293522EC410DD00034D78 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				D548927E2F8E7F1A00F2C30A /* AppState.swift */,
+				D54892772F8E796900F2C30A /* ExerciseNote.swift */,
 				D550020A2F43D6E000908F53 /* ProgramState.swift */,
 				D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */,
 				D55002062F43883B00908F53 /* MesoBlock.swift */,
@@ -375,6 +386,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D54892732F8E778600F2C30A /* Sync */,
 				D5F89BB72F8AD54900D44DCB /* Programs */,
 				D5813F972F4910A500CCE909,
 				D58476EC2F410AC300FE3F46 /* Export */,
@@ -535,6 +547,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				D536A6312EF4790E0036BB4E /* Components */,
+				D54892732F8E778600F2C30A /* Sync */,
 				D5550A742F1D25EF00456F8C /* Health */,
 				D568F46C2F2D57C000108B45 /* Extras */,
 				D585D59C2F043BC70073DFE3 /* Catalog */,
@@ -667,6 +680,7 @@
 				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
 				D5E02AA92EFCA6EB0035B768 /* RepRangeRulebook.swift in Sources */,
 				D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */,
+				D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */,
 				D5813F962F48C28700CCE909 /* ExerciseSessionDetailView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */,
@@ -697,6 +711,7 @@
 				D5C48EFA2F1C05EC00495C46 /* SessionRatingStore.swift in Sources */,
 				D58477132F42842000FE3F46 /* MesoLifecycle.swift in Sources */,
 				D5C446502ED7C56000D7BE41 /* LoggedSet.swift in Sources */,
+				D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */,
 				D5A810ED2EE5EECD00130345 /* ProgressionEngine.swift in Sources */,
 				D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */,
 				D5E2938A2EC6BDD100034D78 /* PRBadge.swift in Sources */,

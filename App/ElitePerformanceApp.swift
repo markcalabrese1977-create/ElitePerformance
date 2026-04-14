@@ -10,13 +10,15 @@ struct ElitePerformanceApp: App {
         // ✅ Define schema explicitly (matches your models)
         let schema = Schema([
             User.self,
-            ProgramState.self,   // ✅ add
+            ProgramState.self,
             Session.self,
             SessionItem.self,
             SetLog.self,
             PRIndex.self,
             SessionHistory.self,
-            SessionHistoryExercise.self
+            SessionHistoryExercise.self,
+            ExerciseNote.self,
+            AppState.self
         ])
 
         let appSupport = FileManager.default.urls(

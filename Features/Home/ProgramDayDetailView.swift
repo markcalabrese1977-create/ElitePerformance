@@ -832,7 +832,7 @@ private struct ProgramExercisePlanRow: View {
     }
 
     private var noteIconName: String {
-        ExerciseNotesStore.hasNote(exerciseId: item.exerciseId) ? "note.text" : "note"
+        ExerciseNoteLookup.hasNote(exerciseId: item.exerciseId, in: modelContext) ? "note.text" : "note"
     }
     
     private var prescriptionSummaryRow: some View {
