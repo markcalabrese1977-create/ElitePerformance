@@ -91,9 +91,22 @@ enum AppStateBridge {
         }
     }
 
+    static func restoreUserDefaultsFromAppStateIfAvailable(in context: ModelContext) {
+        let descriptor = FetchDescriptor<AppState>()
+        guard let state = try? context.fetch(descriptor).first else {
+            print("ℹ️ No AppState found to restore into UserDefaults.")
+            return
+        }
+
+        syncToUserDefaults(from: state)
+        print("✅ UserDefaults restored from AppState.")
+    }
+
     static func syncToUserDefaults(from state: AppState) {
         if let d = state.activeMesoStartDate {
             UserDefaults.standard.set(d.timeIntervalSince1970, forKey: activeStartEpochKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: activeStartEpochKey)
         }
 
         if let d = state.scheduledNextMesoStartDate {
@@ -122,6 +135,8 @@ enum AppStateBridge {
 
         if let raw = state.appModeRaw, !raw.isEmpty {
             UserDefaults.standard.set(raw, forKey: appModeKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: appModeKey)
         }
     }
 
