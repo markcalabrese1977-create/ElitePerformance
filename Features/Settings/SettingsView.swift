@@ -47,19 +47,6 @@ struct SettingsView: View {
         let user = users.first
 
         Form {
-            Section("App Mode") {
-                Picker("Mode", selection: appModeBinding) {
-                    ForEach(AppMode.allCases) { m in
-                        Text(m.title).tag(m.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Switching modes does not change saved workout data.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Coach Voice") {
                 Picker(
                     "Style",
