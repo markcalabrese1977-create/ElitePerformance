@@ -69,6 +69,7 @@ enum DUPSessionMaterializer {
             return SessionItem(
                 order: exercise.order,
                 exerciseId: exercise.exerciseId,
+                exerciseNameSnapshot: ExerciseCatalog.displayName(for: exercise.exerciseId),
                 targetReps: exercise.defaultTargetReps,
                 targetSets: defaultSets,
                 targetRIR: exercise.defaultTargetRIR,

@@ -7,7 +7,6 @@ struct ElitePerformanceApp: App {
     private let sharedModelContainer: ModelContainer
 
     init() {
-        // ✅ Define schema explicitly (matches your models)
         let schema = Schema([
             User.self,
             ProgramState.self,
@@ -25,28 +24,26 @@ struct ElitePerformanceApp: App {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first!
-        
-        // ✅ Store pin (prevents “accidental flip” between stores)
+
         let pinKey = "activeSwiftDataStoreLabel.v1"
 
-        // Candidate stores we may have created over time.
-        // IMPORTANT: we only try ones that already exist, so we don't create new empty stores.
         let candidates: [(label: String?, filename: String)] = [
             (nil, "default.store"),
             ("ElitePerformanceStore", "ElitePerformanceStore.store"),
             ("ElitePerformanceStore_v2", "ElitePerformanceStore_v2.store")
         ]
 
-        // MARK: - Helper: open a specific store label (DEFAULT or named)
+        func runStartupBackfills(using container: ModelContainer) {
+            let context = ModelContext(container)
+            ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
+        }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
             let config: ModelConfiguration
 
             if let name = label, name != "DEFAULT" {
-                // Named store
                 config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: false)
             } else {
-                // Default (unnamed) store
                 config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             }
 
@@ -66,42 +63,43 @@ struct ElitePerformanceApp: App {
                 for item in s.items {
                     let hasLoad = item.actualLoads.contains(where: { $0 > 0 })
                     let hasReps = item.actualReps.contains(where: { $0 > 0 })
-                    if hasLoad || hasReps { count += 1 }
+                    if hasLoad || hasReps {
+                        count += 1
+                    }
                 }
             }
             return count
         }
 
-        // ✅ Simulator: always use default store and skip pin/scan logic
-#if targetEnvironment(simulator)
-do {
-    print("ℹ️ Simulator detected — using DEFAULT SwiftData store (no pin/scan).")
-    let (container, _) = try openStore(label: nil)
-    self.sharedModelContainer = container
-    return
-} catch {
-    // Simulator-only self-heal: delete the local store if migration fails, then recreate.
-    print("⚠️ Simulator store failed to open. Deleting default.store and recreating. Error: \(error)")
+        #if targetEnvironment(simulator)
+        do {
+            print("ℹ️ Simulator detected — using DEFAULT SwiftData store (no pin/scan).")
+            let (container, _) = try openStore(label: nil)
+            self.sharedModelContainer = container
+            runStartupBackfills(using: container)
+            return
+        } catch {
+            print("⚠️ Simulator store failed to open. Deleting default.store and recreating. Error: \(error)")
 
-    let storeURL = appSupport.appendingPathComponent("default.store")
-    let walURL = appSupport.appendingPathComponent("default.store-wal")
-    let shmURL = appSupport.appendingPathComponent("default.store-shm")
+            let storeURL = appSupport.appendingPathComponent("default.store")
+            let walURL = appSupport.appendingPathComponent("default.store-wal")
+            let shmURL = appSupport.appendingPathComponent("default.store-shm")
 
-    try? FileManager.default.removeItem(at: storeURL)
-    try? FileManager.default.removeItem(at: walURL)
-    try? FileManager.default.removeItem(at: shmURL)
+            try? FileManager.default.removeItem(at: storeURL)
+            try? FileManager.default.removeItem(at: walURL)
+            try? FileManager.default.removeItem(at: shmURL)
 
-    do {
-        let (container, _) = try openStore(label: nil)
-        self.sharedModelContainer = container
-        return
-    } catch {
-        fatalError("Simulator failed to recreate DEFAULT SwiftData store: \(error)")
-    }
-}
-#endif
+            do {
+                let (container, _) = try openStore(label: nil)
+                self.sharedModelContainer = container
+                runStartupBackfills(using: container)
+                return
+            } catch {
+                fatalError("Simulator failed to recreate DEFAULT SwiftData store: \(error)")
+            }
+        }
+        #endif
 
-        // ✅ 1) If we have a pinned store, ALWAYS use it (no scanning)
         if let pinned = UserDefaults.standard.string(forKey: pinKey) {
             let pinnedLabel: String? = (pinned == "DEFAULT") ? nil : pinned
 
@@ -115,14 +113,12 @@ do {
                 print("🔒 Using PINNED store: \(pinned) sessions=\(sessionCount) completed=\(completedCount) loggedItems=\(loggedSetCount)")
 
                 self.sharedModelContainer = container
+                runStartupBackfills(using: container)
                 return
             } catch {
                 print("⚠️ Failed to open PINNED store \(pinned). Falling back to scan. Error: \(error)")
-                // fall through to scan (recovery only)
             }
         }
-
-        // ✅ 2) Otherwise, scan existing stores and choose best, then PIN it
 
         struct StoreScore {
             let container: ModelContainer
@@ -131,10 +127,6 @@ do {
             let completedCount: Int
             let loggedSetCount: Int
 
-            // Heuristic:
-            // - Completed sessions dominate
-            // - Then actual logged sets (loads/reps)
-            // - Then raw session count
             var score: Int {
                 (completedCount * 1_000_000) + (loggedSetCount * 1_000) + sessionCount
             }
@@ -173,12 +165,12 @@ do {
             }
         }
 
-        // ✅ If none found, fall back to DEFAULT store
         guard let best else {
             print("⚠️ No preferred SwiftData store found — falling back to DEFAULT store.")
             do {
                 let (container, _) = try openStore(label: nil)
                 self.sharedModelContainer = container
+                runStartupBackfills(using: container)
                 return
             } catch {
                 fatalError("Failed to open DEFAULT store as fallback: \(error)")
@@ -187,10 +179,10 @@ do {
 
         print("🏆 Using store: \(best.label) sessions=\(best.sessionCount) completed=\(best.completedCount) loggedItems=\(best.loggedSetCount)")
 
-        // ✅ Pin the chosen store so future launches cannot “flip”
         UserDefaults.standard.set(best.label, forKey: pinKey)
 
         self.sharedModelContainer = best.container
+        runStartupBackfills(using: best.container)
     }
 
     var body: some Scene {

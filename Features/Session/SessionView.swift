@@ -1811,7 +1811,14 @@ extension SessionScreenViewModel {
 
         let exercises: [UISessionExercise] = items.map { item in
             let catalogExercise = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
-            let name = catalogExercise?.name ?? "Exercise"
+            let name = {
+                if let snapshot = item.exerciseNameSnapshot?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !snapshot.isEmpty {
+                    return snapshot
+                }
+                return catalogExercise?.name ?? ExerciseCatalog.displayName(for: item.exerciseId)
+            }()
 
             // Clamp to 3–4 working sets for now
             let targetSets = max(1, min(item.targetSets, 6))

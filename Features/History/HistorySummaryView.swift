@@ -402,6 +402,7 @@ enum HistorySummaryBuilder {
 
                 let resolvedName = displayName(
                     exerciseId: exerciseId,
+                    snapshotName: item.exerciseNameSnapshot,
                     catalogName: catalog?.name,
                     uiName: uiExercise?.name
                 )
@@ -492,9 +493,14 @@ enum HistorySummaryBuilder {
 
     private static func displayName(
         exerciseId: String,
+        snapshotName: String?,
         catalogName: String?,
         uiName: String?
     ) -> String {
+        if let snapshotName, !snapshotName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return snapshotName
+        }
+        
         if let catalogName, !catalogName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return catalogName
         }

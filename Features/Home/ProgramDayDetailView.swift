@@ -475,6 +475,7 @@ struct ProgramDayDetailView: View {
         let newItem = SessionItem(
             order: nextOrder,
             exerciseId: catalog.id,
+            exerciseNameSnapshot: catalog.name,
             targetReps: 10,
             targetSets: 3,
             targetRIR: 2,
@@ -639,6 +640,7 @@ struct ProgramDayDetailView: View {
                         let newItem = SessionItem(
                             order: idx + 1,
                             exerciseId: src.exerciseId,
+                            exerciseNameSnapshot: src.exerciseNameSnapshot,
                             targetReps: src.targetReps,
                             targetSets: src.targetSets,
                             targetRIR: src.targetRIR,
@@ -673,6 +675,7 @@ struct ProgramDayDetailView: View {
 
                     dst.order = idx + 1
                     dst.exerciseId = src.exerciseId
+                    dst.exerciseNameSnapshot = src.exerciseNameSnapshot
 
                     // Flattened execution defaults
                     dst.targetReps = src.targetReps
@@ -989,11 +992,17 @@ private struct ProgramExercisePlanRow: View {
     // MARK: - Display helpers
 
     private var displayName: String {
+        if let snapshot = item.exerciseNameSnapshot?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !snapshot.isEmpty {
+            return snapshot
+        }
+
         if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
             return catalog.name
-        } else {
-            return "Exercise"
         }
+
+        return ExerciseCatalog.displayName(for: item.exerciseId)
     }
 
     private var detailLine: String {

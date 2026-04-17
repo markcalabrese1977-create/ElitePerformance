@@ -172,6 +172,9 @@ final class SessionItem {
     /// ID of the exercise in `ExerciseCatalog` / `CatalogExercise`.
     var exerciseId: String
 
+    /// Durable display-name snapshot for history / recap portability.
+    var exerciseNameSnapshot: String?
+
     // Planned targets (flattened execution defaults)
     var targetReps: Int
     var targetSets: Int
@@ -223,6 +226,7 @@ final class SessionItem {
 
         order: Int,
         exerciseId: String,
+        exerciseNameSnapshot: String? = nil,
         targetReps: Int,
         targetSets: Int,
         targetRIR: Int,
@@ -260,6 +264,7 @@ final class SessionItem {
 
         self.order = order
         self.exerciseId = exerciseId
+        self.exerciseNameSnapshot = exerciseNameSnapshot
 
         self.targetReps = targetReps
         self.targetSets = targetSets
