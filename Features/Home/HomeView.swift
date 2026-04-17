@@ -13,6 +13,9 @@ struct HomeView: View {
     @State private var showMesoRolloverGuard = false
     @State private var guardRescheduleDate = Date()
 
+    // Deferred replace/apply after onboarding dismisses
+    @State private var pendingOnboardingResult: OnboardingResult?
+
     var body: some View {
         NavigationStack {
             ProgramPlanView()
@@ -33,21 +36,23 @@ struct HomeView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showingChangeProgram) {
+                .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView()
-                            .navigationTitle("Change Program")
-                            .toolbar {
-                                ToolbarItem(placement: .cancellationAction) {
-                                    Button("Cancel") {
-                                        showingChangeProgram = false
-                                    }
+                        OnboardingFlowView { result in
+                            pendingOnboardingResult = result
+                        }
+                        .navigationTitle("Change Program")
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") {
+                                    pendingOnboardingResult = nil
+                                    showingChangeProgram = false
                                 }
                             }
+                        }
                     }
                 }
         }
-        // ✅ Attach these to the NavigationStack (outside the inner closure)
         .onAppear {
             if MesoLifecycle.isRolloverDue() {
                 guardRescheduleDate = MesoLifecycle.scheduledStartDate ?? Date()
@@ -59,6 +64,42 @@ struct HomeView: View {
                 isPresented: $showMesoRolloverGuard,
                 rescheduleDate: $guardRescheduleDate
             )
+        }
+    }
+
+    private func handleOnboardingDismiss() {
+        guard let result = pendingOnboardingResult else { return }
+        pendingOnboardingResult = nil
+
+        DispatchQueue.main.async {
+            applyOnboardingResult(result)
+        }
+    }
+
+    private func applyOnboardingResult(_ result: OnboardingResult) {
+        let weekdays = result.trainingDaysOfWeek
+            .map { min(max($0, 1), 7) }
+            .sorted()
+
+        print("DEBUG HomeView.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(weekdays)")
+
+        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
+            do {
+                try DUPProgramReplaceService.replacePlannedProgram(
+                    startDate: Date(),
+                    trainingWeekdays: weekdays,
+                    context: modelContext
+                )
+                print("DEBUG HomeView.applyOnboardingResult – completed DUP replace flow")
+            } catch {
+                print("ERROR HomeView.applyOnboardingResult – DUP replace failed: \(error)")
+            }
+        } else {
+            ProgramCatalog.applyOnboardingResult(
+                result,
+                context: modelContext
+            )
+            print("DEBUG HomeView.applyOnboardingResult – completed applyOnboardingResult")
         }
     }
 }

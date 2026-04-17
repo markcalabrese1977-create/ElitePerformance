@@ -10,7 +10,6 @@ struct ProgramDayDetailView: View {
     @Bindable var session: Session   // SwiftData-friendly
 
     @State private var showingAddExerciseSheet = false
-    @State private var showingApplyScopeDialog = false
     @State private var feedbackMessage: String = ""
     @State private var showFeedbackAlert = false
     @State private var historyTarget: HistoryTarget?
@@ -75,22 +74,10 @@ struct ProgramDayDetailView: View {
                     autoGeneratePerSetPlanForThisDay()
                 }
 
-                Button("Apply") {
-                    showingApplyScopeDialog = true
-                }
+                
             }
         }
-        .confirmationDialog(
-            "Apply these plan changes to which days?",
-            isPresented: $showingApplyScopeDialog,
-            titleVisibility: .visible
-        ) {
-            Button("This weekday going forward") {
-                applyPlanChangesToBlock()
-            }
-
-            Button("Cancel", role: .cancel) { }
-        }
+        
         
         .alert("Plan Update", isPresented: $showFeedbackAlert) {
             Button("OK", role: .cancel) { }

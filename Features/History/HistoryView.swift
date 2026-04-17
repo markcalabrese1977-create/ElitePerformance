@@ -180,8 +180,7 @@ private struct HistoryDayDetailView: View {
     @Environment(\.modelContext) private var context
     let history: SessionHistory
 
-    @State private var showApplyAlert = false
-    @State private var applyAlertMessage = ""
+
 
     private var sourceSession: Session? {
         fetchSourceSession()
@@ -380,27 +379,12 @@ private struct HistoryDayDetailView: View {
                     .buttonStyle(.bordered)
                 }
 
-                Button {
-                    applyForwardToFutureSessions()
-                } label: {
-                    Label("Apply to future sessions", systemImage: "arrowshape.turn.up.right.fill")
-                        .font(.subheadline.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-
                 exerciseBreakdown
             }
             .padding()
         }
         .navigationTitle("Session Recap")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Apply to future", isPresented: $showApplyAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(applyAlertMessage)
-        }
     }
 
     // MARK: - Cards
@@ -660,109 +644,7 @@ private struct HistoryDayDetailView: View {
 
     // MARK: - Apply forward
 
-    private func applyForwardToFutureSessions() {
-        let calendar = Calendar.current
-
-        guard let sourceSession = fetchSourceSession() else {
-            applyAlertMessage = "Could not find the original session for this recap."
-            showApplyAlert = true
-            return
-        }
-
-        do {
-            let vm = SessionScreenViewModel(session: sourceSession)
-            let weekday = calendar.component(.weekday, from: sourceSession.date)
-
-            let allSessions = try context.fetch(FetchDescriptor<Session>())
-            let sourceMesoID = sourceSession.meso?.persistentModelID
-
-            let targets = allSessions.filter { other in
-                let sameBlock: Bool = {
-                    switch (sourceMesoID, other.meso?.persistentModelID) {
-                    case let (lhs?, rhs?):
-                        return lhs == rhs
-                    case (nil, nil):
-                        // Legacy fallback: if neither session belongs to a block yet,
-                        // preserve the old behavior within the legacy dataset.
-                        return true
-                    default:
-                        return false
-                    }
-                }()
-
-                return other.id != sourceSession.id &&
-                    other.date > sourceSession.date &&
-                    other.status != .completed &&
-                    calendar.component(.weekday, from: other.date) == weekday &&
-                    sameBlock
-            }
-
-            guard !targets.isEmpty else {
-                applyAlertMessage = "No future sessions on this day pattern to update."
-                showApplyAlert = true
-                return
-            }
-
-            for target in targets {
-                for uiEx in vm.exercises {
-                    guard let item = target.items.first(where: { $0.exerciseId == uiEx.exerciseId }) else { continue }
-
-                    let working = max(1, min(uiEx.targetSets, uiEx.sets.count))
-
-                    var plannedLoads: [Double] = []
-                    var plannedReps: [Int] = []
-                    var plannedRIRs: [Int] = []
-
-                    for idx in 0..<working {
-                        let set = uiEx.sets[idx]
-                        let reps = (set.actualReps ?? set.plannedReps) ?? 0
-                        let load = (set.actualLoad ?? set.plannedLoad) ?? 0
-                        let rir  = (set.actualRIR ?? set.plannedRIR) ?? 2
-
-                        guard reps > 0 else { continue }   // allow load == 0
-
-                        plannedReps.append(reps)
-                        plannedLoads.append(load)
-                        plannedRIRs.append(rir)
-                    }
-
-                    guard !plannedReps.isEmpty else { continue }
-
-                    let fallbackReps = plannedReps.first ?? 10
-                    let fallbackRIR  = plannedRIRs.first ?? 2
-
-                    let setCount = max(4, max(item.targetSets, plannedLoads.count))
-
-                    if plannedReps.count < setCount {
-                        plannedReps.append(contentsOf: repeatElement(fallbackReps, count: setCount - plannedReps.count))
-                    }
-                    if plannedLoads.count < setCount {
-                        plannedLoads.append(contentsOf: repeatElement(plannedLoads.last ?? 0, count: setCount - plannedLoads.count))
-                    }
-                    if plannedRIRs.count < setCount {
-                        plannedRIRs.append(contentsOf: repeatElement(fallbackRIR, count: setCount - plannedRIRs.count))
-                    }
-
-                    item.plannedRepsBySet  = Array(plannedReps.prefix(setCount))
-                    item.plannedLoadsBySet = Array(plannedLoads.prefix(setCount))
-                    item.targetReps = fallbackReps
-                    item.targetRIR  = fallbackRIR
-
-                    if let last = plannedLoads.prefix(working).last {
-                        item.suggestedLoad = last
-                    }
-                }
-            }
-
-            try context.save()
-            applyAlertMessage = "Applied today’s plan to \(targets.count) future session(s) in this block."
-            showApplyAlert = true
-        } catch {
-            print("⚠️ Apply forward failed: \(error)")
-            applyAlertMessage = "Something went wrong while updating future sessions."
-            showApplyAlert = true
-        }
-    }
+    
 }
 
 // MARK: - Preview

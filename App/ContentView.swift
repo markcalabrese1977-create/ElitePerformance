@@ -13,15 +13,32 @@ struct ContentView: View {
         MainTabView()
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
-                    OnboardingFlowView()
-                        .navigationTitle("Welcome")
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Close") {
-                                    showFirstRunOnboarding = false
-                                }
+                    OnboardingFlowView { result in
+                        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
+                            do {
+                                try DUPProgramReplaceService.replacePlannedProgram(
+                                    startDate: Date(),
+                                    trainingWeekdays: result.trainingDaysOfWeek,
+                                    context: modelContext
+                                )
+                            } catch {
+                                print("ERROR ContentView onboarding – DUP replace failed: \(error)")
                             }
-                        } 
+                        } else {
+                            ProgramCatalog.applyOnboardingResult(
+                                result,
+                                context: modelContext
+                            )
+                        }
+                    }
+                    .navigationTitle("Welcome")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                showFirstRunOnboarding = false
+                            }
+                        }
+                    }
                 }
             }
             .onAppear {

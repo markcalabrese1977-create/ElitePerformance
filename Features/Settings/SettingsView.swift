@@ -164,12 +164,10 @@ struct SettingsView: View {
             // MARK: - Export
             Section("Export") {
                 
-                #if targetEnvironment(simulator)
                 Button("Import Full Backup (JSON)") {
                     showImportBackupPicker = true
                 }
                 .foregroundStyle(.red)
-            #endif
                 Button("Export Full Backup (JSON)") {
                     exportError = nil
                     do {

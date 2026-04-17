@@ -40,8 +40,9 @@ struct OnboardingResult: Codable {
 // MARK: - Flow
 
 struct OnboardingFlowView: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+
+    let onComplete: (OnboardingResult) -> Void
 
     @State private var pageIndex: Int = 0
 
@@ -65,7 +66,6 @@ struct OnboardingFlowView: View {
         .padding()
         .navigationTitle("Welcome")
         .navigationBarTitleDisplayMode(.inline)
-        
     }
 
     // MARK: - Pages
@@ -121,7 +121,6 @@ struct OnboardingFlowView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Days per week
             VStack(alignment: .leading, spacing: 8) {
                 Text("Training frequency")
                     .font(.subheadline.bold())
@@ -130,12 +129,11 @@ struct OnboardingFlowView: View {
                     Text("Days per week: \(daysPerWeek)")
                         .font(.headline)
                 }
-                .onChange(of: daysPerWeek) { _ in
+                .onChange(of: daysPerWeek) { _, _ in
                     syncSelectedWeekdaysWithDaysPerWeek()
                 }
             }
 
-            // Which weekdays
             VStack(alignment: .leading, spacing: 8) {
                 Text("Which days do you want to train?")
                     .font(.subheadline.bold())
@@ -146,7 +144,7 @@ struct OnboardingFlowView: View {
 
                 HStack(spacing: 6) {
                     ForEach(0..<weekdaySymbols.count, id: \.self) { index in
-                        let weekday = index + 1   // 1=Sun ... 7=Sat
+                        let weekday = index + 1
                         let label = String(weekdaySymbols[index].prefix(3))
                         let isSelected = selectedWeekdays.contains(weekday)
 
@@ -175,7 +173,6 @@ struct OnboardingFlowView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Experience chips
             VStack(alignment: .leading, spacing: 8) {
                 Text("Training experience")
                     .font(.subheadline.bold())
@@ -256,15 +253,14 @@ struct OnboardingFlowView: View {
         Self.weekdaySymbolsStatic
     }
 
-    /// Default training pattern for a given frequency (Calendar weekday values).
     private func defaultTrainingDays(for days: Int) -> Set<Int> {
         switch days {
-        case 2:  return [2, 5]                 // Mon, Thu
-        case 3:  return [2, 4, 6]              // Mon, Wed, Fri
-        case 4:  return [2, 3, 5, 6]           // Mon, Tue, Thu, Fri
-        case 5:  return [2, 3, 4, 5, 6]        // Mon–Fri
-        case 6:  return [2, 3, 4, 5, 6, 7]     // Mon–Sat
-        default: return [2, 4, 6]              // fallback: Mon, Wed, Fri
+        case 2:  return [2, 5]
+        case 3:  return [2, 4, 6]
+        case 4:  return [2, 3, 5, 6]
+        case 5:  return [2, 3, 4, 5, 6]
+        case 6:  return [2, 3, 4, 5, 6, 7]
+        default: return [2, 4, 6]
         }
     }
 
@@ -301,12 +297,10 @@ struct OnboardingFlowView: View {
     // MARK: - Finish
 
     private func finish() {
-        // Ensure we have a sensible weekday pattern
         if selectedWeekdays.isEmpty {
             selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
         }
 
-        // NOTE: trainingDaysOfWeek is the single source of truth for schedule; daysPerWeek is derived.
         let weekdays = selectedWeekdays
             .map { min(max($0, 1), 7) }
             .sorted()
@@ -318,32 +312,11 @@ struct OnboardingFlowView: View {
             trainingDaysOfWeek: weekdays
         )
 
-        // DEBUG
         print("DEBUG Onboarding.finish – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(weekdays)")
 
-        // 1) Seed a fresh block
-        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
-            do {
-                try DUPProgramReplaceService.replacePlannedProgram(
-                    startDate: Date(),
-                    trainingWeekdays: weekdays,
-                    context: modelContext
-                )
-                print("DEBUG Onboarding.finish – completed DUP replace flow")
-            } catch {
-                print("ERROR Onboarding.finish – DUP replace failed: \(error)")
-            }
-        } else {
-            ProgramCatalog.applyOnboardingResult(
-                result,
-                context: modelContext
-            )
-            print("DEBUG Onboarding.finish – completed applyOnboardingResult")
-        }
-
-        // 2) Close the sheet / nav stack (no-op on first-run root, but should close sheets)
+        onComplete(result)
         dismiss()
 
-        print("DEBUG Onboarding.finish – called dismiss()")
+        print("DEBUG Onboarding.finish – handed result to parent and dismissed")
     }
 }
