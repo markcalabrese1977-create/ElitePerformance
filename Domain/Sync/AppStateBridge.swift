@@ -7,7 +7,7 @@ enum AppStateBridge {
     private static let promptSnoozeEpochKey = "meso.promptSnoozeEpoch"
     private static let anchorDateKey = "meso.anchorDate"
     private static let anchorDayNumberKey = "meso.anchorDayNumber"
-    private static let appModeKey = AppStorageKeys.appMode
+
 
     static func shared(in context: ModelContext) -> AppState {
         let descriptor = FetchDescriptor<AppState>()
@@ -62,14 +62,6 @@ enum AppStateBridge {
             let v = UserDefaults.standard.integer(forKey: anchorDayNumberKey)
             if v > 0 {
                 state.mesoAnchorDayNumber = v
-                changed = true
-            }
-        }
-
-        if state.appModeRaw == nil {
-            let raw = UserDefaults.standard.string(forKey: appModeKey)
-            if let raw, !raw.isEmpty {
-                state.appModeRaw = raw
                 changed = true
             }
         }
@@ -133,20 +125,8 @@ enum AppStateBridge {
             UserDefaults.standard.removeObject(forKey: anchorDayNumberKey)
         }
 
-        if let raw = state.appModeRaw, !raw.isEmpty {
-            UserDefaults.standard.set(raw, forKey: appModeKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: appModeKey)
-        }
     }
 
-    static func setAppMode(_ raw: String, in context: ModelContext) {
-        let state = shared(in: context)
-        state.appModeRaw = raw
-        state.updatedAt = Date()
-        try? context.save()
-        syncToUserDefaults(from: state)
-    }
 
     static func setScheduledNextMesoStartDate(_ date: Date?, in context: ModelContext) {
         let state = shared(in: context)

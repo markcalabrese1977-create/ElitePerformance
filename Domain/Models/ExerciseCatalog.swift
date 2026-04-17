@@ -31,30 +31,49 @@ struct ExerciseCatalog {
 
     // MARK: - Custom Exercises (UserDefaults)
 
-    private static func currentMode() -> AppMode {
-        let raw = UserDefaults.standard.string(forKey: AppStorageKeys.appMode) ?? AppMode.mark.rawValue
-        return AppMode(rawValue: raw) ?? .mark
-    }
+    private static let universalCustomKey = "custom_exercises_v2"
+    
+    private static let legacyCustomKeys = [
+        "custom_exercises_mark_v1",
+        "custom_exercises_angela_v1"
+    ]
 
-    private static func customKey(for mode: AppMode) -> String {
-        "custom_exercises_\(mode.rawValue)_v1"
-    }
+    private static func loadLegacyCustomExercises() -> [CatalogExercise] {
+        var merged: [CatalogExercise] = []
 
-    static func customExercises(mode: AppMode? = nil) -> [CatalogExercise] {
-        let m = mode ?? currentMode()
-        guard let data = UserDefaults.standard.data(forKey: customKey(for: m)) else { return [] }
-        do {
-            return try JSONDecoder().decode([CatalogExercise].self, from: data)
-        } catch {
-            return []
+        for key in legacyCustomKeys {
+            guard let data = UserDefaults.standard.data(forKey: key) else { continue }
+            guard let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data) else { continue }
+            merged.append(contentsOf: decoded)
+        }
+
+        var seen: Set<String> = []
+        return merged.filter { exercise in
+            if seen.contains(exercise.id) { return false }
+            seen.insert(exercise.id)
+            return true
         }
     }
 
-    private static func saveCustom(_ list: [CatalogExercise], mode: AppMode? = nil) {
-        let m = mode ?? currentMode()
+    static func customExercises() -> [CatalogExercise] {
+        if let data = UserDefaults.standard.data(forKey: universalCustomKey),
+           let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data) {
+            return decoded
+        }
+
+        let migrated = loadLegacyCustomExercises()
+        if !migrated.isEmpty {
+            saveCustom(migrated)
+            return migrated
+        }
+
+        return []
+    }
+
+    private static func saveCustom(_ list: [CatalogExercise]) {
         do {
             let data = try JSONEncoder().encode(list)
-            UserDefaults.standard.set(data, forKey: customKey(for: m))
+            UserDefaults.standard.set(data, forKey: universalCustomKey)
             NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
         } catch { }
     }

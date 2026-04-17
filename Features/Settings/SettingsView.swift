@@ -25,20 +25,7 @@ struct SettingsView: View {
     private var appState: AppState? {
         appStates.first
     }
-
-    private var appModeBinding: Binding<String> {
-        Binding(
-            get: {
-                appState?.appModeRaw
-                    ?? UserDefaults.standard.string(forKey: AppStorageKeys.appMode)
-                    ?? AppMode.mark.rawValue
-            },
-            set: { newValue in
-                AppStateBridge.setAppMode(newValue, in: context)
-            }
-        )
-    }
-
+    
     private var scheduledStartDate: Date? {
         appState?.scheduledNextMesoStartDate ?? MesoLifecycle.scheduledStartDate
     }
