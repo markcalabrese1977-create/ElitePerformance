@@ -563,22 +563,61 @@ struct ExerciseCatalog {
     }
 }
 extension ExerciseCatalog {
+    private static let legacyExerciseNameMap: [String: String] = [
+        "591028b2-9f09-4347-a245-6cf71e5f403d": "Supination / Pronation Curl"
+    ]
+
     static func displayName(for exerciseId: String) -> String {
+        let trimmedId = exerciseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedId.isEmpty else { return "Unknown Exercise" }
+
         // 1) Try built-in + custom list
-        if let ex = all.first(where: { $0.id == exerciseId }) {
+        if let ex = all.first(where: { $0.id == trimmedId }) {
             return ex.name
         }
 
-        // 2) Fallback: prettify IDs like "ez_bar_curl" -> "Ez Bar Curl"
-        let pretty = exerciseId
+        // 2) Try legacy known-ID map
+        if let mapped = legacyExerciseNameMap[trimmedId],
+           !mapped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return mapped
+        }
+
+        // 3) If it looks like a UUID / opaque legacy ID, do not surface raw gibberish
+        if looksLikeOpaqueLegacyId(trimmedId) {
+            return "Legacy / Custom Exercise"
+        }
+
+        // 4) Fallback: prettify IDs like "ez_bar_curl" -> "Ez Bar Curl"
+        let pretty = trimmedId
             .replacingOccurrences(of: "custom_", with: "")
             .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Title-case it lightly
-        return pretty
+        let titleCased = pretty
             .split(separator: " ")
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
+
+        return titleCased.isEmpty ? "Unknown Exercise" : titleCased
+    }
+
+    private static func looksLikeOpaqueLegacyId(_ value: String) -> Bool {
+        let lower = value.lowercased()
+
+        // UUID-like pattern: 8-4-4-4-12
+        let uuidLike = lower.range(
+            of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+            options: .regularExpression
+        ) != nil
+
+        if uuidLike { return true }
+
+        // Any long dashed opaque token that clearly is not a semantic exercise id
+        if lower.contains("-"), lower.count >= 24, !lower.contains("_") {
+            return true
+        }
+
+        return false
     }
 }
