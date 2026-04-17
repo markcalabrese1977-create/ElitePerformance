@@ -398,6 +398,13 @@ private struct HistoryDayDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            if let blockName = history.mesoBlockNameSnapshot,
+               !blockName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(blockName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Divider()
 
             HStack {
@@ -617,6 +624,7 @@ private struct HistoryDayDetailView: View {
 
         let matches = (try? context.fetch(descriptor)) ?? []
         guard !matches.isEmpty else { return nil }
+        let historyBlockId = history.mesoBlockId
 
         func hasAnyActuals(_ s: Session) -> Bool {
             for item in s.items {
@@ -632,6 +640,11 @@ private struct HistoryDayDetailView: View {
             if hasAnyActuals(s) { x += 50 }
             if s.hkWorkoutUUID != nil { x += 10 }
             x += min(10, s.items.count)
+
+            if let historyBlockId, s.meso?.id == historyBlockId {
+                x += 500
+            }
+
             return x
         }
 

@@ -37,12 +37,25 @@ struct HistorySummaryView: View {
         Calendar.current.startOfDay(for: MesoLifecycle.activeStartDate)
     }
 
+    private var activeMesoBlockId: UUID? {
+        sessions.first(where: { $0.meso?.status == .active })?.meso?.id
+    }
+    
     private var filteredCompletedSessions: [Session] {
         let completed = sessions.filter { $0.status == .completed }
+
         switch scope {
         case .allTime:
             return completed
+
         case .thisMeso:
+            if let activeMesoBlockId {
+                let blockMatched = completed.filter { $0.meso?.id == activeMesoBlockId }
+                if !blockMatched.isEmpty {
+                    return blockMatched
+                }
+            }
+
             return completed.filter { $0.date >= mesoCutoff }
         }
     }

@@ -11,6 +11,10 @@ final class SessionHistory {
     var totalSets: Int
     var totalVolume: Double
 
+    // Durable block identity
+    var mesoBlockId: UUID?
+    var mesoBlockNameSnapshot: String?
+
     @Relationship(deleteRule: .cascade)
     var exercises: [SessionHistoryExercise]
 
@@ -22,6 +26,8 @@ final class SessionHistory {
         totalExercises: Int,
         totalSets: Int,
         totalVolume: Double,
+        mesoBlockId: UUID? = nil,
+        mesoBlockNameSnapshot: String? = nil,
         exercises: [SessionHistoryExercise]
     ) {
         self.date = date
@@ -31,6 +37,8 @@ final class SessionHistory {
         self.totalExercises = totalExercises
         self.totalSets = totalSets
         self.totalVolume = totalVolume
+        self.mesoBlockId = mesoBlockId
+        self.mesoBlockNameSnapshot = mesoBlockNameSnapshot
         self.exercises = exercises
     }
 }

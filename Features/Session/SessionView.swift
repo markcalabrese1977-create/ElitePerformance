@@ -1751,6 +1751,9 @@ final class SessionScreenViewModel: ObservableObject {
         // Capture scalar values for the predicate (SwiftData can't compare two key paths)
         let targetDate = recap.date
         let targetWeek = recap.weekIndex
+        
+        let mesoBlockId = session.meso?.id
+        let mesoBlockNameSnapshot = session.meso?.name
 
         // 🔑 Try to find an existing history entry for this same session day/week
         let descriptor = FetchDescriptor<SessionHistory>(
@@ -1775,6 +1778,8 @@ final class SessionScreenViewModel: ObservableObject {
             existingHistory.totalSets = recap.setCount
             existingHistory.totalVolume = recap.totalVolume
             existingHistory.exercises = historyExercises
+            existingHistory.mesoBlockId = mesoBlockId
+            existingHistory.mesoBlockNameSnapshot = mesoBlockNameSnapshot
         } else {
             // First time completing this session → insert a new history row
             let history = SessionHistory(
@@ -1785,6 +1790,8 @@ final class SessionScreenViewModel: ObservableObject {
                 totalExercises: recap.exerciseCount,
                 totalSets: recap.setCount,
                 totalVolume: recap.totalVolume,
+                mesoBlockId: mesoBlockId,
+                mesoBlockNameSnapshot: mesoBlockNameSnapshot,
                 exercises: historyExercises
             )
 

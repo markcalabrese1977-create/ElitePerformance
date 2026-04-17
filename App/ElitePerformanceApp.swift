@@ -37,6 +37,7 @@ struct ElitePerformanceApp: App {
             let context = ModelContext(container)
             ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
             ExerciseNameSnapshotRepair.runIfNeeded(in: context)
+            SessionHistoryBlockBackfill.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
