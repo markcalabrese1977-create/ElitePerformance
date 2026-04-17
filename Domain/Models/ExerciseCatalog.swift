@@ -564,30 +564,40 @@ struct ExerciseCatalog {
 }
 extension ExerciseCatalog {
     private static let legacyExerciseNameMap: [String: String] = [
-        "591028b2-9f09-4347-a245-6cf71e5f403d": "Supination / Pronation Curl"
+        "591028b2-9f09-4347-a245-6cf71e5f403d": "Supination / Pronation Curl",
+        "31c44a80-6c56-4f8e-acb1-2a6761b71a7c": "Arnold Press",
+        "7ddaa8ff-55c5-4af5-891e-62676cdc9daf": "Single-Arm Cable Lateral Raise",
+        "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58": "Seated Cable Press",
+        "1cb4f3a7-65f2-4e9d-aca1-ee754cd157b6": "Single-Arm Cable Curl"
     ]
 
     static func displayName(for exerciseId: String) -> String {
         let trimmedId = exerciseId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedId.isEmpty else { return "Unknown Exercise" }
 
-        // 1) Try built-in + custom list
+        // 1) Direct built-in/custom match
         if let ex = all.first(where: { $0.id == trimmedId }) {
             return ex.name
         }
 
-        // 2) Try legacy known-ID map
-        if let mapped = legacyExerciseNameMap[trimmedId],
+        // 2) Normalized legacy-ID match
+        let normalizedId = normalizeLegacyId(trimmedId)
+
+        if let ex = all.first(where: { $0.id == normalizedId }) {
+            return ex.name
+        }
+
+        if let mapped = legacyExerciseNameMap[normalizedId],
            !mapped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return mapped
         }
 
-        // 3) If it looks like a UUID / opaque legacy ID, do not surface raw gibberish
-        if looksLikeOpaqueLegacyId(trimmedId) {
+        // 3) Opaque legacy token guard
+        if looksLikeOpaqueLegacyId(trimmedId) || looksLikeOpaqueLegacyId(normalizedId) {
             return "Legacy / Custom Exercise"
         }
 
-        // 4) Fallback: prettify IDs like "ez_bar_curl" -> "Ez Bar Curl"
+        // 4) Prettified fallback
         let pretty = trimmedId
             .replacingOccurrences(of: "custom_", with: "")
             .replacingOccurrences(of: "_", with: " ")
@@ -602,20 +612,47 @@ extension ExerciseCatalog {
         return titleCased.isEmpty ? "Unknown Exercise" : titleCased
     }
 
+    private static func normalizeLegacyId(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let compactSpaces = trimmed.replacingOccurrences(of: " ", with: "-")
+
+        if compactSpaces.range(
+            of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#,
+            options: .regularExpression
+        ) != nil {
+            return compactSpaces.lowercased()
+        }
+
+        return trimmed.lowercased()
+    }
+
     private static func looksLikeOpaqueLegacyId(_ value: String) -> Bool {
         let lower = value.lowercased()
 
-        // UUID-like pattern: 8-4-4-4-12
-        let uuidLike = lower.range(
+        let dashedUUID = lower.range(
             of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
             options: .regularExpression
         ) != nil
 
-        if uuidLike { return true }
+        if dashedUUID { return true }
 
-        // Any long dashed opaque token that clearly is not a semantic exercise id
+        let spacedUUID = lower.range(
+            of: #"^[0-9a-f]{8}\s+[0-9a-f]{4}\s+[0-9a-f]{4}\s+[0-9a-f]{4}\s+[0-9a-f]{12}$"#,
+            options: .regularExpression
+        ) != nil
+
+        if spacedUUID { return true }
+
         if lower.contains("-"), lower.count >= 24, !lower.contains("_") {
             return true
+        }
+
+        if lower.contains(" "), lower.count >= 24, !lower.contains("_") {
+            let compact = lower.replacingOccurrences(of: " ", with: "")
+            if compact.range(of: #"^[0-9a-f]+$"#, options: .regularExpression) != nil {
+                return true
+            }
         }
 
         return false

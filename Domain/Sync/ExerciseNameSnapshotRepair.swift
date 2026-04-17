@@ -2,7 +2,15 @@ import Foundation
 import SwiftData
 
 enum ExerciseNameSnapshotRepair {
-    private static let completionKey = "exerciseNameSnapshotRepair.v1.completed"
+    private static let completionKey = "exerciseNameSnapshotRepair.v6.completed"
+
+    private static let snapshotRepairMap: [String: String] = [
+        "591028b2-9f09-4347-a245-6cf71e5f403d": "Supination / Pronation Curl",
+        "31c44a80-6c56-4f8e-acb1-2a6761b71a7c": "Arnold Press",
+        "7ddaa8ff-55c5-4af5-891e-62676cdc9daf": "Single-Arm Cable Lateral Raise",
+        "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58": "Seated Cable Press",
+        "1cb4f3a7-65f2-4e9d-aca1-ee754cd157b6": "Single-Arm Cable Curl"
+    ]
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
@@ -22,6 +30,17 @@ enum ExerciseNameSnapshotRepair {
             for item in session.items {
                 let current = item.exerciseNameSnapshot?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                guard !current.isEmpty else { continue }
+
+                let normalizedSnapshot = normalizeLegacyId(current)
+
+                if let repaired = snapshotRepairMap[normalizedSnapshot],
+                   repaired != current {
+                    item.exerciseNameSnapshot = repaired
+                    changedCount += 1
+                    continue
+                }
 
                 guard looksLikeOpaqueLegacySnapshot(current) else { continue }
 
@@ -51,19 +70,31 @@ enum ExerciseNameSnapshotRepair {
         }
     }
 
+    private static func normalizeLegacyId(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let collapsedWhitespace = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+            .lowercased()
+
+        return collapsedWhitespace
+    }
+
     private static func looksLikeOpaqueLegacySnapshot(_ value: String) -> Bool {
-        guard !value.isEmpty else { return false }
+        let normalized = normalizeLegacyId(value)
+        guard !normalized.isEmpty else { return false }
 
-        let lower = value.lowercased()
-
-        let uuidLike = lower.range(
+        let dashedUUID = normalized.range(
             of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
             options: .regularExpression
         ) != nil
 
-        if uuidLike { return true }
+        if dashedUUID { return true }
 
-        if lower.contains("-"), lower.count >= 24, !lower.contains("_") {
+        if normalized.contains("-"), normalized.count >= 24, !normalized.contains("_") {
             return true
         }
 
