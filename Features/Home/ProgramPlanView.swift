@@ -47,6 +47,18 @@ struct ProgramPlanView: View {
         }
         return legacyFutureSessions
     }
+
+    private var activeBlockName: String? {
+        activeMesoBlock?.name
+    }
+
+    private var activeBlockStartDate: Date? {
+        activeMesoBlock?.startDate
+    }
+
+    private var activeBlockSessionCount: Int {
+        visibleSessions.count
+    }
     
     var body: some View {
         content
@@ -54,6 +66,10 @@ struct ProgramPlanView: View {
 
     private var content: some View {
         List {
+            if activeBlockName != nil {
+                activeBlockHeaderSection
+            }
+
             if visibleSessions.isEmpty {
                 emptyStateSection
             } else {
@@ -132,6 +148,26 @@ struct ProgramPlanView: View {
         }
     }
 
+    private var activeBlockHeaderSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(activeBlockName ?? "Program")
+                    .font(.headline)
+
+                if let startDate = activeBlockStartDate {
+                    Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("\(activeBlockSessionCount) upcoming session\(activeBlockSessionCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+    
     private var addSessionSheet: some View {
         NavigationStack {
             Form {

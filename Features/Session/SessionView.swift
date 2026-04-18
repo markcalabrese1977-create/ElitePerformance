@@ -542,7 +542,7 @@ private struct SessionExerciseCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(exercise.name)
                         .font(.headline)
@@ -562,6 +562,7 @@ private struct SessionExerciseCardView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer()
 
@@ -574,6 +575,8 @@ private struct SessionExerciseCardView: View {
                         }
                     }())
                         .font(.caption)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color.black.opacity(0.05))
@@ -584,6 +587,7 @@ private struct SessionExerciseCardView: View {
                             .font(.caption)
                             .padding(6)
                     }
+                    .buttonStyle(.plain)
                     .background(Color.black.opacity(0.05))
                     .clipShape(Circle())
                     .accessibilityLabel(hasExerciseNote ? "View note" : "Add note")
@@ -593,6 +597,7 @@ private struct SessionExerciseCardView: View {
                             .font(.caption)
                             .padding(6)
                     }
+                    .buttonStyle(.plain)
                     .background(Color.black.opacity(0.05))
                     .clipShape(Circle())
 
@@ -600,24 +605,17 @@ private struct SessionExerciseCardView: View {
                         Text("Swap")
                             .font(.caption2)
                             .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(Color.blue.opacity(0.12))
                             .foregroundColor(.blue)
                             .clipShape(Capsule())
                     }
-
-                    if exercise.isComplete {
-                        Text("Complete")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.green.opacity(0.18))
-                            .foregroundStyle(.green)
-                            .clipShape(Capsule())
-                    }
+                    .buttonStyle(.plain)
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
 
             // Set rows
