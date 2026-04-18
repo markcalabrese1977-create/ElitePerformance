@@ -59,7 +59,7 @@ struct AnalyticsView: View {
             } else {
                 ForEach(rows) { r in
                     Button {
-                        selectedExerciseId = r.exerciseId
+                        selectedExerciseId = ExerciseCatalog.canonicalExerciseId(for: r.exerciseId)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -123,9 +123,8 @@ struct AnalyticsView: View {
 
         for s in recent {
             for item in s.items {
-                let exId = item.exerciseId
+                let exId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
 
-                // Cache/lookup name once per exerciseId
                 let name: String
                 if let existing = map[exId]?.exerciseName {
                     name = existing
@@ -133,7 +132,6 @@ struct AnalyticsView: View {
                     name = ExerciseCatalog.displayName(for: exId)
                 }
 
-                // Estimate volume = sum(load * reps)
                 var volume: Double = 0
                 let loads = item.actualLoads
                 let reps = item.actualReps

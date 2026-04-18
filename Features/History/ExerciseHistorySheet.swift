@@ -139,14 +139,31 @@ struct ExerciseHistorySheet: View {
 
             let sessions = try context.fetch(descriptor)
             var built: [ExerciseHistoryEntry] = []
+            let targetExerciseId = ExerciseCatalog.resolvedExerciseId(
+                rawId: exerciseId,
+                snapshotName: exerciseName,
+                fallbackName: exerciseName
+            )
 
             for session in sessions {
-                guard session.items.contains(where: { $0.exerciseId == exerciseId }) else { continue }
+                guard session.items.contains(where: {
+                    ExerciseCatalog.resolvedExerciseId(
+                        rawId: $0.exerciseId,
+                        snapshotName: $0.exerciseNameSnapshot,
+                        fallbackName: nil
+                    ) == targetExerciseId
+                }) else { continue }
 
                 let vm = SessionScreenViewModel(session: session)
 
                 let uiEx =
-                    vm.exercises.first(where: { $0.exerciseId == exerciseId }) ??
+                    vm.exercises.first(where: {
+                        ExerciseCatalog.resolvedExerciseId(
+                            rawId: $0.exerciseId,
+                            snapshotName: $0.name,
+                            fallbackName: $0.name
+                        ) == targetExerciseId
+                    }) ??
                     vm.exercises.first(where: { $0.name == exerciseName })
 
                 guard let uiEx else { continue }

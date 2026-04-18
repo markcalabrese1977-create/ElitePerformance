@@ -6,6 +6,24 @@ struct ExerciseSessionDetailView: View {
     let exerciseId: String
     let exerciseName: String
 
+    private var canonicalExerciseId: String {
+        ExerciseCatalog.resolvedExerciseId(
+            rawId: exerciseId,
+            snapshotName: exerciseName,
+            fallbackName: exerciseName
+        )
+    }
+
+    private var matchedItem: SessionItem? {
+        session.items.first(where: {
+            ExerciseCatalog.resolvedExerciseId(
+                rawId: $0.exerciseId,
+                snapshotName: $0.exerciseNameSnapshot,
+                fallbackName: nil
+            ) == canonicalExerciseId
+        })
+    }
+
     var body: some View {
         List {
             Section {
@@ -17,13 +35,15 @@ struct ExerciseSessionDetailView: View {
                 }
             }
 
-            if let item = session.items.first(where: { $0.exerciseId == exerciseId }) {
+            if let item = matchedItem {
                 Section("Sets") {
-                    let setCount = max(item.plannedRepsBySet.count,
-                                       item.plannedLoadsBySet.count,
-                                       item.actualReps.count,
-                                       item.actualLoads.count,
-                                       item.actualRIRs.count)
+                    let setCount = max(
+                        item.plannedRepsBySet.count,
+                        item.plannedLoadsBySet.count,
+                        item.actualReps.count,
+                        item.actualLoads.count,
+                        item.actualRIRs.count
+                    )
 
                     if setCount == 0 {
                         Text("No set detail found for this session.")
@@ -47,7 +67,6 @@ struct ExerciseSessionDetailView: View {
 
     @ViewBuilder
     private func setRow(item: SessionItem, idx: Int) -> some View {
-        // Prefer actual if present; fall back to planned.
         let reps = (idx < item.actualReps.count ? item.actualReps[idx] : 0) > 0
             ? item.actualReps[idx]
             : (idx < item.plannedRepsBySet.count ? item.plannedRepsBySet[idx] : 0)
@@ -57,8 +76,9 @@ struct ExerciseSessionDetailView: View {
         let load = actualLoad > 0 ? actualLoad : plannedLoad
 
         let rir: String = {
-            if idx < item.actualRIRs.count, item.actualRIRs[idx] > 0 { return "\(item.actualRIRs[idx])" }
-            // planned fallback
+            if idx < item.actualRIRs.count, item.actualRIRs[idx] > 0 {
+                return "\(item.actualRIRs[idx])"
+            }
             return "\(item.targetRIR)"
         }()
 
@@ -86,5 +106,4 @@ struct ExerciseSessionDetailView: View {
         if v.rounded(.towardZero) == v { return String(Int(v)) }
         return String(format: "%.1f", v)
     }
-}       
-
+}

@@ -37,6 +37,8 @@ struct ElitePerformanceApp: App {
             let context = ModelContext(container)
             ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
             ExerciseNameSnapshotRepair.runIfNeeded(in: context)
+            CanonicalExerciseIdMigration.runIfNeeded(in: context)
+            CustomExerciseDedupMigration.runIfNeeded(in: context)
             SessionHistoryBlockBackfill.runIfNeeded(in: context)
         }
 

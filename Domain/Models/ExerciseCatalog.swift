@@ -85,12 +85,27 @@ struct ExerciseCatalog {
         isCompound: Bool
     ) -> CatalogExercise {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+
+        if let existingBuiltIn = builtIn.first(where: {
+            $0.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == normalizedName
+        }) {
+            return existingBuiltIn
+        }
+
+        if let existingCustom = customExercises().first(where: {
+            $0.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == normalizedName
+        }) {
+            return existingCustom
+        }
+
         let ex = CatalogExercise(
             id: "custom_" + UUID().uuidString.lowercased(),
             name: trimmed,
             primaryMuscle: primaryMuscle,
             isCompound: isCompound
         )
+
         var list = customExercises()
         list.append(ex)
         list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -563,42 +578,96 @@ struct ExerciseCatalog {
     }
 }
 extension ExerciseCatalog {
+    private static let legacyExerciseIdAliases: [String: String] = [
+        "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58": "seated_cable_press",
+        "31c44a80-6c56-4e9d-aca1-ee754cd157b6": "arnold_press",
+        "7ddaa8ff-55c5-4af5-891e-62676cdc9daf": "single_arm_cable_lateral_raise",
+        "1cb4f3a7-65f2-4e9d-aca1-ee754cd157b6": "single_arm_cable_curl",
+        "591028b2-9f09-4347-a245-6cf71e5f403d": "supination_pronation_curl"
+    ]
+
     private static let legacyExerciseNameMap: [String: String] = [
         "591028b2-9f09-4347-a245-6cf71e5f403d": "Supination / Pronation Curl",
-        "31c44a80-6c56-4f8e-acb1-2a6761b71a7c": "Arnold Press",
+        "31c44a80-6c56-4e9d-aca1-ee754cd157b6": "Arnold Press",
         "7ddaa8ff-55c5-4af5-891e-62676cdc9daf": "Single-Arm Cable Lateral Raise",
         "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58": "Seated Cable Press",
         "1cb4f3a7-65f2-4e9d-aca1-ee754cd157b6": "Single-Arm Cable Curl"
     ]
 
+    static func canonicalExerciseId(for rawId: String) -> String {
+        let normalized = normalizeLegacyId(rawId)
+        return legacyExerciseIdAliases[normalized] ?? normalized
+    }
+
+    static func canonicalBuiltInId(forExerciseName name: String) -> String? {
+        let normalized = normalizedExerciseName(name)
+
+        if let builtIn = builtIn.first(where: {
+            normalizedExerciseName($0.name) == normalized
+        }) {
+            return builtIn.id
+        }
+
+        return nil
+    }
+
+    static func resolvedExerciseId(
+        rawId: String,
+        snapshotName: String? = nil,
+        fallbackName: String? = nil
+    ) -> String {
+        let canonicalById = canonicalExerciseId(for: rawId)
+
+        // If the ID already resolves to a known built-in/custom catalog entry, use it.
+        if all.contains(where: { $0.id == canonicalById }) {
+            return canonicalById
+        }
+
+        // Name snapshot fallback
+        if let snapshotName,
+           let builtInId = canonicalBuiltInId(forExerciseName: snapshotName) {
+            return builtInId
+        }
+
+        // UI/display fallback
+        if let fallbackName,
+           let builtInId = canonicalBuiltInId(forExerciseName: fallbackName) {
+            return builtInId
+        }
+
+        return canonicalById
+    }
+
+    private static func normalizedExerciseName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+    
     static func displayName(for exerciseId: String) -> String {
         let trimmedId = exerciseId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedId.isEmpty else { return "Unknown Exercise" }
 
-        // 1) Direct built-in/custom match
-        if let ex = all.first(where: { $0.id == trimmedId }) {
+        let canonicalId = canonicalExerciseId(for: trimmedId)
+
+        // 1) Direct built-in/custom match using canonical ID
+        if let ex = all.first(where: { $0.id == canonicalId }) {
             return ex.name
         }
 
-        // 2) Normalized legacy-ID match
-        let normalizedId = normalizeLegacyId(trimmedId)
-
-        if let ex = all.first(where: { $0.id == normalizedId }) {
-            return ex.name
-        }
-
-        if let mapped = legacyExerciseNameMap[normalizedId],
+        // 2) Known legacy name fallback
+        if let mapped = legacyExerciseNameMap[canonicalId],
            !mapped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return mapped
         }
 
         // 3) Opaque legacy token guard
-        if looksLikeOpaqueLegacyId(trimmedId) || looksLikeOpaqueLegacyId(normalizedId) {
+        if looksLikeOpaqueLegacyId(trimmedId) || looksLikeOpaqueLegacyId(canonicalId) {
             return "Legacy / Custom Exercise"
         }
 
         // 4) Prettified fallback
-        let pretty = trimmedId
+        let pretty = canonicalId
             .replacingOccurrences(of: "custom_", with: "")
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
@@ -612,19 +681,17 @@ extension ExerciseCatalog {
         return titleCased.isEmpty ? "Unknown Exercise" : titleCased
     }
 
-    private static func normalizeLegacyId(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func normalizeLegacyId(_ rawId: String) -> String {
+        let trimmed = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
 
-        let compactSpaces = trimmed.replacingOccurrences(of: " ", with: "-")
+        let collapsedWhitespace = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+            .lowercased()
 
-        if compactSpaces.range(
-            of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#,
-            options: .regularExpression
-        ) != nil {
-            return compactSpaces.lowercased()
-        }
-
-        return trimmed.lowercased()
+        return collapsedWhitespace
     }
 
     private static func looksLikeOpaqueLegacyId(_ value: String) -> Bool {

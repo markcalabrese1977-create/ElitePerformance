@@ -42,11 +42,17 @@ struct ProgramDayDetailView: View {
                             onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { delete(item) },
                             onHistoryTapped: { exerciseId, exerciseName in
-                                historyTarget = HistoryTarget(exerciseId: exerciseId, exerciseName: exerciseName)
+                                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+                                let canonicalName = ExerciseCatalog.displayName(for: canonicalId)
+                                historyTarget = HistoryTarget(
+                                    exerciseId: canonicalId,
+                                    exerciseName: canonicalName
+                                )
                             },
                             onNoteTapped: {
-                                let name = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name ?? "Exercise"
-                                noteTarget = NoteTarget(exerciseId: item.exerciseId, exerciseName: name)
+                                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                                let name = ExerciseCatalog.displayName(for: canonicalId)
+                                noteTarget = NoteTarget(exerciseId: canonicalId, exerciseName: name)
                             }
                         )
                     }
@@ -347,26 +353,37 @@ struct ProgramDayDetailView: View {
 
     /// Returns the most recent SessionItem (from any past session) that has actual logged work.
     private func findMostRecentLoggedItem(exerciseId: String, in sessions: [Session]) -> SessionItem? {
-        for s in sessions {
-            guard let match = s.items.first(where: { $0.exerciseId == exerciseId }) else { continue }
+        let targetExerciseId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
 
-            let pairs = zip(match.actualLoads, match.actualReps)
-            let hasActualWork = match.actualReps.contains(where: { $0 > 0 })
+        for s in sessions {
+            guard let match = s.items.first(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == targetExerciseId
+            }) else { continue }
+
+            let hasActualWork = match.actualReps.contains(where: { $0 > 0 }) ||
+                match.actualLoads.contains(where: { $0 > 0 })
 
             if hasActualWork {
                 return match
             }
         }
+
         return nil
     }
 
     // MARK: - Rep range + rule helpers
 
     private func repRange(for item: SessionItem) -> RepRange {
-        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+
+        if let catalog = ExerciseCatalog.all.first(where: { $0.id == canonicalId }) {
             return RepRangeRulebook.range(forExerciseId: catalog.id, exerciseName: catalog.name)
         }
-        return RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: "Exercise")
+
+        return RepRangeRulebook.range(
+            forExerciseId: canonicalId,
+            exerciseName: ExerciseCatalog.displayName(for: canonicalId)
+        )
     }
 
     /// If we truly have no history, keep the plan honest:
@@ -992,22 +1009,26 @@ private struct ProgramExercisePlanRow: View {
     // MARK: - Display helpers
 
     private var displayName: String {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+
         if let snapshot = item.exerciseNameSnapshot?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !snapshot.isEmpty {
             return snapshot
         }
 
-        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
+        if let catalog = ExerciseCatalog.all.first(where: { $0.id == canonicalId }) {
             return catalog.name
         }
 
-        return ExerciseCatalog.displayName(for: item.exerciseId)
+        return ExerciseCatalog.displayName(for: canonicalId)
     }
 
     private var detailLine: String {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+
         let muscle: String
-        if let catalog = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId }) {
+        if let catalog = ExerciseCatalog.all.first(where: { $0.id == canonicalId }) {
             muscle = catalog.primaryMuscle.rawValue.capitalized
         } else {
             muscle = "—"

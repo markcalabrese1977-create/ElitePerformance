@@ -434,11 +434,24 @@ enum HistorySummaryBuilder {
 
             let vm = SessionScreenViewModel(session: session)
             let uiByExerciseId: [String: UISessionExercise] = Dictionary(
-                uniqueKeysWithValues: vm.exercises.map { ($0.exerciseId, $0) }
+                uniqueKeysWithValues: vm.exercises.map {
+                    (
+                        ExerciseCatalog.resolvedExerciseId(
+                            rawId: $0.exerciseId,
+                            snapshotName: $0.name,
+                            fallbackName: $0.name
+                        ),
+                        $0
+                    )
+                }
             )
 
             for item in session.items {
-                let exerciseId = item.exerciseId
+                let exerciseId = ExerciseCatalog.resolvedExerciseId(
+                    rawId: item.exerciseId,
+                    snapshotName: item.exerciseNameSnapshot,
+                    fallbackName: nil
+                )
                 let catalog = catalogById[exerciseId]
                 let uiExercise = uiByExerciseId[exerciseId]
                 
@@ -603,6 +616,8 @@ enum HistorySummaryBuilder {
         catalogName: String?,
         uiName: String?
     ) -> String {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+
         if let snapshotName, !snapshotName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return snapshotName
         }
@@ -615,7 +630,7 @@ enum HistorySummaryBuilder {
             return uiName
         }
 
-        let readable = humanizeExerciseId(exerciseId)
+        let readable = humanizeExerciseId(canonicalId)
         if !readable.isEmpty {
             return readable
         }
