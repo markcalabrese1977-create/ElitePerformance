@@ -274,48 +274,76 @@ extension ProgramCatalog {
     /// - Seed a new block starting from today using ProgramGenerator.
     static func applyOnboardingResult(
         _ result: OnboardingResult,
-        context: ModelContext
+        context: ModelContext,
+        startDate: Date = Date(),
+        template: ProgramApplicationService.CatalogTemplateKind = .defaultPPL
     ) {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        
-        let weekdays = result.trainingDaysOfWeek.map { min(max($0, 1), 7) }.sorted()
+        let startDay = calendar.startOfDay(for: startDate)
+
+        let weekdays = result.trainingDaysOfWeek
+            .map { min(max($0, 1), 7) }
+            .sorted()
 
         print("DEBUG ProgramCatalog.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(result.trainingDaysOfWeek)")
 
-        // 1) Map onboarding TrainingGoal -> domain Goal
         let goal = mapGoal(from: result.goal)
-
-        // 2) Clamp days/week to a sane range (1–7 for now) based on weekdays count
         let daysPerWeek = max(1, min(weekdays.count, 7))
 
-        print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), derived daysPerWeek from weekdays=\(daysPerWeek), weekdays=\(weekdays)")
+        print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), derived daysPerWeek from weekdays=\(daysPerWeek), weekdays=\(weekdays), startDate=\(startDay)")
 
-        // 3) For now, use a 10-week working block plus 1 deload week
-        //    → 11-week meso (matches what you want through end of February).
-        let totalWeeks = 10        // hard weeks
-        let includeDeloadWeek = true
+        let policy = CatalogProgramPolicy.default(
+            for: result,
+            template: template
+        )
+        print(
+            "DEBUG ProgramCatalog.applyOnboardingResult – policy totalWeeks=\(policy.totalWeeks), " +
+            "includeDeloadWeek=\(policy.includeDeloadWeek), template=\(template.rawValue)"
+        )
 
-        // 4) Delete only *planned* sessions (no logged data).
-        //    Any session with logged sets should already be .inProgress or .completed
-        //    because SessionView flips .planned → .inProgress on first save.
-        let fetch = FetchDescriptor<Session>()
-        if let sessions = try? context.fetch(fetch) {
-            print("DEBUG ProgramCatalog.applyOnboardingResult – existing sessions before delete: \(sessions.count)")
-            for session in sessions where session.status == .planned {
+        // 1) Archive any currently active meso blocks
+        let mesoDescriptor = FetchDescriptor<MesoBlock>()
+        if let existingBlocks = try? context.fetch(mesoDescriptor) {
+            for block in existingBlocks where block.status == .active {
+                block.status = .archived
+            }
+        }
+
+        // 2) Delete only non-completed sessions on or after the chosen start date
+        let sessionDescriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\.date, order: .forward)]
+        )
+
+        if let sessions = try? context.fetch(sessionDescriptor) {
+            print("DEBUG ProgramCatalog.applyOnboardingResult – existing sessions before scoped delete: \(sessions.count)")
+
+            let sessionsToDelete = sessions.filter { session in
+                let sessionDay = calendar.startOfDay(for: session.date)
+                return sessionDay >= startDay && session.status != .completed
+            }
+
+            print("DEBUG ProgramCatalog.applyOnboardingResult – deleting \(sessionsToDelete.count) non-completed sessions on/after \(startDay)")
+
+            for session in sessionsToDelete {
                 context.delete(session)
             }
         }
 
-        // 5) Seed a new block starting from today with the new parameters.
+        do {
+            try context.save()
+        } catch {
+            print("ERROR ProgramCatalog.applyOnboardingResult – save after archive/delete failed: \(error)")
+        }
+
+        // 3) Seed a new block starting from the chosen start date
         print("DEBUG ProgramCatalog.applyOnboardingResult – seeding program now")
         ProgramGenerator.seedInitialProgram(
             goal: goal,
             daysPerWeek: daysPerWeek,
-            totalWeeks: totalWeeks,
-            includeDeloadWeek: includeDeloadWeek,
+            totalWeeks: policy.totalWeeks,
+            includeDeloadWeek: policy.includeDeloadWeek,
             weekdays: weekdays,
-            startDate: today,
+            startDate: startDay,
             context: context
         )
         print("DEBUG ProgramCatalog.applyOnboardingResult – finished seeding")

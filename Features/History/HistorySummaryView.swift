@@ -252,6 +252,19 @@ struct HistorySummaryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                if let wave = summary.lastWaveLabel {
+                    Text(wave)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.blue)
+                }
+
+                if let prescription = summary.lastPrescriptionLabel {
+                    Text(prescription)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 Text("\(summary.totalSessions) sessions · \(summary.totalSets) sets · \(summary.totalReps) reps")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -306,6 +319,19 @@ struct HistorySummaryView: View {
                             Text("\(summary.totalSessions) sessions · \(summary.totalSets) sets · \(summary.totalReps) reps")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+
+                            if let wave = summary.lastWaveLabel {
+                                Text(wave)
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+
+                            if let prescription = summary.lastPrescriptionLabel {
+                                Text(prescription)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Spacer()
@@ -376,7 +402,7 @@ struct HistorySummaryView: View {
 // MARK: - Exercise summary model
 
 struct ExerciseSummary: Identifiable {
-    let id: String
+    let id: String           // exerciseId
     let name: String
     let primaryMuscle: String
     let isCompound: Bool
@@ -387,6 +413,9 @@ struct ExerciseSummary: Identifiable {
     let totalVolume: Double
     let bestE1RM: Double
     let lastTrained: Date?
+
+    let lastWaveLabel: String?
+    let lastPrescriptionLabel: String?
 }
 
 // MARK: - Builder
@@ -412,6 +441,14 @@ enum HistorySummaryBuilder {
                 let exerciseId = item.exerciseId
                 let catalog = catalogById[exerciseId]
                 let uiExercise = uiByExerciseId[exerciseId]
+                
+                let resolvedWaveLabel = waveDisplayName(from: uiExercise?.waveRaw)
+                let resolvedPrescriptionLabel = prescriptionLabel(
+                    repMin: uiExercise?.repMin,
+                    repMax: uiExercise?.repMax,
+                    rirMin: uiExercise?.targetRIRMin,
+                    rirMax: uiExercise?.targetRIRMax
+                )
 
                 let resolvedName = displayName(
                     exerciseId: exerciseId,
@@ -440,6 +477,8 @@ enum HistorySummaryBuilder {
                     totalVolume: 0,
                     bestE1RM: 0,
                     lastTrained: nil,
+                    lastWaveLabel: resolvedWaveLabel,
+                    lastPrescriptionLabel: resolvedPrescriptionLabel,
                     sessionKeys: []
                 )
 
@@ -472,24 +511,34 @@ enum HistorySummaryBuilder {
 
                 if didRecordAnySet {
                     bucket.sessionKeys.insert(sessionKey)
+
+                    let isNewest = bucket.lastTrained == nil || sessionDate >= (bucket.lastTrained ?? .distantPast)
                     bucket.lastTrained = max(bucket.lastTrained ?? sessionDate, sessionDate)
+
+                    if isNewest {
+                        bucket.lastWaveLabel = resolvedWaveLabel
+                        bucket.lastPrescriptionLabel = resolvedPrescriptionLabel
+                    }
+
                     buckets[exerciseId] = bucket
                 }
             }
         }
 
-        let summaries = buckets.values.map { bucket in
+        let summaries = buckets.values.map { b in
             ExerciseSummary(
-                id: bucket.exerciseId,
-                name: bucket.name,
-                primaryMuscle: bucket.primaryMuscle,
-                isCompound: bucket.isCompound,
-                totalSessions: bucket.sessionKeys.count,
-                totalSets: bucket.totalSets,
-                totalReps: bucket.totalReps,
-                totalVolume: bucket.totalVolume,
-                bestE1RM: bucket.bestE1RM,
-                lastTrained: bucket.lastTrained
+                id: b.exerciseId,
+                name: b.name,
+                primaryMuscle: b.primaryMuscle,
+                isCompound: b.isCompound,
+                totalSessions: b.sessionKeys.count,
+                totalSets: b.totalSets,
+                totalReps: b.totalReps,
+                totalVolume: b.totalVolume,
+                bestE1RM: b.bestE1RM,
+                lastTrained: b.lastTrained,
+                lastWaveLabel: b.lastWaveLabel,
+                lastPrescriptionLabel: b.lastPrescriptionLabel
             )
         }
 
@@ -502,6 +551,50 @@ enum HistorySummaryBuilder {
     static func estimateE1RM(weight: Double, reps: Int) -> Double {
         guard weight > 0, reps > 0 else { return 0 }
         return weight * (1.0 + Double(reps) / 30.0)
+    }
+    
+    private static func waveDisplayName(from raw: String?) -> String? {
+        guard let raw else { return nil }
+
+        switch raw.lowercased() {
+        case "a":
+            return "Strength"
+        case "b":
+            return "Hypertrophy"
+        case "c":
+            return "Intensification"
+        case "deload":
+            return "Deload"
+        default:
+            return raw.capitalized
+        }
+    }
+
+    private static func prescriptionLabel(
+        repMin: Int?,
+        repMax: Int?,
+        rirMin: Int?,
+        rirMax: Int?
+    ) -> String? {
+        var parts: [String] = []
+
+        if let repMin, let repMax {
+            if repMin == repMax {
+                parts.append("\(repMin) reps")
+            } else {
+                parts.append("\(repMin)–\(repMax) reps")
+            }
+        }
+
+        if let rirMin, let rirMax {
+            if rirMin == rirMax {
+                parts.append("\(rirMin) RIR")
+            } else {
+                parts.append("\(rirMin)–\(rirMax) RIR")
+            }
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private static func displayName(
@@ -593,6 +686,9 @@ enum HistorySummaryBuilder {
         var totalVolume: Double
         var bestE1RM: Double
         var lastTrained: Date?
+
+        var lastWaveLabel: String?
+        var lastPrescriptionLabel: String?
 
         var sessionKeys: Set<String>
     }

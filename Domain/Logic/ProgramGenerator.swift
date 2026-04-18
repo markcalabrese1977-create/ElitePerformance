@@ -83,6 +83,30 @@ struct ProgramGenerator {
         return dates
     }
     
+    private static func defaultMesoName(
+        goal: Goal,
+        daysPerWeek: Int,
+        totalWeeks: Int,
+        includeDeloadWeek: Bool
+    ) -> String {
+        let goalText: String
+        switch goal {
+        case .strength:
+            goalText = "Strength"
+        case .fatLoss:
+            goalText = "Fat Loss"
+        case .hypertrophy:
+            goalText = "Hypertrophy"
+        case .longevity:
+            goalText = "Longevity"
+        @unknown default:
+            goalText = "Training"
+        }
+
+        let deloadText = includeDeloadWeek ? " + Deload" : ""
+        return "\(goalText) \(daysPerWeek)-Day Block (\(totalWeeks) Weeks\(deloadText))"
+    }
+    
     /// - Parameters:
     ///   - goal: User's primary goal (strength / hypertrophy / fat loss).
     ///   - daysPerWeek: Planned training days per week (e.g. 3–6).
@@ -104,23 +128,16 @@ struct ProgramGenerator {
         let baseStart = startDate ?? Date()
         let today = calendar.startOfDay(for: baseStart)
 
-        // Clamp inputs
         let desiredDays = max(daysPerWeek, 1)
-        // Allow longer mesocycles (e.g. 10 hard weeks)
-        // Still guard against 0 or negative values.
         let hardWeeks = max(1, min(totalWeeks, 12))
         let totalWeeksCount = includeDeloadWeek ? hardWeeks + 1 : hardWeeks
 
-        // Determine training weekdays (1 = Sunday ... 7 = Saturday).
-        // If `weekdays` are provided, they are the single source of truth.
         let trainingWeekdays = normalizedTrainingWeekdays(
             daysPerWeek: desiredDays,
             provided: weekdays
         )
         let trainingDays = trainingWeekdays.count
 
-        // Precompute all session dates so we always honor rest days.
-        // Example: for 6 days/week this will naturally leave 1 rest day per 7-day cycle.
         let totalSessions = trainingDays * totalWeeksCount
         let sessionDates = buildSessionDates(
             calendar: calendar,
@@ -129,80 +146,40 @@ struct ProgramGenerator {
             totalSessions: totalSessions
         )
 
+        let mesoName = defaultMesoName(
+            goal: goal,
+            daysPerWeek: trainingDays,
+            totalWeeks: hardWeeks,
+            includeDeloadWeek: includeDeloadWeek
+        )
+
+        let mesoBlock = MesoBlock(
+            name: mesoName,
+            startDate: today,
+            status: .active,
+            notes: "Seeded via ProgramGenerator on \(today.formatted(date: .abbreviated, time: .omitted))"
+        )
+        context.insert(mesoBlock)
+
         var createdSessions = 0
 
-        // Simple PPL rotation across the block
         for weekIndex in 0..<totalWeeksCount {
             let isDeload = includeDeloadWeek && (weekIndex == totalWeeksCount - 1)
 
             for dayIndex in 0..<trainingDays {
-                // Global index into our precomputed date list
                 let globalIndex = (weekIndex * trainingDays) + dayIndex
                 guard globalIndex < sessionDates.count else { continue }
 
                 let date = sessionDates[globalIndex]
 
-                // Which focus for this day: 0 = Push, 1 = Pull, 2 = Legs
-                let focusIndex = globalIndex % 3
-                let exercisesForDay: [CatalogExercise]
+                let dayPlan = DefaultCatalogProgramTemplate.dayPlan(for: globalIndex)
+                let prescription = DefaultCatalogProgramTemplate.prescription(
+                    goal: goal,
+                    isDeload: isDeload
+                )
 
-                switch focusIndex {
-                case 0:
-                    // PUSH DAY
-                    exercisesForDay = [
-                        ExerciseCatalog.benchPress,
-                        ExerciseCatalog.inclineDumbbellPress,
-                        ExerciseCatalog.seatedCableFly,
-                        ExerciseCatalog.cableTricepRopePushdown,
-                        ExerciseCatalog.dumbbellLateralRaise
-                    ]
-                case 1:
-                    // PULL DAY
-                    exercisesForDay = [
-                        ExerciseCatalog.wideGripPulldown,
-                        ExerciseCatalog.dumbbellRowSingleArm,
-                        ExerciseCatalog.seatedCableRow,
-                        ExerciseCatalog.inclineRearDeltFly,
-                        ExerciseCatalog.ezBarCurl,
-                        ExerciseCatalog.hammerCurl
-                    ]
-                default:
-                    // LEGS DAY
-                    exercisesForDay = [
-                        ExerciseCatalog.hackSquat,
-                        ExerciseCatalog.legExtension,
-                        ExerciseCatalog.romanianDeadlift,
-                        ExerciseCatalog.lyingLegCurl,
-                        ExerciseCatalog.machineHipThrust,
-                        ExerciseCatalog.cableGluteKickback,
-                        ExerciseCatalog.smithMachineCalves,
-                        ExerciseCatalog.cableRopeCrunch
-                    ]
-                }
-
-                // Basic set/rep/RIR targets
-                let targetSets = isDeload ? 2 : 3
-                let targetReps: Int
-                let targetRIR: Int
-
-                switch goal {
-                case .strength:
-                    targetReps = 5
-                    targetRIR = isDeload ? 3 : 2
-                case .fatLoss:
-                    targetReps = 12
-                    targetRIR = isDeload ? 3 : 2
-                case .hypertrophy, .longevity:
-                    fallthrough
-                @unknown default:
-                    targetReps = 10
-                    targetRIR = isDeload ? 3 : 2
-                }
-
-                let plannedReps = Array(repeating: targetReps, count: targetSets)
-                let plannedLoads = Array(repeating: 0.0, count: targetSets)
-
-                // Create Session
+                print("DEBUG ProgramGenerator.seedInitialProgram – week=\(weekIndex + 1) day=\(dayIndex + 1) plan=\(dayPlan.title)")
+                
                 let session = Session(
                     date: date,
                     status: .planned,
@@ -211,19 +188,23 @@ struct ProgramGenerator {
                     items: []
                 )
 
-                // Create SessionItems for each exercise
-                for (idx, ex) in exercisesForDay.enumerated() {
+                session.meso = mesoBlock
+                session.programIndex = dayIndex + 1
+
+                for (idx, ex) in dayPlan.exercises.enumerated() {
                     let order = idx + 1
 
                     let item = SessionItem(
                         order: order,
                         exerciseId: ex.id,
-                        targetReps: targetReps,
-                        targetSets: targetSets,
-                        targetRIR: targetRIR,
+                        exerciseNameSnapshot: ex.name,
+                        targetReps: prescription.targetReps,
+                        targetSets: prescription.targetSets,
+                        targetRIR: prescription.targetRIR,
                         suggestedLoad: 0.0,
-                        plannedRepsBySet: plannedReps,
-                        plannedLoadsBySet: plannedLoads
+                        plannedRepsBySet: prescription.plannedRepsBySet,
+                        plannedLoadsBySet: prescription.plannedLoadsBySet,
+                        plannedRIRsBySet: prescription.plannedRIRsBySet
                     )
 
                     session.items.append(item)
@@ -234,10 +215,10 @@ struct ProgramGenerator {
             }
         }
 
-        // Persist all created sessions and log what we see
         do {
             try context.save()
             print("DEBUG ProgramGenerator.seedInitialProgram – created sessions: \(createdSessions)")
+            print("DEBUG ProgramGenerator.seedInitialProgram – created meso block: \(mesoName)")
 
             let fetch = FetchDescriptor<Session>()
             if let sessions = try? context.fetch(fetch) {

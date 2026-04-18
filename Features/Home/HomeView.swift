@@ -72,34 +72,11 @@ struct HomeView: View {
         pendingOnboardingResult = nil
 
         DispatchQueue.main.async {
-            applyOnboardingResult(result)
-        }
-    }
-
-    private func applyOnboardingResult(_ result: OnboardingResult) {
-        let weekdays = result.trainingDaysOfWeek
-            .map { min(max($0, 1), 7) }
-            .sorted()
-
-        print("DEBUG HomeView.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(weekdays)")
-
-        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
-            do {
-                try DUPProgramReplaceService.replacePlannedProgram(
-                    startDate: Date(),
-                    trainingWeekdays: weekdays,
-                    context: modelContext
-                )
-                print("DEBUG HomeView.applyOnboardingResult – completed DUP replace flow")
-            } catch {
-                print("ERROR HomeView.applyOnboardingResult – DUP replace failed: \(error)")
-            }
-        } else {
-            ProgramCatalog.applyOnboardingResult(
+            ProgramApplicationService.apply(
                 result,
-                context: modelContext
+                context: modelContext,
+                startDate: Date()
             )
-            print("DEBUG HomeView.applyOnboardingResult – completed applyOnboardingResult")
         }
     }
 }

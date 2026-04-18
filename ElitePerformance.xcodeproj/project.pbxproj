@@ -18,6 +18,9 @@
 		D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
+		D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */; };
+		D54A94AA2F9306C900EFBF25 /* CatalogProgramPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A94A92F9306C700EFBF25 /* CatalogProgramPolicy.swift */; };
+		D54A94AC2F93095B00EFBF25 /* DefaultCatalogProgramTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A94AB2F93095A00EFBF25 /* DefaultCatalogProgramTemplate.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
 		D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020A2F43D6E000908F53 /* ProgramState.swift */; };
 		D550020F2F43E56F00908F53 /* LoadDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020E2F43E56D00908F53 /* LoadDisplay.swift */; };
@@ -93,6 +96,9 @@
 		D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveAwareComparisonEngine.swift; sourceTree = "<group>"; };
 		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
+		D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramApplicationService.swift; sourceTree = "<group>"; };
+		D54A94A92F9306C700EFBF25 /* CatalogProgramPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogProgramPolicy.swift; sourceTree = "<group>"; };
+		D54A94AB2F93095A00EFBF25 /* DefaultCatalogProgramTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultCatalogProgramTemplate.swift; sourceTree = "<group>"; };
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
 		D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoIndexBackfillEngine.swift; sourceTree = "<group>"; };
 		D550020A2F43D6E000908F53 /* ProgramState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramState.swift; sourceTree = "<group>"; };
@@ -315,6 +321,9 @@
 		D5E2934E2EC410DD00034D78 /* Logic */ = {
 			isa = PBXGroup;
 			children = (
+				D54A94AB2F93095A00EFBF25 /* DefaultCatalogProgramTemplate.swift */,
+				D54A94A92F9306C700EFBF25 /* CatalogProgramPolicy.swift */,
+				D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */,
 				D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */,
 				D550020E2F43E56D00908F53 /* LoadDisplay.swift */,
 				D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */,
@@ -594,7 +603,9 @@
 				D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */,
 				D5E293692EC410DD00034D78 /* Readiness.swift in Sources */,
 				D5813FE12F49433D00CCE909 /* AnalyticsView.swift in Sources */,
+				D54A94AA2F9306C900EFBF25 /* CatalogProgramPolicy.swift in Sources */,
 				D5E2936A2EC410DD00034D78 /* ElitePerformanceApp.swift in Sources */,
+				D54A94AC2F93095B00EFBF25 /* DefaultCatalogProgramTemplate.swift in Sources */,
 				D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */,
 				D5BEBEFC2ED2087B0035FE70 /* RootTabView.swift in Sources */,
 				D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */,
@@ -643,6 +654,7 @@
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* (null) in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
+				D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */,
 				D5E293742EC410DD00034D78 /* CatalogExercise.swift in Sources */,
 				D55002072F43883F00908F53 /* MesoBlock.swift in Sources */,
 			);

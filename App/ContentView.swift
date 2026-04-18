@@ -14,22 +14,11 @@ struct ContentView: View {
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
                     OnboardingFlowView { result in
-                        if result.goal == .hypertrophy && result.daysPerWeek == 6 {
-                            do {
-                                try DUPProgramReplaceService.replacePlannedProgram(
-                                    startDate: Date(),
-                                    trainingWeekdays: result.trainingDaysOfWeek,
-                                    context: modelContext
-                                )
-                            } catch {
-                                print("ERROR ContentView onboarding – DUP replace failed: \(error)")
-                            }
-                        } else {
-                            ProgramCatalog.applyOnboardingResult(
-                                result,
-                                context: modelContext
-                            )
-                        }
+                        ProgramApplicationService.apply(
+                            result,
+                            context: modelContext,
+                            startDate: Date()
+                        )
                     }
                     .navigationTitle("Welcome")
                     .toolbar {

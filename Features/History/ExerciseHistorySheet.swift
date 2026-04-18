@@ -8,8 +8,6 @@ struct ExerciseHistorySheet: View {
 
     @Environment(\.modelContext) private var context
 
-    // MARK: - Row model
-
     private struct ExerciseHistoryEntry: Identifiable {
         let id = UUID()
         let date: Date
@@ -17,23 +15,14 @@ struct ExerciseHistorySheet: View {
 
         let waveLabel: String?
         let prescriptionLabel: String?
-        let executionNote: String?
 
         let sets: Int
         let reps: Int
         let volume: Double
-
-        /// Executed sets only (includes RP tokens)
         let detail: String
-
-        /// Best e1RM for the day (computed from executed sets where load > 0)
         let bestE1RM: Double?
-
-        /// Used for drill-in
         let session: Session
     }
-
-    // MARK: - Date format
 
     private static let df: DateFormatter = {
         let df = DateFormatter()
@@ -42,15 +31,11 @@ struct ExerciseHistorySheet: View {
         return df
     }()
 
-    // MARK: - State
-
     @State private var entries: [ExerciseHistoryEntry] = []
 
     private var bestOverallE1RM: Double? {
         entries.compactMap { $0.bestE1RM }.max()
     }
-
-    // MARK: - View
 
     var body: some View {
         ZStack {
@@ -97,13 +82,11 @@ struct ExerciseHistorySheet: View {
                 .fontWeight(.semibold)
 
             Spacer()
-            Color.clear.frame(width: 80) // balance Close button
+            Color.clear.frame(width: 80)
         }
         .padding(.horizontal)
         .padding(.top, 12)
     }
-
-    // MARK: - Loading
 
     private func waveDisplayName(from raw: String?) -> String? {
         guard let raw else { return nil }
@@ -146,31 +129,9 @@ struct ExerciseHistorySheet: View {
             }
         }
 
-        if parts.isEmpty { return nil }
-        return parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private func executionNote(
-        intensifierNotes: String?,
-        prescriptionNotes: String?
-    ) -> String? {
-        let intensifier = intensifierNotes?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let intensifier, !intensifier.isEmpty {
-            return intensifier
-        }
-
-        let prescription = prescriptionNotes?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let prescription, !prescription.isEmpty {
-            return prescription
-        }
-
-        return nil
-    }
-    
     private func loadHistory() {
         do {
             var descriptor = FetchDescriptor<Session>()
@@ -180,19 +141,16 @@ struct ExerciseHistorySheet: View {
             var built: [ExerciseHistoryEntry] = []
 
             for session in sessions {
-                // Must contain this exercise (by ID) in persisted items
                 guard session.items.contains(where: { $0.exerciseId == exerciseId }) else { continue }
 
-                // Reconstruct with the same pipeline as live session screen (gives RP fields)
                 let vm = SessionScreenViewModel(session: session)
 
-                // Find the reconstructed UI exercise by ID first, then fallback by name
                 let uiEx =
                     vm.exercises.first(where: { $0.exerciseId == exerciseId }) ??
                     vm.exercises.first(where: { $0.name == exerciseName })
 
                 guard let uiEx else { continue }
-                
+
                 let waveLabel = waveDisplayName(from: uiEx.waveRaw)
                 let prescription = prescriptionLabel(
                     repMin: uiEx.repMin,
@@ -200,12 +158,7 @@ struct ExerciseHistorySheet: View {
                     rirMin: uiEx.targetRIRMin,
                     rirMax: uiEx.targetRIRMax
                 )
-                let note = executionNote(
-                    intensifierNotes: uiEx.intensifierNotes,
-                    prescriptionNotes: uiEx.prescriptionNotes
-                )
 
-                // Build executed set tokens + totals from executed sets only
                 let target = max(0, uiEx.targetSets)
                 var executedTokens: [String] = []
                 var repsTotal = 0
@@ -215,7 +168,7 @@ struct ExerciseHistorySheet: View {
 
                 for set in uiEx.sets where set.index <= target {
                     let reps = set.actualReps ?? 0
-                    guard reps > 0 else { continue } // executed only
+                    guard reps > 0 else { continue }
 
                     let load = set.actualLoad ?? 0
                     let rir = set.actualRIR ?? set.plannedRIR
@@ -240,10 +193,7 @@ struct ExerciseHistorySheet: View {
                     )
                 }
 
-                // If there are no executed sets, skip showing the day (keeps history clean)
                 guard executedSetCount > 0 else { continue }
-
-                let detailText = executedTokens.joined(separator: ", ")
 
                 built.append(
                     ExerciseHistoryEntry(
@@ -251,11 +201,10 @@ struct ExerciseHistorySheet: View {
                         weekIndex: session.weekIndex,
                         waveLabel: waveLabel,
                         prescriptionLabel: prescription,
-                        executionNote: note,
                         sets: executedSetCount,
                         reps: repsTotal,
                         volume: volumeTotal,
-                        detail: detailText,
+                        detail: executedTokens.joined(separator: ", "),
                         bestE1RM: (bestE1RM == 0 ? nil : bestE1RM),
                         session: session
                     )
@@ -268,8 +217,6 @@ struct ExerciseHistorySheet: View {
         }
     }
 
-    // MARK: - Row UI
-
     @ViewBuilder
     private func historyRow(_ entry: ExerciseHistoryEntry) -> some View {
         let isBest: Bool = {
@@ -278,7 +225,6 @@ struct ExerciseHistorySheet: View {
             return abs(e1 - best) < 0.5
         }()
 
-        // If you DON'T want drill-in, replace NavigationLink with a plain VStack.
         NavigationLink {
             ExerciseSessionDetailView(
                 session: entry.session,
@@ -305,16 +251,8 @@ struct ExerciseHistorySheet: View {
 
                 if let prescription = entry.prescriptionLabel {
                     Text(prescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let note = entry.executionNote {
-                    Text(note)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .italic()
-                        .lineLimit(2)
                 }
 
                 HStack(spacing: 12) {
@@ -354,10 +292,8 @@ struct ExerciseHistorySheet: View {
                     .fill(Color(.secondarySystemBackground))
             )
         }
-        .buttonStyle(.plain) // keeps your card style
+        .buttonStyle(.plain)
     }
-
-    // MARK: - Helpers
 
     private func estimate1RM(load: Double, reps: Int) -> Double {
         let r = max(1, reps)
