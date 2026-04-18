@@ -1889,7 +1889,8 @@ extension SessionScreenViewModel {
                     // Only treat actual RIR as real if the set itself was actually logged.
                     guard actualReps != nil || actualLoad != nil else { return nil }
 
-                    return item.actualRIRs[idx]
+                    let stored = item.actualRIRs[idx]
+                    return stored > 0 ? stored : nil
                 }()
 
                 // ---- RP flags/patterns ----
