@@ -38,6 +38,8 @@ final class Session {
     /// Optional for migration safety with existing stores.
     var programIndex: Int?
 
+    var dayLabel: String?
+    
     /// Alias used throughout the app.
     var weekIndex: Int {
         get { weekInMeso ?? 1 }
@@ -93,6 +95,7 @@ final class Session {
         readinessStars: Int = 0,
         sessionNotes: String? = nil,
         weekIndex: Int = 1,
+        dayLabel: String? = nil,
         items: [SessionItem] = [],
         completedAt: Date? = nil,
         programIndex: Int? = nil,
@@ -129,6 +132,7 @@ final class Session {
         self.readinessStars = readinessStars
         self.sessionNotes = sessionNotes
         self.weekInMeso = weekIndex
+        self.dayLabel = dayLabel
         self.items = items
         self.programIndex = programIndex
 

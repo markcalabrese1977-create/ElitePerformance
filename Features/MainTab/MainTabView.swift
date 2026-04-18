@@ -95,8 +95,15 @@ struct TodayTabView: View {
                     .font(.headline)
 
                 if let session = todaySession {
+                    if let dayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !dayLabel.isEmpty {
+                        Text(dayLabel)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+
                     Text(session.weekDayLabel)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     Text("No session planned for today")
@@ -157,8 +164,15 @@ struct TodaySessionCard: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
 
+            if let dayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !dayLabel.isEmpty {
+                Text(dayLabel)
+                    .font(.headline)
+            }
+
             Text(session.date, style: .date)
-                .font(.headline)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
 
             Text(exercisesText)
                 .font(.subheadline)
@@ -219,8 +233,16 @@ struct SessionSummaryRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
+                if let dayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !dayLabel.isEmpty {
+                    Text(dayLabel)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+
                 Text(session.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.subheadline)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text(exercisesText)
                     .font(.caption)

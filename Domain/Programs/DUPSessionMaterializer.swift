@@ -114,6 +114,7 @@ enum DUPSessionMaterializer {
             readinessStars: 0,
             sessionNotes: "\(materializedDay.title) · \(materializedDay.wave.displayName) wave",
             weekIndex: weekNumber,
+            dayLabel: materializedDay.title,
             items: items
         )
     }

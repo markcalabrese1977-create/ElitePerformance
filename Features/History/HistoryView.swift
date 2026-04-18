@@ -391,8 +391,15 @@ private struct HistoryDayDetailView: View {
 
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let dayLabel = sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !dayLabel.isEmpty {
+                Text(dayLabel)
+                    .font(.headline)
+            }
+
             Text(history.date, format: .dateTime.month().day().year())
-                .font(.headline)
+                .font(sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .subheadline : .headline)
+                .foregroundStyle(sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .secondary : .primary)
 
             Text("Week \(history.weekIndex)")
                 .font(.subheadline)

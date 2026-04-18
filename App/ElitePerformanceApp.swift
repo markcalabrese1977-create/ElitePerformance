@@ -40,6 +40,7 @@ struct ElitePerformanceApp: App {
             CanonicalExerciseIdMigration.runIfNeeded(in: context)
             CustomExerciseDedupMigration.runIfNeeded(in: context)
             SessionHistoryBlockBackfill.runIfNeeded(in: context)
+            SessionDayLabelBackfill.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {

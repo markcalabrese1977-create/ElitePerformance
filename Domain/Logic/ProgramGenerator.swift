@@ -189,8 +189,10 @@ struct ProgramGenerator {
                     status: .planned,
                     readinessStars: 0,
                     weekIndex: weekIndex + 1,
+                    dayLabel: dayPlan.title,
                     items: []
                 )
+                
 
                 session.meso = mesoBlock
                 session.programIndex = dayIndex + 1

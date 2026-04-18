@@ -47,6 +47,8 @@ struct ProgramPlanView: View {
         }
         return legacyFutureSessions
     }
+    
+    
 
     private var activeBlockName: String? {
         activeMesoBlock?.name
@@ -64,6 +66,26 @@ struct ProgramPlanView: View {
         content
     }
 
+    private var activeBlockHeaderSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(activeBlockName ?? "Program")
+                    .font(.headline)
+
+                if let startDate = activeBlockStartDate {
+                    Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("\(activeBlockSessionCount) upcoming session\(activeBlockSessionCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+    
     private var content: some View {
         List {
             if activeBlockName != nil {
@@ -148,25 +170,6 @@ struct ProgramPlanView: View {
         }
     }
 
-    private var activeBlockHeaderSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(activeBlockName ?? "Program")
-                    .font(.headline)
-
-                if let startDate = activeBlockStartDate {
-                    Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("\(activeBlockSessionCount) upcoming session\(activeBlockSessionCount == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
-        }
-    }
     
     private var addSessionSheet: some View {
         NavigationStack {
@@ -436,8 +439,18 @@ struct ProgramPlanView: View {
     private func programRow(for session: Session, computedWeek: Int, computedDay: Int) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
+                if let dayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !dayLabel.isEmpty {
+                    Text(dayLabel)
+                        .font(.headline)
+                } else {
+                    Text("W\(computedWeek)D\(computedDay) · \(dayName(for: session.date))")
+                        .font(.headline)
+                }
+
                 Text("W\(computedWeek)D\(computedDay) · \(dayName(for: session.date))")
-                    .font(.headline)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text(session.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
