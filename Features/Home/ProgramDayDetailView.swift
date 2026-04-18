@@ -981,12 +981,15 @@ private struct ProgramExercisePlanRow: View {
         .onChange(of: item.targetReps) { newValue in
             normalizeArraySizes()
 
-            let setRows = max(4, item.targetSets)
-            let limit = min(setRows, item.plannedRepsBySet.count)
+            let workingSetCount = min(item.targetSets, item.plannedRepsBySet.count)
 
-            for idx in 0..<limit {
-                if item.plannedRepsBySet[idx] == 0 {
-                    item.plannedRepsBySet[idx] = newValue
+            for idx in 0..<workingSetCount {
+                item.plannedRepsBySet[idx] = newValue
+            }
+
+            if workingSetCount < item.plannedRepsBySet.count {
+                for idx in workingSetCount..<item.plannedRepsBySet.count {
+                    item.plannedRepsBySet[idx] = 0
                 }
             }
 
