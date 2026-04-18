@@ -122,6 +122,7 @@ struct ProgramGenerator {
         includeDeloadWeek: Bool,
         weekdays: [Int]? = nil,
         startDate: Date? = nil,
+        template: ProgramApplicationService.CatalogTemplateKind = .defaultPPL,
         context: ModelContext
     ) {
         let calendar = Calendar.current
@@ -172,13 +173,16 @@ struct ProgramGenerator {
 
                 let date = sessionDates[globalIndex]
 
-                let dayPlan = DefaultCatalogProgramTemplate.dayPlan(for: globalIndex)
+                let dayPlan = DefaultCatalogProgramTemplate.dayPlan(
+                    for: globalIndex,
+                    template: template
+                )
                 let prescription = DefaultCatalogProgramTemplate.prescription(
                     goal: goal,
                     isDeload: isDeload
                 )
 
-                print("DEBUG ProgramGenerator.seedInitialProgram – week=\(weekIndex + 1) day=\(dayIndex + 1) plan=\(dayPlan.title)")
+                print("DEBUG ProgramGenerator.seedInitialProgram – week=\(weekIndex + 1) day=\(dayIndex + 1) template=\(template.rawValue) plan=\(dayPlan.title)")
                 
                 let session = Session(
                     date: date,

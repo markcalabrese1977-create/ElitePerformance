@@ -14,6 +14,12 @@ struct CatalogProgramPolicy {
                 totalWeeks: 10,
                 includeDeloadWeek: true
             )
+
+        case .upperLower:
+            return CatalogProgramPolicy(
+                totalWeeks: 10,
+                includeDeloadWeek: true
+            )
         }
     }
 }

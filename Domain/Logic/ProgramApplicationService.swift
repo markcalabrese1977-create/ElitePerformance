@@ -12,6 +12,7 @@ enum ProgramApplicationService {
 
     enum CatalogTemplateKind: String {
         case defaultPPL
+        case upperLower
     }
 
     static func apply(
@@ -58,13 +59,14 @@ enum ProgramApplicationService {
     }
 
     private static func selectCatalogTemplate(for result: OnboardingResult) -> CatalogTemplateKind {
-        // Current universal catalog template.
-        // Future expansion point:
-        // - upper/lower
-        // - full body
-        // - maintenance-specific template
-        // - goal/frequency-aware selection
-        .defaultPPL
+        switch (result.goal, result.daysPerWeek) {
+        case (.strength, 4):
+            return .upperLower
+        case (.maintenance, 4):
+            return .upperLower
+        default:
+            return .defaultPPL
+        }
     }
 
     private static func execute(

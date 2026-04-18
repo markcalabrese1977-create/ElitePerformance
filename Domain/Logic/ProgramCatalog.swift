@@ -344,6 +344,7 @@ extension ProgramCatalog {
             includeDeloadWeek: policy.includeDeloadWeek,
             weekdays: weekdays,
             startDate: startDay,
+            template: template,
             context: context
         )
         print("DEBUG ProgramCatalog.applyOnboardingResult – finished seeding")
