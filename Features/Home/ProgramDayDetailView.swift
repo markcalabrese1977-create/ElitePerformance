@@ -127,8 +127,14 @@ struct ProgramDayDetailView: View {
     private var headerSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
+                if let sessionDayLabel {
+                    Text(sessionDayLabel)
+                        .font(.headline)
+                }
+
                 Text(sessionLabel)
-                    .font(.headline)
+                    .font(sessionDayLabel == nil ? .headline : .subheadline)
+                    .foregroundStyle(sessionDayLabel == nil ? .primary : .secondary)
 
                 Text(summaryLine)
                     .font(.subheadline)
@@ -142,6 +148,11 @@ struct ProgramDayDetailView: View {
         }
     }
 
+    private var sessionDayLabel: String? {
+        let trimmed = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+    
     /// e.g. "Dec 9, 2025 · Week 1"
     private var sessionLabel: String {
         let formatter = DateFormatter()
@@ -1037,41 +1048,9 @@ private struct ProgramExercisePlanRow: View {
             muscle = "—"
         }
 
-        let setsText: String = {
-            if let min = item.setMin, let max = item.setMax {
-                if min == max {
-                    return "\(min) sets"
-                } else {
-                    return "\(min)–\(max) sets"
-                }
-            } else {
-                return "\(item.targetSets) sets"
-            }
-        }()
-
-        let repsText: String = {
-            if let min = item.repMin, let max = item.repMax {
-                if min == max {
-                    return "\(min) reps"
-                } else {
-                    return "\(min)–\(max) reps"
-                }
-            } else {
-                return "\(item.targetReps) reps"
-            }
-        }()
-
-        let rirText: String = {
-            if let min = item.targetRIRMin, let max = item.targetRIRMax {
-                if min == max {
-                    return "\(min) RIR"
-                } else {
-                    return "\(min)–\(max) RIR"
-                }
-            } else {
-                return "\(item.targetRIR) RIR"
-            }
-        }()
+        let setsText = "\(item.targetSets) sets"
+        let repsText = "\(item.targetReps) reps"
+        let rirText = "\(item.targetRIR) RIR"
 
         return "\(muscle) · \(setsText) · \(repsText) · \(rirText)"
     }
