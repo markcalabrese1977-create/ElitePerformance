@@ -11,6 +11,9 @@ final class SessionHistory {
     var totalSets: Int
     var totalVolume: Double
 
+    // Durable session/day identity
+    var dayLabelSnapshot: String?
+
     // Durable block identity
     var mesoBlockId: UUID?
     var mesoBlockNameSnapshot: String?
@@ -26,6 +29,7 @@ final class SessionHistory {
         totalExercises: Int,
         totalSets: Int,
         totalVolume: Double,
+        dayLabelSnapshot: String? = nil,
         mesoBlockId: UUID? = nil,
         mesoBlockNameSnapshot: String? = nil,
         exercises: [SessionHistoryExercise]
@@ -37,6 +41,7 @@ final class SessionHistory {
         self.totalExercises = totalExercises
         self.totalSets = totalSets
         self.totalVolume = totalVolume
+        self.dayLabelSnapshot = dayLabelSnapshot
         self.mesoBlockId = mesoBlockId
         self.mesoBlockNameSnapshot = mesoBlockNameSnapshot
         self.exercises = exercises

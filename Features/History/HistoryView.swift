@@ -390,16 +390,19 @@ private struct HistoryDayDetailView: View {
     // MARK: - Cards
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let dayLabel = sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !dayLabel.isEmpty {
-                Text(dayLabel)
+        let historyLabel = history.dayLabelSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessionLabel = sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDayLabel = (historyLabel?.isEmpty == false) ? historyLabel : ((sessionLabel?.isEmpty == false) ? sessionLabel : nil)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            if let resolvedDayLabel {
+                Text(resolvedDayLabel)
                     .font(.headline)
             }
 
             Text(history.date, format: .dateTime.month().day().year())
-                .font(sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .subheadline : .headline)
-                .foregroundStyle(sourceSession?.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .secondary : .primary)
+                .font(resolvedDayLabel == nil ? .headline : .subheadline)
+                .foregroundStyle(resolvedDayLabel == nil ? .primary : .secondary)
 
             Text("Week \(history.weekIndex)")
                 .font(.subheadline)

@@ -1750,6 +1750,9 @@ final class SessionScreenViewModel: ObservableObject {
         let targetDate = recap.date
         let targetWeek = recap.weekIndex
         
+        let dayLabelSnapshot = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDayLabelSnapshot = (dayLabelSnapshot?.isEmpty == false) ? dayLabelSnapshot : nil
+
         let mesoBlockId = session.meso?.id
         let mesoBlockNameSnapshot = session.meso?.name
 
@@ -1775,6 +1778,7 @@ final class SessionScreenViewModel: ObservableObject {
             existingHistory.totalExercises = recap.exerciseCount
             existingHistory.totalSets = recap.setCount
             existingHistory.totalVolume = recap.totalVolume
+            existingHistory.dayLabelSnapshot = normalizedDayLabelSnapshot
             existingHistory.exercises = historyExercises
             existingHistory.mesoBlockId = mesoBlockId
             existingHistory.mesoBlockNameSnapshot = mesoBlockNameSnapshot
@@ -1788,6 +1792,7 @@ final class SessionScreenViewModel: ObservableObject {
                 totalExercises: recap.exerciseCount,
                 totalSets: recap.setCount,
                 totalVolume: recap.totalVolume,
+                dayLabelSnapshot: normalizedDayLabelSnapshot,
                 mesoBlockId: mesoBlockId,
                 mesoBlockNameSnapshot: mesoBlockNameSnapshot,
                 exercises: historyExercises
