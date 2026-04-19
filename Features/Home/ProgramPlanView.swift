@@ -16,6 +16,7 @@ struct ProgramPlanView: View {
     // Add session (date-targeted)
     @State private var showAddSessionSheet = false
     @State private var newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var newSessionDayLabel: String = ""
     @State private var addSessionErrorMessage: String?
     @State private var showAddSessionError = false
 
@@ -135,6 +136,7 @@ struct ProgramPlanView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    newSessionDayLabel = ""
                     showAddSessionSheet = true
                 } label: {
                     Label("Add Session", systemImage: "plus")
@@ -180,6 +182,9 @@ struct ProgramPlanView: View {
                         selection: $newSessionDate,
                         displayedComponents: [.date]
                     )
+
+                    TextField("Day label (optional)", text: $newSessionDayLabel)
+                        .textInputAutocapitalization(.words)
                 }
 
                 Section("Quick pick") {
@@ -193,7 +198,7 @@ struct ProgramPlanView: View {
 
                 Section {
                     Button("Create") {
-                        addSession(for: newSessionDate)
+                        addSession(for: newSessionDate, dayLabel: newSessionDayLabel)
                     }
                 }
 
@@ -251,7 +256,7 @@ struct ProgramPlanView: View {
 
     // MARK: - Add Session (date-targeted)
 
-    private func addSession(for date: Date) {
+    private func addSession(for date: Date, dayLabel: String?) {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: date)
 
@@ -265,12 +270,16 @@ struct ProgramPlanView: View {
 
         let computedWeek = insertionWeekIndex(for: day)
 
+        let trimmedDayLabel = dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDayLabel = (trimmedDayLabel?.isEmpty == false) ? trimmedDayLabel : nil
+
         let newSession = Session(
             date: day,
             status: .planned,
             readinessStars: 0,
             sessionNotes: nil,
             weekIndex: computedWeek,
+            dayLabel: normalizedDayLabel,
             items: [],
             completedAt: nil
         )
@@ -342,6 +351,7 @@ struct ProgramPlanView: View {
             readinessStars: 0,
             sessionNotes: nil,
             weekIndex: computedWeek,
+            dayLabel: "Extra Session",
             items: [],
             completedAt: nil
         )

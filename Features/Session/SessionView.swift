@@ -558,7 +558,7 @@ private struct SessionExerciseCardView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .italic()
-                            .lineLimit(2)
+                            .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
