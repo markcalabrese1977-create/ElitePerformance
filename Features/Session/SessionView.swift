@@ -117,6 +117,9 @@ struct SessionView: View {
                                 exerciseId: exercise.exerciseId,
                                 exerciseName: exercise.name
                             )
+                        },
+                        onAddSetTapped: {
+                            viewModel.addSet(toExerciseID: exercise.id, context: modelContext)
                         }
                     )
                 }
@@ -395,6 +398,7 @@ private struct SessionExerciseCardView: View {
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
     let onNoteTapped: () -> Void
+    let onAddSetTapped: () -> Void
 
     // MARK: - Coach v5 (ProgressionEngine) helpers
 
@@ -521,6 +525,21 @@ private struct SessionExerciseCardView: View {
         return nil
     }
     
+    private var visibleSetIndices: [Int] {
+        exercise.sets.indices.filter { idx in
+            let set = exercise.sets[idx]
+
+            if set.index <= exercise.targetSets {
+                return true
+            }
+
+            let hasActualWork = (set.actualReps ?? 0) > 0 || (set.actualLoad ?? 0) > 0
+            let wasSkipped = set.status == .skipped
+
+            return hasActualWork || wasSkipped
+        }
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header
@@ -590,20 +609,35 @@ private struct SessionExerciseCardView: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    
+                    Button(action: onAddSetTapped) {
+                        Text("Add Set")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundColor(.green)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(exercise.targetSets >= 6)
+                    .opacity(exercise.targetSets >= 6 ? 0.5 : 1.0)
                 }
                 .fixedSize(horizontal: true, vertical: false)
             }
 
             // Set rows
             VStack(spacing: 6) {
-                ForEach($exercise.sets) { $set in
+                ForEach(visibleSetIndices, id: \.self) { idx in
                     SessionSetRowView(
-                        uiSet: $set,
+                        uiSet: $exercise.sets[idx],
                         repRange: repRange,
-                        onLog: { onSetLogged(set.index) },
-                        onSkip: { onSkipSet(set.index) }
+                        onLog: { onSetLogged(exercise.sets[idx].index) },
+                        onSkip: { onSkipSet(exercise.sets[idx].index) }
                     )
-                    .opacity(set.index <= exercise.targetSets ? 1.0 : 0.35)
                 }
             }
         }
@@ -1033,6 +1067,56 @@ final class SessionScreenViewModel: ObservableObject {
         // Hook for timers / haptics later if we want.
     }
 
+    func addSet(toExerciseID exerciseID: UUID, context: ModelContext) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+
+        var exercise = exercises[exerciseIdx]
+        guard exercise.targetSets < 6 else { return }
+
+        let seedSet = exercise.sets
+            .filter { $0.index <= exercise.targetSets }
+            .last ?? exercise.sets.last
+
+        let nextIndex = (exercise.sets.map(\.index).max() ?? 0) + 1
+
+        let plannedLoad = seedSet?.plannedLoad ?? 0
+        let plannedReps = seedSet?.plannedReps ?? 10
+        let plannedRIR = seedSet?.plannedRIR ?? 2
+
+        let newSet = UISessionSet(
+            index: nextIndex,
+            plannedLoad: plannedLoad,
+            plannedReps: plannedReps,
+            plannedRIR: plannedRIR,
+            actualLoad: nil,
+            actualReps: nil,
+            actualRIR: nil,
+            status: .notStarted,
+            usedRestPause: false,
+            restPausePattern: ""
+        )
+
+        exercise.targetSets += 1
+        exercise.sets.append(newSet)
+        exercise.sets.sort { $0.index < $1.index }
+
+        let parts = exercise.detail.components(separatedBy: " · ")
+        let weekText = parts.indices.contains(0) ? parts[0] : "Week \(exercise.weekIndex)"
+        let muscleText = parts.indices.contains(1) ? parts[1] : nil
+        let repsText = "\(plannedReps) reps"
+        let rirText = "\(plannedRIR) RIR"
+        let setsText = "\(exercise.targetSets) sets"
+
+        if let muscleText {
+            exercise.detail = "\(weekText) · \(muscleText) · \(setsText) · \(repsText) · \(rirText)"
+        } else {
+            exercise.detail = "\(weekText) · \(setsText) · \(repsText) · \(rirText)"
+        }
+
+        exercises[exerciseIdx] = exercise
+        persist(using: context)
+    }
+    
     // MARK: - Swap Logic
 
     func swapExercise(at index: Int, with catalogExercise: CatalogExercise) {
