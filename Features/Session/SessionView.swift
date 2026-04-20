@@ -473,37 +473,19 @@ private struct SessionExerciseCardView: View {
         let weekText = parts.indices.contains(0) ? parts[0] : "Week \(exercise.weekIndex)"
         let muscleText = parts.indices.contains(1) ? parts[1] : nil
 
-        let setsText: String = {
-            if let min = exercise.setMin, let max = exercise.setMax {
-                return min == max ? "\(min) sets" : "\(min)–\(max) sets"
-            }
-            return "\(exercise.targetSets) sets"
-        }()
+        let setsText = "\(exercise.targetSets) sets"
 
-        let repsText: String = {
-            if let min = exercise.repMin, let max = exercise.repMax {
-                return min == max ? "\(min) reps" : "\(min)–\(max) reps"
-            }
-
-            let planned = exercise.sets.first(where: { $0.index == 1 })?.plannedReps
-                ?? exercise.sets.first?.plannedReps
-                ?? 10
-
-            let repsLabel = RepRangeRulebook.display(targetReps: planned, range: repRange)
-            return "\(repsLabel) reps"
-        }()
+        let plannedReps = exercise.sets.first(where: { $0.index == 1 })?.plannedReps
+            ?? exercise.sets.first?.plannedReps
+            ?? 10
+        let repsText = "\(plannedReps) reps"
 
         let rirText: String = {
-            if let min = exercise.targetRIRMin, let max = exercise.targetRIRMax {
-                return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
-            }
-
             if let rir = exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
                 ?? exercise.sets.first?.plannedRIR {
                 return "\(rir) RIR"
             }
-
-            return "—"
+            return "— RIR"
         }()
 
         if let muscleText {
@@ -567,13 +549,7 @@ private struct SessionExerciseCardView: View {
                 Spacer()
 
                 HStack(spacing: 8) {
-                    Text({
-                        if let min = exercise.setMin, let max = exercise.setMax {
-                            return min == max ? "\(min) sets" : "\(min)–\(max) sets"
-                        } else {
-                            return "\(exercise.targetSets) sets"
-                        }
-                    }())
+                    Text("\(exercise.targetSets) sets")
                         .font(.caption)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -1085,8 +1061,6 @@ final class SessionScreenViewModel: ObservableObject {
         let baseReps = exercise.sets.first?.plannedReps ?? 10
         let baseRIR = exercise.sets.first?.plannedRIR ?? 2
 
-        let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
-        let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
         exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(exercise.prescriptionDetailLine.replacingOccurrences(of: "Week \(exercise.weekIndex) · ", with: ""))"
         exercise.coachMessage = ""
 
@@ -1936,30 +1910,11 @@ extension SessionScreenViewModel {
                 )
             }
 
-            let range = RepRangeRulebook.range(forExerciseId: item.exerciseId, exerciseName: name)
-            let repsLabel = RepRangeRulebook.display(targetReps: baseReps, range: range)
-
             let detail: String
-            let setsText: String = {
-                if let min = item.setMin, let max = item.setMax {
-                    return min == max ? "\(min) sets" : "\(min)–\(max) sets"
-                }
-                return "\(item.targetSets) sets"
-            }()
 
-            let repsText: String = {
-                if let min = item.repMin, let max = item.repMax {
-                    return min == max ? "\(min) reps" : "\(min)–\(max) reps"
-                }
-                return "\(baseReps) reps"
-            }()
-
-            let rirText: String = {
-                if let min = item.targetRIRMin, let max = item.targetRIRMax {
-                    return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
-                }
-                return "\(baseRIR) RIR"
-            }()
+            let setsText = "\(item.targetSets) sets"
+            let repsText = "\(baseReps) reps"
+            let rirText = "\(baseRIR) RIR"
 
             if let ce = catalogExercise {
                 detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(setsText) · \(repsText) · \(rirText)"

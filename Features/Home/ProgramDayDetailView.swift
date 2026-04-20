@@ -767,6 +767,7 @@ private struct ProgramExercisePlanRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             headerRow
+            prescriptionSummaryRow
             planRow
             perSetPlanEditor
         }
@@ -854,14 +855,15 @@ private struct ProgramExercisePlanRow: View {
     }
     
     private var prescriptionSummaryRow: some View {
-        HStack(spacing: 8) {
-            Text("Prescription")
+        HStack(spacing: 6) {
+            Text("Range:")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
             Text(prescriptionSummaryText)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.black.opacity(0.05))
