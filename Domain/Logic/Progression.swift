@@ -1,5 +1,11 @@
 import Foundation
 
+// LEGACY — FROZEN
+// Simplified progression logic predating CoachingEngine and ProgressionEngine.
+// No production call sites confirmed. Tests only.
+// No new logic. No modifications. Scheduled for deletion after
+// CoachingEngine test coverage absorbs its three cases.
+
 enum Adjustment { case hold, increase(percent: Double), decrease(percent: Double) }
 
 struct Progression {
