@@ -324,8 +324,8 @@ struct SessionView: View {
     private var coachCue: String {
         let maxSets = viewModel.exercises.map(\.targetSets).max() ?? 3
         return maxSets >= 4
-            ? "3 to grow, 1 to know: use the 4th set as your tester if recovery is solid."
-            : "3 to grow: 3 solid working sets. Add a tester only on good days."
+            ? "Complete the planned working sets with clean execution. Extra sets are supportive, not mandatory."
+            : "Complete the planned working sets with clean execution and stable effort."
     }
 
     private var warmupSessionKey: String {

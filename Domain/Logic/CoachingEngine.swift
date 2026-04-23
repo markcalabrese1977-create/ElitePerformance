@@ -178,7 +178,7 @@ struct CoachingEngine {
            repDrop >= 3 {
 
             let msg = """
-            You pushed at least one of your \(primaryWorkPhrase) to 0 RIR and reps dropped from \(firstReps) to \(lastReps). This looks like a hold for next session. Aim for more even performance before trying to increase load.
+            You pushed at least one of your \(primaryWorkPhrase) to 0 RIR and reps dropped from \(firstReps) to \(lastReps). This looks like a repeat-load day. Aim for more even performance before trying to increase load.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
@@ -186,7 +186,7 @@ struct CoachingEngine {
         // 2) Under target reps → fix reps first
         if bestReps < targetReps {
             let msg = """
-            Your best \(primaryWorkPhrase) was below the target of \(targetReps) reps. This looks like a repeat-load day. Bring reps up before trying to increase load.
+            Your best \(primaryWorkPhrase) was below the planned reps. This looks like a repeat-load day. Bring reps up before trying to increase load.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
@@ -210,7 +210,7 @@ struct CoachingEngine {
             let reasonText = reasons.joined(separator: " and ")
 
             let msg = """
-            Across the \(primaryWorkPhrase), this was harder than planned (\(reasonText)). This looks like a repeat-load day. Focus on smoother, more controlled work before increasing.
+            Across the \(primaryWorkPhrase), this was harder than planned (\(reasonText)). This turned into a repeat-load day. Focus on smoother, more controlled work before increasing.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
@@ -232,11 +232,11 @@ struct CoachingEngine {
             let msg: String
             if plannedWorkingSetCount >= 4 {
                 msg = """
-                You hit the top rep target across the primary working sets at roughly the intended difficulty, without needing rest-pause. This likely earned a small load increase next session; any extra set here is diagnostic and doesn’t block that progression.
+                You completed the planned reps across the primary working sets at roughly the intended difficulty, without needing rest-pause. This supports either a repeat-load day or a small increase next session, depending on how this lift is progressed. Any extra set here is supportive, not decisive.
                 """
             } else {
                 msg = """
-                You hit the top rep target across the planned working sets at roughly the intended difficulty, without needing rest-pause. This likely earned a small load increase next session.
+                You completed the planned reps across the planned working sets at roughly the intended difficulty, without needing rest-pause. This supports either a repeat-load day or a small increase next session, depending on how this lift is progressed.
                 """
             }
 
@@ -252,7 +252,7 @@ struct CoachingEngine {
             let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
 
             let msg = """
-            You exceeded the rep target of \(plannedTopReps) by a comfortable margin across your \(primaryWorkPhrase) without needing rest-pause or going to failure. This likely earned a small load increase next session.
+            You exceeded the planned reps by a comfortable margin across your \(primaryWorkPhrase) without needing rest-pause or going to failure. This supports a small increase next session if this lift is being load-progressed.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
         }
@@ -266,7 +266,7 @@ struct CoachingEngine {
 
         if hitRepTarget && nearTargetRIR {
             let msg = """
-            You hit the planned work at roughly the intended difficulty. This looks like a solid repeat-load day, with room for a small increase next time if performance stays this clean.
+            You completed the planned work at roughly the intended difficulty. This looks like a solid repeat-load day, with room for a small increase next time if performance stays this clean.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
