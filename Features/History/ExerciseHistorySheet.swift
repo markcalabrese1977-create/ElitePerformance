@@ -36,6 +36,17 @@ struct ExerciseHistorySheet: View {
     private var bestOverallE1RM: Double? {
         entries.compactMap { $0.bestE1RM }.max()
     }
+    
+    private var hasThinHistory: Bool {
+        entries.count <= 1
+    }
+    private var historyContextNote: String {
+        if hasThinHistory {
+            return "This view shows logged history for this exact exercise. History is still limited, so use the current plan and today’s execution to guide decisions."
+        } else {
+            return "This view shows logged history for this exact exercise. It is not a direct view of the current program prescription."
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -65,24 +76,31 @@ struct ExerciseHistorySheet: View {
     }
 
     private var header: some View {
-        HStack {
-            Button(action: onClose) {
-                Text("Close")
-                    .font(.headline)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button(action: onClose) {
+                    Text("Close")
+                        .font(.headline)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
+
+                Text(exerciseName)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+
+                Spacer()
+                Color.clear.frame(width: 80)
             }
 
-            Spacer()
-
-            Text(exerciseName)
-                .font(.title3)
-                .fontWeight(.semibold)
-
-            Spacer()
-            Color.clear.frame(width: 80)
+            Text(historyContextNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal)
         .padding(.top, 12)

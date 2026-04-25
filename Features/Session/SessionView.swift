@@ -228,7 +228,7 @@ struct SessionView: View {
             isPresented: $showSwapPropagationDialog,
             titleVisibility: .visible
         ) {
-            Button("Apply to future planned sessions") {
+            Button("Apply to future \(propagationWeekdayName) sessions") {
                 guard let swap = pendingSwapForPropagation else { return }
                 ExerciseSwapPropagationService.apply(
                     fromExerciseId: swap.from,
@@ -238,16 +238,18 @@ struct SessionView: View {
                 pendingSwapForPropagation = nil
             }
 
-            Button("Keep this session only", role: .cancel) {
+            Button("Keep this session only") {
                 pendingSwapForPropagation = nil
             }
+
+            Button("Cancel", role: .cancel) { }
         }
         .confirmationDialog(
             "Added \(pendingAddedExerciseForPropagation?.exerciseName ?? "exercise")",
             isPresented: $showAddExercisePropagationDialog,
             titleVisibility: .visible
         ) {
-            Button("Apply to future matching sessions") {
+            Button("Apply to future \(propagationWeekdayName) sessions") {
                 guard let pending = pendingAddedExerciseForPropagation else { return }
                 viewModel.propagateAddedExerciseForward(
                     exerciseId: pending.exerciseId,
@@ -256,9 +258,11 @@ struct SessionView: View {
                 pendingAddedExerciseForPropagation = nil
             }
 
-            Button("Keep this session only", role: .cancel) {
+            Button("Keep this session only") {
                 pendingAddedExerciseForPropagation = nil
             }
+
+            Button("Cancel", role: .cancel) { }
         }
     }
 
@@ -388,6 +392,13 @@ struct SessionView: View {
         return .barbell
     }
 
+    private var propagationWeekdayName: String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: viewModel.sessionDate)
+    }
+    
     private var completionBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
@@ -1056,6 +1067,10 @@ final class SessionScreenViewModel: ObservableObject {
     @Published var title: String
     @Published var subtitle: String
     @Published var exercises: [UISessionExercise]
+
+    var sessionDate: Date {
+        session.date
+    }
 
     init(
         session: Session,
