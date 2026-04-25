@@ -97,16 +97,62 @@ struct SessionView: View {
 
                 ForEach(Array(viewModel.exercises.enumerated()), id: \.element.id) { index, exercise in
                     SessionExerciseCardView(
-                        exercise: $viewModel.exercises[index],
-                        onSetLogged: { setIndex in
+                        exercise: exercise,
+                        onLoadChanged: { setIndex, text in
+                            viewModel.updateActualLoad(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                text: text
+                            )
+                        },
+                        onRepsChanged: { setIndex, text in
+                            viewModel.updateActualReps(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                text: text
+                            )
+                        },
+                        onRIRChanged: { setIndex, text in
+                            viewModel.updateActualRIR(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                text: text
+                            )
+                        },
+                        onRPToggled: { setIndex, isOn in
+                            viewModel.updateRestPauseToggle(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                isOn: isOn
+                            )
+                        },
+                        onRPPatternChanged: { setIndex, text in
+                            viewModel.updateRestPausePattern(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                text: text
+                            )
+                        },
+                        onLogTapped: { setIndex in
                             viewModel.handleSetLogged(
                                 exerciseID: exercise.id,
                                 setIndex: setIndex,
                                 context: modelContext
                             )
                         },
-                        onSkipSet: { _ in
-                            viewModel.persist(using: modelContext)
+                        onSkipTapped: { setIndex in
+                            viewModel.skipSet(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                context: modelContext
+                            )
+                        },
+                        onEditTapped: { setIndex in
+                            viewModel.editSet(
+                                exerciseID: exercise.id,
+                                setIndex: setIndex,
+                                context: modelContext
+                            )
                         },
                         onSwapTapped: {
                             activeSheet = .swap(SwapTarget(exerciseIndex: index))
@@ -420,9 +466,18 @@ private struct SwapTarget {
 /// One card per exercise: header and set-by-set plan + actual logging.
 private struct SessionExerciseCardView: View {
     @Environment(\.modelContext) private var modelContext
-    @Binding var exercise: UISessionExercise
-    let onSetLogged: (_ setIndex: Int) -> Void
-    let onSkipSet: (_ setIndex: Int) -> Void
+    let exercise: UISessionExercise
+
+    let onLoadChanged: (_ setIndex: Int, _ text: String) -> Void
+    let onRepsChanged: (_ setIndex: Int, _ text: String) -> Void
+    let onRIRChanged: (_ setIndex: Int, _ text: String) -> Void
+    let onRPToggled: (_ setIndex: Int, _ isOn: Bool) -> Void
+    let onRPPatternChanged: (_ setIndex: Int, _ text: String) -> Void
+
+    let onLogTapped: (_ setIndex: Int) -> Void
+    let onSkipTapped: (_ setIndex: Int) -> Void
+    let onEditTapped: (_ setIndex: Int) -> Void
+
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
     let onNoteTapped: () -> Void
@@ -648,13 +703,35 @@ private struct SessionExerciseCardView: View {
             }
 
             VStack(spacing: 6) {
-                ForEach($exercise.sets) { $set in
+                ForEach(exercise.sets) { set in
                     if shouldShowSet(set) {
                         SessionSetRowView(
-                            uiSet: $set,
+                            uiSet: set,
                             repRange: repRange,
-                            onLog: { onSetLogged(set.index) },
-                            onSkip: { onSkipSet(set.index) }
+                            onLoadChanged: { text in
+                                onLoadChanged(set.index, text)
+                            },
+                            onRepsChanged: { text in
+                                onRepsChanged(set.index, text)
+                            },
+                            onRIRChanged: { text in
+                                onRIRChanged(set.index, text)
+                            },
+                            onRPToggled: { isOn in
+                                onRPToggled(set.index, isOn)
+                            },
+                            onRPPatternChanged: { text in
+                                onRPPatternChanged(set.index, text)
+                            },
+                            onLog: {
+                                onLogTapped(set.index)
+                            },
+                            onSkip: {
+                                onSkipTapped(set.index)
+                            },
+                            onEdit: {
+                                onEditTapped(set.index)
+                            }
                         )
                     }
                 }
@@ -682,36 +759,24 @@ private struct SessionExerciseCardView: View {
 // MARK: - Set Row
 
 private struct SessionSetRowView: View {
-    @Binding var uiSet: UISessionSet
+    let uiSet: UISessionSet
     let repRange: RepRange
+
+    let onLoadChanged: (String) -> Void
+    let onRepsChanged: (String) -> Void
+    let onRIRChanged: (String) -> Void
+    let onRPToggled: (Bool) -> Void
+    let onRPPatternChanged: (String) -> Void
+
     let onLog: () -> Void
     let onSkip: () -> Void
+    let onEdit: () -> Void
     
     private var isLocked: Bool {
         uiSet.status == .completed || uiSet.status == .skipped
     }
     
-    private var actualRIRBinding: Binding<String> {
-        Binding(
-            get: {
-                if let actual = uiSet.actualRIR {
-                    return "\(actual)"
-                } else if let planned = uiSet.plannedRIR {
-                    return "\(planned)"
-                } else {
-                    return ""
-                }
-            },
-            set: { newValue in
-                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty {
-                    uiSet.actualRIR = nil
-                } else if let value = Int(trimmed) {
-                    uiSet.actualRIR = value
-                }
-            }
-        )
-    }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -756,7 +821,13 @@ private struct SessionSetRowView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    TextField("0", text: $uiSet.actualLoadText)
+                    TextField(
+                        "0",
+                        text: Binding(
+                            get: { uiSet.actualLoadText },
+                            set: { onLoadChanged($0) }
+                        )
+                    )
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 72)
@@ -770,7 +841,13 @@ private struct SessionSetRowView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    TextField("0", text: $uiSet.actualRepsText)
+                    TextField(
+                        "0",
+                        text: Binding(
+                            get: { uiSet.actualRepsText },
+                            set: { onRepsChanged($0) }
+                        )
+                    )
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 52)
@@ -784,12 +861,26 @@ private struct SessionSetRowView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    TextField("0", text: actualRIRBinding)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 40)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
+                    TextField(
+                        "0",
+                        text: Binding(
+                            get: {
+                                if let actual = uiSet.actualRIR {
+                                    return "\(actual)"
+                                } else if let planned = uiSet.plannedRIR {
+                                    return "\(planned)"
+                                } else {
+                                    return ""
+                                }
+                            },
+                            set: { onRIRChanged($0) }
+                        )
+                    )
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 40)
+                    .disabled(isLocked)
+                    .opacity(isLocked ? 0.6 : 1.0)
                 }
 
                 // RP toggle
@@ -798,7 +889,13 @@ private struct SessionSetRowView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    Toggle("", isOn: $uiSet.usedRestPause)
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { uiSet.usedRestPause },
+                            set: { onRPToggled($0) }
+                        )
+                    )
                         .labelsHidden()
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
@@ -847,20 +944,24 @@ private struct SessionSetRowView: View {
                     .contextMenu {
                         if isLocked {
                             Button("Edit set") {
-                                // Unlock and restore fields to planned values
-                                uiSet.status = .notStarted
-                                resetToPlan()
+                                onEdit()
                             }
                         } else {
                             Button("Skip set") {
-                                applySkip()
+                                onSkip()
                             }
                         }
                     }
 
                     // RP pattern text (optional)
                     if uiSet.usedRestPause {
-                        TextField("RP pattern (e.g., 10+4+3)", text: $uiSet.restPausePattern)
+                        TextField(
+                            "RP pattern (e.g., 10+4+3)",
+                            text: Binding(
+                                get: { uiSet.restPausePattern },
+                                set: { onRPPatternChanged($0) }
+                            )
+                        )
                             .textFieldStyle(.roundedBorder)
                             .disabled(isLocked)
                             .opacity(isLocked ? 0.6 : 1.0)
@@ -869,7 +970,7 @@ private struct SessionSetRowView: View {
                     // Explicit Skip button
                     Button {
                         guard !isLocked else { return }
-                        applySkip()
+                        onSkip()
                     } label: {
                         Text("Skip")
                             .font(.caption2)
@@ -880,49 +981,6 @@ private struct SessionSetRowView: View {
             }
         }
         .padding(.vertical, 4)
-        
-    }
-
-    // MARK: - Helpers
-
-    /// Clear any actuals and mark as skipped, ignoring prefilled plan values.
-    private func applySkip() {
-        uiSet.status = .skipped
-
-        // Clear actual numeric values so they don't get persisted
-        uiSet.actualLoad = nil
-        uiSet.actualReps = nil
-        uiSet.actualRIR = nil
-
-        // Clear RP so skipped sets never carry RP state/pattern
-        uiSet.usedRestPause = false
-        uiSet.restPausePattern = ""
-
-        // Reset text fields away from "real" numbers
-        uiSet.actualLoadText = "0"
-        uiSet.actualRepsText = "\(uiSet.plannedReps)"
-        
-
-        // 🔁 Tell the parent so it can persist the change
-        onSkip()
-    }
-
-    /// Restore inputs to the planned baseline when you "Edit set".
-    private func resetToPlan() {
-        // Clear actual numeric values (so UI falls back to plan)
-        uiSet.actualLoad = nil
-        uiSet.actualReps = nil
-        uiSet.actualRIR = nil
-
-        // Clear RP so "Edit set" always starts clean
-        uiSet.usedRestPause = false
-        uiSet.restPausePattern = ""
-
-        uiSet.actualLoadText = uiSet.plannedLoad == 0
-            ? "0"
-            : String(format: "%.1f", uiSet.plannedLoad)
-
-        uiSet.actualRepsText = "\(uiSet.plannedReps)"
         
     }
 }
@@ -1119,7 +1177,96 @@ final class SessionScreenViewModel: ObservableObject {
         persist(using: context)
     }
 
-        
+    func updateActualLoad(exerciseID: UUID, setIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].actualLoadText = text
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            exercises[exerciseIdx].sets[setIdx].actualLoad = nil
+        } else if let value = Double(trimmed) {
+            exercises[exerciseIdx].sets[setIdx].actualLoad = max(0, value)
+        }
+    }
+
+    func updateActualReps(exerciseID: UUID, setIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].actualRepsText = text
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            exercises[exerciseIdx].sets[setIdx].actualReps = nil
+        } else if let value = Int(trimmed) {
+            exercises[exerciseIdx].sets[setIdx].actualReps = value
+        }
+    }
+
+    func updateActualRIR(exerciseID: UUID, setIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            exercises[exerciseIdx].sets[setIdx].actualRIR = nil
+        } else if let value = Int(trimmed) {
+            exercises[exerciseIdx].sets[setIdx].actualRIR = value
+        }
+    }
+
+    func updateRestPauseToggle(exerciseID: UUID, setIndex: Int, isOn: Bool) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].usedRestPause = isOn
+        if !isOn {
+            exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
+        }
+    }
+
+    func updateRestPausePattern(exerciseID: UUID, setIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].restPausePattern = text
+    }
+    
+    func skipSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].status = .skipped
+        exercises[exerciseIdx].sets[setIdx].actualLoad = nil
+        exercises[exerciseIdx].sets[setIdx].actualReps = nil
+        exercises[exerciseIdx].sets[setIdx].actualRIR = nil
+        exercises[exerciseIdx].sets[setIdx].usedRestPause = false
+        exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
+        exercises[exerciseIdx].sets[setIdx].actualLoadText = "0"
+        exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
+
+        persist(using: context)
+    }
+
+    func editSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].status = .notStarted
+        exercises[exerciseIdx].sets[setIdx].actualLoad = nil
+        exercises[exerciseIdx].sets[setIdx].actualReps = nil
+        exercises[exerciseIdx].sets[setIdx].actualRIR = nil
+        exercises[exerciseIdx].sets[setIdx].usedRestPause = false
+        exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
+        exercises[exerciseIdx].sets[setIdx].actualLoadText = exercises[exerciseIdx].sets[setIdx].plannedLoad == 0
+            ? "0"
+            : String(format: "%.1f", exercises[exerciseIdx].sets[setIdx].plannedLoad)
+        exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
+
+        persist(using: context)
+    }
 
     private func onSetCompleted(exercise: UISessionExercise, set: UISessionSet) {
         // Hook for timers / haptics later if we want.
