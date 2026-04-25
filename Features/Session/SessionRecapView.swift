@@ -273,7 +273,7 @@ struct SessionRecapView: View {
     private var nextAdjustmentsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if itemsWithRecommendations.isEmpty {
-                Text("No load changes suggested. Repeat today’s prescription next time.")
+                Text("No load changes suggested. Repeat today’s plan next time.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
