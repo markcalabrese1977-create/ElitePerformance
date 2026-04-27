@@ -24,22 +24,25 @@ struct ProgramGeneratorWeekdayTests {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
 
-        // Simulate onboarding result
         let result = OnboardingResult(
             goal: .hypertrophy,
             daysPerWeek: 6,
             weekdays: [1, 2, 3, 4, 6, 7]   // Sun, Mon, Tue, Wed, Fri, Sat (Thu off)
         )
 
-        let generator = ProgramGenerator(context: context)
-        try generator.seedInitialProgram(from: result)
+        ProgramGenerator.seedInitialProgram(
+            goal: result.goal,
+            daysPerWeek: result.daysPerWeek,
+            totalWeeks: 4,
+            includeDeloadWeek: false,
+            weekdays: result.weekdays,
+            context: context
+        )
 
-        let allSessions = try context.fetch(FetchDescriptor<Session>())
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
 
-        // We only care about the weekday pattern for Week 1
         let week1 = allSessions.filter { $0.weekIndex == 1 }
 
-        // Extract weekday numbers for those sessions
         let calendar = Calendar.current
         let weekdays = week1.map { calendar.component(.weekday, from: $0.date) }
                             .sorted()

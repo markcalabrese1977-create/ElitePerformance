@@ -22,6 +22,11 @@ public protocol CoachProfile {
 /// Concrete implementation of your "Mark Hypertrophy" rules v1.
 /// This is v0.1 of the logic — we can keep refining the internals
 /// without changing the external interface.
+// TODO: Not wired to production. Conforms to CoachProfile and is intended
+// to replace CoachingEngine as the active coach. Wire into SessionRecapView
+// by injecting as the CoachProfile dependency instead of CoachingEngine.
+// See CoachingEngine.swift for current production path.
+
 public struct MarkHypertrophyCoachProfile: CoachProfile {
 
     public let id: String = "mark_hypertrophy_v1"
