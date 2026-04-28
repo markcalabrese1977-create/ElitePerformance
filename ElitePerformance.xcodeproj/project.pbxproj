@@ -33,13 +33,13 @@
 		D58476E92F40F48000FE3F46 /* (null) in Sources */ = {isa = PBXBuildFile; };
 		D58476EE2F410AD000FE3F46 /* SetsV1CSVExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */; };
 		D58477132F42842000FE3F46 /* MesoLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477122F42841E00FE3F46 /* MesoLifecycle.swift */; };
-		D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift.swift */; };
+		D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */; };
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D586594B2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */; };
 		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
-		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */; };
+		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */; };
 		D5BCD44D2F9D0B97005007F6 /* SessionRecapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BCD44C2F9D0B97005007F6 /* SessionRecapView.swift */; };
 		D5BE29402F99842C00DB9F04 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BE293F2F99842A00DB9F04 /* CoachingEngineTests.swift */; };
 		D5BE29422F99844A00DB9F04 /* CoachingMessageSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BE29412F99844800DB9F04 /* CoachingMessageSeamTests.swift */; };
@@ -107,13 +107,13 @@
 		D5813FE02F49433600CCE909 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetsV1CSVExporter.swift; sourceTree = "<group>"; };
 		D58477122F42841E00FE3F46 /* MesoLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoLifecycle.swift; sourceTree = "<group>"; };
-		D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoRolloverGuardSheet.swift.swift; sourceTree = "<group>"; };
+		D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoRolloverGuardSheet.swift; sourceTree = "<group>"; };
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D586594A2ED910DA00761F94 /* ProgramGeneratorWeekdayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGeneratorWeekdayTests.swift; sourceTree = "<group>"; };
 		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
-		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift.swift; sourceTree = "<group>"; };
+		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift; sourceTree = "<group>"; };
 		D5BCD44C2F9D0B97005007F6 /* SessionRecapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecapView.swift; sourceTree = "<group>"; };
 		D5BE293F2F99842A00DB9F04 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		D5BE29412F99844800DB9F04 /* CoachingMessageSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingMessageSeamTests.swift; sourceTree = "<group>"; };
@@ -362,7 +362,7 @@
 				D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */,
 				D550F56E2ED60DA40011D54B /* CoachingModels.swift */,
 				D58618252ECCA92A006EF818 /* TrainingProgram.swift */,
-				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift.swift */,
+				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */,
 				D5E2939F2EC7C4E900034D78 /* Goal.swift */,
 				D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */,
 				D5E293912EC7BBC000034D78 /* UserProfile.swift */,
@@ -433,7 +433,7 @@
 		D5E2935D2EC410DD00034D78 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift.swift */,
+				D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */,
 				D5E2935C2EC410DD00034D78 /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -603,7 +603,7 @@
 				D5E293662EC410DD00034D78 /* User.swift in Sources */,
 				D5E293672EC410DD00034D78 /* ProgramGenerator.swift in Sources */,
 				D5E293682EC410DD00034D78 /* Progression.swift in Sources */,
-				D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift.swift in Sources */,
+				D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift in Sources */,
 				D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */,
 				D5E293692EC410DD00034D78 /* Readiness.swift in Sources */,
 				D5813FE12F49433D00CCE909 /* AnalyticsView.swift in Sources */,
@@ -636,7 +636,7 @@
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
 				D5BCD44D2F9D0B97005007F6 /* SessionRecapView.swift in Sources */,
 				D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */,
-				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift.swift in Sources */,
+				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */,
 				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
 				D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */,
 				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
