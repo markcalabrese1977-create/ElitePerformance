@@ -154,20 +154,17 @@ struct SessionView: View {
                                 context: modelContext
                             )
                         },
-                        onSwapTapped: {
-                            activeSheet = .swap(SwapTarget(exerciseIndex: index))
+                        onSwapTapped: { [exerciseIndex = index] in
+                            activeSheet = .swap(SwapTarget(exerciseIndex: exerciseIndex))
                         },
-                        onHistoryTapped: {
-                            activeSheet = .history(exerciseId: exercise.exerciseId, exerciseName: exercise.name)
+                        onHistoryTapped: { [exerciseId = exercise.exerciseId, exerciseName = exercise.name] in
+                            activeSheet = .history(exerciseId: exerciseId, exerciseName: exerciseName)
                         },
-                        onNoteTapped: {
-                            activeSheet = .note(
-                                exerciseId: exercise.exerciseId,
-                                exerciseName: exercise.name
-                            )
+                        onNoteTapped: { [exerciseId = exercise.exerciseId, exerciseName = exercise.name] in
+                            activeSheet = .note(exerciseId: exerciseId, exerciseName: exerciseName)
                         },
-                        onAddSetTapped: {
-                            viewModel.addSet(toExerciseID: exercise.id, context: modelContext)
+                        onAddSetTapped: { [exerciseId = exercise.id] in
+                            viewModel.addSet(toExerciseID: exerciseId, context: modelContext)
                         }
                     )
                 }
@@ -2365,34 +2362,28 @@ enum SetOutcome {
 }
 
 struct UISessionExercise: Identifiable {
-    let id = UUID()
+    let id: UUID
 
     var exerciseId: String
     var name: String
     var detail: String
 
-    /// Stored (keep)
     var weekInMeso: Int
 
-    /// Alias (use throughout app)
     var weekIndex: Int {
         get { weekInMeso }
         set { weekInMeso = newValue }
     }
 
-    // Resolved prescription metadata
     var waveRaw: String?
     var priorityRaw: String?
 
     var setMin: Int?
     var setMax: Int?
-
     var repMin: Int?
     var repMax: Int?
-
     var targetRIRMin: Int?
     var targetRIRMax: Int?
-
     var intensifierRaw: String?
     var intensifierNotes: String?
     var prescriptionNotes: String?
@@ -2400,47 +2391,27 @@ struct UISessionExercise: Identifiable {
     var targetSets: Int
     var sets: [UISessionSet]
     var coachMessage: String
-    
-    private var setsText: String {
+
+    var setsText: String {
         if let min = setMin, let max = setMax {
-            if min == max {
-                return "\(min) sets"
-            } else {
-                return "\(min)–\(max) sets"
-            }
+            return min == max ? "\(min) sets" : "\(min)–\(max) sets"
         }
         return "\(targetSets) sets"
     }
 
-    private var repsText: String {
+    var repsText: String {
         if let min = repMin, let max = repMax {
-            if min == max {
-                return "\(min) reps"
-            } else {
-                return "\(min)–\(max) reps"
-            }
+            return min == max ? "\(min) reps" : "\(min)–\(max) reps"
         }
-
-        if let first = sets.first {
-            return "\(first.plannedReps) reps"
-        }
-
+        if let first = sets.first { return "\(first.plannedReps) reps" }
         return "—"
     }
 
-    private var rirText: String {
+    var rirText: String {
         if let min = targetRIRMin, let max = targetRIRMax {
-            if min == max {
-                return "\(min) RIR"
-            } else {
-                return "\(min)–\(max) RIR"
-            }
+            return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
         }
-
-        if let first = sets.first, let rir = first.plannedRIR {
-            return "\(rir) RIR"
-        }
-
+        if let first = sets.first, let rir = first.plannedRIR { return "\(rir) RIR" }
         return "—"
     }
 
@@ -2448,15 +2419,10 @@ struct UISessionExercise: Identifiable {
         "Week \(weekIndex) · \(setsText) · \(repsText) · \(rirText)"
     }
 
-    /// A session exercise is "complete" when all working sets (up to `targetSets`)
-    /// are either completed or explicitly skipped.
     var isComplete: Bool {
         let workingSets = sets.filter { $0.index <= targetSets }
         guard !workingSets.isEmpty else { return false }
-
-        return workingSets.allSatisfy { set in
-            set.status == .completed || set.status == .skipped
-        }
+        return workingSets.allSatisfy { $0.status == .completed || $0.status == .skipped }
     }
 
     init(
@@ -2464,7 +2430,6 @@ struct UISessionExercise: Identifiable {
         name: String,
         detail: String,
         weekInMeso: Int,
-
         waveRaw: String? = nil,
         priorityRaw: String? = nil,
         setMin: Int? = nil,
@@ -2476,17 +2441,34 @@ struct UISessionExercise: Identifiable {
         intensifierRaw: String? = nil,
         intensifierNotes: String? = nil,
         prescriptionNotes: String? = nil,
-
         targetSets: Int,
         sets: [UISessionSet],
         coachMessage: String = ""
     ) {
+        // Derive a stable UUID from exerciseId so ForEach identity is consistent
+        // across republishes of viewModel.exercises.
+        self.id = UUID(uuidString: exerciseId) ?? {
+            var hash = exerciseId.utf8.reduce(UInt64(14695981039346656037)) { acc, byte in
+                (acc ^ UInt64(byte)) &* 1099511628211
+            }
+            let a = UInt32(hash & 0xFFFFFFFF)
+            let b = UInt32((hash >> 32) & 0xFFFFFFFF)
+            return UUID(uuid: (
+                UInt8(a & 0xFF), UInt8((a >> 8) & 0xFF),
+                UInt8((a >> 16) & 0xFF), UInt8((a >> 24) & 0xFF),
+                UInt8(b & 0xFF), UInt8((b >> 8) & 0xFF),
+                0x40 | UInt8((b >> 16) & 0x0F), UInt8((b >> 24) & 0xFF),
+                0x80 | UInt8(a & 0x3F), UInt8((a >> 8) & 0xFF),
+                UInt8((a >> 16) & 0xFF), UInt8((a >> 24) & 0xFF),
+                UInt8(b & 0xFF), UInt8((b >> 8) & 0xFF),
+                UInt8((b >> 16) & 0xFF), UInt8((b >> 24) & 0xFF)
+            ))
+        }()
+
         self.exerciseId = exerciseId
         self.name = name
         self.detail = detail
-
         self.weekInMeso = weekInMeso
-
         self.waveRaw = waveRaw
         self.priorityRaw = priorityRaw
         self.setMin = setMin
@@ -2498,13 +2480,11 @@ struct UISessionExercise: Identifiable {
         self.intensifierRaw = intensifierRaw
         self.intensifierNotes = intensifierNotes
         self.prescriptionNotes = prescriptionNotes
-
         self.targetSets = max(1, min(targetSets, 6))
-        self.sets = sets.sorted(by: { $0.index < $1.index })
+        self.sets = sets.sorted { $0.index < $1.index }
         self.coachMessage = coachMessage
     }
 }
-
 struct UISessionSet: Identifiable {
     var id: Int { index }
     let index: Int

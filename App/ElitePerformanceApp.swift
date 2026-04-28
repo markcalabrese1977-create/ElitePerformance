@@ -39,6 +39,8 @@ struct ElitePerformanceApp: App {
             ExerciseNameSnapshotRepair.runIfNeeded(in: context)
             CanonicalExerciseIdMigration.runIfNeeded(in: context)
             CustomExerciseDedupMigration.runIfNeeded(in: context)
+            D5ExerciseIdRepairMigration.runIfNeeded(in: context)
+            Apr21SessionHistoryRepairMigration.runIfNeeded(in: context) 
             SessionHistoryBlockBackfill.runIfNeeded(in: context)
             SessionDayLabelBackfill.runIfNeeded(in: context)
         }
