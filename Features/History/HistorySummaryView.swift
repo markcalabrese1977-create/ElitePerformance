@@ -434,7 +434,7 @@ enum HistorySummaryBuilder {
 
             let vm = SessionScreenViewModel(session: session)
             let uiByExerciseId: [String: UISessionExercise] = Dictionary(
-                uniqueKeysWithValues: vm.exercises.map {
+                vm.exercises.map {
                     (
                         ExerciseCatalog.resolvedExerciseId(
                             rawId: $0.exerciseId,
@@ -443,7 +443,8 @@ enum HistorySummaryBuilder {
                         ),
                         $0
                     )
-                }
+                },
+                uniquingKeysWith: { _, last in last }
             )
 
             for item in session.items {
