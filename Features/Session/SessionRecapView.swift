@@ -500,6 +500,11 @@ struct ExerciseRecapRow: View {
                                     .font(.caption2)
                                     .foregroundColor(.blue)
                             }
+                            if let drop = item.dropSetDescription(forSetAt: idx) {
+                                Text(drop)
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            }
 
                             Spacer()
                         }
@@ -638,8 +643,15 @@ extension SessionItem {
         let usedRP = idx < usedRestPauseFlags.count ? usedRestPauseFlags[idx] : false
         let pattern = idx < restPausePatternsBySet.count ? restPausePatternsBySet[idx] : ""
 
-        if usedRP && !pattern.isEmpty {
+        let usedDrop = idx < dropSetPatternsBySet.count ? !dropSetPatternsBySet[idx].isEmpty : false
+        let dropPattern = idx < dropSetPatternsBySet.count ? dropSetPatternsBySet[idx] : ""
+
+        if usedRP && !pattern.isEmpty && usedDrop {
+            return base + " (RP: \(pattern)) + Drop: \(dropPattern)"
+        } else if usedRP && !pattern.isEmpty {
             return base + " (RP: \(pattern))"
+        } else if usedDrop {
+            return base + " + Drop: \(dropPattern)"
         } else {
             return base
         }
@@ -656,6 +668,13 @@ extension SessionItem {
         } else {
             return "RP: \(pattern)"
         }
+    }
+    /// Description of drop set for a specific set index, e.g. "Drop: 120x12,100x8".
+    func dropSetDescription(forSetAt index: Int) -> String? {
+        guard index < dropSetPatternsBySet.count else { return nil }
+        let pattern = dropSetPatternsBySet[index]
+        guard !pattern.isEmpty else { return nil }
+        return "Drop: \(pattern)"
     }
 }
 

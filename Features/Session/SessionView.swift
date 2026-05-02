@@ -133,6 +133,20 @@ struct SessionView: View {
                                 text: text
                             )
                         },
+                        onDropSetToggled: { [exerciseId = exercise.id] setIndex, isOn in
+                            viewModel.updateDropSetToggle(
+                                exerciseID: exerciseId,
+                                setIndex: setIndex,
+                                isOn: isOn
+                            )
+                        },
+                        onDropSetPatternChanged: { [exerciseId = exercise.id] setIndex, text in
+                            viewModel.updateDropSetPattern(
+                                exerciseID: exerciseId,
+                                setIndex: setIndex,
+                                text: text
+                            )
+                        },
                         onLogTapped: { setIndex in
                             viewModel.handleSetLogged(
                                 exerciseID: exercise.id,
@@ -481,6 +495,8 @@ private struct SessionExerciseCardView: View {
     let onRIRChanged: (_ setIndex: Int, _ text: String) -> Void
     let onRPToggled: (_ setIndex: Int, _ isOn: Bool) -> Void
     let onRPPatternChanged: (_ setIndex: Int, _ text: String) -> Void
+    let onDropSetToggled: (_ setIndex: Int, _ isOn: Bool) -> Void
+    let onDropSetPatternChanged: (_ setIndex: Int, _ text: String) -> Void
 
     let onLogTapped: (_ setIndex: Int) -> Void
     let onSkipTapped: (_ setIndex: Int) -> Void
@@ -731,6 +747,12 @@ private struct SessionExerciseCardView: View {
                             onRPPatternChanged: { text in
                                 onRPPatternChanged(set.index, text)
                             },
+                            onDropSetToggled: { isOn in
+                                onDropSetToggled(set.index, isOn)
+                            },
+                            onDropSetPatternChanged: { text in
+                                onDropSetPatternChanged(set.index, text)
+                            },
                             onLog: {
                                 onLogTapped(set.index)
                             },
@@ -775,6 +797,8 @@ private struct SessionSetRowView: View {
     let onRIRChanged: (String) -> Void
     let onRPToggled: (Bool) -> Void
     let onRPPatternChanged: (String) -> Void
+    let onDropSetToggled: (Bool) -> Void
+    let onDropSetPatternChanged: (String) -> Void
 
     let onLog: () -> Void
     let onSkip: () -> Void
@@ -788,28 +812,21 @@ private struct SessionSetRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Top line: Set label + status chip (for locked sets)
+
+            // Top line: Set label + status chip (locked sets only)
             HStack {
                 Text("Set \(uiSet.index)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
                 Spacer()
-
                 if isLocked {
                     Text(uiSet.status == .skipped ? "Skipped" : "Done")
                         .font(.caption2)
                         .fontWeight(.semibold)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(
-                            (uiSet.status == .skipped
-                             ? Color.orange.opacity(0.2)
-                             : Color.green.opacity(0.2))
-                        )
-                        .foregroundStyle(
-                            uiSet.status == .skipped ? Color.orange : Color.green
-                        )
+                        .background(uiSet.status == .skipped ? Color.orange.opacity(0.2) : Color.green.opacity(0.2))
+                        .foregroundStyle(uiSet.status == .skipped ? Color.orange : Color.green)
                         .clipShape(Capsule())
                 }
             }
@@ -821,26 +838,22 @@ private struct SessionSetRowView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
-            // ACTUAL inputs + Log / Skip buttons
+            // ACTUAL inputs row
             HStack(alignment: .bottom, spacing: 8) {
                 // Load
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Load")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-
-                    TextField(
-                        "0",
-                        text: Binding(
-                            get: { uiSet.actualLoadText },
-                            set: { onLoadChanged($0) }
-                        )
-                    )
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 72)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
+                    TextField("0", text: Binding(
+                        get: { uiSet.actualLoadText },
+                        set: { onLoadChanged($0) }
+                    ))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 72)
+                    .disabled(isLocked)
+                    .opacity(isLocked ? 0.6 : 1.0)
                 }
 
                 // Reps
@@ -848,19 +861,15 @@ private struct SessionSetRowView: View {
                     Text("Reps")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-
-                    TextField(
-                        "0",
-                        text: Binding(
-                            get: { uiSet.actualRepsText },
-                            set: { onRepsChanged($0) }
-                        )
-                    )
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 52)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
+                    TextField("0", text: Binding(
+                        get: { uiSet.actualRepsText },
+                        set: { onRepsChanged($0) }
+                    ))
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 52)
+                    .disabled(isLocked)
+                    .opacity(isLocked ? 0.6 : 1.0)
                 }
 
                 // RIR
@@ -868,22 +877,14 @@ private struct SessionSetRowView: View {
                     Text("RIR")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-
-                    TextField(
-                        "0",
-                        text: Binding(
-                            get: {
-                                if let actual = uiSet.actualRIR {
-                                    return "\(actual)"
-                                } else if let planned = uiSet.plannedRIR {
-                                    return "\(planned)"
-                                } else {
-                                    return ""
-                                }
-                            },
-                            set: { onRIRChanged($0) }
-                        )
-                    )
+                    TextField("0", text: Binding(
+                        get: {
+                            if let actual = uiSet.actualRIR { return "\(actual)" }
+                            if let planned = uiSet.plannedRIR { return "\(planned)" }
+                            return ""
+                        },
+                        set: { onRIRChanged($0) }
+                    ))
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 40)
@@ -891,30 +892,10 @@ private struct SessionSetRowView: View {
                     .opacity(isLocked ? 0.6 : 1.0)
                 }
 
-                // RP toggle
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("RP")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { uiSet.usedRestPause },
-                            set: { onRPToggled($0) }
-                        )
-                    )
-                        .labelsHidden()
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
-                }
-                .frame(width: 44)
-                
                 Spacer()
 
-                // Primary actions: Log + Skip
+                // Log / Skip / Edit
                 VStack(spacing: 4) {
-                    // Log button
                     Button(action: {
                         guard !isLocked else { return }
                         onLog()
@@ -928,7 +909,6 @@ private struct SessionSetRowView: View {
                                 .padding(.vertical, 6)
                                 .background(Color.green.opacity(0.2))
                                 .clipShape(Capsule())
-
                         case .skipped:
                             Text("Skipped")
                                 .font(.caption)
@@ -937,7 +917,6 @@ private struct SessionSetRowView: View {
                                 .padding(.vertical, 6)
                                 .background(Color.orange.opacity(0.2))
                                 .clipShape(Capsule())
-
                         default:
                             Text("Log")
                                 .font(.caption)
@@ -951,31 +930,12 @@ private struct SessionSetRowView: View {
                     .buttonStyle(.plain)
                     .contextMenu {
                         if isLocked {
-                            Button("Edit set") {
-                                onEdit()
-                            }
+                            Button("Edit set") { onEdit() }
                         } else {
-                            Button("Skip set") {
-                                onSkip()
-                            }
+                            Button("Skip set") { onSkip() }
                         }
                     }
 
-                    // RP pattern text (optional)
-                    if uiSet.usedRestPause {
-                        TextField(
-                            "RP pattern (e.g., 10+4+3)",
-                            text: Binding(
-                                get: { uiSet.restPausePattern },
-                                set: { onRPPatternChanged($0) }
-                            )
-                        )
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(isLocked)
-                            .opacity(isLocked ? 0.6 : 1.0)
-                    }
-                    
-                    // Explicit Skip button
                     Button {
                         guard !isLocked else { return }
                         onSkip()
@@ -987,9 +947,62 @@ private struct SessionSetRowView: View {
                     .buttonStyle(.borderless)
                 }
             }
+
+            // Intensifier toggles row (hidden when locked)
+            if !isLocked {
+                HStack(spacing: 20) {
+                    HStack(spacing: 6) {
+                        Toggle("", isOn: Binding(
+                            get: { uiSet.usedRestPause },
+                            set: { onRPToggled($0) }
+                        ))
+                        .labelsHidden()
+                        .scaleEffect(0.85)
+                        Text("Rest-pause")
+                            .font(.caption2)
+                            .foregroundStyle(uiSet.usedRestPause ? Color.primary : Color.secondary)
+                    }
+                    HStack(spacing: 6) {
+                        Toggle("", isOn: Binding(
+                            get: { uiSet.usedDropSet },
+                            set: { onDropSetToggled($0) }
+                        ))
+                        .labelsHidden()
+                        .scaleEffect(0.85)
+                        Text("Drop set")
+                            .font(.caption2)
+                            .foregroundStyle(uiSet.usedDropSet ? Color.primary : Color.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 2)
+            }
+
+            // RP pattern field (shown when toggle is on)
+            if uiSet.usedRestPause {
+                TextField("RP pattern (e.g. 10+4+3)", text: Binding(
+                    get: { uiSet.restPausePattern },
+                    set: { onRPPatternChanged($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .disabled(isLocked)
+                .opacity(isLocked ? 0.6 : 1.0)
+            }
+
+            // Drop set pattern field (shown when toggle is on)
+            if uiSet.usedDropSet {
+                TextField("Drop pattern (e.g. 120x12, 100x8)", text: Binding(
+                    get: { uiSet.dropSetPattern },
+                    set: { onDropSetPatternChanged($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .disabled(isLocked)
+                .opacity(isLocked ? 0.6 : 1.0)
+            }
         }
         .padding(.vertical, 4)
-        
     }
 }
 
@@ -1246,6 +1259,23 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].restPausePattern = text
     }
     
+    func updateDropSetToggle(exerciseID: UUID, setIndex: Int, isOn: Bool) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].usedDropSet = isOn
+        if !isOn {
+            exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
+        }
+    }
+
+    func updateDropSetPattern(exerciseID: UUID, setIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+
+        exercises[exerciseIdx].sets[setIdx].dropSetPattern = text
+    }
+    
     func skipSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
@@ -1256,6 +1286,8 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].actualRIR = nil
         exercises[exerciseIdx].sets[setIdx].usedRestPause = false
         exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
+        exercises[exerciseIdx].sets[setIdx].usedDropSet = false
+        exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
         exercises[exerciseIdx].sets[setIdx].actualLoadText = "0"
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
 
@@ -1272,6 +1304,8 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].actualRIR = nil
         exercises[exerciseIdx].sets[setIdx].usedRestPause = false
         exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
+        exercises[exerciseIdx].sets[setIdx].usedDropSet = false
+        exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
         exercises[exerciseIdx].sets[setIdx].actualLoadText = exercises[exerciseIdx].sets[setIdx].plannedLoad == 0
             ? "0"
             : String(format: "%.1f", exercises[exerciseIdx].sets[setIdx].plannedLoad)
@@ -1563,6 +1597,7 @@ final class SessionScreenViewModel: ObservableObject {
             item.actualRIRs              = Array(repeating: 0, count: setCount)
             item.usedRestPauseFlags      = Array(repeating: false, count: setCount)
             item.restPausePatternsBySet  = Array(repeating: "", count: setCount)
+            item.dropSetPatternsBySet   = Array(repeating: "", count: setCount)
 
             for uiSet in uiExercise.sets {
                 let idx = uiSet.index - 1
@@ -1591,6 +1626,8 @@ final class SessionScreenViewModel: ObservableObject {
                     item.restPausePatternsBySet[idx] = "SKIP"
                 } else {
                     item.restPausePatternsBySet[idx] = uiSet.restPausePattern
+                    // Drop set tracking
+                    item.dropSetPatternsBySet[idx] = uiSet.usedDropSet ? uiSet.dropSetPattern : ""
                 }
             }
 
@@ -2274,6 +2311,18 @@ extension SessionScreenViewModel {
 
                 let isSkipped = (rpPatternRaw == "SKIP")
                 let rpPattern = isSkipped ? "" : rpPatternRaw
+                // ---- Drop set flags/patterns ----
+                let dropUsed: Bool = {
+                    if idx < item.dropSetPatternsBySet.count {
+                        return !item.dropSetPatternsBySet[idx].isEmpty
+                    }
+                    return false
+                }()
+
+                let dropPattern: String = {
+                    if idx < item.dropSetPatternsBySet.count { return item.dropSetPatternsBySet[idx] }
+                    return ""
+                }()
 
                 // ---- Status ----
                 let status: SetStatus
@@ -2296,7 +2345,9 @@ extension SessionScreenViewModel {
                         actualRIR: actualRIR,
                         status: status,
                         usedRestPause: rpUsed,
-                        restPausePattern: rpPattern
+                        restPausePattern: rpPattern,
+                        usedDropSet: dropUsed,
+                        dropSetPattern: dropPattern
                     )
                 )
             }
@@ -2500,6 +2551,8 @@ struct UISessionSet: Identifiable {
     var status: SetStatus
     var usedRestPause: Bool
     var restPausePattern: String
+    var usedDropSet: Bool
+    var dropSetPattern: String  // format: "120x12,100x8" — empty if no drop set
 
     var plannedLoadText: String
     var plannedRepsText: String
@@ -2516,7 +2569,9 @@ struct UISessionSet: Identifiable {
         actualRIR: Int? = nil,
         status: SetStatus = .notStarted,
         usedRestPause: Bool = false,
-        restPausePattern: String = ""
+        restPausePattern: String = "",
+        usedDropSet: Bool = false,
+        dropSetPattern: String = ""
     ) {
         self.index = index
         self.plannedLoad = plannedLoad
@@ -2528,6 +2583,8 @@ struct UISessionSet: Identifiable {
         self.status = status
         self.usedRestPause = usedRestPause
         self.restPausePattern = restPausePattern
+        self.usedDropSet = usedDropSet
+        self.dropSetPattern = dropSetPattern
         let planLoadString: String
         if plannedLoad == 0 {
             planLoadString = "0"

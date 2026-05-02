@@ -216,6 +216,7 @@ final class SessionItem {
     var actualRIRs: [Int] = []
     var usedRestPauseFlags: [Bool] = []
     var restPausePatternsBySet: [String] = []
+    var dropSetPatternsBySet: [String] = []
 
     var isCompleted: Bool
     var isPR: Bool
@@ -257,6 +258,7 @@ final class SessionItem {
         actualRIRs: [Int] = [],
         usedRestPauseFlags: [Bool] = [],
         restPausePatternsBySet: [String] = [],
+        dropSetPatternsBySet: [String] = [],
         isCompleted: Bool = false,
         isPR: Bool = false,
         coachNote: String? = nil,
@@ -297,6 +299,7 @@ final class SessionItem {
         self.actualRIRs = actualRIRs
         self.usedRestPauseFlags = usedRestPauseFlags
         self.restPausePatternsBySet = restPausePatternsBySet
+        self.dropSetPatternsBySet = dropSetPatternsBySet
 
         self.isCompleted = isCompleted
         self.isPR = isPR
