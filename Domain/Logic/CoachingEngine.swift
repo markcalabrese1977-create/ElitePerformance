@@ -80,6 +80,24 @@ struct CoachingEngine {
             }
         }
         let restPauseCount = primaryRP.filter { $0 }.count
+        
+        // Drop set detection — computed once, used across multiple checks
+        let lastPrimaryIdx = primaryIndices.last ?? 0
+        let dropPatternForLastSet: String = {
+            if lastPrimaryIdx < item.dropSetPatternsBySet.count {
+                return item.dropSetPatternsBySet[lastPrimaryIdx]
+            }
+            return ""
+        }()
+        let lastSetHadGoodDropSet: Bool = {
+            guard !dropPatternForLastSet.isEmpty else { return false }
+            let firstDrop = dropPatternForLastSet.split(separator: ",").first.map(String.init) ?? ""
+            let parts = firstDrop.split(separator: "x")
+            if parts.count == 2, let dropReps = Int(parts[1]) {
+                return dropReps >= max(1, targetReps / 2)
+            }
+            return !firstDrop.isEmpty
+        }()
 
         func nextLoad(from base: Double, step: Double) -> Double? {
             guard base > 0 else { return nil }
@@ -106,8 +124,14 @@ struct CoachingEngine {
         }()
 
         // 0) Downshift / Re-baseline detection
+        // Skip if the last working set had a drop set — the load drop was intentional
+        let lastWorkingIdx = workingIndices.last ?? 0
+        let lastSetHadDropSet = lastWorkingIdx < item.dropSetPatternsBySet.count &&
+            !item.dropSetPatternsBySet[lastWorkingIdx].isEmpty
+
         let workingLoads = workingIndices.map { loads[$0] }
-        if workingIndices.count >= 2,
+        if !lastSetHadDropSet,
+           workingIndices.count >= 2,
            let maxLoad = workingLoads.max(),
            let minLoad = workingLoads.min(),
            maxLoad > 0,
@@ -183,8 +207,14 @@ struct CoachingEngine {
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // 2) Under target reps → fix reps first
+        // 2) Under target reps → fix reps first (unless drop set was used as a finisher)
         if bestReps < targetReps {
+            if lastSetHadGoodDropSet {
+                let msg = """
+                Your working sets came in below the planned reps, but you finished the last set with a drop set to get volume in. Hold this load and focus on building the working sets up before increasing.
+                """
+                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+            }
             let msg = """
             Your best \(primaryWorkPhrase) was below the planned reps. This looks like a repeat-load day. Bring reps up before trying to increase load.
             """
@@ -240,6 +270,16 @@ struct CoachingEngine {
                 """
             }
 
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
+        }
+        
+        // 3.6) Hit top reps on all growth sets + drop set with good reps → increase
+        if allPrimaryAtTop && rirOnTargetForIncrease && lastSetHadGoodDropSet {
+            let step = loadStep(for: baseLoad)
+            let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            let msg = """
+            You hit the planned reps across your working sets and pushed further with a drop set on the last set. The drop set confirms you had more in the tank. This supports a load increase next session.
+            """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
         }
 
