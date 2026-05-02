@@ -1172,6 +1172,10 @@ final class SessionScreenViewModel: ObservableObject {
                     while matchingItem.restPausePatternsBySet.count <= idx {
                         matchingItem.restPausePatternsBySet.append("")
                     }
+                    
+                    while matchingItem.dropSetPatternsBySet.count <= idx {
+                        matchingItem.dropSetPatternsBySet.append("")
+                    }
 
                     matchingItem.actualReps[idx] = reps
                     matchingItem.actualLoads[idx] = loadToStore
@@ -1183,6 +1187,7 @@ final class SessionScreenViewModel: ObservableObject {
                     matchingItem.actualRIRs[idx] = rirToStore
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
+                    matchingItem.dropSetPatternsBySet[idx] = set.dropSetPattern
 
                     if let recommendation = CoachingEngine.recommend(for: matchingItem) {
                         exercise.coachMessage = recommendation.message
