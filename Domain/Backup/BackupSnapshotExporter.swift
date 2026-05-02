@@ -136,6 +136,7 @@ enum BackupSnapshotExporter {
                                 actualRIRs: item.actualRIRs,
                                 usedRestPauseFlags: item.usedRestPauseFlags,
                                 restPausePatternsBySet: item.restPausePatternsBySet,
+                                dropSetPatternsBySet: item.dropSetPatternsBySet,
 
                                 isCompleted: item.isCompleted,
                                 isPR: item.isPR,

@@ -149,6 +149,7 @@ enum BackupSnapshotImporter {
                     actualRIRs: itemDTO.actualRIRs,
                     usedRestPauseFlags: itemDTO.usedRestPauseFlags,
                     restPausePatternsBySet: itemDTO.restPausePatternsBySet,
+                    dropSetPatternsBySet: itemDTO.dropSetPatternsBySet,
                     isCompleted: itemDTO.isCompleted,
                     isPR: itemDTO.isPR,
                     coachNote: itemDTO.coachNote,
