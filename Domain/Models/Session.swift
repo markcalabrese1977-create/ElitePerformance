@@ -391,7 +391,13 @@ extension Session {
             default: return "D?"
             }
         }()
-
         return "W\(week)\(dayText)"
+    }
+}
+extension Session {
+    /// True when this session falls in the deload week of its meso.
+    var isDeloadWeek: Bool {
+        guard let total = meso?.totalWeeks, total > 0 else { return false }
+        return weekIndex == total
     }
 }

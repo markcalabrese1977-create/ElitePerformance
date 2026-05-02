@@ -158,7 +158,8 @@ struct ProgramGenerator {
             name: mesoName,
             startDate: today,
             status: .active,
-            notes: "Seeded via ProgramGenerator on \(today.formatted(date: .abbreviated, time: .omitted))"
+            notes: "Seeded via ProgramGenerator on \(today.formatted(date: .abbreviated, time: .omitted))",
+            totalWeeks: totalWeeksCount
         )
         context.insert(mesoBlock)
 

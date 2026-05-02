@@ -20,6 +20,10 @@ final class MesoBlock {
 
     /// Optional notes like “Cut block” / “Deload week 6” etc.
     var notes: String?
+    
+    /// Total number of weeks in this meso (hard weeks + deload if included).
+    /// Used by CoachingEngine for phase detection.
+    var totalWeeks: Int?
 
     /// Sessions that belong to this meso
     @Relationship(deleteRule: .cascade) var sessions: [Session] = []
@@ -31,7 +35,8 @@ final class MesoBlock {
         name: String,
         startDate: Date,
         status: MesoStatus = .draft,
-        notes: String? = nil
+        notes: String? = nil,
+        totalWeeks: Int? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -41,5 +46,6 @@ final class MesoBlock {
         self.startDate = startDate
         self.status = status
         self.notes = notes
+        self.totalWeeks = totalWeeks
     }
 }
