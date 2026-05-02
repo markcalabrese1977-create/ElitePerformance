@@ -17,7 +17,9 @@ struct ElitePerformanceApp: App {
             SessionHistory.self,
             SessionHistoryExercise.self,
             ExerciseNote.self,
-            AppState.self
+            AppState.self,
+            MesoBlock.self,
+            UserProfile.self
         ])
 
         let appSupport = FileManager.default.urls(
