@@ -669,12 +669,15 @@ extension SessionItem {
             return "RP: \(pattern)"
         }
     }
-    /// Description of drop set for a specific set index, e.g. "Drop: 120x12,100x8".
     func dropSetDescription(forSetAt index: Int) -> String? {
         guard index < dropSetPatternsBySet.count else { return nil }
         let pattern = dropSetPatternsBySet[index]
         guard !pattern.isEmpty else { return nil }
-        return "Drop: \(pattern)"
+        let entries = DropSetEntry.parse(from: pattern)
+        if entries.isEmpty { return "Drop set" }
+        return entries.enumerated().map { i, entry in
+            "Drop \(i + 1): \(entry.loadText) × \(entry.repsText)"
+        }.joined(separator: "\n")
     }
 }
 

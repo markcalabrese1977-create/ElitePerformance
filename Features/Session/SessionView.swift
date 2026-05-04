@@ -140,11 +140,26 @@ struct SessionView: View {
                                 isOn: isOn
                             )
                         },
-                        onDropSetPatternChanged: { [exerciseId = exercise.id] setIndex, text in
-                            viewModel.updateDropSetPattern(
+                        onDropSetLoadChanged: { [exerciseId = exercise.id] setIndex, dropIndex, text in
+                            viewModel.updateDropSetLoad(
                                 exerciseID: exerciseId,
                                 setIndex: setIndex,
+                                dropIndex: dropIndex,
                                 text: text
+                            )
+                        },
+                        onDropSetRepsChanged: { [exerciseId = exercise.id] setIndex, dropIndex, text in
+                            viewModel.updateDropSetReps(
+                                exerciseID: exerciseId,
+                                setIndex: setIndex,
+                                dropIndex: dropIndex,
+                                text: text
+                            )
+                        },
+                        onDropSetAdded: { [exerciseId = exercise.id] setIndex in
+                            viewModel.addDropSet(
+                                exerciseID: exerciseId,
+                                setIndex: setIndex
                             )
                         },
                         onLogTapped: { setIndex in
@@ -496,7 +511,9 @@ private struct SessionExerciseCardView: View {
     let onRPToggled: (_ setIndex: Int, _ isOn: Bool) -> Void
     let onRPPatternChanged: (_ setIndex: Int, _ text: String) -> Void
     let onDropSetToggled: (_ setIndex: Int, _ isOn: Bool) -> Void
-    let onDropSetPatternChanged: (_ setIndex: Int, _ text: String) -> Void
+    let onDropSetLoadChanged: (_ setIndex: Int, _ dropIndex: Int, _ text: String) -> Void
+    let onDropSetRepsChanged: (_ setIndex: Int, _ dropIndex: Int, _ text: String) -> Void
+    let onDropSetAdded: (_ setIndex: Int) -> Void
 
     let onLogTapped: (_ setIndex: Int) -> Void
     let onSkipTapped: (_ setIndex: Int) -> Void
@@ -750,8 +767,14 @@ private struct SessionExerciseCardView: View {
                             onDropSetToggled: { isOn in
                                 onDropSetToggled(set.index, isOn)
                             },
-                            onDropSetPatternChanged: { text in
-                                onDropSetPatternChanged(set.index, text)
+                            onDropSetLoadChanged: { dropIndex, text in
+                                onDropSetLoadChanged(set.index, dropIndex, text)
+                            },
+                            onDropSetRepsChanged: { dropIndex, text in
+                                onDropSetRepsChanged(set.index, dropIndex, text)
+                            },
+                            onDropSetAdded: {
+                                onDropSetAdded(set.index)
                             },
                             onLog: {
                                 onLogTapped(set.index)
@@ -798,7 +821,10 @@ private struct SessionSetRowView: View {
     let onRPToggled: (Bool) -> Void
     let onRPPatternChanged: (String) -> Void
     let onDropSetToggled: (Bool) -> Void
-    let onDropSetPatternChanged: (String) -> Void
+    let onDropSetLoadChanged: (_ dropIndex: Int, _ text: String) -> Void
+    let onDropSetRepsChanged: (_ dropIndex: Int, _ text: String) -> Void
+    let onDropSetAdded: () -> Void
+
 
     let onLog: () -> Void
     let onSkip: () -> Void
@@ -990,16 +1016,63 @@ private struct SessionSetRowView: View {
                 .opacity(isLocked ? 0.6 : 1.0)
             }
 
-            // Drop set pattern field (shown when toggle is on)
+            // Drop set inputs (shown when toggle is on)
             if uiSet.usedDropSet {
-                TextField("Drop pattern (e.g. 120x12, 100x8)", text: Binding(
-                    get: { uiSet.dropSetPattern },
-                    set: { onDropSetPatternChanged($0) }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
-                .disabled(isLocked)
-                .opacity(isLocked ? 0.6 : 1.0)
+                VStack(spacing: 4) {
+                    ForEach(Array(uiSet.dropSets.enumerated()), id: \.element.id) { dropIndex, drop in
+                        HStack(spacing: 8) {
+                            Text("Drop \(dropIndex + 1)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Load")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                TextField("0", text: Binding(
+                                    get: { drop.loadText },
+                                    set: { onDropSetLoadChanged(dropIndex, $0) }
+                                ))
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 72)
+                                .disabled(isLocked)
+                                .opacity(isLocked ? 0.6 : 1.0)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reps")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                TextField("0", text: Binding(
+                                    get: { drop.repsText },
+                                    set: { onDropSetRepsChanged(dropIndex, $0) }
+                                ))
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 52)
+                                .disabled(isLocked)
+                                .opacity(isLocked ? 0.6 : 1.0)
+                            }
+
+                            Spacer()
+                        }
+                    }
+
+                    if !isLocked && uiSet.dropSets.count < 3 {
+                        Button {
+                            onDropSetAdded()
+                        } label: {
+                            Label("Add Drop", systemImage: "plus.circle")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.top, 2)
+                    }
+                }
+                .padding(.top, 4)
             }
         }
         .padding(.vertical, 4)
@@ -1187,7 +1260,9 @@ final class SessionScreenViewModel: ObservableObject {
                     matchingItem.actualRIRs[idx] = rirToStore
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
-                    matchingItem.dropSetPatternsBySet[idx] = set.dropSetPattern
+                    matchingItem.dropSetPatternsBySet[idx] = set.usedDropSet && !set.dropSets.isEmpty
+                        ? set.dropSets.map { $0.serialized }.joined(separator: ",")
+                        : ""
 
                     if let recommendation = CoachingEngine.recommend(for: matchingItem) {
                         exercise.coachMessage = recommendation.message
@@ -1269,16 +1344,32 @@ final class SessionScreenViewModel: ObservableObject {
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
 
         exercises[exerciseIdx].sets[setIdx].usedDropSet = isOn
-        if !isOn {
-            exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
+        if isOn && exercises[exerciseIdx].sets[setIdx].dropSets.isEmpty {
+            exercises[exerciseIdx].sets[setIdx].dropSets = [DropSetEntry()]
+        } else if !isOn {
+            exercises[exerciseIdx].sets[setIdx].dropSets = []
         }
     }
 
-    func updateDropSetPattern(exerciseID: UUID, setIndex: Int, text: String) {
+    func updateDropSetLoad(exerciseID: UUID, setIndex: Int, dropIndex: Int, text: String) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        guard dropIndex < exercises[exerciseIdx].sets[setIdx].dropSets.count else { return }
+        exercises[exerciseIdx].sets[setIdx].dropSets[dropIndex].loadText = text
+    }
 
-        exercises[exerciseIdx].sets[setIdx].dropSetPattern = text
+    func updateDropSetReps(exerciseID: UUID, setIndex: Int, dropIndex: Int, text: String) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        guard dropIndex < exercises[exerciseIdx].sets[setIdx].dropSets.count else { return }
+        exercises[exerciseIdx].sets[setIdx].dropSets[dropIndex].repsText = text
+    }
+
+    func addDropSet(exerciseID: UUID, setIndex: Int) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        guard exercises[exerciseIdx].sets[setIdx].dropSets.count < 3 else { return }
+        exercises[exerciseIdx].sets[setIdx].dropSets.append(DropSetEntry())
     }
     
     func skipSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
@@ -1292,7 +1383,7 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].usedRestPause = false
         exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
         exercises[exerciseIdx].sets[setIdx].usedDropSet = false
-        exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
+        exercises[exerciseIdx].sets[setIdx].dropSets = []
         exercises[exerciseIdx].sets[setIdx].actualLoadText = "0"
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
 
@@ -1310,7 +1401,7 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].usedRestPause = false
         exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
         exercises[exerciseIdx].sets[setIdx].usedDropSet = false
-        exercises[exerciseIdx].sets[setIdx].dropSetPattern = ""
+        exercises[exerciseIdx].sets[setIdx].dropSets = []
         exercises[exerciseIdx].sets[setIdx].actualLoadText = exercises[exerciseIdx].sets[setIdx].plannedLoad == 0
             ? "0"
             : String(format: "%.1f", exercises[exerciseIdx].sets[setIdx].plannedLoad)
@@ -1632,7 +1723,11 @@ final class SessionScreenViewModel: ObservableObject {
                 } else {
                     item.restPausePatternsBySet[idx] = uiSet.restPausePattern
                     // Drop set tracking
-                    item.dropSetPatternsBySet[idx] = uiSet.usedDropSet ? uiSet.dropSetPattern : ""
+                    if uiSet.usedDropSet && !uiSet.dropSets.isEmpty {
+                        item.dropSetPatternsBySet[idx] = uiSet.dropSets.map { $0.serialized }.joined(separator: ",")
+                    } else {
+                        item.dropSetPatternsBySet[idx] = ""
+                    }
                 }
             }
 
@@ -2324,9 +2419,11 @@ extension SessionScreenViewModel {
                     return false
                 }()
 
-                let dropPattern: String = {
-                    if idx < item.dropSetPatternsBySet.count { return item.dropSetPatternsBySet[idx] }
-                    return ""
+                let dropEntries: [DropSetEntry] = {
+                    if idx < item.dropSetPatternsBySet.count {
+                        return DropSetEntry.parse(from: item.dropSetPatternsBySet[idx])
+                    }
+                    return []
                 }()
 
                 // ---- Status ----
@@ -2352,7 +2449,7 @@ extension SessionScreenViewModel {
                         usedRestPause: rpUsed,
                         restPausePattern: rpPattern,
                         usedDropSet: dropUsed,
-                        dropSetPattern: dropPattern
+                        dropSets: dropEntries
                     )
                 )
             }
@@ -2541,6 +2638,9 @@ struct UISessionExercise: Identifiable {
         self.coachMessage = coachMessage
     }
 }
+
+
+
 struct UISessionSet: Identifiable {
     var id: Int { index }
     let index: Int
@@ -2557,7 +2657,7 @@ struct UISessionSet: Identifiable {
     var usedRestPause: Bool
     var restPausePattern: String
     var usedDropSet: Bool
-    var dropSetPattern: String  // format: "120x12,100x8" — empty if no drop set
+    var dropSets: [DropSetEntry]
 
     var plannedLoadText: String
     var plannedRepsText: String
@@ -2576,7 +2676,7 @@ struct UISessionSet: Identifiable {
         usedRestPause: Bool = false,
         restPausePattern: String = "",
         usedDropSet: Bool = false,
-        dropSetPattern: String = ""
+        dropSets: [DropSetEntry] = []
     ) {
         self.index = index
         self.plannedLoad = plannedLoad
@@ -2589,7 +2689,7 @@ struct UISessionSet: Identifiable {
         self.usedRestPause = usedRestPause
         self.restPausePattern = restPausePattern
         self.usedDropSet = usedDropSet
-        self.dropSetPattern = dropSetPattern
+        self.dropSets = dropSets
         let planLoadString: String
         if plannedLoad == 0 {
             planLoadString = "0"
