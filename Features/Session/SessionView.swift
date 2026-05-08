@@ -857,10 +857,10 @@ private struct SessionSetRowView: View {
                 }
             }
 
-            // PLAN line
-            Text("PLAN \(uiSet.plannedDescription(with: repRange))")
+            // PLAN / SUGGESTED line
+            Text("\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange))")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
