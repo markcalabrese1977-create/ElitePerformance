@@ -64,18 +64,46 @@ struct PlanMemoryEngine {
             targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
 
-            // 0.4 — Wire CoachingEngine: if engine has a load suggestion, apply it
-            // Load only — never write message to coachNote here
-            if let recommendation = CoachingEngine.recommend(for: sourceItem),
-               let nextLoad = recommendation.nextSuggestedLoad,
-               nextLoad > 0 {
-                targetItem.suggestedLoad = nextLoad
-                // Overwrite all planned load slots with the coached load
-                targetItem.plannedLoadsBySet = Array(
-                    repeating: nextLoad,
-                    count: targetItem.plannedLoadsBySet.count
-                )
-            }
+            // 0.4 + 1.2 — CoachingEngine load suggestion + RIR-adjusted carry-forward
+            let baseLoad: Double = {
+                if let recommendation = CoachingEngine.recommend(for: sourceItem),
+                   let nextLoad = recommendation.nextSuggestedLoad,
+                   nextLoad > 0 {
+                    return nextLoad
+                }
+                return sourceItem.suggestedLoad
+            }()
+
+            guard baseLoad > 0 else { continue }
+
+            // 1.2 — RIR delta adjustment using e1RM
+            let sourceRIR = sourceItem.targetRIR
+            let targetRIR = targetItem.targetRIR
+            let sourceReps = sourceItem.targetReps
+            let targetReps = targetItem.targetReps
+
+            let adjustedLoad: Double = {
+                // Only adjust if RIR or reps differ between sessions
+                guard sourceRIR != targetRIR || sourceReps != targetReps else {
+                    return baseLoad
+                }
+                // Compute e1RM from the coached/carried load at source conditions
+                let e1rm = E1RMCalculator.e1RM(load: baseLoad, reps: sourceReps)
+                guard e1rm > 0 else { return baseLoad }
+                // Compute target load at new RIR and rep target
+                let rawLoad = E1RMCalculator.load(for: e1rm, reps: targetReps, targetRIR: targetRIR)
+                guard rawLoad > 0 else { return baseLoad }
+                // Round to nearest 2.5 — will be replaced with UserProfile.minLoadIncrement in 1.4
+                return E1RMCalculator.rounded(rawLoad, increment: 2.5)
+            }()
+
+            let finalLoad = min(adjustedLoad, baseLoad * 2.0) // sanity cap
+
+            targetItem.suggestedLoad = finalLoad
+            targetItem.plannedLoadsBySet = Array(
+                repeating: finalLoad,
+                count: targetItem.plannedLoadsBySet.count
+            )
         }
     }
 
