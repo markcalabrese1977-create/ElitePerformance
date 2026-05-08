@@ -59,7 +59,7 @@ struct ProgramPickerView: View {
                 return option.goalTag == "Build muscle"
             case .strength:
                 return option.goalTag == "Strength" || option.goalTag == "Build muscle"
-            case .maintenance:
+            case .longevity:
                 return true
             }
         }
@@ -99,7 +99,7 @@ struct ProgramPickerView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("We’ve matched a few starting points based on your answers.")
                 .font(.subheadline)
-            Text("\(result.goal.shortTag) · \(result.daysPerWeek) days/week · \(result.experience.rawValue)")
+            Text("\(result.goal.displayName) · \(result.daysPerWeek) days/week · \(result.experience.rawValue)")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

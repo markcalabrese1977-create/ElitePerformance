@@ -287,7 +287,7 @@ extension ProgramCatalog {
 
         print("DEBUG ProgramCatalog.applyOnboardingResult – goal=\(result.goal), daysPerWeek=\(result.daysPerWeek), weekdays=\(result.trainingDaysOfWeek)")
 
-        let goal = mapGoal(from: result.goal)
+        let goal = result.goal
         let daysPerWeek = max(1, min(weekdays.count, 7))
 
         print("DEBUG ProgramCatalog.applyOnboardingResult – mapped goal=\(goal), derived daysPerWeek from weekdays=\(daysPerWeek), weekdays=\(weekdays), startDate=\(startDay)")
@@ -350,18 +350,5 @@ extension ProgramCatalog {
         print("DEBUG ProgramCatalog.applyOnboardingResult – finished seeding")
     }
 
-    /// Helper: connect onboarding's TrainingGoal to the existing Goal enum.
-    private static func mapGoal(from trainingGoal: TrainingGoal) -> Goal {
-        switch trainingGoal {
-        case .hypertrophy:
-            return .hypertrophy
-        case .strength:
-            return .strength
-        case .fatLoss:
-            return .fatLoss
-        case .maintenance:
-            // Treat maintenance as a "longevity / feel better" style goal
-            return .longevity
-        }
-    }
+
 }

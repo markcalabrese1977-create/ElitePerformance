@@ -62,7 +62,7 @@ enum ProgramApplicationService {
         switch (result.goal, result.daysPerWeek) {
         case (.strength, 4):
             return .upperLower
-        case (.maintenance, 4):
+        case (.longevity, 4):
             return .upperLower
         default:
             return .defaultPPL

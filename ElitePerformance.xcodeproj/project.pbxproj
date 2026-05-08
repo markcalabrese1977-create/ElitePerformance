@@ -47,7 +47,6 @@
 		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
 		D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */; };
 		D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF92ED207A40035FE70 /* ContentView.swift */; };
-		D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */; };
 		D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */; };
 		D5C48EFC2F1C0F6E00495C46 /* ExerciseHistorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C48EFB2F1C0F6D00495C46 /* ExerciseHistorySheet.swift */; };
 		D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D7DB662EC94F150058D515 /* CoachingEngine.swift */; };
@@ -122,7 +121,6 @@
 		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
 		D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPickerView.swift; sourceTree = "<group>"; };
 		D5BEBEF92ED207A40035FE70 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingGoal.swift; sourceTree = "<group>"; };
 		D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistory.swift; sourceTree = "<group>"; };
 		D5C48EFB2F1C0F6D00495C46 /* ExerciseHistorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseHistorySheet.swift; sourceTree = "<group>"; };
 		D5D7DB662EC94F150058D515 /* CoachingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngine.swift; sourceTree = "<group>"; };
@@ -322,7 +320,6 @@
 				D536A6A12EF7265F0036BB4E /* MesoLabel.swift */,
 				D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */,
 				D5BEBEF92ED207A40035FE70 /* ContentView.swift */,
-				D5BEBEFD2ED214F40035FE70 /* TrainingGoal.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -642,7 +639,6 @@
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */,
 				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
 				D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */,
-				D5BEBEFE2ED214F40035FE70 /* TrainingGoal.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */,
 				D550020F2F43E56F00908F53 /* LoadDisplay.swift in Sources */,

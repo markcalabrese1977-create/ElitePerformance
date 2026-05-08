@@ -3,13 +3,13 @@ import SwiftData
 
 // MARK: - Goal labels used in onboarding
 
-extension TrainingGoal {
+extension Goal {
     var title: String {
         switch self {
         case .fatLoss:     return "Lose fat"
         case .hypertrophy: return "Build muscle"
         case .strength:    return "Get stronger"
-        case .maintenance: return "Maintain / move better"
+        case .longevity: return "Maintain / move better"
         }
     }
 
@@ -21,7 +21,7 @@ extension TrainingGoal {
             return "Add muscle with structured training."
         case .strength:
             return "Push heavier weights on key lifts."
-        case .maintenance:
+        case .longevity:
             return "Stay consistent with moderate volume."
         }
     }
@@ -30,7 +30,7 @@ extension TrainingGoal {
 // MARK: - Result model
 
 struct OnboardingResult: Codable {
-    var goal: TrainingGoal
+    var goal: Goal
     var experience: TrainingExperience
     var daysPerWeek: Int
     /// 1 = Sunday ... 7 = Saturday (Calendar weekday values)
@@ -46,7 +46,7 @@ struct OnboardingFlowView: View {
 
     @State private var pageIndex: Int = 0
 
-    @State private var selectedGoal: TrainingGoal = .hypertrophy
+    @State private var selectedGoal: Goal = .hypertrophy
     @State private var selectedExperience: TrainingExperience = .intermediate
     @State private var daysPerWeek: Int = 4
 
@@ -79,7 +79,7 @@ struct OnboardingFlowView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            ForEach(TrainingGoal.allCases, id: \.self) { goal in
+            ForEach(Goal.allCases, id: \.self) { goal in
                 Button {
                     selectedGoal = goal
                 } label: {
