@@ -418,3 +418,20 @@ extension Session {
         return weekIndex == total
     }
 }
+
+extension Session {
+    /// Meso phase derived from position within the block.
+    /// Uses percentage bands so it works for any meso length.
+    var mesoPhase: MesoPhase {
+        guard let total = meso?.totalWeeks, total > 0 else {
+            return .early
+        }
+        let pct = Double(weekIndex) / Double(total)
+        switch pct {
+        case ..<0.30: return .early
+        case ..<0.70: return .mid
+        case ..<0.90: return .late
+        default:      return .deload
+        }
+    }
+}
