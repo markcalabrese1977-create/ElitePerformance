@@ -1212,7 +1212,7 @@ final class SessionScreenViewModel: ObservableObject {
                         ? set.dropSets.map { $0.serialized }.joined(separator: ",")
                         : ""
 
-                    if let recommendation = CoachingEngine.recommend(for: matchingItem) {
+                    if let recommendation = CoachingEngine.recommend(for: matchingItem, mesoPhase: session.mesoPhase) {
                         exercise.coachMessage = recommendation.message
                     } else {
                         exercise.coachMessage = ""

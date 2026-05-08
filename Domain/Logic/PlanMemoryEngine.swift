@@ -68,8 +68,10 @@ struct PlanMemoryEngine {
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
 
             // 0.4 + 1.2 — CoachingEngine load suggestion + RIR-adjusted carry-forward
+            let sourceMesoPhase = session.mesoPhase
+
             let baseLoad: Double = {
-                if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement),
+                if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement, mesoPhase: sourceMesoPhase),
                    let nextLoad = recommendation.nextSuggestedLoad,
                    nextLoad > 0 {
                     return nextLoad

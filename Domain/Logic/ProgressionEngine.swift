@@ -415,16 +415,17 @@ extension SessionItem {
         let loadCount = actualLoads.count
         let rirCount = actualRIRs.count
 
-        let count = min(repCount, min(loadCount, rirCount))
+        let count = max(repCount, max(loadCount, rirCount))
         guard count > 0 else { return [] }
 
         var result: [SetSnapshot] = []
         result.reserveCapacity(count)
 
         for idx in 0..<count {
+            guard idx < repCount, idx < loadCount else { continue }
             let reps = actualReps[idx]
             let load = actualLoads[idx]
-            let rirInt = actualRIRs[idx]
+            let rirInt = idx < rirCount ? actualRIRs[idx] : 0
 
             // Treat as a working set only if we have real data.
             if reps > 0 && load > 0 {

@@ -19,7 +19,7 @@ struct CoachingRecommendation {
 
 struct CoachingEngine {
 
-    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil) -> CoachingRecommendation? {
+    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil, mesoPhase: MesoPhase = .early) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
 
@@ -72,6 +72,20 @@ struct CoachingEngine {
         // Guard 4 — Sanity cap: never suggest more than 2x the previous load
         // Applied at recommendation return sites, stored here for reuse
         let loadSanityCap = baseLoad * 2.0
+        
+        // 2.4 — ProgressionEngine decision for cluster-aware progression
+        let progressionDecision: ProgressionDecision? = {
+            guard let cluster = ExerciseCatalog.cluster(for: item.exerciseId) else { return nil }
+            let config =  ChestArmsLowBackMesoProfile.config(for: cluster)
+            let snapshots = item.toSetSnapshots()
+            guard !snapshots.isEmpty else { return nil }
+            return ProgressionEngine.suggestNext(
+                history: snapshots,
+                currentSets: item.targetSets,
+                config: config,
+                phase: mesoPhase
+            )
+        }()
 
         let plannedTopReps = item.repMax ?? item.plannedRepsBySet.max() ?? item.targetReps
         let plannedBottomReps = item.repMin ?? item.plannedRepsBySet.min() ?? item.targetReps
@@ -132,9 +146,13 @@ struct CoachingEngine {
         }
 
         func loadStep(for base: Double) -> Double {
-            // Use UserProfile increment if provided, otherwise fall back to load-based defaults
             if let increment = minLoadIncrement, increment > 0 {
                 return increment
+            }
+            // Use cluster-aware config if available
+            if let cluster = ExerciseCatalog.cluster(for: item.exerciseId) {
+                let config =  ChestArmsLowBackMesoProfile.config(for: cluster)
+                return config.primaryLoadIncrement
             }
             if base >= 200 { return 5.0 }
             if base >= 100 { return 2.5 }
@@ -287,8 +305,13 @@ struct CoachingEngine {
         }()
 
         if allPrimaryAtTop && rirOnTargetForIncrease && restPauseCount == 0 {
-            let step = loadStep(for: baseLoad)
-            let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            let suggested: Double = {
+                if let decision = progressionDecision, decision.action == .increaseLoad {
+                    return min(decision.nextLoad, loadSanityCap)
+                }
+                let step = loadStep(for: baseLoad)
+                return nextLoad(from: baseLoad, step: step) ?? baseLoad
+            }()
 
             let msg: String
             if plannedWorkingSetCount >= 4 {
@@ -306,8 +329,13 @@ struct CoachingEngine {
         
         // 3.6) Hit top reps on all growth sets + drop set with good reps → increase
         if allPrimaryAtTop && rirOnTargetForIncrease && lastSetHadGoodDropSet {
-            let step = loadStep(for: baseLoad)
-            let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            let suggested: Double = {
+                if let decision = progressionDecision, decision.action == .increaseLoad {
+                    return min(decision.nextLoad, loadSanityCap)
+                }
+                let step = loadStep(for: baseLoad)
+                return nextLoad(from: baseLoad, step: step) ?? baseLoad
+            }()
             let msg = """
             You hit the planned reps across your working sets and pushed further with a drop set on the last set. The drop set confirms you had more in the tank. This supports a load increase next session.
             """
@@ -319,8 +347,13 @@ struct CoachingEngine {
         let notToFailure = (minRIR ?? targetRIR) > 0 && restPauseCount == 0
 
         if comfortablyOverReps && notToFailure {
-            let step = loadStep(for: baseLoad)
-            let suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            let suggested: Double = {
+                if let decision = progressionDecision, decision.action == .increaseLoad {
+                    return min(decision.nextLoad, loadSanityCap)
+                }
+                let step = loadStep(for: baseLoad)
+                return nextLoad(from: baseLoad, step: step) ?? baseLoad
+            }()
 
             let msg = """
             You exceeded the planned reps by a comfortable margin across your \(primaryWorkPhrase) without needing rest-pause or going to failure. This supports a small increase next session if this lift is being load-progressed.
