@@ -25,6 +25,21 @@ struct CoachingEngine {
 
         let count = min(reps.count, loads.count)
         guard count > 0 else { return nil }
+        
+        // Guard 1 — Deload week: never make progression calls on deload sessions
+        if item.waveRaw?.lowercased() == "deload" {
+            return nil
+        }
+
+        // Guard 2 — No baseline: if suggestedLoad is 0 there's nothing to progress from
+        if item.suggestedLoad <= 0 {
+            return nil
+        }
+
+        // Guard 3 — First session baseline: if no actual data has been logged yet, return nil
+        // (count > 0 only checks array size, not whether any real data exists)
+        let hasAnyActualData = (0..<count).contains { reps[$0] > 0 || loads[$0] > 0 }
+        guard hasAnyActualData else { return nil }
 
         // Working sets = any set with both load and reps > 0
         var workingIndices: [Int] = []
@@ -33,6 +48,13 @@ struct CoachingEngine {
                 workingIndices.append(idx)
             }
         }
+        
+        // Warmup pollution guard: exclude sets below 50% of session max load
+        if let maxLoad = workingIndices.map({ loads[$0] }).max(), maxLoad > 0 {
+            workingIndices = workingIndices.filter { loads[$0] >= maxLoad * 0.5 }
+        }
+        guard !workingIndices.isEmpty else { return nil }
+        
         guard !workingIndices.isEmpty else { return nil }
 
         let plannedWorkingSetCount = max(1, item.targetSets)
@@ -46,6 +68,10 @@ struct CoachingEngine {
         let primaryReps = primaryIndices.map { reps[$0] }
 
         let baseLoad: Double = primaryLoads.last ?? 0
+        
+        // Guard 4 — Sanity cap: never suggest more than 2x the previous load
+        // Applied at recommendation return sites, stored here for reuse
+        let loadSanityCap = baseLoad * 2.0
 
         let plannedTopReps = item.repMax ?? item.plannedRepsBySet.max() ?? item.targetReps
         let plannedBottomReps = item.repMin ?? item.plannedRepsBySet.min() ?? item.targetReps
@@ -271,7 +297,7 @@ struct CoachingEngine {
                 """
             }
 
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
         }
         
         // 3.6) Hit top reps on all growth sets + drop set with good reps → increase
@@ -281,7 +307,7 @@ struct CoachingEngine {
             let msg = """
             You hit the planned reps across your working sets and pushed further with a drop set on the last set. The drop set confirms you had more in the tank. This supports a load increase next session.
             """
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
         }
 
         // 4) Clearly over-performing with room in the tank
@@ -295,7 +321,7 @@ struct CoachingEngine {
             let msg = """
             You exceeded the planned reps by a comfortable margin across your \(primaryWorkPhrase) without needing rest-pause or going to failure. This supports a small increase next session if this lift is being load-progressed.
             """
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: suggested)
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
         }
 
         // 5) On target reps at roughly target difficulty → repeat once
