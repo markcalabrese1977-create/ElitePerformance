@@ -63,6 +63,19 @@ struct PlanMemoryEngine {
             // Copy per-set plan arrays
             targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
+
+            // 0.4 — Wire CoachingEngine: if engine has a load suggestion, apply it
+            // Load only — never write message to coachNote here
+            if let recommendation = CoachingEngine.recommend(for: sourceItem),
+               let nextLoad = recommendation.nextSuggestedLoad,
+               nextLoad > 0 {
+                targetItem.suggestedLoad = nextLoad
+                // Overwrite all planned load slots with the coached load
+                targetItem.plannedLoadsBySet = Array(
+                    repeating: nextLoad,
+                    count: targetItem.plannedLoadsBySet.count
+                )
+            }
         }
     }
 
