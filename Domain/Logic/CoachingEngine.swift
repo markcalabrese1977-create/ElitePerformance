@@ -19,7 +19,7 @@ struct CoachingRecommendation {
 
 struct CoachingEngine {
 
-    static func recommend(for item: SessionItem) -> CoachingRecommendation? {
+    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
 
@@ -132,6 +132,10 @@ struct CoachingEngine {
         }
 
         func loadStep(for base: Double) -> Double {
+            // Use UserProfile increment if provided, otherwise fall back to load-based defaults
+            if let increment = minLoadIncrement, increment > 0 {
+                return increment
+            }
             if base >= 200 { return 5.0 }
             if base >= 100 { return 2.5 }
             return 2.0

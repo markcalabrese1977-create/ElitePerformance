@@ -20,6 +20,9 @@ struct PlanMemoryEngine {
     /// where plan is still empty.
     func carryForwardPlans(from session: Session) {
         guard session.status == .inProgress || session.status == .completed else { return }
+        // 1.4 — Fetch UserProfile for load increment preference
+        let profileDescriptor = FetchDescriptor<UserProfile>()
+        let profileIncrement: Double? = try? context.fetch(profileDescriptor).first?.minLoadIncrement
         // Fetch all sessions in chronological order
         let descriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
@@ -66,7 +69,7 @@ struct PlanMemoryEngine {
 
             // 0.4 + 1.2 — CoachingEngine load suggestion + RIR-adjusted carry-forward
             let baseLoad: Double = {
-                if let recommendation = CoachingEngine.recommend(for: sourceItem),
+                if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement),
                    let nextLoad = recommendation.nextSuggestedLoad,
                    nextLoad > 0 {
                     return nextLoad
@@ -93,8 +96,8 @@ struct PlanMemoryEngine {
                 // Compute target load at new RIR and rep target
                 let rawLoad = E1RMCalculator.load(for: e1rm, reps: targetReps, targetRIR: targetRIR)
                 guard rawLoad > 0 else { return baseLoad }
-                // Round to nearest 2.5 — will be replaced with UserProfile.minLoadIncrement in 1.4
-                return E1RMCalculator.rounded(rawLoad, increment: 2.5)
+                let increment = profileIncrement ?? 2.5
+                return E1RMCalculator.rounded(rawLoad, increment: increment)
             }()
 
             let finalLoad = min(adjustedLoad, baseLoad * 2.0) // sanity cap
