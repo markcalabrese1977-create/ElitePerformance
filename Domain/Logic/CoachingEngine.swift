@@ -47,7 +47,8 @@ struct CoachingEngine {
 
         let baseLoad: Double = primaryLoads.last ?? 0
 
-        let plannedTopReps = item.plannedRepsBySet.max() ?? item.targetReps
+        let plannedTopReps = item.repMax ?? item.plannedRepsBySet.max() ?? item.targetReps
+        let plannedBottomReps = item.repMin ?? item.plannedRepsBySet.min() ?? item.targetReps
         let targetReps = item.targetReps
         let targetRIR = item.targetRIR
 
@@ -208,7 +209,7 @@ struct CoachingEngine {
         }
 
         // 2) Under target reps → fix reps first (unless drop set was used as a finisher)
-        if bestReps < targetReps {
+        if bestReps < plannedBottomReps {
             if lastSetHadGoodDropSet {
                 let msg = """
                 Your working sets came in below the planned reps, but you finished the last set with a drop set to get volume in. Hold this load and focus on building the working sets up before increasing.
@@ -216,7 +217,7 @@ struct CoachingEngine {
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
             }
             let msg = """
-            Your best \(primaryWorkPhrase) was below the planned reps. This looks like a repeat-load day. Bring reps up before trying to increase load.
+            Your best \(primaryWorkPhrase) came in below the planned range (\(plannedBottomReps)–\(plannedTopReps) reps). Hold this load and focus on hitting the bottom of the range before considering an increase.
             """
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
@@ -248,7 +249,7 @@ struct CoachingEngine {
         // 3.5) Hit top reps on all evaluated growth sets → bump
         let allPrimaryAtTop =
             primaryReps.count >= growthSetTarget &&
-            primaryReps.allSatisfy { $0 >= plannedTopReps }
+            primaryReps.allSatisfy { $0 >= plannedBottomReps }
 
         let rirOnTargetForIncrease: Bool = {
             guard let avgRIR = avgRIR else { return true }
@@ -298,7 +299,7 @@ struct CoachingEngine {
         }
 
         // 5) On target reps at roughly target difficulty → repeat once
-        let hitRepTarget = bestReps >= plannedTopReps
+        let hitRepTarget = bestReps >= plannedBottomReps
         let nearTargetRIR: Bool = {
             guard let avgRIR = avgRIR else { return true }
             return abs(avgRIR - Double(targetRIR)) <= 0.5

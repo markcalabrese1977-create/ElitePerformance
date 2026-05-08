@@ -9,6 +9,15 @@ enum SessionStatus: String, Codable, CaseIterable {
     case completed
 }
 
+// MARK: - Session Readiness
+
+enum SessionReadiness: String, Codable {
+    case fresh        // better than normal — aggressive increase threshold
+    case normal       // baseline — standard evaluation
+    case fatigued     // tired but trainable — hold load, no increases
+    case compromised  // joint/injury issue — reduce load, shift reps up
+}
+
 // MARK: - Session
 
 @Model
@@ -25,6 +34,14 @@ final class Session {
 
     /// 0 = not set yet, 1–5 = readiness rating for this session.
     var readinessStars: Int
+    
+    /// Structured readiness for coaching engine use. Default normal.
+    var readinessRaw: String = "normal"
+
+    var readiness: SessionReadiness {
+        get { SessionReadiness(rawValue: readinessRaw) ?? .normal }
+        set { readinessRaw = newValue.rawValue }
+    }
 
     /// Optional text recap / notes for this session (end-of-workout recap writes here).
     var sessionNotes: String?
