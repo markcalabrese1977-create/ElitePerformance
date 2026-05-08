@@ -725,3 +725,60 @@ extension ExerciseCatalog {
         return false
     }
 }
+
+// MARK: - Exercise Cluster
+
+extension ExerciseCatalog {
+    /// Returns the progression cluster for a given exercise ID.
+    /// Used by CoachingEngine and ProgressionEngine for cluster-aware load steps.
+    static func cluster(for exerciseId: String) -> ExerciseCluster? {
+        switch exerciseId {
+        case "bench_press",
+             "incline_dumbbell_press",
+             "machine_chest_press":
+            return .primaryChestPress
+
+        case "cable_tricep_rope_pushdown",
+             "overhead_rope_tricep_extension",
+             "smith_machine_dip",
+             "wide_grip_pulldown",
+             "pulldown_normal_grip",
+             "seated_cable_row",
+             "chest_supported_incline_dumbbell_row",
+             "dumbbell_row_single_arm":
+            return .secondaryPressOrArms
+
+        case "hack_squat",
+             "leg_press":
+            return .primaryLeg
+
+        case "seated_cable_fly",
+             "leg_extension",
+             "lying_leg_curl",
+             "seated_leg_curl",
+             "smith_machine_calves",
+             "seated_calf_raise",
+             "leg_press_calf_raise",
+             "ez_bar_curl",
+             "hammer_curl",
+             "cable_rope_hammer_curl",
+             "single_arm_cable_curl",
+             "dumbbell_lateral_raise",
+             "incline_rear_delt_fly",
+             "cable_rope_crunch":
+            return .pumpIsolation
+
+        case "cable_pull_through",
+             "back_extension_45",
+             "bench_back_extension",
+             "pallof_press",
+             "dead_bug",
+             "suitcase_carry",
+             "farmer_carry":
+            return .lowBackStability
+
+        default:
+            return nil
+        }
+    }
+}
