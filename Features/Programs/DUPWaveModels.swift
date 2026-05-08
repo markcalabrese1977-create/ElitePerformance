@@ -116,23 +116,65 @@ struct ProgramExerciseTemplate: Identifiable, Codable {
     let notes: String?
     let prescriptions: [WavePrescription]
 
+    /// Per-week set counts for this exercise. Index 0 = week 1.
+    /// Empty means use WavePrescription.defaultSetCount for all weeks.
+    var setsByWeek: [Int]
+
+    init(
+        id: String,
+        order: Int,
+        exerciseId: String,
+        priority: ExercisePriority,
+        notes: String? = nil,
+        prescriptions: [WavePrescription],
+        setsByWeek: [Int] = []
+    ) {
+        self.id = id
+        self.order = order
+        self.exerciseId = exerciseId
+        self.priority = priority
+        self.notes = notes
+        self.prescriptions = prescriptions
+        self.setsByWeek = setsByWeek
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, order, exerciseId, priority, notes, prescriptions, setsByWeek
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        order = try container.decode(Int.self, forKey: .order)
+        exerciseId = try container.decode(String.self, forKey: .exerciseId)
+        priority = try container.decode(ExercisePriority.self, forKey: .priority)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        prescriptions = try container.decode([WavePrescription].self, forKey: .prescriptions)
+        setsByWeek = (try? container.decode([Int].self, forKey: .setsByWeek)) ?? []
+    }
+
     func prescription(for wave: WaveType) -> WavePrescription? {
         prescriptions.first { $0.wave == wave }
+    }
+
+    /// Set count for a specific week (1-indexed). Falls back to prescription default.
+    func sets(forWeek weekNumber: Int, wave: WaveType) -> Int {
+        let idx = weekNumber - 1
+        if idx >= 0 && idx < setsByWeek.count {
+            return setsByWeek[idx]
+        }
+        return prescription(for: wave)?.defaultSetCount ?? 3
     }
 }
 
 struct WavePrescription: Codable {
     let wave: WaveType
-
     let setMin: Int
     let setMax: Int
-
     let repMin: Int
     let repMax: Int
-
     let targetRIRMin: Int
     let targetRIRMax: Int
-
     let intensifier: IntensifierType
     let intensifierNotes: String?
 
@@ -176,7 +218,6 @@ struct ResolvedExercisePlan {
     let exerciseId: String
     let priority: ExercisePriority
     let notes: String?
-
     let wave: WaveType
     let setMin: Int
     let setMax: Int
@@ -186,7 +227,6 @@ struct ResolvedExercisePlan {
     let targetRIRMax: Int
     let intensifier: IntensifierType
     let intensifierNotes: String?
-
     let defaultSets: Int
     let defaultTargetReps: Int
     let defaultTargetRIR: Int
@@ -235,7 +275,7 @@ struct ProgramTemplateResolver {
                 targetRIRMax: prescription.targetRIRMax,
                 intensifier: prescription.intensifier,
                 intensifierNotes: prescription.intensifierNotes,
-                defaultSets: prescription.defaultSetCount,
+                defaultSets: exercise.sets(forWeek: weekNumber, wave: weekRule.wave),
                 defaultTargetReps: prescription.defaultTargetReps,
                 defaultTargetRIR: prescription.defaultTargetRIR
             )
