@@ -3,8 +3,9 @@ import SwiftData
 
 struct ExerciseHistorySheet: View {
     let exerciseId: String
-    let exerciseName: String
-    let onClose: () -> Void
+        let exerciseName: String
+        let currentWave: String?
+        let onClose: () -> Void
 
     @Environment(\.modelContext) private var context
 
@@ -323,9 +324,14 @@ struct ExerciseHistorySheet: View {
             }
             .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(.secondarySystemBackground))
-            )
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .opacity({
+                            guard let current = currentWave,
+                                  let entryWave = entry.waveLabel else { return 1.0 }
+                            return entryWave.lowercased() == current.lowercased() ? 1.0 : 0.4
+                        }())
         }
         .buttonStyle(.plain)
     }

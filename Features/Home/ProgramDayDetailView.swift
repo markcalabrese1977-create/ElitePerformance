@@ -105,10 +105,11 @@ struct ProgramDayDetailView: View {
         }
         .sheet(item: $historyTarget) { target in
             ExerciseHistorySheet(
-                exerciseId: target.exerciseId,
-                exerciseName: target.exerciseName,
-                onClose: { historyTarget = nil }
-            )
+                            exerciseId: target.exerciseId,
+                            exerciseName: target.exerciseName,
+                            currentWave: nil,
+                            onClose: { historyTarget = nil }
+                        )
         }
         .sheet(item: $noteTarget) { target in
             ExerciseNoteSheet(

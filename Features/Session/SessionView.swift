@@ -351,6 +351,7 @@ struct SessionView: View {
             ExerciseHistorySheet(
                 exerciseId: exerciseId,
                 exerciseName: exerciseName,
+                currentWave: viewModel.currentWaveLabel,
                 onClose: { activeSheet = nil }
             )
 
@@ -1099,6 +1100,17 @@ final class SessionScreenViewModel: ObservableObject {
     @Published var subtitle: String
     @Published var exercises: [UISessionExercise]
 
+    var currentWaveLabel: String? {
+        switch session.items.compactMap({ $0.waveRaw }).first?.lowercased() {
+        case "a": return "Strength"
+        case "b": return "Hypertrophy"
+        case "c": return "Intensification"
+        case "deload": return "Deload"
+        case let w?: return w.capitalized
+        default: return nil
+        }
+    }
+    
     var sessionDate: Date {
         session.date
     }
@@ -1464,16 +1476,36 @@ final class SessionScreenViewModel: ObservableObject {
             sortBy: [SortDescriptor(\Session.date, order: .reverse)]
         )
         let recentLoad: Double = {
-            guard let sessions = try? context.fetch(descriptor) else { return 0 }
-            for session in sessions {
-                if let match = session.items.first(where: { $0.exerciseId == catalogExercise.id }) {
-                    let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
-                    if lastActual > 0 { return lastActual }
-                    if match.suggestedLoad > 0 { return match.suggestedLoad }
-                }
-            }
-            return 0
-        }()
+                    guard let sessions = try? context.fetch(descriptor) else { return 0 }
+
+                    // Derive current wave from existing session items
+                    let currentWave = session.items.compactMap { $0.waveRaw }.first?.lowercased()
+
+                    // Pass 1 — same wave type only
+                    if let wave = currentWave, !wave.isEmpty {
+                        for s in sessions {
+                            guard s.persistentModelID != session.persistentModelID else { continue }
+                            let sessionWave = s.items.compactMap { $0.waveRaw }.first?.lowercased()
+                            guard sessionWave == wave else { continue }
+                            if let match = s.items.first(where: { $0.exerciseId == catalogExercise.id }) {
+                                let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
+                                if lastActual > 0 { return lastActual }
+                                if match.suggestedLoad > 0 { return match.suggestedLoad }
+                            }
+                        }
+                    }
+
+                    // Pass 2 — fallback: any session (original behavior)
+                    for s in sessions {
+                        guard s.persistentModelID != session.persistentModelID else { continue }
+                        if let match = s.items.first(where: { $0.exerciseId == catalogExercise.id }) {
+                            let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
+                            if lastActual > 0 { return lastActual }
+                            if match.suggestedLoad > 0 { return match.suggestedLoad }
+                        }
+                    }
+                    return 0
+                }()
         let defaultLoad: Double = recentLoad
 
         let newItem = SessionItem(
