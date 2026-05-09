@@ -530,7 +530,10 @@ private struct SessionExerciseCardView: View {
 
 
     private var repRange: RepRange {
-        RepRangeRulebook.range(
+        if let min = exercise.repMin, let max = exercise.repMax {
+            return RepRange(min: min, max: max)
+        }
+        return RepRangeRulebook.range(
             forExerciseId: exercise.exerciseId,
             exerciseName: exercise.name
         )
@@ -2338,26 +2341,26 @@ struct UISessionExercise: Identifiable {
 struct UISessionSet: Identifiable {
     var id: Int { index }
     let index: Int
-
+    
     var plannedLoad: Double
     var plannedReps: Int
     let plannedRIR: Int?
-
+    
     var actualLoad: Double?
     var actualReps: Int?
     var actualRIR: Int?
-
+    
     var status: SetStatus
     var usedRestPause: Bool
     var restPausePattern: String
     var usedDropSet: Bool
     var dropSets: [DropSetEntry]
-
+    
     var plannedLoadText: String
     var plannedRepsText: String
     var actualLoadText: String
     var actualRepsText: String
-
+    
     init(
         index: Int,
         plannedLoad: Double,
@@ -2390,23 +2393,23 @@ struct UISessionSet: Identifiable {
         } else {
             planLoadString = String(format: "%.1f", plannedLoad)
         }
-
+        
         self.plannedLoadText = planLoadString
         self.plannedRepsText = "\(plannedReps)"
-
+        
         if let actualLoad {
             self.actualLoadText = String(format: "%.1f", actualLoad)
         } else {
             self.actualLoadText = planLoadString
         }
-
+        
         if let actualReps {
             self.actualRepsText = "\(actualReps)"
         } else {
             self.actualRepsText = "\(plannedReps)"
         }
     }
-
+    
     var plannedDescription: String {
         if plannedLoad == 0 && plannedReps == 0 {
             return "—"
@@ -2429,332 +2432,341 @@ struct UISessionSet: Identifiable {
     }
     func plannedDescription(with repRange: RepRange) -> String {
         if plannedLoad == 0 && plannedReps == 0 { return "—" }
-
+        
         let loadText: String
         if plannedLoad == 0 {
             loadText = "0.0"
         } else {
             loadText = String(format: "%.1f", plannedLoad)
         }
-
-        if let plannedRIR {
-            return "\(loadText) × \(plannedReps) @ \(plannedRIR) RIR"
+        
+        // Show range if min and max differ, otherwise show single target
+        let repsText: String
+        if repRange.min != repRange.max {
+            repsText = "\(repRange.min)–\(repRange.max)"
         } else {
-            return "\(loadText) × \(plannedReps)"
+            repsText = "\(plannedReps)"
+        }
+        
+        if let plannedRIR {
+                    return "\(loadText) × \(repsText) @ \(plannedRIR) RIR"
+                } else {
+                    return "\(loadText) × \(repsText)"
+                }
+            }
+        }
+
+
+        // MARK: - Recap Types + Sheet
+    
+    struct SessionRecap: Identifiable {
+        let id = UUID()
+        let date: Date
+        let weekIndex: Int
+        let title: String
+        let subtitle: String
+        let exercises: [SessionRecapExercise]
+        
+        var exerciseCount: Int {
+            exercises.count
+        }
+        
+        var setCount: Int {
+            exercises.reduce(0) { $0 + $1.sets }
+        }
+        
+        var totalVolume: Double {
+            exercises.reduce(0) { $0 + $1.volume }
+        }
+        
+        /// Total reps logged across all exercises.
+        var totalReps: Int {
+            exercises.reduce(0) { $0 + $1.reps }
+        }
+        
+        /// Last-set RIR values for exercises that have them.
+        private var lastSetRIRs: [Int] {
+            exercises.compactMap { $0.lastSetRIR }
+        }
+        
+        /// Average last-set RIR for the session.
+        var averageLastSetRIR: Double? {
+            guard !lastSetRIRs.isEmpty else { return nil }
+            let sum = lastSetRIRs.reduce(0, +)
+            return Double(sum) / Double(lastSetRIRs.count)
+        }
+        
+        /// Minimum and maximum last-set RIR.
+        var minLastSetRIR: Int? { lastSetRIRs.min() }
+        var maxLastSetRIR: Int? { lastSetRIRs.max() }
+        
+        /// Best estimated 1RM across all exercises (top set only).
+        var bestE1RM: Double? {
+            exercises.compactMap { $0.topE1RM }.max()
         }
     }
+    
+    struct SessionRecapExercise: Identifiable {
+        let id = UUID()
+        let name: String
+        let primaryMuscle: String?
+        let sets: Int
+        let reps: Int
+        let volume: Double
+        let lastSetRIR: Int?
+        let topE1RM: Double?
+    }
+    
+    private struct SessionRecapSheet: View {
+        let recap: SessionRecap
+        let onDone: () -> Void
+        
+        private var dateFormatter: DateFormatter {
+            let df = DateFormatter()
+            df.dateStyle = .medium
+            df.timeStyle = .none
+            return df
         }
-
-
-// MARK: - Recap Types + Sheet
-
-struct SessionRecap: Identifiable {
-    let id = UUID()
-    let date: Date
-    let weekIndex: Int
-    let title: String
-    let subtitle: String
-    let exercises: [SessionRecapExercise]
-
-    var exerciseCount: Int {
-        exercises.count
-    }
-
-    var setCount: Int {
-        exercises.reduce(0) { $0 + $1.sets }
-    }
-
-    var totalVolume: Double {
-        exercises.reduce(0) { $0 + $1.volume }
-    }
-
-    /// Total reps logged across all exercises.
-    var totalReps: Int {
-        exercises.reduce(0) { $0 + $1.reps }
-    }
-
-    /// Last-set RIR values for exercises that have them.
-    private var lastSetRIRs: [Int] {
-        exercises.compactMap { $0.lastSetRIR }
-    }
-
-    /// Average last-set RIR for the session.
-    var averageLastSetRIR: Double? {
-        guard !lastSetRIRs.isEmpty else { return nil }
-        let sum = lastSetRIRs.reduce(0, +)
-        return Double(sum) / Double(lastSetRIRs.count)
-    }
-
-    /// Minimum and maximum last-set RIR.
-    var minLastSetRIR: Int? { lastSetRIRs.min() }
-    var maxLastSetRIR: Int? { lastSetRIRs.max() }
-
-    /// Best estimated 1RM across all exercises (top set only).
-    var bestE1RM: Double? {
-        exercises.compactMap { $0.topE1RM }.max()
-    }
-}
-
-struct SessionRecapExercise: Identifiable {
-    let id = UUID()
-    let name: String
-    let primaryMuscle: String?
-    let sets: Int
-    let reps: Int
-    let volume: Double
-    let lastSetRIR: Int?
-    let topE1RM: Double?
-}
-
-private struct SessionRecapSheet: View {
-    let recap: SessionRecap
-    let onDone: () -> Void
-
-    private var dateFormatter: DateFormatter {
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .none
-        return df
-    }
-
-    private func e1RMString(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return String(format: "%.0f", value)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    headerCard
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("By exercise")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        VStack(spacing: 0) {
-                            ForEach(recap.exercises) { ex in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(ex.name)
-                                        .font(.body)
-                                    HStack(spacing: 12) {
-                                        Text("Sets: \(ex.sets)")
-                                        Text("Reps: \(ex.reps)")
-                                        Text("Vol: \(Int(ex.volume))")
-                                        if let top = ex.topE1RM {
-                                            Text("e1RM: \(e1RMString(top))")
+        
+        private func e1RMString(_ value: Double?) -> String {
+            guard let value else { return "—" }
+            return String(format: "%.0f", value)
+        }
+        
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        headerCard
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("By exercise")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            VStack(spacing: 0) {
+                                ForEach(recap.exercises) { ex in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(ex.name)
+                                            .font(.body)
+                                        HStack(spacing: 12) {
+                                            Text("Sets: \(ex.sets)")
+                                            Text("Reps: \(ex.reps)")
+                                            Text("Vol: \(Int(ex.volume))")
+                                            if let top = ex.topE1RM {
+                                                Text("e1RM: \(e1RMString(top))")
+                                            }
                                         }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                                .padding(.vertical, 8)
-
-                                if ex.id != recap.exercises.last?.id {
-                                    Divider()
+                                    .padding(.vertical, 8)
+                                    
+                                    if ex.id != recap.exercises.last?.id {
+                                        Divider()
+                                    }
                                 }
                             }
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color(.systemBackground))
+                            )
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.systemBackground))
-                        )
                     }
+                    .padding()
                 }
-                .padding()
-            }
-            .navigationTitle("Session Recap")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        onDone()
+                .navigationTitle("Session Recap")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            onDone()
+                        }
                     }
                 }
             }
         }
-    }
-
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(dateFormatter.string(from: recap.date))
-                .font(.headline)
-
-            Text("Week \(recap.weekIndex)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            // Top row
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Exercises")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(recap.exerciseCount)")
-                        .font(.headline)
-                }
-
-                Spacer()
-
-                VStack(alignment: .leading) {
-                    Text("Sets completed")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(recap.setCount)")
-                        .font(.headline)
-                }
-
-                Spacer()
-
-                VStack(alignment: .leading) {
-                    Text("Total volume")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(recap.totalVolume))")
-                        .font(.headline)
-                }
-            }
-
-            if let best = recap.bestE1RM {
+        
+        private var headerCard: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(dateFormatter.string(from: recap.date))
+                    .font(.headline)
+                
+                Text("Week \(recap.weekIndex)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                Divider()
+                
+                // Top row
                 HStack {
-                    Text("Best est. 1RM")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading) {
+                        Text("Exercises")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(recap.exerciseCount)")
+                            .font(.headline)
+                    }
+                    
                     Spacer()
-                    Text(e1RMString(best))
-                        .font(.caption)
+                    
+                    VStack(alignment: .leading) {
+                        Text("Sets completed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(recap.setCount)")
+                            .font(.headline)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .leading) {
+                        Text("Total volume")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(Int(recap.totalVolume))")
+                            .font(.headline)
+                    }
                 }
-            }
-
-            if recap.totalReps > 0 {
-                HStack {
-                    Text("Total reps")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(recap.totalReps)")
-                        .font(.caption)
+                
+                if let best = recap.bestE1RM {
+                    HStack {
+                        Text("Best est. 1RM")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(e1RMString(best))
+                            .font(.caption)
+                    }
                 }
-            }
-
-            if let avg = recap.averageLastSetRIR {
-                HStack {
-                    Text("Avg last-set RIR")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.1f", avg))
-                        .font(.caption)
+                
+                if recap.totalReps > 0 {
+                    HStack {
+                        Text("Total reps")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(recap.totalReps)")
+                            .font(.caption)
+                    }
                 }
-            }
-
-            if let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
-                HStack {
-                    Text("Last-set RIR range")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(minR)–\(maxR)")
-                        .font(.caption)
+                
+                if let avg = recap.averageLastSetRIR {
+                    HStack {
+                        Text("Avg last-set RIR")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.1f", avg))
+                            .font(.caption)
+                    }
+                }
+                
+                if let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
+                    HStack {
+                        Text("Last-set RIR range")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(minR)–\(maxR)")
+                            .font(.caption)
+                    }
                 }
             }
         }
     }
-}
-
-// MARK: - Exercise History Sheet (per exercise)
-
-
-
-// MARK: - Mock Data for Previews
-
-extension SessionScreenViewModel {
-    static var mock: SessionScreenViewModel {
-        let dummySession = Session(
-            date: Date(),
-            weekIndex: 1,
-            items: []
-        )
-
-        let benchSets = [
-            UISessionSet(index: 1, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-            UISessionSet(index: 2, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-            UISessionSet(index: 3, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-            UISessionSet(index: 4, plannedLoad: 185, plannedReps: 8, plannedRIR: 1)
-        ]
-
-        let bench = UISessionExercise(
-            exerciseId: "bench",
-            name: "Barbell Bench Press",
-            detail: "Week 1 · Chest · 8–12 reps @ 2–3 RIR",
-            weekInMeso: 1,
-
-            waveRaw: nil,
-            priorityRaw: nil,
-            setMin: nil,
-            setMax: nil,
-            repMin: nil,
-            repMax: nil,
-            targetRIRMin: nil,
-            targetRIRMax: nil,
-            intensifierRaw: nil,
-            intensifierNotes: nil,
-            prescriptionNotes: nil,
-
-            targetSets: 3,
-            sets: benchSets
-        )
-
-        return SessionScreenViewModel(
-            session: dummySession,
-            title: "Nov 26, 2025",
-            subtitle: "Week 1",
-            exercises: [bench]
-        )
+    
+    // MARK: - Exercise History Sheet (per exercise)
+    
+    
+    
+    // MARK: - Mock Data for Previews
+    
+    extension SessionScreenViewModel {
+        static var mock: SessionScreenViewModel {
+            let dummySession = Session(
+                date: Date(),
+                weekIndex: 1,
+                items: []
+            )
+            
+            let benchSets = [
+                UISessionSet(index: 1, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 2, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 3, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 4, plannedLoad: 185, plannedReps: 8, plannedRIR: 1)
+            ]
+            
+            let bench = UISessionExercise(
+                exerciseId: "bench",
+                name: "Barbell Bench Press",
+                detail: "Week 1 · Chest · 8–12 reps @ 2–3 RIR",
+                weekInMeso: 1,
+                
+                waveRaw: nil,
+                priorityRaw: nil,
+                setMin: nil,
+                setMax: nil,
+                repMin: nil,
+                repMax: nil,
+                targetRIRMin: nil,
+                targetRIRMax: nil,
+                intensifierRaw: nil,
+                intensifierNotes: nil,
+                prescriptionNotes: nil,
+                
+                targetSets: 3,
+                sets: benchSets
+            )
+            
+            return SessionScreenViewModel(
+                session: dummySession,
+                title: "Nov 26, 2025",
+                subtitle: "Week 1",
+                exercises: [bench]
+            )
+        }
     }
-}
-
-// MARK: - Bottom Complete Bar (UI-only)
-
-private struct SessionCompleteBar: View {
-    let isEnabled: Bool
-    let onComplete: () -> Void
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Divider()
-
-            Button(action: onComplete) {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Complete")
-                        .fontWeight(.semibold)
-                    Spacer()
+    
+    // MARK: - Bottom Complete Bar (UI-only)
+    
+    private struct SessionCompleteBar: View {
+        let isEnabled: Bool
+        let onComplete: () -> Void
+        
+        var body: some View {
+            VStack(spacing: 10) {
+                Divider()
+                
+                Button(action: onComplete) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Complete")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(isEnabled ? Color.green : Color.gray.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(isEnabled ? Color.green : Color.gray.opacity(0.6))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .disabled(!isEnabled)
             }
-            .disabled(!isEnabled)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-        .background(.ultraThinMaterial)
-    }
-}
-
-// MARK: - Preview
-
-struct SessionView_Previews: PreviewProvider {
-    static var previews: some View {
-        NavigationStack {
-            SessionView()
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .background(.ultraThinMaterial)
         }
     }
-}
+    
+    // MARK: - Preview
+    
+    struct SessionView_Previews: PreviewProvider {
+        static var previews: some View {
+            NavigationStack {
+                SessionView()
+            }
+        }
+    }
+
