@@ -1459,7 +1459,22 @@ final class SessionScreenViewModel: ObservableObject {
         let defaultSets = 3
         let defaultRIR = 2
         let defaultReps = catalogExercise.isCompound ? 10 : 12
-        let defaultLoad: Double = 0
+        // Look up last known load for this exercise
+        let descriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\Session.date, order: .reverse)]
+        )
+        let recentLoad: Double = {
+            guard let sessions = try? context.fetch(descriptor) else { return 0 }
+            for session in sessions {
+                if let match = session.items.first(where: { $0.exerciseId == catalogExercise.id }) {
+                    let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
+                    if lastActual > 0 { return lastActual }
+                    if match.suggestedLoad > 0 { return match.suggestedLoad }
+                }
+            }
+            return 0
+        }()
+        let defaultLoad: Double = recentLoad
 
         let newItem = SessionItem(
             order: nextOrder,
@@ -1468,8 +1483,7 @@ final class SessionScreenViewModel: ObservableObject {
             targetSets: defaultSets,
             targetRIR: defaultRIR,
             suggestedLoad: defaultLoad,
-            plannedRepsBySet: Array(repeating: defaultReps, count: 4),
-            plannedLoadsBySet: Array(repeating: 0, count: 4)
+            plannedLoadsBySet: Array(repeating: defaultLoad, count: 4)
         )
 
         // Attach to session + persist
