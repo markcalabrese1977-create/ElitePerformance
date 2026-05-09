@@ -180,7 +180,7 @@ struct ProgramDayDetailView: View {
         var foundHistory = false
 
         for item in orderedItems {
-            if let lastLogged = findMostRecentLoggedItem(exerciseId: item.exerciseId, in: sessions) {
+            if let lastLogged = findMostRecentLoggedItem(exerciseId: item.exerciseId, currentWaveRaw: item.waveRaw, in: sessions) {
                 foundHistory = true
 
                 let range = repRange(for: item)
@@ -363,21 +363,31 @@ struct ProgramDayDetailView: View {
         }
     }
 
-    /// Returns the most recent SessionItem (from any past session) that has actual logged work.
-    private func findMostRecentLoggedItem(exerciseId: String, in sessions: [Session]) -> SessionItem? {
+    private func findMostRecentLoggedItem(exerciseId: String, currentWaveRaw: String?, in sessions: [Session]) -> SessionItem? {
         let targetExerciseId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
 
+        func hasActualWork(_ item: SessionItem) -> Bool {
+            item.actualReps.contains(where: { $0 > 0 }) ||
+            item.actualLoads.contains(where: { $0 > 0 })
+        }
+
+        // Pass 1 — same wave type only
+        if let wave = currentWaveRaw?.lowercased(), !wave.isEmpty {
+            for s in sessions {
+                guard s.items.compactMap({ $0.waveRaw }).first?.lowercased() == wave else { continue }
+                guard let match = s.items.first(where: {
+                    ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == targetExerciseId
+                }) else { continue }
+                if hasActualWork(match) { return match }
+            }
+        }
+
+        // Pass 2 — fallback: any session
         for s in sessions {
             guard let match = s.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == targetExerciseId
             }) else { continue }
-
-            let hasActualWork = match.actualReps.contains(where: { $0 > 0 }) ||
-                match.actualLoads.contains(where: { $0 > 0 })
-
-            if hasActualWork {
-                return match
-            }
+            if hasActualWork(match) { return match }
         }
 
         return nil
@@ -444,24 +454,25 @@ struct ProgramDayDetailView: View {
             repsBySet.append(lastLoggedItem.targetReps)
         }
 
-        // Apply your blueprint triggers (load-only version).
-        let earnedWeight = repsBySet.allSatisfy { $0 >= repRange.max }
+        // Use the item's actual prescription as the rep range.
+                // Fall back to the pattern-based rulebook only if prescription data is missing.
+                let prescribedMin = lastLoggedItem.repMin ?? repRange.min
+                let prescribedMax = lastLoggedItem.repMax ?? repRange.max
+                let increment = loadIncrement(for: repRange)
 
-        let missesBottomBadlyCount = repsBySet.filter { $0 < (repRange.min - 1) }.count
-        let tooMuchFatigue = missesBottomBadlyCount >= 2
+                let earnedWeight = repsBySet.allSatisfy { $0 >= prescribedMax }
+                let missesBottomBadlyCount = repsBySet.filter { $0 < (prescribedMin - 1) }.count
+                let tooMuchFatigue = missesBottomBadlyCount >= 2
 
-        if tooMuchFatigue {
-            // Deload / reduce load trigger
-            return roundToIncrement(lastLoad * 0.95, increment: loadIncrement(for: repRange))
-        }
+                if tooMuchFatigue {
+                    return roundToIncrement(lastLoad * 0.95, increment: increment)
+                }
 
-        if earnedWeight {
-            // Load increase trigger
-            return roundToIncrement(lastLoad + loadIncrement(for: repRange), increment: loadIncrement(for: repRange))
-        }
+                if earnedWeight {
+                    return roundToIncrement(lastLoad + increment, increment: increment)
+                }
 
-        // Otherwise hold load
-        return roundToIncrement(lastLoad, increment: loadIncrement(for: repRange))
+                return roundToIncrement(lastLoad, increment: increment)
     }
 
     private func bestLoggedLoad(from item: SessionItem) -> Double {
