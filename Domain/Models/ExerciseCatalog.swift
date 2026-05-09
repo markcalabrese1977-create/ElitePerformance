@@ -733,41 +733,67 @@ extension ExerciseCatalog {
     /// Used by CoachingEngine and ProgressionEngine for cluster-aware load steps.
     static func cluster(for exerciseId: String) -> ExerciseCluster? {
         switch exerciseId {
+
+        // MARK: Primary Chest Press
         case "bench_press",
+             "close_grip_bench_press",
+             "pin_press",
              "incline_dumbbell_press",
-             "machine_chest_press":
+             "dumbbell_press",
+             "machine_chest_press",
+             "seated_cable_press":
             return .primaryChestPress
 
+        // MARK: Secondary Press / Arms
         case "cable_tricep_rope_pushdown",
              "overhead_rope_tricep_extension",
              "smith_machine_dip",
+             "tricep_kickback",
+             "single_arm_cable_tricep_extension",
              "wide_grip_pulldown",
              "pulldown_normal_grip",
+             "dumbbell_row_single_arm",
              "seated_cable_row",
              "chest_supported_incline_dumbbell_row",
-             "dumbbell_row_single_arm":
+             "seated_smith_machine_shoulder_press",
+             "arnold_press":
             return .secondaryPressOrArms
 
+        // MARK: Primary Leg
         case "hack_squat",
-             "leg_press":
+             "leg_press",
+             "bulgarian_split_squat",
+             "walking_lunge",
+             "romanian_deadlift",
+             "machine_hip_thrust":
             return .primaryLeg
 
+        // MARK: Pump / Isolation
         case "seated_cable_fly",
              "leg_extension",
              "lying_leg_curl",
              "seated_leg_curl",
+             "cable_glute_kickback",
              "smith_machine_calves",
              "seated_calf_raise",
              "leg_press_calf_raise",
+             "sled_calf_press",
              "ez_bar_curl",
              "hammer_curl",
              "cable_rope_hammer_curl",
              "single_arm_cable_curl",
+             "supination_pronation_curl",
+             "ez_bar_reverse_curl",
              "dumbbell_lateral_raise",
+             "single_arm_cable_lateral_raise",
              "incline_rear_delt_fly",
-             "cable_rope_crunch":
+             "cable_rope_crunch",
+             "decline_cable_crunch",
+             "hanging_straight_leg_raise",
+             "hanging_knee_raise":
             return .pumpIsolation
 
+        // MARK: Low Back / Stability
         case "cable_pull_through",
              "back_extension_45",
              "bench_back_extension",
