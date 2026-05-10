@@ -110,6 +110,8 @@ struct ProgramDayDetailView: View {
                             currentWave: nil,
                             onClose: { historyTarget = nil }
                         )
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.hidden)
         }
         .sheet(item: $noteTarget) { target in
             ExerciseNoteSheet(

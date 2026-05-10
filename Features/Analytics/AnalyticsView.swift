@@ -16,6 +16,7 @@ struct AnalyticsView: View {
                 summarySection
                 activitySection
                 topExercisesSection
+                allExercisesSection
             }
             .navigationTitle("Analytics")
             .sheet(item: sheetItemBinding) { item in
@@ -25,6 +26,8 @@ struct AnalyticsView: View {
                                     currentWave: nil,
                                     onClose: { selectedExerciseId = nil }
                                 )
+                                .presentationDetents([.large])
+                                .presentationDragIndicator(.hidden)
             }
         }
     }
@@ -53,30 +56,47 @@ struct AnalyticsView: View {
     private var topExercisesSection: some View {
         Section("Top exercises (last 30 days, this meso)") {
             let rows = topExercises(lastDays: 30, limit: 12)
-
             if rows.isEmpty {
                 Text("No exercise data found.")
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(rows) { r in
-                    Button {
-                        selectedExerciseId = ExerciseCatalog.canonicalExerciseId(for: r.exerciseId)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(r.exerciseName)
-                                    .font(.body)
-                                Text("\(r.loggedEntries) logged entries")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("\(r.estimatedVolumeK)k")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    exerciseButton(r)
                 }
+            }
+        }
+    }
+
+    private var allExercisesSection: some View {
+        Section("All exercises") {
+            let all = allExercises(limit: 200)
+            if all.isEmpty {
+                Text("No exercise data found.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(all) { r in
+                    exerciseButton(r)
+                }
+            }
+        }
+    }
+
+    private func exerciseButton(_ r: TopExerciseRow) -> some View {
+        Button {
+            selectedExerciseId = ExerciseCatalog.canonicalExerciseId(for: r.exerciseId)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(r.exerciseName)
+                        .font(.body)
+                    Text("\(r.loggedEntries) logged entries")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(r.estimatedVolumeK)k")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -95,11 +115,9 @@ struct AnalyticsView: View {
         let cal = Calendar.current
         let daysCutoff = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         let cutoff = max(cal.startOfDay(for: daysCutoff), mesoCutoff)
-
         return sessions.filter { $0.status == .completed && $0.date >= cutoff }.count
     }
 
-    /// Counts "logged exercise entries" using the same heuristic: any set-array with load>0 OR reps>0.
     private func computeLoggedExerciseEntryCount(from sessions: [Session]) -> Int {
         var count = 0
         for s in sessions {
@@ -116,32 +134,28 @@ struct AnalyticsView: View {
         let cal = Calendar.current
         let daysCutoff = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         let cutoff = max(cal.startOfDay(for: daysCutoff), mesoCutoff)
-
         let recent = sessions.filter { $0.status == .completed && $0.date >= cutoff }
+        return buildRows(from: recent, limit: limit)
+    }
 
-        // Map: exerciseId -> accumulator
+    private func allExercises(limit: Int) -> [TopExerciseRow] {
+        let completed = sessions.filter { $0.status == .completed }
+        return buildRows(from: completed, limit: limit)
+    }
+
+    private func buildRows(from sessions: [Session], limit: Int) -> [TopExerciseRow] {
         var map: [String: Accum] = [:]
 
-        for s in recent {
+        for s in sessions {
             for item in s.items {
                 let exId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                let name = map[exId]?.exerciseName ?? ExerciseCatalog.displayName(for: exId)
 
-                let name: String
-                if let existing = map[exId]?.exerciseName {
-                    name = existing
-                } else {
-                    name = ExerciseCatalog.displayName(for: exId)
-                }
-
-                var volume: Double = 0
                 let loads = item.actualLoads
                 let reps = item.actualReps
                 let n = min(loads.count, reps.count)
-                if n > 0 {
-                    for i in 0..<n {
-                        volume += Double(loads[i]) * Double(reps[i])
-                    }
-                }
+                var volume: Double = 0
+                for i in 0..<n { volume += Double(loads[i]) * Double(reps[i]) }
 
                 let logged = (loads.contains(where: { $0 > 0 }) || reps.contains(where: { $0 > 0 })) ? 1 : 0
 
@@ -161,15 +175,15 @@ struct AnalyticsView: View {
                 estimatedVolumeK: Int((a.volume / 1000.0).rounded())
             )
         }
-
-        rows.sort {
+        .sorted {
             if $0.loggedEntries != $1.loggedEntries { return $0.loggedEntries > $1.loggedEntries }
             return $0.estimatedVolumeK > $1.estimatedVolumeK
         }
 
-        if rows.count > limit { rows = Array(rows.prefix(limit)) }
-        return rows
+        return rows.count > limit ? Array(rows.prefix(limit)) : rows
     }
+
+    // MARK: - Models
 
     private struct Accum {
         let exerciseId: String

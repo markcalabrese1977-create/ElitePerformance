@@ -349,11 +349,13 @@ struct SessionView: View {
 
         case .history(let exerciseId, let exerciseName):
             ExerciseHistorySheet(
-                exerciseId: exerciseId,
-                exerciseName: exerciseName,
-                currentWave: viewModel.currentWaveLabel,
-                onClose: { activeSheet = nil }
-            )
+                            exerciseId: exerciseId,
+                            exerciseName: exerciseName,
+                            currentWave: viewModel.currentWaveLabel,
+                            onClose: { activeSheet = nil }
+                        )
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.hidden)
 
         case .note(let exerciseId, let exerciseName):
             ExerciseNoteSheet(
