@@ -8,6 +8,8 @@ struct SettingsView: View {
     @Query private var appStates: [AppState]
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
+    
+    
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
@@ -133,7 +135,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             
-            
+            // MARK: - Data Repair
+
+            Section("Data Repair") {
+                Button("Fix Exercise ID Mismatches") {
+                    fixExerciseIdMismatches()
+                }
+                Text("Corrects session items where the stored exercise ID doesn't match the exercise name snapshot. Run this once if history is showing the wrong exercise.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             
             // MARK: - Export
             Section("Export") {
@@ -252,6 +263,36 @@ struct SettingsView: View {
     }
     // MARK: - Safe next-meso generation
 
+    private func fixExerciseIdMismatches() {
+        let descriptor = FetchDescriptor<SessionItem>()
+        guard let items = try? context.fetch(descriptor) else {
+            presentMesoGenerationMessage("Failed to fetch session items.")
+            return
+        }
+
+        var fixedCount = 0
+
+        for item in items {
+            guard let snapshot = item.exerciseNameSnapshot,
+                  !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            guard let correctId = ExerciseCatalog.canonicalBuiltInId(forExerciseName: snapshot) else { continue }
+
+            if item.exerciseId != correctId {
+                print("🔧 Fixing \(snapshot): \(item.exerciseId) → \(correctId)")
+                item.exerciseId = correctId
+                fixedCount += 1
+            }
+        }
+
+        if fixedCount > 0 {
+            try? context.save()
+            presentMesoGenerationMessage("Fixed \(fixedCount) exercise ID mismatch\(fixedCount == 1 ? "" : "es").")
+        } else {
+            presentMesoGenerationMessage("No mismatches found.")
+        }
+    }
+    
     private func presentMesoGenerationMessage(_ message: String) {
         mesoGenerationMessage = message
         showMesoGenerationAlert = true
