@@ -14,6 +14,8 @@ struct ProgramDayDetailView: View {
     @State private var showFeedbackAlert = false
     @State private var historyTarget: HistoryTarget?
     @State private var noteTarget: NoteTarget?
+    @State private var propagateAddToFutureSessions: Bool = true
+    @State private var propagateChangesToFutureSessions: Bool = true
 
     // MARK: - Derived ordered items
 
@@ -144,8 +146,16 @@ struct ProgramDayDetailView: View {
                     .foregroundStyle(.secondary)
 
                 Text("Adjust plan defaults here. Logging happens on the Today tab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Toggle(isOn: $propagateChangesToFutureSessions) {
+                                    Text("Apply changes to future sessions")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .toggleStyle(.switch)
+                                .padding(.top, 4)
             }
             .padding(.vertical, 4)
         }
@@ -536,8 +546,9 @@ struct ProgramDayDetailView: View {
 
         session.items.append(newItem)
 
-        // ✅ NEW: propagate program edits forward into future planned sessions
-        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        if propagateChangesToFutureSessions {
+                    ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+                }
 
         do {
             try modelContext.save()
@@ -558,7 +569,9 @@ struct ProgramDayDetailView: View {
         }
 
         // ✅ NEW: propagate program edits forward into future planned sessions
-        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        if propagateChangesToFutureSessions {
+                    ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+                }
 
         do {
             try modelContext.save()
