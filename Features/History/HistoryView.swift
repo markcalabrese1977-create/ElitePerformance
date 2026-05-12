@@ -262,6 +262,7 @@ private struct HistoryDayDetailView: View {
                 let primary = catalog?.primaryMuscle.rawValue.capitalized
 
                 let waveLabel = waveDisplayName(from: uiEx.waveRaw)
+                    ?? waveDisplayName(from: vm.exercises.compactMap { $0.waveRaw }.first)
                 let prescription = prescriptionLabel(
                     repMin: uiEx.repMin,
                     repMax: uiEx.repMax,
