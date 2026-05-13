@@ -19,7 +19,8 @@ struct ElitePerformanceApp: App {
             ExerciseNote.self,
             AppState.self,
             MesoBlock.self,
-            UserProfile.self
+            UserProfile.self,
+            CustomExercise.self
         ])
 
         let appSupport = FileManager.default.urls(
@@ -45,6 +46,7 @@ struct ElitePerformanceApp: App {
             Apr21SessionHistoryRepairMigration.runIfNeeded(in: context) 
             SessionHistoryBlockBackfill.runIfNeeded(in: context)
             SessionDayLabelBackfill.runIfNeeded(in: context)
+            CustomExerciseStoreMigration.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {

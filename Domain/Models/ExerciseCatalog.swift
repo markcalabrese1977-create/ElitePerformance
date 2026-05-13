@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Primary muscle group focus for an exercise.
 /// This is intentionally coarse – we can refine later if needed.
@@ -55,19 +56,12 @@ struct ExerciseCatalog {
         }
     }
 
-    static func customExercises() -> [CatalogExercise] {
-        if let data = UserDefaults.standard.data(forKey: universalCustomKey),
-           let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data) {
-            return decoded
-        }
-
-        let migrated = loadLegacyCustomExercises()
-        if !migrated.isEmpty {
-            saveCustom(migrated)
-            return migrated
-        }
-
-        return []
+    static func customExercises(in context: ModelContext) -> [CatalogExercise] {
+        let descriptor = FetchDescriptor<CustomExercise>(
+            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
+        )
+        let results = (try? context.fetch(descriptor)) ?? []
+        return results.map { $0.asCatalogExercise }
     }
 
     private static func saveCustom(_ list: [CatalogExercise]) {
@@ -82,7 +76,8 @@ struct ExerciseCatalog {
     static func addCustomExercise(
         name: String,
         primaryMuscle: MuscleGroup,
-        isCompound: Bool
+        isCompound: Bool,
+        in context: ModelContext
     ) -> CatalogExercise {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedName = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -93,30 +88,35 @@ struct ExerciseCatalog {
             return existingBuiltIn
         }
 
-        if let existingCustom = customExercises().first(where: {
+        let existing = customExercises(in: context)
+        if let existingCustom = existing.first(where: {
             $0.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == normalizedName
         }) {
             return existingCustom
         }
 
-        let ex = CatalogExercise(
-            id: "custom_" + UUID().uuidString.lowercased(),
+        let id = "custom_\(UUID().uuidString.lowercased())"
+        let custom = CustomExercise(
+            id: id,
             name: trimmed,
-            primaryMuscle: primaryMuscle,
+            primaryMuscleRaw: primaryMuscle.rawValue,
             isCompound: isCompound
         )
+        context.insert(custom)
+        try? context.save()
+        NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
 
-        var list = customExercises()
-        list.append(ex)
-        list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        saveCustom(list)
-        return ex
+        return CatalogExercise(id: id, name: trimmed, primaryMuscle: primaryMuscle, isCompound: isCompound)
     }
 
-    static func deleteCustomExercises(ids: [String]) {
-        var list = customExercises()
-        list.removeAll { ids.contains($0.id) }
-        saveCustom(list)
+    static func deleteCustomExercises(ids: [String], in context: ModelContext) {
+        let descriptor = FetchDescriptor<CustomExercise>()
+        let all = (try? context.fetch(descriptor)) ?? []
+        for item in all where ids.contains(item.id) {
+            context.delete(item)
+        }
+        try? context.save()
+        NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
     }
     
     // MARK: - Chest / Push (horizontal / vertical)
@@ -574,7 +574,7 @@ struct ExerciseCatalog {
         supinationPronationCurl
     ]
     static var all: [CatalogExercise] {
-        builtIn + customExercises()
+        builtIn
     }
 }
 extension ExerciseCatalog {

@@ -9,6 +9,7 @@ struct BackupSnapshotV1: Codable {
     let sessions: [SessionBackupDTO]
     let sessionHistory: [SessionHistoryBackupDTO]
     let exerciseNotes: [ExerciseNoteBackupDTO]
+    let customExercises: [CustomExerciseBackupDTO]
 }
 
 // MARK: - AppState
@@ -183,3 +184,12 @@ struct ExerciseNoteBackupDTO: Codable {
     let note: String
 }
 
+// MARK: - CustomExercise
+
+struct CustomExerciseBackupDTO: Codable {
+    let id: String
+    let name: String
+    let primaryMuscleRaw: String
+    let isCompound: Bool
+    let createdAt: Date
+}

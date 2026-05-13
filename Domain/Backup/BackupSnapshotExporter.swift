@@ -7,6 +7,7 @@ struct BackupSnapshotExportResult {
     let sessionCount: Int
     let sessionHistoryCount: Int
     let exerciseNoteCount: Int
+    let customExerciseCount: Int
 }
 
 enum BackupSnapshotExporter {
@@ -27,6 +28,10 @@ enum BackupSnapshotExporter {
 
         let exerciseNotes = try modelContext.fetch(
             FetchDescriptor<ExerciseNote>(sortBy: [SortDescriptor(\.exerciseId, order: .forward)])
+        )
+
+        let customExercises = try modelContext.fetch(
+            FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
         )
 
         let snapshot = BackupSnapshotV1(
@@ -61,19 +66,14 @@ enum BackupSnapshotExporter {
                     id: session.id,
                     createdAt: session.createdAt,
                     updatedAt: session.updatedAt,
-
                     mesoBlockId: session.meso?.id,
-
                     date: session.date,
                     statusRaw: session.status.rawValue,
                     completedAt: session.completedAt,
-
                     readinessStars: session.readinessStars,
                     sessionNotes: session.sessionNotes,
-
                     weekInMeso: session.weekInMeso,
                     programIndex: session.programIndex,
-
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
                     hkWorkoutEnd: session.hkWorkoutEnd,
@@ -82,19 +82,15 @@ enum BackupSnapshotExporter {
                     hkTotalCalories: session.hkTotalCalories,
                     hkAvgHeartRate: session.hkAvgHeartRate,
                     hkMaxHeartRate: session.hkMaxHeartRate,
-
                     hkZone1Seconds: session.hkZone1Seconds,
                     hkZone2Seconds: session.hkZone2Seconds,
                     hkZone3Seconds: session.hkZone3Seconds,
                     hkZone4Seconds: session.hkZone4Seconds,
                     hkZone5Seconds: session.hkZone5Seconds,
-
                     hkHeartRateSeriesBPM: session.hkHeartRateSeriesBPM,
                     hkHeartRateSeriesStepSeconds: session.hkHeartRateSeriesStepSeconds,
-
                     hkPostWorkoutHeartRateBPM: session.hkPostWorkoutHeartRateBPM,
                     hkPostWorkoutHeartRateStepSeconds: session.hkPostWorkoutHeartRateStepSeconds,
-
                     items: session.items
                         .sorted { $0.order < $1.order }
                         .map { item in
@@ -102,48 +98,36 @@ enum BackupSnapshotExporter {
                                 id: item.id,
                                 createdAt: item.createdAt,
                                 updatedAt: item.updatedAt,
-
                                 order: item.order,
                                 exerciseId: item.exerciseId,
-
                                 targetReps: item.targetReps,
                                 targetSets: item.targetSets,
                                 targetRIR: item.targetRIR,
                                 suggestedLoad: item.suggestedLoad,
-
                                 waveRaw: item.waveRaw,
                                 priorityRaw: item.priorityRaw,
-
                                 setMin: item.setMin,
                                 setMax: item.setMax,
-
                                 repMin: item.repMin,
                                 repMax: item.repMax,
-
                                 targetRIRMin: item.targetRIRMin,
                                 targetRIRMax: item.targetRIRMax,
-
                                 intensifierRaw: item.intensifierRaw,
                                 intensifierNotes: item.intensifierNotes,
                                 prescriptionNotes: item.prescriptionNotes,
-
                                 plannedRepsBySet: item.plannedRepsBySet,
                                 plannedLoadsBySet: item.plannedLoadsBySet,
                                 plannedRIRsBySet: item.plannedRIRsBySet,
-
                                 actualReps: item.actualReps,
                                 actualLoads: item.actualLoads,
                                 actualRIRs: item.actualRIRs,
                                 usedRestPauseFlags: item.usedRestPauseFlags,
                                 restPausePatternsBySet: item.restPausePatternsBySet,
                                 dropSetPatternsBySet: item.dropSetPatternsBySet,
-
                                 isCompleted: item.isCompleted,
                                 isPR: item.isPR,
-
                                 coachNote: item.coachNote,
                                 nextSuggestedLoad: item.nextSuggestedLoad,
-
                                 logs: item.logs.map { log in
                                     SetLogBackupDTO(
                                         id: log.id,
@@ -190,6 +174,15 @@ enum BackupSnapshotExporter {
                     exerciseId: note.exerciseId,
                     note: note.note
                 )
+            },
+            customExercises: customExercises.map { ex in
+                CustomExerciseBackupDTO(
+                    id: ex.id,
+                    name: ex.name,
+                    primaryMuscleRaw: ex.primaryMuscleRaw,
+                    isCompound: ex.isCompound,
+                    createdAt: ex.createdAt
+                )
             }
         )
 
@@ -212,7 +205,8 @@ enum BackupSnapshotExporter {
             mesoBlockCount: mesoBlocks.count,
             sessionCount: sessions.count,
             sessionHistoryCount: sessionHistory.count,
-            exerciseNoteCount: exerciseNotes.count
+            exerciseNoteCount: exerciseNotes.count,
+            customExerciseCount: customExercises.count
         )
     }
 }

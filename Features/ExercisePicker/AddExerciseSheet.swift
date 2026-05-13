@@ -1,15 +1,17 @@
 import SwiftUI
+import SwiftData
 
 struct AddExerciseSheet: View {
     let onSelect: (CatalogExercise) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
     @State private var searchText: String = ""
     @State private var showingCreateCustom = false
     @State private var refreshToken = UUID()
 
     private var builtIn: [CatalogExercise] { ExerciseCatalog.builtIn }
-    private var custom: [CatalogExercise] { ExerciseCatalog.customExercises() }
+    private var custom: [CatalogExercise] { ExerciseCatalog.customExercises(in: modelContext) }
 
     private var filteredBuiltIn: [CatalogExercise] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -50,7 +52,7 @@ struct AddExerciseSheet: View {
                         }
                         .onDelete { idx in
                             let ids = idx.map { filteredCustom[$0].id }
-                            ExerciseCatalog.deleteCustomExercises(ids: ids)
+                            ExerciseCatalog.deleteCustomExercises(ids: ids, in: modelContext)
                             refreshToken = UUID()
                         }
                     }
@@ -92,7 +94,6 @@ struct AddExerciseSheet: View {
                 CreateCustomExerciseSheet(
                     onDone: { newEx in
                         showingCreateCustom = false
-                        // Optional: auto-select after create
                         onSelect(newEx)
                     },
                     onCancel: { showingCreateCustom = false }
@@ -106,6 +107,7 @@ struct CreateCustomExerciseSheet: View {
     let onDone: (CatalogExercise) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
     @State private var name: String = ""
     @State private var primary: MuscleGroup = .shoulders
     @State private var isCompound: Bool = false
@@ -131,7 +133,7 @@ struct CreateCustomExerciseSheet: View {
                 }
 
                 Section {
-                    Text("Custom exercises save only on this phone and can be deleted any time.")
+                    Text("Custom exercises are saved to this device and included in your backup.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -149,7 +151,8 @@ struct CreateCustomExerciseSheet: View {
                         let ex = ExerciseCatalog.addCustomExercise(
                             name: trimmed,
                             primaryMuscle: primary,
-                            isCompound: isCompound
+                            isCompound: isCompound,
+                            in: modelContext
                         )
                         onDone(ex)
                     }

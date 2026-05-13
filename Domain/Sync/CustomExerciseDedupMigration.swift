@@ -10,7 +10,7 @@ enum CustomExerciseDedupMigration {
             return
         }
 
-        let customExercises = ExerciseCatalog.customExercises()
+        let customExercises = ExerciseCatalog.customExercises(in: context)
         let builtInByNormalizedName: [String: CatalogExercise] = Dictionary(
             uniqueKeysWithValues: ExerciseCatalog.builtIn.map {
                 (normalizedName($0.name), $0)

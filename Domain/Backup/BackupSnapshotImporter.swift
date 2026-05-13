@@ -6,6 +6,7 @@ struct BackupSnapshotImportResult {
     let sessionCount: Int
     let sessionHistoryCount: Int
     let exerciseNoteCount: Int
+    let customExerciseCount: Int
 }
 
 enum BackupSnapshotImporter {
@@ -203,6 +204,18 @@ enum BackupSnapshotImporter {
             modelContext.insert(note)
         }
 
+        // MARK: - CustomExercises
+        for dto in snapshot.customExercises ?? [] {
+            let custom = CustomExercise(
+                id: dto.id,
+                name: dto.name,
+                primaryMuscleRaw: dto.primaryMuscleRaw,
+                isCompound: dto.isCompound,
+                createdAt: dto.createdAt
+            )
+            modelContext.insert(custom)
+        }
+
         try modelContext.save()
 
         if let restoredAppState = try modelContext.fetch(FetchDescriptor<AppState>()).first {
@@ -213,7 +226,8 @@ enum BackupSnapshotImporter {
             mesoBlockCount: snapshot.mesoBlocks.count,
             sessionCount: snapshot.sessions.count,
             sessionHistoryCount: snapshot.sessionHistory.count,
-            exerciseNoteCount: snapshot.exerciseNotes.count
+            exerciseNoteCount: snapshot.exerciseNotes.count,
+            customExerciseCount: snapshot.customExercises.count
         )
     }
 
@@ -223,26 +237,14 @@ enum BackupSnapshotImporter {
         let histories = try modelContext.fetch(FetchDescriptor<SessionHistory>())
         let sessions = try modelContext.fetch(FetchDescriptor<Session>())
         let mesoBlocks = try modelContext.fetch(FetchDescriptor<MesoBlock>())
+        let customExercises = try modelContext.fetch(FetchDescriptor<CustomExercise>())
 
-        for object in appStates {
-            modelContext.delete(object)
-        }
-
-        for object in notes {
-            modelContext.delete(object)
-        }
-
-        for object in histories {
-            modelContext.delete(object)
-        }
-
-        for object in sessions {
-            modelContext.delete(object)
-        }
-
-        for object in mesoBlocks {
-            modelContext.delete(object)
-        }
+        for object in appStates { modelContext.delete(object) }
+        for object in notes { modelContext.delete(object) }
+        for object in histories { modelContext.delete(object) }
+        for object in sessions { modelContext.delete(object) }
+        for object in mesoBlocks { modelContext.delete(object) }
+        for object in customExercises { modelContext.delete(object) }
 
         try modelContext.save()
     }
