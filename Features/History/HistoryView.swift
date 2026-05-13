@@ -133,6 +133,8 @@ private struct HistorySetDetail: Identifiable {
     let reps: Int
     let rir: Int?
     let isSkipped: Bool
+    let feedback: SetFeedback
+    let pumpRating: PumpRating
 
     let rpUsed: Bool
     let rpPattern: String
@@ -143,7 +145,15 @@ private struct HistorySetDetail: Identifiable {
 
     var lineText: String {
         if isSkipped {
-            var s = "Set \(index) — skipped (planned \(loadText(load)) × \(reps)"
+            let reason: String = {
+                switch feedback {
+                case .pain: return "pain"
+                case .soreness: return "soreness"
+                case .disruption: return "disruption"
+                case .none: return "skipped"
+                }
+            }()
+            var s = "Set \(index) — \(reason) (planned \(loadText(load)) × \(reps)"
             if let rir { s += " @ \(rir) RIR" }
             s += ")"
             return s
@@ -154,9 +164,20 @@ private struct HistorySetDetail: Identifiable {
                 let trimmed = rpPattern.trimmingCharacters(in: .whitespacesAndNewlines)
                 s += trimmed.isEmpty ? " (RP)" : " (RP: \(trimmed))"
             }
+            if pumpRating != .none {
+                s += " · \(pumpRating.label) pump"
+            }
             return s
         }
     }
+    var displayColor: Color {
+            switch feedback {
+            case .pain: return Color.red.opacity(0.8)
+            case .soreness: return Color.yellow.opacity(0.8)
+            case .disruption: return Color.orange.opacity(0.8)
+            case .none: return isSkipped ? Color(UIColor.tertiaryLabel) : Color(UIColor.secondaryLabel)
+            }
+        }
 }
 
 private struct HistoryExerciseDetail: Identifiable {
@@ -303,28 +324,32 @@ private struct HistoryDayDetailView: View {
                         totalVol += Double(actualReps) * displayLoad
 
                         setDetails.append(
-                            HistorySetDetail(
-                                index: set.index,
-                                load: displayLoad,
-                                reps: actualReps,
-                                rir: rir,
-                                isSkipped: false,
-                                rpUsed: set.usedRestPause,
-                                rpPattern: set.restPausePattern
-                            )
-                        )
+                                                    HistorySetDetail(
+                                                        index: set.index,
+                                                        load: displayLoad,
+                                                        reps: actualReps,
+                                                        rir: rir,
+                                                        isSkipped: false,
+                                                        feedback: .none,
+                                                        pumpRating: set.pumpRating,
+                                                        rpUsed: set.usedRestPause,
+                                                        rpPattern: set.restPausePattern
+                                                    )
+                                                )
                     } else if plannedReps > 0 {
                         setDetails.append(
-                            HistorySetDetail(
-                                index: set.index,
-                                load: plannedLoad,
-                                reps: plannedReps,
-                                rir: set.plannedRIR,
-                                isSkipped: true,
-                                rpUsed: false,
-                                rpPattern: ""
-                            )
-                        )
+                                                    HistorySetDetail(
+                                                        index: set.index,
+                                                        load: plannedLoad,
+                                                        reps: plannedReps,
+                                                        rir: set.plannedRIR,
+                                                        isSkipped: true,
+                                                        feedback: set.status.feedbackValue,
+                                                        pumpRating: .none,
+                                                        rpUsed: false,
+                                                        rpPattern: ""
+                                                    )
+                                                )
                     }
                 }
 
@@ -594,14 +619,14 @@ private struct HistoryDayDetailView: View {
 
                         if !ex.sets.isEmpty {
                             VStack(alignment: .leading, spacing: 2) {
-                                ForEach(ex.sets) { set in
-                                    Text(set.lineText)
-                                        .font(.caption2)
-                                        .foregroundStyle(set.isSkipped ? .tertiary : .secondary)
-                                        .strikethrough(set.isSkipped)
-                                }
-                            }
-                            .padding(.top, 4)
+                                                            ForEach(ex.sets) { set in
+                                                                Text(set.lineText)
+                                                                    .font(.caption2)
+                                                                    .foregroundStyle(set.displayColor)
+                                                                    .strikethrough(set.isSkipped)
+                                                            }
+                                                        }
+                                                        .padding(.top, 4)
                         }
                     }
                     .padding(.vertical, 8)

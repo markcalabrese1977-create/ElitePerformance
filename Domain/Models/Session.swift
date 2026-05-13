@@ -234,6 +234,8 @@ final class SessionItem {
     var usedRestPauseFlags: [Bool] = []
     var restPausePatternsBySet: [String] = []
     var dropSetPatternsBySet: [String] = []
+    var setFeedbackBySet: [String] = []
+    var pumpRatingsBySet: [Int] = []
 
     var isCompleted: Bool
     var isPR: Bool
@@ -276,6 +278,8 @@ final class SessionItem {
         usedRestPauseFlags: [Bool] = [],
         restPausePatternsBySet: [String] = [],
         dropSetPatternsBySet: [String] = [],
+        setFeedbackBySet: [String] = [],
+        pumpRatingsBySet: [Int] = [],
         isCompleted: Bool = false,
         isPR: Bool = false,
         coachNote: String? = nil,
@@ -317,6 +321,8 @@ final class SessionItem {
         self.usedRestPauseFlags = usedRestPauseFlags
         self.restPausePatternsBySet = restPausePatternsBySet
         self.dropSetPatternsBySet = dropSetPatternsBySet
+        self.setFeedbackBySet = setFeedbackBySet
+        self.pumpRatingsBySet = pumpRatingsBySet
 
         self.isCompleted = isCompleted
         self.isPR = isPR

@@ -105,12 +105,28 @@ struct PlanMemoryEngine {
             let finalLoad = min(adjustedLoad, baseLoad * 2.0) // sanity cap
 
             targetItem.suggestedLoad = finalLoad
-            targetItem.plannedLoadsBySet = Array(
-                repeating: finalLoad,
-                count: targetItem.plannedLoadsBySet.count
-            )
-        }
-    }
+                        targetItem.plannedLoadsBySet = Array(
+                            repeating: finalLoad,
+                            count: targetItem.plannedLoadsBySet.count
+                        )
+
+                        // Pain carry-forward — write warning to next session if pain was flagged
+                        let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
+                            $0 == SetFeedback.pain.rawValue
+                        }
+                        if sourcePainFlagged {
+                            targetItem.coachNote = "⚠️ Pain was flagged in your last session for this exercise. Reassess before loading."
+                        }
+
+                        // Soreness/disruption carry-forward — softer advisory
+                        let sourceFatigueFlagged = sourceItem.setFeedbackBySet.contains {
+                            $0 == SetFeedback.soreness.rawValue || $0 == SetFeedback.disruption.rawValue
+                        }
+                        if sourceFatigueFlagged && !sourcePainFlagged {
+                            targetItem.coachNote = "ℹ️ Soreness or disruption was flagged last session. Monitor how this feels before pushing load."
+                        }
+                    }
+                }
 
     // MARK: - Helpers
 

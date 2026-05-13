@@ -125,7 +125,9 @@ struct SessionItemBackupDTO: Codable {
     let actualRIRs: [Int]
     let usedRestPauseFlags: [Bool]
     let restPausePatternsBySet: [String]
-    let dropSetPatternsBySet: [String]
+        let dropSetPatternsBySet: [String]
+    let setFeedbackBySet: [String]?
+        let pumpRatingsBySet: [Int]?
 
     let isCompleted: Bool
     let isPR: Bool

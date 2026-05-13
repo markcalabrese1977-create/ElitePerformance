@@ -169,14 +169,23 @@ struct SessionView: View {
                                 context: modelContext
                             )
                         },
-                        onSkipTapped: { setIndex in
-                            viewModel.skipSet(
-                                exerciseID: exercise.id,
-                                setIndex: setIndex,
-                                context: modelContext
-                            )
-                        },
-                        onEditTapped: { setIndex in
+                        onSkipTapped: { setIndex, reason in
+                                                    viewModel.skipSet(
+                                                        exerciseID: exercise.id,
+                                                        setIndex: setIndex,
+                                                        reason: reason,
+                                                        context: modelContext
+                                                    )
+                                                },
+                                                onPumpRated: { setIndex, rating in
+                                                    viewModel.setPumpRating(
+                                                        exerciseID: exercise.id,
+                                                        setIndex: setIndex,
+                                                        rating: rating,
+                                                        context: modelContext
+                                                    )
+                                                },
+                                                onEditTapped: { setIndex in
                             viewModel.editSet(
                                 exerciseID: exercise.id,
                                 setIndex: setIndex,
@@ -519,7 +528,8 @@ private struct SessionExerciseCardView: View {
     let onDropSetAdded: (_ setIndex: Int) -> Void
 
     let onLogTapped: (_ setIndex: Int) -> Void
-    let onSkipTapped: (_ setIndex: Int) -> Void
+    let onSkipTapped: (_ setIndex: Int, _ reason: SetFeedback) -> Void
+    let onPumpRated: (_ setIndex: Int, _ rating: PumpRating) -> Void
     let onEditTapped: (_ setIndex: Int) -> Void
 
     let onSwapTapped: () -> Void
@@ -733,12 +743,15 @@ private struct SessionExerciseCardView: View {
                             onLog: {
                                 onLogTapped(set.index)
                             },
-                            onSkip: {
-                                onSkipTapped(set.index)
-                            },
-                            onEdit: {
-                                onEditTapped(set.index)
-                            }
+                            onSkip: { reason in
+                                                            onSkipTapped(set.index, reason)
+                                                        },
+                                                        onPumpRated: { rating in
+                                                            onPumpRated(set.index, rating)
+                                                        },
+                                                        onEdit: {
+                                                            onEditTapped(set.index)
+                                                        }
                         )
                     }
                 }
@@ -781,12 +794,13 @@ private struct SessionSetRowView: View {
 
 
     let onLog: () -> Void
-    let onSkip: () -> Void
+    let onSkip: (_ reason: SetFeedback) -> Void
+    let onPumpRated: (_ rating: PumpRating) -> Void
     let onEdit: () -> Void
     
     private var isLocked: Bool {
-        uiSet.status == .completed || uiSet.status == .skipped
-    }
+            uiSet.status == .completed || uiSet.status.isAnySkip
+        }
     
 
 
@@ -800,15 +814,32 @@ private struct SessionSetRowView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if isLocked {
-                    Text(uiSet.status == .skipped ? "Skipped" : "Done")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(uiSet.status == .skipped ? Color.orange.opacity(0.2) : Color.green.opacity(0.2))
-                        .foregroundStyle(uiSet.status == .skipped ? Color.orange : Color.green)
-                        .clipShape(Capsule())
-                }
+                                    if uiSet.status.isAnySkip {
+                                        Text(uiSet.status.displayLabel)
+                                            .font(.caption2)
+                                            .fontWeight(.semibold)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(uiSet.status.displayColor.opacity(0.2))
+                                            .foregroundStyle(uiSet.status.displayColor)
+                                            .clipShape(Capsule())
+                                    } else {
+                                        HStack(spacing: 4) {
+                                            Text("Done")
+                                                .font(.caption2)
+                                                .fontWeight(.semibold)
+                                            if uiSet.pumpRating != .none {
+                                                Text("· \(uiSet.pumpRating.label) pump")
+                                                    .font(.caption2)
+                                            }
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(Color.green.opacity(0.2))
+                                        .foregroundStyle(.green)
+                                        .clipShape(Capsule())
+                                    }
+                                }
             }
 
             // PLAN / SUGGESTED line
@@ -881,50 +912,90 @@ private struct SessionSetRowView: View {
                         onLog()
                     }) {
                         switch uiSet.status {
-                        case .completed:
-                            Text("Done")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.green.opacity(0.2))
-                                .clipShape(Capsule())
-                        case .skipped:
-                            Text("Skipped")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.orange.opacity(0.2))
-                                .clipShape(Capsule())
-                        default:
-                            Text("Log")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.2))
-                                .clipShape(Capsule())
-                        }
+                                                case .completed:
+                                                    Text("Done")
+                                                        .font(.caption)
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.green.opacity(0.2))
+                                                        .foregroundStyle(.green)
+                                                        .clipShape(Capsule())
+                                                case _ where uiSet.status.isAnySkip:
+                                                    Text(uiSet.status.displayLabel)
+                                                        .font(.caption)
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(uiSet.status.displayColor.opacity(0.2))
+                                                        .foregroundStyle(uiSet.status.displayColor)
+                                                        .clipShape(Capsule())
+                                                default:
+                                                    Text("Log")
+                                                        .font(.caption)
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.blue.opacity(0.2))
+                                                        .foregroundStyle(.blue)
+                                                        .clipShape(Capsule())
+                                                }
                     }
                     .buttonStyle(.plain)
-                    .contextMenu {
-                        if isLocked {
-                            Button("Edit set") { onEdit() }
-                        } else {
-                            Button("Skip set") { onSkip() }
-                        }
-                    }
+                                        .contextMenu {
+                                            if isLocked {
+                                                Button("Edit set") { onEdit() }
+                                            } else {
+                                                Button("Skip") { onSkip(.none) }
+                                                Button("Pain") { onSkip(.pain) }
+                                                Button("Soreness") { onSkip(.soreness) }
+                                                Button("Disruption") { onSkip(.disruption) }
+                                            }
+                                        }
 
-                    Button {
-                        guard !isLocked else { return }
-                        onSkip()
-                    } label: {
-                        Text("Skip")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
+                                        if uiSet.status == .completed {
+                                            Menu {
+                                                Button("Not rated") { onPumpRated(.none) }
+                                                Divider()
+                                                ForEach(PumpRating.allCases.filter { $0 != .none }, id: \.self) { rating in
+                                                    Button(rating.label) { onPumpRated(rating) }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 3) {
+                                                    Image(systemName: "drop.fill")
+                                                        .font(.caption2)
+                                                    Text(uiSet.pumpRating == .none ? "Pump" : uiSet.pumpRating.label)
+                                                        .font(.caption2)
+                                                }
+                                                .foregroundStyle(uiSet.pumpRating == .none ? Color.secondary : Color.blue)
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+
+                                        Menu {
+                                            Button("Skip") { onSkip(.none) }
+                                            Divider()
+                                            Button {
+                                                onSkip(.pain)
+                                            } label: {
+                                                Label("Pain", systemImage: "exclamationmark.triangle.fill")
+                                            }
+                                            Button {
+                                                onSkip(.soreness)
+                                            } label: {
+                                                Label("Soreness", systemImage: "flame.fill")
+                                            }
+                                            Button {
+                                                onSkip(.disruption)
+                                            } label: {
+                                                Label("Disruption", systemImage: "bolt.slash.fill")
+                                            }
+                                        } label: {
+                                            Text("Skip")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.borderless)
                 }
             }
 
@@ -1337,11 +1408,20 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].dropSets.append(DropSetEntry())
     }
     
-    func skipSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
-        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
-        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+    func skipSet(exerciseID: UUID, setIndex: Int, reason: SetFeedback = .none, context: ModelContext) {
+            guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+            guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
 
-        exercises[exerciseIdx].sets[setIdx].status = .skipped
+            let status: SetStatus = {
+                switch reason {
+                case .pain: return .skippedPain
+                case .soreness: return .skippedSoreness
+                case .disruption: return .skippedDisruption
+                case .none: return .skipped
+                }
+            }()
+
+        exercises[exerciseIdx].sets[setIdx].status = status
         exercises[exerciseIdx].sets[setIdx].actualLoad = nil
         exercises[exerciseIdx].sets[setIdx].actualReps = nil
         exercises[exerciseIdx].sets[setIdx].actualRIR = nil
@@ -1352,6 +1432,13 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].actualLoadText = "0"
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
 
+        persist(using: context)
+    }
+    
+    func setPumpRating(exerciseID: UUID, setIndex: Int, rating: PumpRating, context: ModelContext) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        exercises[exerciseIdx].sets[setIdx].pumpRating = rating
         persist(using: context)
     }
 
@@ -1692,7 +1779,9 @@ final class SessionScreenViewModel: ObservableObject {
             item.actualRIRs              = Array(repeating: 0, count: setCount)
             item.usedRestPauseFlags      = Array(repeating: false, count: setCount)
             item.restPausePatternsBySet  = Array(repeating: "", count: setCount)
-            item.dropSetPatternsBySet   = Array(repeating: "", count: setCount)
+            item.dropSetPatternsBySet    = Array(repeating: "", count: setCount)
+            item.setFeedbackBySet        = Array(repeating: "", count: setCount)
+            item.pumpRatingsBySet        = Array(repeating: 0, count: setCount)
 
             for uiSet in uiExercise.sets {
                 let idx = uiSet.index - 1
@@ -1717,17 +1806,20 @@ final class SessionScreenViewModel: ObservableObject {
                 item.usedRestPauseFlags[idx] = uiSet.usedRestPause
 
                 // Skip encoding takes priority; otherwise store the RP pattern text
-                if uiSet.status == .skipped {
-                    item.restPausePatternsBySet[idx] = "SKIP"
-                } else {
-                    item.restPausePatternsBySet[idx] = uiSet.restPausePattern
-                    // Drop set tracking
-                    if uiSet.usedDropSet && !uiSet.dropSets.isEmpty {
-                        item.dropSetPatternsBySet[idx] = uiSet.dropSets.map { $0.serialized }.joined(separator: ",")
-                    } else {
-                        item.dropSetPatternsBySet[idx] = ""
-                    }
-                }
+                // Skip encoding takes priority; otherwise store the RP pattern text
+                                if uiSet.status.isAnySkip {
+                                    item.restPausePatternsBySet[idx] = "SKIP"
+                                    item.setFeedbackBySet[idx] = uiSet.status.feedbackValue.rawValue
+                                } else {
+                                    item.restPausePatternsBySet[idx] = uiSet.restPausePattern
+                                    item.pumpRatingsBySet[idx] = uiSet.pumpRating.rawValue
+                                    // Drop set tracking
+                                    if uiSet.usedDropSet && !uiSet.dropSets.isEmpty {
+                                        item.dropSetPatternsBySet[idx] = uiSet.dropSets.map { $0.serialized }.joined(separator: ",")
+                                    } else {
+                                        item.dropSetPatternsBySet[idx] = ""
+                                    }
+                                }
             }
 
             item.isCompleted = uiExercise.isComplete
@@ -2130,32 +2222,50 @@ extension SessionScreenViewModel {
                     return []
                 }()
 
-                // ---- Status ----
-                let status: SetStatus
-                if isSkipped {
-                    status = .skipped
-                } else if let reps = actualReps, reps > 0 {
-                    status = .completed
-                } else {
-                    status = .notStarted
-                }
+                // ---- Feedback + pump ----
+                                let feedback: SetFeedback = {
+                                    guard idx < item.setFeedbackBySet.count else { return .none }
+                                    return SetFeedback(rawValue: item.setFeedbackBySet[idx]) ?? .none
+                                }()
+
+                                let pumpRating: PumpRating = {
+                                    guard idx < item.pumpRatingsBySet.count else { return .none }
+                                    return PumpRating(rawValue: item.pumpRatingsBySet[idx]) ?? .none
+                                }()
+
+                                // ---- Status ----
+                                let status: SetStatus = {
+                                    if isSkipped {
+                                        switch feedback {
+                                        case .pain: return .skippedPain
+                                        case .soreness: return .skippedSoreness
+                                        case .disruption: return .skippedDisruption
+                                        case .none: return .skipped
+                                        }
+                                    } else if let reps = actualReps, reps > 0 {
+                                        return .completed
+                                    } else {
+                                        return .notStarted
+                                    }
+                                }()
 
                 uiSets.append(
-                    UISessionSet(
-                        index: setIndex,
-                        plannedLoad: plannedLoad,
-                        plannedReps: plannedReps,
-                        plannedRIR: plannedRIR,
-                        actualLoad: actualLoad,
-                        actualReps: actualReps,
-                        actualRIR: actualRIR,
-                        status: status,
-                        usedRestPause: rpUsed,
-                        restPausePattern: rpPattern,
-                        usedDropSet: dropUsed,
-                        dropSets: dropEntries
-                    )
-                )
+                                    UISessionSet(
+                                        index: setIndex,
+                                        plannedLoad: plannedLoad,
+                                        plannedReps: plannedReps,
+                                        plannedRIR: plannedRIR,
+                                        actualLoad: actualLoad,
+                                        actualReps: actualReps,
+                                        actualRIR: actualRIR,
+                                        status: status,
+                                        usedRestPause: rpUsed,
+                                        restPausePattern: rpPattern,
+                                        usedDropSet: dropUsed,
+                                        dropSets: dropEntries,
+                                        pumpRating: pumpRating
+                                    )
+                                )
             }
 
             let detail: String
@@ -2210,6 +2320,45 @@ enum SetStatus: Equatable {
     case inProgress
     case completed
     case skipped
+    case skippedPain
+    case skippedSoreness
+    case skippedDisruption
+
+    var isAnySkip: Bool {
+        switch self {
+        case .skipped, .skippedPain, .skippedSoreness, .skippedDisruption: return true
+        default: return false
+        }
+    }
+
+    var feedbackValue: SetFeedback {
+        switch self {
+        case .skippedPain: return .pain
+        case .skippedSoreness: return .soreness
+        case .skippedDisruption: return .disruption
+        default: return .none
+        }
+    }
+
+    var displayLabel: String {
+        switch self {
+        case .skipped: return "Skipped"
+        case .skippedPain: return "Pain"
+        case .skippedSoreness: return "Soreness"
+        case .skippedDisruption: return "Disruption"
+        default: return ""
+        }
+    }
+
+    var displayColor: Color {
+        switch self {
+        case .skipped: return .orange
+        case .skippedPain: return .red
+        case .skippedSoreness: return .yellow
+        case .skippedDisruption: return .orange
+        default: return .secondary
+        }
+    }
 }
 
 
@@ -2274,7 +2423,7 @@ struct UISessionExercise: Identifiable {
     var isComplete: Bool {
         let workingSets = sets.filter { $0.index <= targetSets }
         guard !workingSets.isEmpty else { return false }
-        return workingSets.allSatisfy { $0.status == .completed || $0.status == .skipped }
+        return workingSets.allSatisfy { $0.status == .completed || $0.status.isAnySkip }
     }
 
     init(
@@ -2357,6 +2506,7 @@ struct UISessionSet: Identifiable {
     var restPausePattern: String
     var usedDropSet: Bool
     var dropSets: [DropSetEntry]
+    var pumpRating: PumpRating
     
     var plannedLoadText: String
     var plannedRepsText: String
@@ -2375,7 +2525,8 @@ struct UISessionSet: Identifiable {
         usedRestPause: Bool = false,
         restPausePattern: String = "",
         usedDropSet: Bool = false,
-        dropSets: [DropSetEntry] = []
+        dropSets: [DropSetEntry] = [],
+        pumpRating: PumpRating = .none
     ) {
         self.index = index
         self.plannedLoad = plannedLoad
@@ -2389,6 +2540,7 @@ struct UISessionSet: Identifiable {
         self.restPausePattern = restPausePattern
         self.usedDropSet = usedDropSet
         self.dropSets = dropSets
+        self.pumpRating = pumpRating
         let planLoadString: String
         if plannedLoad == 0 {
             planLoadString = "0"
