@@ -158,7 +158,6 @@
 		D5603BD62F9FF34600664B58 /* Exceptions for "Programs" folder in "ElitePerformance" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				DUPWaveModels.swift,
 			);
 			target = D5E2931C2EC4102800034D78 /* ElitePerformance */;
 		};
