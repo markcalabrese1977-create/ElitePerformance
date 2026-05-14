@@ -40,3 +40,18 @@ enum PumpRating: Int, Codable, CaseIterable {
     }
 }
 
+
+// MARK: - Volume Regulation
+
+enum VolumeRegulationAction {
+    case hold
+    case reduce
+}
+
+struct VolumeRegulationSignal {
+    let action: VolumeRegulationAction
+    let reason: String?
+    let setDelta: Int  // 0 or -1
+
+    static let neutral = VolumeRegulationSignal(action: .hold, reason: nil, setDelta: 0)
+}

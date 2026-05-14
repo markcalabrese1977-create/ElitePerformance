@@ -125,6 +125,24 @@ struct PlanMemoryEngine {
                         if sourceFatigueFlagged && !sourcePainFlagged {
                             targetItem.coachNote = "ℹ️ Soreness or disruption was flagged last session. Monitor how this feels before pushing load."
                         }
+                        // Volume auto-regulation — look back 3 completed sessions for this exercise
+                        let recentItems: [SessionItem] = allSessions
+                            .prefix(currentIndex)
+                            .filter { $0.status == .completed }
+                            .suffix(3)
+                            .compactMap { $0.items.first { $0.exerciseId == sourceItem.exerciseId } }
+
+                        let signal = PlanMemoryEngine.volumeRegulationSignal(from: recentItems)
+
+                        if signal.setDelta != 0 {
+                            targetItem.targetSets = max(2, targetItem.targetSets + signal.setDelta)
+                            let fill = finalLoad > 0 ? finalLoad : targetItem.suggestedLoad
+                            targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
+                        }
+
+                        if let reason = signal.reason, targetItem.coachNote == nil {
+                            targetItem.coachNote = reason
+                        }
                     }
                 }
 
@@ -149,6 +167,71 @@ struct PlanMemoryEngine {
         let anyPlannedReps  = item.plannedRepsBySet.contains(where: { $0 > 0 })
         let anyPlannedLoads = item.plannedLoadsBySet.contains(where: { $0 > 0 })
         return anyPlannedReps || anyPlannedLoads || item.suggestedLoad > 0
+    }
+    
+    // MARK: - Volume Auto-Regulation
+
+    /// Analyzes feedback patterns across up to 3 recent completed sessions
+    /// for a single exercise and returns a set-count regulation signal.
+    ///
+    /// Priority order:
+    /// 1. Pain in any session → reduce
+    /// 2. Soreness or disruption in 2+ of 3 → reduce
+    /// 3. Soreness or disruption in 1 of 3 → hold with reason
+    /// 4. Poor pump in 2+ of 3, no fatigue flags → hold with reason
+    /// 5. Otherwise → neutral hold
+    static func volumeRegulationSignal(from recentItems: [SessionItem]) -> VolumeRegulationSignal {
+        guard !recentItems.isEmpty else { return .neutral }
+
+        // 1. Pain in any session
+        let anyPain = recentItems.contains { item in
+            item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
+        }
+        if anyPain {
+            return VolumeRegulationSignal(
+                action: .reduce,
+                reason: "⚠️ Pain flagged in a recent session for this exercise. Volume reduced — reassess before loading.",
+                setDelta: -1
+            )
+        }
+
+        // 2. Soreness or disruption in 2+ sessions
+        let fatigueSessionCount = recentItems.filter { item in
+            item.setFeedbackBySet.contains {
+                $0 == SetFeedback.soreness.rawValue || $0 == SetFeedback.disruption.rawValue
+            }
+        }.count
+
+        if fatigueSessionCount >= 2 {
+            return VolumeRegulationSignal(
+                action: .reduce,
+                reason: "ℹ️ Repeated fatigue signals across recent sessions. Set count reduced by 1 — rebuild before adding volume.",
+                setDelta: -1
+            )
+        }
+
+        if fatigueSessionCount == 1 {
+            return VolumeRegulationSignal(
+                action: .hold,
+                reason: "ℹ️ Fatigue flagged in a recent session. Holding set count this session.",
+                setDelta: 0
+            )
+        }
+
+        // 3. Poor pump in 2+ sessions, no fatigue
+        let poorPumpSessionCount = recentItems.filter { item in
+            item.pumpRatingsBySet.contains { PumpRating(rawValue: $0) == .poor }
+        }.count
+
+        if poorPumpSessionCount >= 2 {
+            return VolumeRegulationSignal(
+                action: .hold,
+                reason: "ℹ️ Consistently poor pump signal across recent sessions. Holding volume before increasing.",
+                setDelta: 0
+            )
+        }
+
+        return .neutral
     }
 }
 
