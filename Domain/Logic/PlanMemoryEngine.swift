@@ -23,128 +23,130 @@ struct PlanMemoryEngine {
         // 1.4 — Fetch UserProfile for load increment preference
         let profileDescriptor = FetchDescriptor<UserProfile>()
         let profileIncrement: Double? = try? context.fetch(profileDescriptor).first?.minLoadIncrement
+        let progressionEnabled: Bool = {
+            let descriptor = FetchDescriptor<User>()
+            return (try? context.fetch(descriptor).first?.progressionEnabled) ?? true
+        }()
+        
         // Fetch all sessions in chronological order
         let descriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
         )
-
+        
         guard let allSessions = try? context.fetch(descriptor),
               let currentIndex = allSessions.firstIndex(where: { $0.persistentModelID == session.persistentModelID })
         else {
             return
         }
-
+        
         let futureSessions = allSessions.suffix(from: currentIndex + 1)
         guard !futureSessions.isEmpty else { return }
-
+        
         // For each exercise in the completed session, push its plan to the
         // *next* session in the future that contains the same exerciseId.
         for sourceItem in session.items {
             // If the current exercise has no meaningful plan, skip it.
             guard hasMeaningfulPlan(sourceItem) else { continue }
-
+            
             // Find the next future session that includes this exercise
             guard let nextSession = futureSessions.first(where: { future in
                 future.items.contains(where: { $0.exerciseId == sourceItem.exerciseId })
             }) else {
                 continue
             }
-
+            
             guard let targetItem = nextSession.items.first(where: { $0.exerciseId == sourceItem.exerciseId }) else {
                 continue
             }
-
+            
             // Only fill if that future item doesn't already have its own plan.
             guard isPlanEffectivelyEmpty(targetItem) else { continue }
-
+            
             // Copy aggregate targets
             targetItem.targetReps    = sourceItem.targetReps
             targetItem.targetSets    = sourceItem.targetSets
             targetItem.targetRIR     = sourceItem.targetRIR
             targetItem.suggestedLoad = sourceItem.suggestedLoad
-
+            
             // Copy per-set plan arrays
             targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
-
+            
             // 0.4 + 1.2 — CoachingEngine load suggestion + RIR-adjusted carry-forward
-            let sourceMesoPhase = session.mesoPhase
-
-            let baseLoad: Double = {
-                if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement, mesoPhase: sourceMesoPhase),
-                   let nextLoad = recommendation.nextSuggestedLoad,
-                   nextLoad > 0 {
-                    return nextLoad
-                }
-                return sourceItem.suggestedLoad
-            }()
-
-            guard baseLoad > 0 else { continue }
-
-            // 1.2 — RIR delta adjustment using e1RM
-            let sourceRIR = sourceItem.targetRIR
-            let targetRIR = targetItem.targetRIR
-            let sourceReps = sourceItem.targetReps
-            let targetReps = targetItem.targetReps
-
-            let adjustedLoad: Double = {
-                // Only adjust if RIR or reps differ between sessions
-                guard sourceRIR != targetRIR || sourceReps != targetReps else {
-                    return baseLoad
-                }
-                // Compute e1RM from the coached/carried load at source conditions
-                let e1rm = E1RMCalculator.e1RM(load: baseLoad, reps: sourceReps)
-                guard e1rm > 0 else { return baseLoad }
-                // Compute target load at new RIR and rep target
-                let rawLoad = E1RMCalculator.load(for: e1rm, reps: targetReps, targetRIR: targetRIR)
-                guard rawLoad > 0 else { return baseLoad }
-                let increment = profileIncrement ?? 2.5
-                return E1RMCalculator.rounded(rawLoad, increment: increment)
-            }()
-
-            let finalLoad = min(adjustedLoad, baseLoad * 2.0) // sanity cap
-
-            targetItem.suggestedLoad = finalLoad
-                        targetItem.plannedLoadsBySet = Array(
-                            repeating: finalLoad,
-                            count: targetItem.plannedLoadsBySet.count
-                        )
-
-                        // Pain carry-forward — write warning to next session if pain was flagged
-                        let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
-                            $0 == SetFeedback.pain.rawValue
-                        }
-                        if sourcePainFlagged {
-                            targetItem.coachNote = "⚠️ Pain was flagged in your last session for this exercise. Reassess before loading."
-                        }
-
-                        // Soreness/disruption carry-forward — softer advisory
-                        let sourceFatigueFlagged = sourceItem.setFeedbackBySet.contains {
-                            $0 == SetFeedback.soreness.rawValue || $0 == SetFeedback.disruption.rawValue
-                        }
-                        if sourceFatigueFlagged && !sourcePainFlagged {
-                            targetItem.coachNote = "ℹ️ Soreness or disruption was flagged last session. Monitor how this feels before pushing load."
-                        }
-                        // Volume auto-regulation — look back 3 completed sessions for this exercise
-                        let recentItems: [SessionItem] = allSessions
-                            .prefix(currentIndex)
-                            .filter { $0.status == .completed }
-                            .suffix(3)
-                            .compactMap { $0.items.first { $0.exerciseId == sourceItem.exerciseId } }
-
-                        let signal = PlanMemoryEngine.volumeRegulationSignal(from: recentItems)
-
-                        if signal.setDelta != 0 {
-                            targetItem.targetSets = max(2, targetItem.targetSets + signal.setDelta)
-                            let fill = finalLoad > 0 ? finalLoad : targetItem.suggestedLoad
-                            targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
-                        }
-
-                        if let reason = signal.reason, targetItem.coachNote == nil {
-                            targetItem.coachNote = reason
-                        }
+            if progressionEnabled {
+                let sourceMesoPhase = session.mesoPhase
+                
+                let baseLoad: Double = {
+                    if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement, mesoPhase: sourceMesoPhase),
+                       let nextLoad = recommendation.nextSuggestedLoad,
+                       nextLoad > 0 {
+                        return nextLoad
                     }
+                    return sourceItem.suggestedLoad
+                }()
+                
+                guard baseLoad > 0 else { continue }
+                
+                let sourceRIR = sourceItem.targetRIR
+                let targetRIR = targetItem.targetRIR
+                let sourceReps = sourceItem.targetReps
+                let targetReps = targetItem.targetReps
+                
+                let adjustedLoad: Double = {
+                    guard sourceRIR != targetRIR || sourceReps != targetReps else {
+                        return baseLoad
+                    }
+                    let e1rm = E1RMCalculator.e1RM(load: baseLoad, reps: sourceReps)
+                    guard e1rm > 0 else { return baseLoad }
+                    let rawLoad = E1RMCalculator.load(for: e1rm, reps: targetReps, targetRIR: targetRIR)
+                    guard rawLoad > 0 else { return baseLoad }
+                    let increment = profileIncrement ?? 2.5
+                    return E1RMCalculator.rounded(rawLoad, increment: increment)
+                }()
+                
+                let finalLoad = min(adjustedLoad, baseLoad * 2.0)
+                
+                targetItem.suggestedLoad = finalLoad
+                targetItem.plannedLoadsBySet = Array(
+                    repeating: finalLoad,
+                    count: targetItem.plannedLoadsBySet.count
+                )
+                
+                let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
+                    $0 == SetFeedback.pain.rawValue
                 }
+                if sourcePainFlagged {
+                    targetItem.coachNote = "⚠️ Pain was flagged in your last session for this exercise. Reassess before loading."
+                }
+                
+                let sourceFatigueFlagged = sourceItem.setFeedbackBySet.contains {
+                    $0 == SetFeedback.soreness.rawValue || $0 == SetFeedback.disruption.rawValue
+                }
+                if sourceFatigueFlagged && !sourcePainFlagged {
+                    targetItem.coachNote = "ℹ️ Soreness or disruption was flagged last session. Monitor how this feels before pushing load."
+                }
+                
+                let recentItems: [SessionItem] = allSessions
+                    .prefix(currentIndex)
+                    .filter { $0.status == .completed }
+                    .suffix(3)
+                    .compactMap { $0.items.first { $0.exerciseId == sourceItem.exerciseId } }
+                
+                let signal = PlanMemoryEngine.volumeRegulationSignal(from: recentItems)
+                
+                if signal.setDelta != 0 {
+                    targetItem.targetSets = max(2, targetItem.targetSets + signal.setDelta)
+                    let fill = finalLoad > 0 ? finalLoad : targetItem.suggestedLoad
+                    targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
+                }
+                
+                if let reason = signal.reason, targetItem.coachNote == nil {
+                    targetItem.coachNote = reason
+                }
+            }
+            // progressionEnabled = false: structural plan already copied above, no coaching writes
+        }
+    }
 
     // MARK: - Helpers
 
