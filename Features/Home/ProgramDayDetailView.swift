@@ -821,19 +821,38 @@ private struct ProgramExercisePlanRow: View {
     private var headerRow: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayName)
-                    .font(.headline)
+                            HStack(spacing: 6) {
+                                Text(displayName)
+                                    .font(.headline)
 
-                Text(detailLine)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                                if let note = item.coachNote, note.hasPrefix("⚠️") {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                } else if let note = item.coachNote, note.hasPrefix("ℹ️") {
+                                    Image(systemName: "info.circle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
 
-                if let intensifierLine {
-                    Text(intensifierLine)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+                            Text(detailLine)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let note = item.coachNote, !note.isEmpty {
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundStyle(note.hasPrefix("⚠️") ? Color.red : Color.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            if let intensifierLine {
+                                Text(intensifierLine)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
 
             Spacer()
 
