@@ -32,6 +32,14 @@ struct SessionRecapView: View {
             Section(header: Text("Next session adjustments")) {
                 nextAdjustmentsSection
             }
+
+            if !itemsNeedingOverridePrompt.isEmpty {
+                Section(header: Text("Load adjustments")) {
+                    ForEach(itemsNeedingOverridePrompt) { item in
+                        LoadOverridePromptRow(item: item)
+                    }
+                }
+            }
         }
         .navigationTitle("Session Recap")
         .toolbar {
@@ -61,7 +69,7 @@ struct SessionRecapView: View {
             partial + item.loggedSetsCount
         }
     }
-    
+
     /// Total reps actually logged across all exercises.
     private var loggedRepsTotal: Int {
         sortedItems.reduce(0) { partial, item in
@@ -81,7 +89,7 @@ struct SessionRecapView: View {
         guard plannedSetsTotal > 0 else { return 0 }
         return (Double(loggedSetsTotal) / Double(plannedSetsTotal)) * 100.0
     }
-    
+
     /// Last-set RIR values across all exercises with logged work.
     private var lastSetRIRs: [Int] {
         sortedItems.compactMap { item in
@@ -92,7 +100,6 @@ struct SessionRecapView: View {
 
             var lastRIR: Int?
 
-            // Walk backwards to find the last *real* work set.
             for idx in stride(from: count - 1, through: 0, by: -1) {
                 let reps = item.actualReps[idx]
                 let load = item.actualLoads[idx]
@@ -116,7 +123,7 @@ struct SessionRecapView: View {
     /// Minimum and maximum last-set RIR across the session.
     private var minLastSetRIR: Int? { lastSetRIRs.min() }
     private var maxLastSetRIR: Int? { lastSetRIRs.max() }
-    
+
     /// Items for which the coaching engine has a concrete next-load suggestion.
     private var itemsWithRecommendations: [SessionItem] {
         sortedItems.filter {
@@ -125,6 +132,20 @@ struct SessionRecapView: View {
                 return true
             }
             return false
+        }
+    }
+
+    /// Items where logged load was ≥15% below suggested across ≥2 sets.
+    /// Prompts user to explain the deviation so the engine can adjust accordingly.
+    private var itemsNeedingOverridePrompt: [SessionItem] {
+        sortedItems.filter { item in
+            let suggested = item.suggestedLoad
+            guard suggested > 0 else { return false }
+
+            // Count sets where logged load was ≥15% below suggested
+            let threshold = suggested * 0.85
+            let lowSets = item.actualLoads.filter { $0 > 0 && $0 < threshold }.count
+            return lowSets >= 2
         }
     }
 
@@ -273,7 +294,7 @@ struct SessionRecapView: View {
     private var nextAdjustmentsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if itemsWithRecommendations.isEmpty {
-                Text("No load changes suggested. Repeat today’s plan next time.")
+                Text("No load changes suggested. Repeat today's plan next time.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
@@ -291,7 +312,6 @@ struct SessionRecapView: View {
                                 Text(exerciseName)
                                     .font(.subheadline)
 
-                                // Shortened coach message for quick scan
                                 Text(rec.message)
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
@@ -347,6 +367,66 @@ struct SessionRecapView: View {
     }
 }
 
+// MARK: - Load Override Prompt Row
+
+struct LoadOverridePromptRow: View {
+    @Bindable var item: SessionItem
+
+    private var exerciseName: String {
+        ExerciseCatalog.displayName(for: item.exerciseId)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.orange)
+                    .font(.caption)
+                Text("\(exerciseName) — you went lighter than planned")
+                    .font(.subheadline)
+            }
+
+            Text("Want to note why? This helps the engine make better load calls next session.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if let reason = item.loadOverrideReason {
+                HStack {
+                    Text(reason.displayName)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundColor(.orange)
+                        .clipShape(Capsule())
+
+                    Button("Clear") {
+                        item.loadOverrideReason = nil
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(LoadOverrideReason.allCases, id: \.self) { reason in
+                        Button(reason.displayName) {
+                            item.loadOverrideReason = reason
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemGray6))
+                        .foregroundColor(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: - Per-exercise recap row
 
 struct ExerciseRecapRow: View {
@@ -373,17 +453,14 @@ struct ExerciseRecapRow: View {
     private var status: (text: String, color: Color) {
         let logged = item.loggedSetsCount
 
-        // 1) Nothing logged at all
         if logged == 0 {
             return ("Not logged", .secondary)
         }
 
-        // 2) If you logged fewer sets than planned → always under
         if logged < plannedSets {
             return ("Low sets", .orange)
         }
 
-        // 3) You logged at least as many sets as planned, now check reps
         let bestReps = item.actualReps.max() ?? 0
 
         if bestReps >= plannedTopReps {
@@ -441,7 +518,6 @@ struct ExerciseRecapRow: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
-                // Top set with RP pattern if used
                 if let top = item.bestSetDescription {
                     Text("Top set: \(top)")
                         .font(.caption2)
@@ -468,7 +544,7 @@ struct ExerciseRecapRow: View {
                     .fontWeight(.semibold)
             }
 
-            // 🔹 Per-set breakdown
+            // Per-set breakdown
             if !item.loggedSetIndices.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sets")
@@ -476,7 +552,6 @@ struct ExerciseRecapRow: View {
                         .foregroundColor(.secondary)
 
                     ForEach(item.loggedSetIndices, id: \.self) { idx in
-                        // Manual safe indexing so we don't rely on subscript(safe:)
                         let load: Double = idx < item.actualLoads.count ? item.actualLoads[idx] : 0
                         let reps: Int    = idx < item.actualReps.count  ? item.actualReps[idx]  : 0
                         let rir: Int?    = idx < item.actualRIRs.count  ? item.actualRIRs[idx]  : nil
@@ -513,7 +588,7 @@ struct ExerciseRecapRow: View {
                 .padding(.top, 4)
             }
 
-            // Recommendation / "what should I do next?"
+            // Recommendation
             if let rec = coachingRecommendation {
                 Text(rec.message)
                     .font(.caption)
@@ -629,7 +704,6 @@ extension SessionItem {
     }
 
     /// Human-readable description of the top set, including RP pattern if used.
-    /// e.g. "120.0 x 17 (RP: 10+4+3)"
     var bestSetDescription: String? {
         guard let idx = bestSetIndex else { return nil }
         guard idx < actualLoads.count, idx < actualReps.count else { return nil }
@@ -657,7 +731,7 @@ extension SessionItem {
         }
     }
 
-    /// Description of rest-pause for a specific set index, e.g. "RP: 10+4+3".
+    /// Description of rest-pause for a specific set index.
     func restPauseDescription(forSetAt index: Int) -> String? {
         guard index < usedRestPauseFlags.count, usedRestPauseFlags[index] else {
             return nil
@@ -669,6 +743,7 @@ extension SessionItem {
             return "RP: \(pattern)"
         }
     }
+
     func dropSetDescription(forSetAt index: Int) -> String? {
         guard index < dropSetPatternsBySet.count else { return nil }
         let pattern = dropSetPatternsBySet[index]
@@ -680,5 +755,3 @@ extension SessionItem {
         }.joined(separator: "\n")
     }
 }
-
-

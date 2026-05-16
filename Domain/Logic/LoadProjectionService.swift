@@ -79,6 +79,23 @@ enum LoadProjectionService {
                     ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
                 }) else { return nil }
 
+                // Override reason — adjust how this session contributes to e1RM
+                if let reason = item.loadOverrideReason {
+                    switch reason {
+                    case .jointTenderness, .generalFatigue:
+                        // Session was compromised — exclude entirely
+                        return nil
+                    case .equipmentConstraint, .deliberateDeload:
+                        // Load was artificially low — use suggested load as capacity proxy
+                        guard item.suggestedLoad > 0 else { return nil }
+                        let proxyReps = item.targetReps > 0 ? item.targetReps : 8
+                        let proxyE1RM = E1RMCalculator.e1RM(load: item.suggestedLoad, reps: proxyReps)
+                        guard proxyE1RM > 0 else { return nil }
+                        return (e1rm: proxyE1RM, date: s.date, sessionID: s.persistentModelID)
+                    }
+                }
+
+                // Normal path — RIR-weighted e1RM from actuals
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 guard setCount > 0 else { return nil }
 

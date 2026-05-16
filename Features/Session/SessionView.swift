@@ -2002,6 +2002,8 @@ final class SessionScreenViewModel: ObservableObject {
                 }
             }
 
+            let matchingItem = session.items.first { $0.exerciseId == exercise.exerciseId }
+
             let summary = SessionRecapExercise(
                 name: exercise.name,
                 primaryMuscle: primary,
@@ -2009,7 +2011,8 @@ final class SessionScreenViewModel: ObservableObject {
                 reps: totalRepsForExercise,
                 volume: totalVolume,
                 lastSetRIR: lastRIR,
-                topE1RM: topE1RM
+                topE1RM: topE1RM,
+                sessionItem: matchingItem
             )
 
             exerciseSummaries.append(summary)
@@ -2669,6 +2672,7 @@ struct UISessionSet: Identifiable {
         let volume: Double
         let lastSetRIR: Int?
         let topE1RM: Double?
+        let sessionItem: SessionItem?  // ← add
     }
     
     private struct SessionRecapSheet: View {
@@ -2693,11 +2697,29 @@ struct UISessionSet: Identifiable {
                     VStack(spacing: 16) {
                         headerCard
                         
+                        
                         VStack(alignment: .leading, spacing: 8) {
                             Text("By exercise")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            
+                            if !itemsNeedingPrompt.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Load adjustments")
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    VStack(spacing: 12) {
+                                        ForEach(itemsNeedingPrompt, id: \.exerciseId) { item in
+                                            LoadOverridePromptRow(item: item)
+                                                .padding()
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 20)
+                                                        .fill(Color(.systemBackground))
+                                                )
+                                        }
+                                    }
+                                }
+                            }
                             VStack(spacing: 0) {
                                 ForEach(recap.exercises) { ex in
                                     VStack(alignment: .leading, spacing: 4) {
@@ -2740,6 +2762,7 @@ struct UISessionSet: Identifiable {
                     }
                 }
             }
+            
         }
         
         private var headerCard: some View {
@@ -2827,6 +2850,16 @@ struct UISessionSet: Identifiable {
                             .font(.caption)
                     }
                 }
+            }
+        }
+        private var itemsNeedingPrompt: [SessionItem] {
+            recap.exercises.compactMap { ex -> SessionItem? in
+                guard let item = ex.sessionItem else { return nil }
+                let suggested = item.suggestedLoad
+                guard suggested > 0 else { return nil }
+                let threshold = suggested * 0.85
+                let lowSets = item.actualLoads.filter { $0 > 0 && $0 < threshold }.count
+                return lowSets >= 2 ? item : nil
             }
         }
     }
