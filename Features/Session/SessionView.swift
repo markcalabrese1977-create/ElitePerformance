@@ -2696,30 +2696,13 @@ struct UISessionSet: Identifiable {
                 ScrollView {
                     VStack(spacing: 16) {
                         headerCard
-                        
-                        
+
+                        // By exercise
                         VStack(alignment: .leading, spacing: 8) {
                             Text("By exercise")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            if !itemsNeedingPrompt.isEmpty {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Load adjustments")
-                                        .font(.headline)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                                    VStack(spacing: 12) {
-                                        ForEach(itemsNeedingPrompt, id: \.exerciseId) { item in
-                                            LoadOverridePromptRow(item: item)
-                                                .padding()
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 20)
-                                                        .fill(Color(.systemBackground))
-                                                )
-                                        }
-                                    }
-                                }
-                            }
                             VStack(spacing: 0) {
                                 ForEach(recap.exercises) { ex in
                                     VStack(alignment: .leading, spacing: 4) {
@@ -2737,7 +2720,7 @@ struct UISessionSet: Identifiable {
                                         .foregroundStyle(.secondary)
                                     }
                                     .padding(.vertical, 8)
-                                    
+
                                     if ex.id != recap.exercises.last?.id {
                                         Divider()
                                     }
@@ -2748,6 +2731,26 @@ struct UISessionSet: Identifiable {
                                 RoundedRectangle(cornerRadius: 20)
                                     .fill(Color(.systemBackground))
                             )
+                        }
+
+                        // Load adjustments — shown after exercise summary
+                        if !itemsNeedingPrompt.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Load adjustments")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                VStack(spacing: 12) {
+                                    ForEach(itemsNeedingPrompt, id: \.exerciseId) { item in
+                                        LoadOverridePromptRow(item: item)
+                                            .padding()
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 20)
+                                                    .fill(Color(.systemBackground))
+                                            )
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding()
