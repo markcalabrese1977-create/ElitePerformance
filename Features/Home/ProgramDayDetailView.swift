@@ -483,25 +483,36 @@ struct ProgramDayDetailView: View {
         let targetReps = currentItem.targetReps > 0 ? currentItem.targetReps : (prescribedMin + prescribedMax) / 2
         let increment = loadIncrement(for: repRange)
  
-        // Build e1RM candidates — exclude today's sessions
-        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentItem.exerciseId)
-        let today = Calendar.current.startOfDay(for: Date())
- 
-        typealias E1RMCandidate = (e1rm: Double, date: Date, sessionID: PersistentIdentifier)
- 
-        let allCandidates: [E1RMCandidate] = allSessions
-            .filter { Calendar.current.startOfDay(for: $0.date) < today }
-            .compactMap { s -> E1RMCandidate? in
-                guard let item = s.items.first(where: {
-                    ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
-                }) else { return nil }
-                let bestE1RM: Double = zip(item.actualLoads, item.actualReps)
-                    .filter { $0.0 > 0 && $0.1 > 0 }
-                    .map { E1RMCalculator.e1RM(load: $0.0, reps: $0.1) }
-                    .max() ?? 0
-                guard bestE1RM > 0 else { return nil }
-                return (e1rm: bestE1RM, date: s.date, sessionID: s.persistentModelID)
-            }
+        // Build e1RM candidates — exclude today, use RIR-weighted e1RM per session
+                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentItem.exerciseId)
+                let today = Calendar.current.startOfDay(for: Date())
+
+                typealias E1RMCandidate = (e1rm: Double, date: Date, sessionID: PersistentIdentifier)
+
+                let allCandidates: [E1RMCandidate] = allSessions
+                    .filter { Calendar.current.startOfDay(for: $0.date) < today }
+                    .compactMap { s -> E1RMCandidate? in
+                        guard let item = s.items.first(where: {
+                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+                        }) else { return nil }
+
+                        // Build (load, reps, actualRIR) tuples for RIR-weighted e1RM
+                        let setCount = min(item.actualLoads.count, item.actualReps.count)
+                        guard setCount > 0 else { return nil }
+
+                        let sets: [(load: Double, reps: Int, actualRIR: Int)] = (0..<setCount).compactMap { idx in
+                            let load = item.actualLoads[idx]
+                            let reps = item.actualReps[idx]
+                            guard load > 0, reps > 0 else { return nil }
+                            let rir = idx < item.actualRIRs.count ? item.actualRIRs[idx] : item.targetRIR
+                            return (load: load, reps: reps, actualRIR: rir)
+                        }
+
+                        let sessionTargetRIR = item.targetRIR > 0 ? item.targetRIR : 2
+                        let weightedE1RM = E1RMCalculator.rirWeightedE1RM(from: sets, targetRIR: sessionTargetRIR)
+                        guard weightedE1RM > 0 else { return nil }
+                        return (e1rm: weightedE1RM, date: s.date, sessionID: s.persistentModelID)
+                    }
  
         // Current meso peak — best raw e1RM within the active meso, no decay
         // Reflects true current capacity without being diluted by older sessions

@@ -26,6 +26,47 @@ struct E1RMCalculator {
         return (load / increment).rounded() * increment
     }
 
+    /// RIR-weighted e1RM from a single session's sets.
+    ///
+    /// Sets performed at or above the target RIR get full weight (1.0).
+    /// Sets performed below target RIR (harder than intended) are downweighted,
+    /// floored at 0.5 so they still contribute but don't dominate.
+    ///
+    /// This prevents a single pushed set at low RIR from inflating the e1RM
+    /// estimate beyond what represents sustainable working capacity.
+    ///
+    /// - Parameters:
+    ///   - sets: Array of (load, reps, actualRIR) tuples from a single session.
+    ///   - targetRIR: The intended RIR for the session.
+    /// - Returns: RIR-weighted average e1RM, or 0 if no valid sets.
+    static func rirWeightedE1RM(
+        from sets: [(load: Double, reps: Int, actualRIR: Int)],
+        targetRIR: Int
+    ) -> Double {
+        let validSets = sets.filter { $0.load > 0 && $0.reps > 0 }
+        guard !validSets.isEmpty else { return 0 }
+
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+
+        for set in validSets {
+            let setE1RM = e1RM(load: set.load, reps: set.reps)
+            guard setE1RM > 0 else { continue }
+
+            let weight: Double = {
+                guard targetRIR > 0 else { return 1.0 }
+                let ratio = Double(set.actualRIR) / Double(targetRIR)
+                return max(0.5, min(1.0, ratio))
+            }()
+
+            weightedSum += setE1RM * weight
+            totalWeight += weight
+        }
+
+        guard totalWeight > 0 else { return 0 }
+        return weightedSum / totalWeight
+    }
+
     /// Decay-weighted e1RM across multiple sessions.
     ///
     /// Recent sessions contribute more than older ones using exponential decay.
@@ -33,7 +74,7 @@ struct E1RMCalculator {
     /// at 50% weight, 6 weeks ago at 25%, and so on.
     ///
     /// - Parameters:
-    ///   - candidates: Array of (e1rm, sessionDate) pairs. Empty arrays return 0.
+    ///   - candidates: Array of (e1rm, sessionDate) pairs.
     ///   - referenceDate: The date to measure recency from. Defaults to today.
     ///   - halfLifeDays: Days until a session's weight halves. Default 21 (3 weeks).
     /// - Returns: Weighted average e1RM, or 0 if no valid candidates.
@@ -50,7 +91,6 @@ struct E1RMCalculator {
         for candidate in candidates {
             guard candidate.e1rm > 0 else { continue }
             let daysSince = referenceDate.timeIntervalSince(candidate.date) / 86400.0
-            // Clamp to non-negative — future dates treated as today
             let clampedDays = max(0.0, daysSince)
             let weight = pow(0.5, clampedDays / halfLifeDays)
             weightedSum += candidate.e1rm * weight

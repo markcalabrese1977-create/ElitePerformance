@@ -93,25 +93,32 @@ struct PlanMemoryEngine {
                 guard baseLoad > 0 else { continue }
 
                 // 1.2 — Decay-weighted cross-session e1RM for RIR adjustment
-                // Build e1RM candidates from all completed sessions for this exercise
-                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: sourceItem.exerciseId)
-                let e1rmCandidates: [(e1rm: Double, date: Date)] = allSessions
-                    .prefix(currentIndex + 1)
-                    .filter { $0.status == .completed }
-                    .compactMap { s -> (e1rm: Double, date: Date)? in
-                        guard let item = s.items.first(where: {
-                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
-                        }) else { return nil }
+                // Build RIR-weighted e1RM candidates from all completed sessions for this exercise
+                                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: sourceItem.exerciseId)
+                                let e1rmCandidates: [(e1rm: Double, date: Date)] = allSessions
+                                    .prefix(currentIndex)
+                                    .filter { $0.status == .completed }
+                                    .compactMap { s -> (e1rm: Double, date: Date)? in
+                                        guard let item = s.items.first(where: {
+                                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+                                        }) else { return nil }
 
-                        // Find best e1RM from this session's actual performance
-                        let bestE1RM: Double = zip(item.actualLoads, item.actualReps)
-                            .filter { $0.0 > 0 && $0.1 > 0 }
-                            .map { E1RMCalculator.e1RM(load: $0.0, reps: $0.1) }
-                            .max() ?? 0
+                                        let setCount = min(item.actualLoads.count, item.actualReps.count)
+                                        guard setCount > 0 else { return nil }
 
-                        guard bestE1RM > 0 else { return nil }
-                        return (e1rm: bestE1RM, date: s.date)
-                    }
+                                        let sets: [(load: Double, reps: Int, actualRIR: Int)] = (0..<setCount).compactMap { idx in
+                                            let load = item.actualLoads[idx]
+                                            let reps = item.actualReps[idx]
+                                            guard load > 0, reps > 0 else { return nil }
+                                            let rir = idx < item.actualRIRs.count ? item.actualRIRs[idx] : item.targetRIR
+                                            return (load: load, reps: reps, actualRIR: rir)
+                                        }
+
+                                        let sessionTargetRIR = item.targetRIR > 0 ? item.targetRIR : 2
+                                        let weightedE1RM = E1RMCalculator.rirWeightedE1RM(from: sets, targetRIR: sessionTargetRIR)
+                                        guard weightedE1RM > 0 else { return nil }
+                                        return (e1rm: weightedE1RM, date: s.date)
+                                    }
 
                 let sourceRIR = sourceItem.targetRIR
                 let targetRIR = targetItem.targetRIR
