@@ -67,6 +67,8 @@ struct PlanMemoryEngine {
             targetItem.targetSets    = sourceItem.targetSets
             targetItem.targetRIR     = sourceItem.targetRIR
             targetItem.suggestedLoad = sourceItem.suggestedLoad
+            targetItem.repMin = sourceItem.repMin
+            targetItem.repMax = sourceItem.repMax
             
             // Copy per-set plan arrays
             targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
