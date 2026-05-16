@@ -133,6 +133,7 @@ struct SessionItemBackupDTO: Codable {
     let isPR: Bool
 
     let coachNote: String?
+    let loadOverrideReasonRaw: String?
     let nextSuggestedLoad: Double?
 
     let logs: [SetLogBackupDTO]

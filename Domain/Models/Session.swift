@@ -241,6 +241,15 @@ final class SessionItem {
     var isPR: Bool
 
     var coachNote: String?
+    var loadOverrideReasonRaw: String? = nil
+
+    var loadOverrideReason: LoadOverrideReason? {
+        get {
+            guard let raw = loadOverrideReasonRaw else { return nil }
+            return LoadOverrideReason(rawValue: raw)
+        }
+        set { loadOverrideReasonRaw = newValue?.rawValue }
+    }
     var nextSuggestedLoad: Double?
 
     init(
@@ -283,7 +292,8 @@ final class SessionItem {
         isCompleted: Bool = false,
         isPR: Bool = false,
         coachNote: String? = nil,
-        nextSuggestedLoad: Double? = nil
+        nextSuggestedLoad: Double? = nil,
+        loadOverrideReasonRaw: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -329,6 +339,7 @@ final class SessionItem {
 
         self.coachNote = coachNote
         self.nextSuggestedLoad = nextSuggestedLoad
+        self.loadOverrideReasonRaw = loadOverrideReasonRaw
     }
 }
 

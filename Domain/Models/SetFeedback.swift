@@ -48,6 +48,35 @@ enum VolumeRegulationAction {
     case reduce
 }
 
+// MARK: - Load Override Reason
+
+enum LoadOverrideReason: String, Codable, CaseIterable {
+    case jointTenderness
+    case generalFatigue
+    case equipmentConstraint
+    case deliberateDeload
+
+    var displayName: String {
+        switch self {
+        case .jointTenderness:     return "Joint tenderness"
+        case .generalFatigue:      return "General fatigue"
+        case .equipmentConstraint: return "Equipment constraint"
+        case .deliberateDeload:    return "Deliberate deload"
+        }
+    }
+
+    var coachNote: String {
+        switch self {
+        case .jointTenderness:
+            return "⚠️ Joint tenderness was flagged last session. Reassess load before pushing."
+        case .generalFatigue:
+            return "ℹ️ General fatigue caused a load reduction last session. Monitor before increasing."
+        case .equipmentConstraint, .deliberateDeload:
+            return ""
+        }
+    }
+}
+
 struct VolumeRegulationSignal {
     let action: VolumeRegulationAction
     let reason: String?

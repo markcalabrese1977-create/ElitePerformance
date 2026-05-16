@@ -129,6 +129,7 @@ enum BackupSnapshotExporter {
                                 isCompleted: item.isCompleted,
                                 isPR: item.isPR,
                                 coachNote: item.coachNote,
+                                loadOverrideReasonRaw: item.loadOverrideReasonRaw,
                                 nextSuggestedLoad: item.nextSuggestedLoad,
                                 logs: item.logs.map { log in
                                     SetLogBackupDTO(

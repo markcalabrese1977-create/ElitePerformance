@@ -156,7 +156,8 @@ enum BackupSnapshotImporter {
                     isCompleted: itemDTO.isCompleted,
                     isPR: itemDTO.isPR,
                     coachNote: itemDTO.coachNote,
-                    nextSuggestedLoad: itemDTO.nextSuggestedLoad
+                    nextSuggestedLoad: itemDTO.nextSuggestedLoad,
+                    loadOverrideReasonRaw: itemDTO.loadOverrideReasonRaw
                 )
 
                 modelContext.insert(item)
