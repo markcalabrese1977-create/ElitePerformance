@@ -20,64 +20,67 @@ struct PlanMemoryEngine {
     /// where plan is still empty.
     func carryForwardPlans(from session: Session) {
         guard session.status == .inProgress || session.status == .completed else { return }
+
         // 1.4 — Fetch UserProfile for load increment preference
         let profileDescriptor = FetchDescriptor<UserProfile>()
         let profileIncrement: Double? = try? context.fetch(profileDescriptor).first?.minLoadIncrement
+
+        // Auto-progression gate
         let progressionEnabled: Bool = {
             let descriptor = FetchDescriptor<User>()
             return (try? context.fetch(descriptor).first?.progressionEnabled) ?? true
         }()
-        
+
         // Fetch all sessions in chronological order
         let descriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
         )
-        
+
         guard let allSessions = try? context.fetch(descriptor),
               let currentIndex = allSessions.firstIndex(where: { $0.persistentModelID == session.persistentModelID })
         else {
             return
         }
-        
+
         let futureSessions = allSessions.suffix(from: currentIndex + 1)
         guard !futureSessions.isEmpty else { return }
-        
+
         // For each exercise in the completed session, push its plan to the
         // *next* session in the future that contains the same exerciseId.
         for sourceItem in session.items {
             // If the current exercise has no meaningful plan, skip it.
             guard hasMeaningfulPlan(sourceItem) else { continue }
-            
+
             // Find the next future session that includes this exercise
             guard let nextSession = futureSessions.first(where: { future in
                 future.items.contains(where: { $0.exerciseId == sourceItem.exerciseId })
             }) else {
                 continue
             }
-            
+
             guard let targetItem = nextSession.items.first(where: { $0.exerciseId == sourceItem.exerciseId }) else {
                 continue
             }
-            
+
             // Only fill if that future item doesn't already have its own plan.
             guard isPlanEffectivelyEmpty(targetItem) else { continue }
-            
+
             // Copy aggregate targets
             targetItem.targetReps    = sourceItem.targetReps
             targetItem.targetSets    = sourceItem.targetSets
             targetItem.targetRIR     = sourceItem.targetRIR
             targetItem.suggestedLoad = sourceItem.suggestedLoad
-            targetItem.repMin = sourceItem.repMin
-            targetItem.repMax = sourceItem.repMax
-            
+            targetItem.repMin        = sourceItem.repMin
+            targetItem.repMax        = sourceItem.repMax
+
             // Copy per-set plan arrays
             targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
-            
+
             // 0.4 + 1.2 — CoachingEngine load suggestion + RIR-adjusted carry-forward
             if progressionEnabled {
                 let sourceMesoPhase = session.mesoPhase
-                
+
                 let baseLoad: Double = {
                     if let recommendation = CoachingEngine.recommend(for: sourceItem, minLoadIncrement: profileIncrement, mesoPhase: sourceMesoPhase),
                        let nextLoad = recommendation.nextSuggestedLoad,
@@ -86,15 +89,49 @@ struct PlanMemoryEngine {
                     }
                     return sourceItem.suggestedLoad
                 }()
-                
+
                 guard baseLoad > 0 else { continue }
-                
+
+                // 1.2 — Decay-weighted cross-session e1RM for RIR adjustment
+                // Build e1RM candidates from all completed sessions for this exercise
+                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: sourceItem.exerciseId)
+                let e1rmCandidates: [(e1rm: Double, date: Date)] = allSessions
+                    .prefix(currentIndex + 1)
+                    .filter { $0.status == .completed }
+                    .compactMap { s -> (e1rm: Double, date: Date)? in
+                        guard let item = s.items.first(where: {
+                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+                        }) else { return nil }
+
+                        // Find best e1RM from this session's actual performance
+                        let bestE1RM: Double = zip(item.actualLoads, item.actualReps)
+                            .filter { $0.0 > 0 && $0.1 > 0 }
+                            .map { E1RMCalculator.e1RM(load: $0.0, reps: $0.1) }
+                            .max() ?? 0
+
+                        guard bestE1RM > 0 else { return nil }
+                        return (e1rm: bestE1RM, date: s.date)
+                    }
+
                 let sourceRIR = sourceItem.targetRIR
                 let targetRIR = targetItem.targetRIR
                 let sourceReps = sourceItem.targetReps
                 let targetReps = targetItem.targetReps
-                
+
                 let adjustedLoad: Double = {
+                    // Use decay-weighted e1RM if we have cross-session history
+                    if !e1rmCandidates.isEmpty {
+                        let weightedE1RM = E1RMCalculator.decayWeightedE1RM(from: e1rmCandidates)
+                        guard weightedE1RM > 0 else { return baseLoad }
+                        let rawLoad = E1RMCalculator.load(for: weightedE1RM, reps: targetReps, targetRIR: targetRIR)
+                        guard rawLoad > 0 else { return baseLoad }
+                        let increment = profileIncrement ?? 2.5
+                        let e1rmLoad = E1RMCalculator.rounded(rawLoad, increment: increment)
+                        // Use whichever is higher — coached progression or e1RM floor
+                        return max(baseLoad, e1rmLoad)
+                    }
+
+                    // Fallback: single-session RIR delta adjustment
                     guard sourceRIR != targetRIR || sourceReps != targetReps else {
                         return baseLoad
                     }
@@ -105,43 +142,46 @@ struct PlanMemoryEngine {
                     let increment = profileIncrement ?? 2.5
                     return E1RMCalculator.rounded(rawLoad, increment: increment)
                 }()
-                
-                let finalLoad = min(adjustedLoad, baseLoad * 2.0)
-                
+
+                let finalLoad = min(adjustedLoad, baseLoad * 2.0) // sanity cap
+
                 targetItem.suggestedLoad = finalLoad
                 targetItem.plannedLoadsBySet = Array(
                     repeating: finalLoad,
                     count: targetItem.plannedLoadsBySet.count
                 )
-                
+
+                // Pain carry-forward
                 let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
                     $0 == SetFeedback.pain.rawValue
                 }
                 if sourcePainFlagged {
                     targetItem.coachNote = "⚠️ Pain was flagged in your last session for this exercise. Reassess before loading."
                 }
-                
+
+                // Soreness/disruption carry-forward
                 let sourceFatigueFlagged = sourceItem.setFeedbackBySet.contains {
                     $0 == SetFeedback.soreness.rawValue || $0 == SetFeedback.disruption.rawValue
                 }
                 if sourceFatigueFlagged && !sourcePainFlagged {
                     targetItem.coachNote = "ℹ️ Soreness or disruption was flagged last session. Monitor how this feels before pushing load."
                 }
-                
+
+                // Volume auto-regulation — look back 3 completed sessions for this exercise
                 let recentItems: [SessionItem] = allSessions
                     .prefix(currentIndex)
                     .filter { $0.status == .completed }
                     .suffix(3)
                     .compactMap { $0.items.first { $0.exerciseId == sourceItem.exerciseId } }
-                
+
                 let signal = PlanMemoryEngine.volumeRegulationSignal(from: recentItems)
-                
+
                 if signal.setDelta != 0 {
                     targetItem.targetSets = max(2, targetItem.targetSets + signal.setDelta)
                     let fill = finalLoad > 0 ? finalLoad : targetItem.suggestedLoad
                     targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
                 }
-                
+
                 if let reason = signal.reason, targetItem.coachNote == nil {
                     targetItem.coachNote = reason
                 }
@@ -155,10 +195,6 @@ struct PlanMemoryEngine {
     /// Treat a plan as "empty" if:
     /// - All planned loads are 0, AND
     /// - The aggregate suggestedLoad is 0.
-    ///
-    /// We intentionally ignore reps here because the program generator
-    /// pre-fills target reps/RIR across the meso. We still want Plan Memory
-    /// to fill in *loads* for those sessions.
     private func isPlanEffectivelyEmpty(_ item: SessionItem) -> Bool {
         let allLoadsZero = item.plannedLoadsBySet.allSatisfy { $0 == 0 }
         return allLoadsZero && item.suggestedLoad == 0
@@ -172,7 +208,7 @@ struct PlanMemoryEngine {
         let anyPlannedLoads = item.plannedLoadsBySet.contains(where: { $0 > 0 })
         return anyPlannedReps || anyPlannedLoads || item.suggestedLoad > 0
     }
-    
+
     // MARK: - Volume Auto-Regulation
 
     /// Analyzes feedback patterns across up to 3 recent completed sessions
@@ -238,4 +274,3 @@ struct PlanMemoryEngine {
         return .neutral
     }
 }
-

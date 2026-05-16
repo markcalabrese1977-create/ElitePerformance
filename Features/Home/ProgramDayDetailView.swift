@@ -186,37 +186,47 @@ struct ProgramDayDetailView: View {
     // MARK: - Auto-generate (no model changes)
 
     // MARK: - Auto+ (From History): update suggestedLoad from last logged performance
-
+ 
     private func autoGenerateSuggestedLoadsFromHistoryForThisDay() {
         let sessions = fetchRecentSessions(limit: 60)
         var foundHistory = false
-
+ 
+        // Fetch active meso session IDs for current-meso peak e1RM calculation
+        let activeMesoSessionIDs: Set<PersistentIdentifier> = {
+            let descriptor = FetchDescriptor<MesoBlock>()
+            let blocks = (try? modelContext.fetch(descriptor)) ?? []
+            let active = blocks.first { $0.status == .active }
+            return Set(active?.sessions.map { $0.persistentModelID } ?? [])
+        }()
+ 
         for item in orderedItems {
             if let lastLogged = findMostRecentLoggedItem(exerciseId: item.exerciseId, currentWaveRaw: item.waveRaw, in: sessions) {
                 foundHistory = true
-
+ 
                 let range = repRange(for: item)
-
+ 
                 let nextLoad = computeNextSuggestedLoad(
                     currentItem: item,
                     lastLoggedItem: lastLogged,
-                    repRange: range
+                    repRange: range,
+                    allSessions: sessions,
+                    activeMesoSessionIDs: activeMesoSessionIDs
                 )
-
+ 
                 if nextLoad > 0 {
                     item.suggestedLoad = nextLoad
                 }
             } else {
                 seedSuggestedLoadIfNeeded(item)
             }
-
+ 
             autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
         }
-
+ 
         do {
             try modelContext.save()
             print("✅ Auto+ applied (history-informed load + per-set plan refresh)")
-
+ 
             if foundHistory {
                 presentFeedback("Updated suggested loads from history and refreshed per-set defaults.")
             } else {
@@ -224,7 +234,7 @@ struct ProgramDayDetailView: View {
             }
         } catch {
             print("⚠️ Auto+ save failed: \(error)")
-            presentFeedback("Couldn’t update Auto+ plan: \(error.localizedDescription)")
+            presentFeedback("Couldn't update Auto+ plan: \(error.localizedDescription)")
         }
     }
     
@@ -433,58 +443,110 @@ struct ProgramDayDetailView: View {
     }
 
     // MARK: - Core load decision (history → next suggestedLoad)
-
+ 
     private func computeNextSuggestedLoad(
         currentItem: SessionItem,
         lastLoggedItem: SessionItem,
-        repRange: RepRange
+        repRange: RepRange,
+        allSessions: [Session],
+        activeMesoSessionIDs: Set<PersistentIdentifier>
     ) -> Double {
-
-        // Identify the “current load” used most recently for this exercise.
+ 
+        // Identify the "current load" used most recently for this exercise.
         let setCount = max(1, currentItem.targetSets)
         let lastLoad = bestWorkingLoad(from: lastLoggedItem, setCount: setCount)
         guard lastLoad > 0 else { return 0 }
-
+ 
         // Gather last working-set reps for the first N sets (N = current targetSets).
-        // Prefer actual reps; fallback to planned reps; final fallback to current targetReps.
         var repsBySet: [Int] = []
         repsBySet.reserveCapacity(setCount)
-
+ 
         for idx in 0..<setCount {
             let actual = idx < lastLoggedItem.actualReps.count ? lastLoggedItem.actualReps[idx] : 0
             if actual > 0 {
                 repsBySet.append(actual)
                 continue
             }
-
+ 
             let planned = idx < lastLoggedItem.plannedRepsBySet.count ? lastLoggedItem.plannedRepsBySet[idx] : 0
             if planned > 0 {
                 repsBySet.append(planned)
                 continue
             }
-
+ 
             repsBySet.append(lastLoggedItem.targetReps)
         }
-
-        // Use the item's actual prescription as the rep range.
-                // Fall back to the pattern-based rulebook only if prescription data is missing.
-                let prescribedMin = lastLoggedItem.repMin ?? repRange.min
-                let prescribedMax = lastLoggedItem.repMax ?? repRange.max
-                let increment = loadIncrement(for: repRange)
-
-                let earnedWeight = repsBySet.allSatisfy { $0 >= prescribedMax }
-                let missesBottomBadlyCount = repsBySet.filter { $0 < (prescribedMin - 1) }.count
-                let tooMuchFatigue = missesBottomBadlyCount >= 2
-
-                if tooMuchFatigue {
-                    return roundToIncrement(lastLoad * 0.95, increment: increment)
-                }
-
-                if earnedWeight {
-                    return roundToIncrement(lastLoad + increment, increment: increment)
-                }
-
-                return roundToIncrement(lastLoad, increment: increment)
+ 
+        let prescribedMin = currentItem.repMin ?? repRange.min
+        let prescribedMax = currentItem.repMax ?? repRange.max
+        let targetRIR = currentItem.targetRIR
+        let targetReps = currentItem.targetReps > 0 ? currentItem.targetReps : (prescribedMin + prescribedMax) / 2
+        let increment = loadIncrement(for: repRange)
+ 
+        // Build e1RM candidates — exclude today's sessions
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentItem.exerciseId)
+        let today = Calendar.current.startOfDay(for: Date())
+ 
+        typealias E1RMCandidate = (e1rm: Double, date: Date, sessionID: PersistentIdentifier)
+ 
+        let allCandidates: [E1RMCandidate] = allSessions
+            .filter { Calendar.current.startOfDay(for: $0.date) < today }
+            .compactMap { s -> E1RMCandidate? in
+                guard let item = s.items.first(where: {
+                    ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+                }) else { return nil }
+                let bestE1RM: Double = zip(item.actualLoads, item.actualReps)
+                    .filter { $0.0 > 0 && $0.1 > 0 }
+                    .map { E1RMCalculator.e1RM(load: $0.0, reps: $0.1) }
+                    .max() ?? 0
+                guard bestE1RM > 0 else { return nil }
+                return (e1rm: bestE1RM, date: s.date, sessionID: s.persistentModelID)
+            }
+ 
+        // Current meso peak — best raw e1RM within the active meso, no decay
+        // Reflects true current capacity without being diluted by older sessions
+        let currentMesoPeakE1RM: Double = allCandidates
+            .filter { activeMesoSessionIDs.contains($0.sessionID) }
+            .map { $0.e1rm }
+            .max() ?? 0
+ 
+        // Cross-meso baseline — decay-weighted average from sessions outside current meso
+        // Provides longer-term context without anchoring on stale peaks
+        let crossMesoCandidates = allCandidates
+            .filter { !activeMesoSessionIDs.contains($0.sessionID) }
+        let crossMesoE1RM = E1RMCalculator.decayWeightedE1RM(from: crossMesoCandidates.map { ($0.e1rm, $0.date) })
+ 
+        // Best e1RM = higher of current meso peak or cross-meso baseline
+        let bestE1RM = max(currentMesoPeakE1RM, crossMesoE1RM)
+ 
+        // Translate best e1RM to target wave's load
+        let e1rmFloorLoad: Double = {
+            guard bestE1RM > 0 else { return 0 }
+            let raw = E1RMCalculator.load(for: bestE1RM, reps: targetReps, targetRIR: targetRIR)
+            return E1RMCalculator.rounded(raw, increment: increment)
+        }()
+ 
+        // Same-wave progression decision
+        let prescribedMinLast = lastLoggedItem.repMin ?? repRange.min
+        let prescribedMaxLast = lastLoggedItem.repMax ?? repRange.max
+        let earnedWeight = repsBySet.allSatisfy { $0 >= prescribedMaxLast }
+        let missesBottomBadlyCount = repsBySet.filter { $0 < (prescribedMinLast - 1) }.count
+        let tooMuchFatigue = missesBottomBadlyCount >= 2
+ 
+        let sameWaveLoad: Double = {
+            if tooMuchFatigue {
+                return roundToIncrement(lastLoad * 0.95, increment: increment)
+            }
+            if earnedWeight {
+                return roundToIncrement(lastLoad + increment, increment: increment)
+            }
+            return roundToIncrement(lastLoad, increment: increment)
+        }()
+ 
+        print("🔍 Auto+ debug — \(currentItem.exerciseId): mesoPeak=\(currentMesoPeakE1RM), crossMeso=\(crossMesoE1RM), bestE1RM=\(bestE1RM), e1rmFloor=\(e1rmFloorLoad), sameWave=\(sameWaveLoad), final=\(max(sameWaveLoad, e1rmFloorLoad))")
+ 
+        // Use whichever is higher — same-wave progression or e1RM-derived floor
+        return max(sameWaveLoad, e1rmFloorLoad)
     }
 
     private func bestLoggedLoad(from item: SessionItem) -> Double {

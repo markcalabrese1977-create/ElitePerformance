@@ -196,9 +196,15 @@ struct ElitePerformanceApp: App {
         runStartupBackfills(using: best.container)
     }
 
+    @State private var appResetID = UUID()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .id(appResetID)
+                .onReceive(NotificationCenter.default.publisher(for: .didRestoreBackup)) { _ in
+                    appResetID = UUID()
+                }
                 .modelContainer(sharedModelContainer)
         }
     }

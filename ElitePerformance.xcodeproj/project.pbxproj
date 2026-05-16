@@ -72,6 +72,7 @@
 		D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */; };
 		D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2939F2EC7C4E900034D78 /* Goal.swift */; };
 		D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */; };
+		D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F582FB895AF00C9E38C /* Notifications.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -152,16 +153,8 @@
 		D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseCatalog.swift; sourceTree = "<group>"; };
 		D5E2939F2EC7C4E900034D78 /* Goal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Goal.swift; sourceTree = "<group>"; };
 		D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumericTextFields.swift; sourceTree = "<group>"; };
+		D5EC0F582FB895AF00C9E38C /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D5603BD62F9FF34600664B58 /* Exceptions for "Programs" folder in "ElitePerformance" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-			);
-			target = D5E2931C2EC4102800034D78 /* ElitePerformance */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D536A6312EF4790E0036BB4E /* Components */ = {
@@ -196,9 +189,6 @@
 		};
 		D585D5A32F043CE60073DFE3 /* Programs */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				D5603BD62F9FF34600664B58 /* Exceptions for "Programs" folder in "ElitePerformance" target */,
-			);
 			path = Programs;
 			sourceTree = "<group>";
 		};
@@ -384,6 +374,7 @@
 		D5E293532EC410DD00034D78 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				D5EC0F582FB895AF00C9E38C /* Notifications.swift */,
 				D54892852F8E8DCA00F2C30A /* Backup */,
 				D54892732F8E778600F2C30A /* Sync */,
 				D5F89BB72F8AD54900D44DCB /* Programs */,
@@ -667,6 +658,7 @@
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* (null) in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
+				D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */,
 				D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */,
 				D55002072F43883F00908F53 /* MesoBlock.swift in Sources */,
 			);

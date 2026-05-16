@@ -217,6 +217,8 @@ struct SettingsView: View {
                     modelContext: context
                 )
 
+                
+                
                 importMessage = """
                 Restored backup successfully.
 
@@ -225,7 +227,9 @@ struct SettingsView: View {
                 Session history: \(restore.sessionHistoryCount)
                 Exercise notes: \(restore.exerciseNoteCount)
                 """
+                NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
                 showImportAlert = true
+
             } catch {
                 importMessage = "Backup import failed: \(error.localizedDescription)"
                 showImportAlert = true

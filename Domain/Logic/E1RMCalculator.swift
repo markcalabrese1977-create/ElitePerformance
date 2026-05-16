@@ -25,4 +25,39 @@ struct E1RMCalculator {
         guard increment > 0 else { return load }
         return (load / increment).rounded() * increment
     }
+
+    /// Decay-weighted e1RM across multiple sessions.
+    ///
+    /// Recent sessions contribute more than older ones using exponential decay.
+    /// Default half-life of 21 days means a session from 3 weeks ago counts
+    /// at 50% weight, 6 weeks ago at 25%, and so on.
+    ///
+    /// - Parameters:
+    ///   - candidates: Array of (e1rm, sessionDate) pairs. Empty arrays return 0.
+    ///   - referenceDate: The date to measure recency from. Defaults to today.
+    ///   - halfLifeDays: Days until a session's weight halves. Default 21 (3 weeks).
+    /// - Returns: Weighted average e1RM, or 0 if no valid candidates.
+    static func decayWeightedE1RM(
+        from candidates: [(e1rm: Double, date: Date)],
+        referenceDate: Date = Date(),
+        halfLifeDays: Double = 21.0
+    ) -> Double {
+        guard !candidates.isEmpty, halfLifeDays > 0 else { return 0 }
+
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+
+        for candidate in candidates {
+            guard candidate.e1rm > 0 else { continue }
+            let daysSince = referenceDate.timeIntervalSince(candidate.date) / 86400.0
+            // Clamp to non-negative — future dates treated as today
+            let clampedDays = max(0.0, daysSince)
+            let weight = pow(0.5, clampedDays / halfLifeDays)
+            weightedSum += candidate.e1rm * weight
+            totalWeight += weight
+        }
+
+        guard totalWeight > 0 else { return 0 }
+        return weightedSum / totalWeight
+    }
 }
