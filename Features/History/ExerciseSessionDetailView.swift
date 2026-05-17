@@ -50,7 +50,11 @@ struct ExerciseSessionDetailView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(0..<setCount, id: \.self) { idx in
-                            setRow(item: item, idx: idx)
+                            let actualLoad = idx < item.actualLoads.count ? item.actualLoads[idx] : 0.0
+                            let actualReps = idx < item.actualReps.count ? item.actualReps[idx] : 0
+                            if actualLoad > 0 || actualReps > 0 {
+                                setRow(item: item, idx: idx)
+                            }
                         }
                     }
                 }
