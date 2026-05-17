@@ -1538,7 +1538,9 @@ final class SessionScreenViewModel: ObservableObject {
 
     func swapExercise(at index: Int, with catalogExercise: CatalogExercise) {
         guard exercises.indices.contains(index) else { return }
-
+        
+        let oldExerciseId = exercises[index].exerciseId  // capture before mutation
+        
         var exercise = exercises[index]
         exercise.exerciseId = catalogExercise.id
         exercise.name = catalogExercise.name
@@ -1566,6 +1568,12 @@ final class SessionScreenViewModel: ObservableObject {
         exercise.coachMessage = ""
 
         exercises[index] = exercise
+        
+        // Write back to SwiftData immediately using old ID to find the right item
+            if let item = session.items.first(where: { $0.exerciseId == oldExerciseId }) {
+                item.exerciseId = catalogExercise.id
+                item.exerciseNameSnapshot = catalogExercise.name
+            }
     }
 
     func addExercise(_ catalogExercise: CatalogExercise, context: ModelContext) {
@@ -1776,6 +1784,7 @@ final class SessionScreenViewModel: ObservableObject {
 
             // Sync basic exercise info (including swaps)
             item.exerciseId = uiExercise.exerciseId
+            item.exerciseNameSnapshot = uiExercise.name
             item.targetSets = uiExercise.targetSets
 
             if let firstSet = uiExercise.sets.first {
