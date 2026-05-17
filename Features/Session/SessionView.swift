@@ -448,7 +448,7 @@ struct SessionView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
-                Text("All planned sets are logged. Nice work.")
+                Text(completionSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -473,6 +473,24 @@ struct SessionView: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.green.opacity(0.12))
         )
+    }
+    private var completionSubtitle: String {
+        let allExercises = viewModel.exercises
+        let totalPlanned = allExercises.reduce(0) { $0 + $1.targetSets }
+        let totalCompleted = allExercises.reduce(0) { total, ex in
+            total + ex.sets.filter { $0.index <= ex.targetSets && $0.status == .completed }.count
+        }
+        let totalSkipped = allExercises.reduce(0) { total, ex in
+            total + ex.sets.filter { $0.index <= ex.targetSets && $0.status.isAnySkip }.count
+        }
+
+        if totalSkipped == 0 {
+            return "All \(totalPlanned) planned sets logged. Nice work."
+        } else if totalCompleted == 0 {
+            return "\(totalSkipped) set\(totalSkipped == 1 ? "" : "s") skipped."
+        } else {
+            return "\(totalCompleted) of \(totalPlanned) sets logged, \(totalSkipped) skipped."
+        }
     }
 }
 
@@ -2015,6 +2033,7 @@ final class SessionScreenViewModel: ObservableObject {
                 sessionItem: matchingItem
             )
 
+            guard setsCompleted > 0 else { continue }
             exerciseSummaries.append(summary)
         }
 
