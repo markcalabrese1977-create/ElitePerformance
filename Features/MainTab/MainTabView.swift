@@ -30,6 +30,8 @@ struct TodayTabView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
+    @State private var showRestDayConfirm = false
+
     private var activeBlockSessions: [Session] {
         sessions.filter { $0.meso?.status == .active }
     }
@@ -60,6 +62,12 @@ struct TodayTabView: View {
         })
     }
 
+    /// True when today has a planned (not started) session that can be pushed.
+    private var canRestToday: Bool {
+        guard let session = todaySession else { return false }
+        return session.status == .planned
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -83,6 +91,18 @@ struct TodayTabView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Today")
+            .confirmationDialog(
+                "Rest today?",
+                isPresented: $showRestDayConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Push this week's remaining sessions one day") {
+                    pushRemainingSessionsOneDay()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Today becomes a rest day. All planned sessions remaining this week shift forward one day, and the rest day absorbs the change. Next week is unaffected.")
+            }
         }
     }
 
@@ -119,6 +139,24 @@ struct TodayTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            if canRestToday {
+                Button {
+                    showRestDayConfirm = true
+                } label: {
+                    HStack {
+                        Image(systemName: "bed.double")
+                        Text("Rest today")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding()
         .background(
@@ -126,6 +164,36 @@ struct TodayTabView: View {
                 .fill(Color(.systemBackground))
                 .shadow(radius: 4, y: 2)
         )
+    }
+
+    // MARK: - Rest Today Action
+
+    /// Push all planned sessions in the current week forward one day.
+    /// Bounded to the current week's weekIndex — next week is never affected.
+    /// The rest day absorbs the shift.
+    private func pushRemainingSessionsOneDay() {
+        guard let todaySession = todaySession else { return }
+
+        let currentWeekIndex = todaySession.weekIndex
+        let todayStart = Calendar.current.startOfDay(for: Date())
+
+        // Find all planned sessions in the same week from today forward
+        let sessionsToShift = visibleSessions.filter {
+            $0.status == .planned &&
+            $0.weekIndex == currentWeekIndex &&
+            Calendar.current.startOfDay(for: $0.date) >= todayStart
+        }
+
+        // Sort ascending and shift each by one day
+        for session in sessionsToShift.sorted(by: { $0.date < $1.date }) {
+            session.date = Calendar.current.date(
+                byAdding: .day,
+                value: 1,
+                to: session.date
+            ) ?? session.date
+        }
+
+        try? context.save()
     }
 }
 
@@ -159,7 +227,7 @@ struct TodaySessionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Today’s Session")
+            Text("Today's Session")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
