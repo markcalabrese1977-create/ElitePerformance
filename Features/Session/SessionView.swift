@@ -1776,11 +1776,10 @@ final class SessionScreenViewModel: ObservableObject {
 
     /// Push current UI state into the underlying `Session` / `SessionItem`s.
     func persist(using context: ModelContext) {
-        let items = session.items.sorted { $0.order < $1.order }
-
-        for (exerciseIndex, uiExercise) in exercises.enumerated() {
-            guard exerciseIndex < items.count else { continue }
-            let item = items[exerciseIndex]
+        for uiExercise in exercises {
+                    guard let item = session.items.first(where: { $0.exerciseId == uiExercise.exerciseId }) else {
+                        continue
+                    }
 
             // Sync basic exercise info (including swaps)
             item.exerciseId = uiExercise.exerciseId
