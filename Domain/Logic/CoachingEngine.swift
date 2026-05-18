@@ -306,8 +306,17 @@ struct CoachingEngine {
                 let step = loadStep(for: baseLoad)
                 return nextLoad(from: baseLoad, step: step) ?? baseLoad
             }()
-            let msg = "Reps came in well above the target range with room to spare. Load increases next session."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
+            let nextLoad = min(suggested, loadSanityCap)
+            let pumpNote: String = {
+                switch avgPump {
+                case .good: return " Pump was good — this lift is responding well."
+                case .excellent: return " Pump was excellent — strong stimulus confirmed."
+                case .poor: return " Pump was poor — consider whether load, technique, or fatigue affected stimulus."
+                default: return ""
+                }
+            }()
+            let msg = "Reps came in well above the target range with room to spare. Next session: \(String(format: "%.1f", nextLoad)).\(pumpNote)"
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }
 
         // Fatigue flag override — soreness/disruption holds load regardless of rep performance
@@ -358,13 +367,14 @@ struct CoachingEngine {
                 }
             }()
 
+            let nextLoad = min(suggested, loadSanityCap)
             let msg: String
             if plannedWorkingSetCount >= 4 {
-                msg = "Clean execution across the working sets at the target difficulty. Load is set for next session. Volume beyond the primary sets is supplemental — don't let it drive the progression call.\(pumpNote)"
+                msg = "Clean execution across the working sets at the target difficulty. Next session: \(String(format: "%.1f", nextLoad)). Volume beyond the primary sets is supplemental — don't let it drive the progression call.\(pumpNote)"
             } else {
-                msg = "Clean execution across the working sets at the target difficulty. Load is set for next session.\(pumpNote)"
+                msg = "Clean execution across the working sets at the target difficulty. Next session: \(String(format: "%.1f", nextLoad)).\(pumpNote)"
             }
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }
 
         // 3.6) Hit planned reps + drop set finisher → increase
@@ -376,8 +386,9 @@ struct CoachingEngine {
                 let step = loadStep(for: baseLoad)
                 return nextLoad(from: baseLoad, step: step) ?? baseLoad
             }()
-            let msg = "Working sets hit the rep target and you extended with a drop set. Load increases next session."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: min(suggested, loadSanityCap))
+            let nextLoad = min(suggested, loadSanityCap)
+            let msg = "Working sets hit the rep target and you extended with a drop set. Next session: \(String(format: "%.1f", nextLoad))."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }
 
         // 5) On target reps at roughly target difficulty → repeat
@@ -388,7 +399,7 @@ struct CoachingEngine {
         }()
 
         if hitRepTarget && nearTargetRIR {
-            let msg = "On target at the planned difficulty. Repeat this load next session — if it's this clean again, expect an increase."
+            let msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
