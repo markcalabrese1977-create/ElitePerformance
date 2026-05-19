@@ -7,14 +7,23 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
 
+    @Query private var mesoBlocks: [MesoBlock]
+
     @State private var showingChangeProgram = false
 
-    // Meso rollover guard
+    // Meso summary (end-of-meso flow)
+    @State private var showMesoSummary = false
+
+    // Meso rollover guard (fallback when no active meso or summary dismissed)
     @State private var showMesoRolloverGuard = false
     @State private var guardRescheduleDate = Date()
 
     // Deferred replace/apply after onboarding dismisses
     @State private var pendingOnboardingResult: OnboardingResult?
+
+    private var activeMeso: MesoBlock? {
+        mesoBlocks.first { $0.status == .active }
+    }
 
     var body: some View {
         NavigationStack {
@@ -56,7 +65,18 @@ struct HomeView: View {
         .onAppear {
             if MesoLifecycle.isRolloverDue() {
                 guardRescheduleDate = MesoLifecycle.scheduledStartDate ?? Date()
-                showMesoRolloverGuard = true
+                if activeMeso != nil {
+                    showMesoSummary = true
+                } else {
+                    showMesoRolloverGuard = true
+                }
+            }
+        }
+        .sheet(isPresented: $showMesoSummary) {
+            if let meso = activeMeso {
+                MesoSummaryView(meso: meso) { choice in
+                    handleNextBlockChoice(choice)
+                }
             }
         }
         .sheet(isPresented: $showMesoRolloverGuard) {
@@ -66,6 +86,34 @@ struct HomeView: View {
             )
         }
     }
+
+    // MARK: - Next block handler
+
+    private func handleNextBlockChoice(_ choice: NextBlockChoice) {
+        switch choice {
+        case .newHypertrophyMeso:
+            // Re-run the existing onboarding → program apply flow
+            // For now, show the change program sheet so user can configure
+            // In a future iteration this will auto-seed from UserProfile
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showingChangeProgram = true
+            }
+
+        case .maintenanceBlock:
+            // Maintenance block seeder — not yet implemented
+            // Will be wired when MaintenanceProgramSeeder is built
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showMesoRolloverGuard = true
+            }
+
+        case .custom:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showMesoRolloverGuard = true
+            }
+        }
+    }
+
+    // MARK: - Onboarding dismiss handler
 
     private func handleOnboardingDismiss() {
         guard let result = pendingOnboardingResult else { return }
