@@ -25,13 +25,6 @@ struct LoadProjection {
     let consecutiveCleanCount: Int
 }
 
-// MARK: - Clean Session Evaluation
-
-private struct CleanSessionEval {
-    let isClean: Bool
-    let load: Double
-}
-
 // MARK: - Service
 
 /// Canonical load projection logic.
@@ -50,6 +43,85 @@ private struct CleanSessionEval {
 ///
 /// The higher of (1 or 2) vs (3) wins. Same-wave progression is never undercut by e1RM.
 enum LoadProjectionService {
+
+    // MARK: - Clean Session Evaluation (public — used by CoachingEngine call sites)
+
+    /// Evaluate whether a single session item represents a clean performance.
+    /// Clean = reps ≥ prescribedMin, RIR on target, no fatigue/pain flags,
+    /// no compromising load override reason.
+    static func isCleanSession(_ item: SessionItem, prescribedMin: Int) -> Bool {
+        if let reason = item.loadOverrideReason {
+            switch reason {
+            case .jointTenderness, .generalFatigue: return false
+            case .equipmentConstraint, .deliberateDeload: break
+            }
+        }
+
+        let hasFatigue = item.setFeedbackBySet.contains {
+            $0 == SetFeedback.soreness.rawValue ||
+            $0 == SetFeedback.disruption.rawValue ||
+            $0 == SetFeedback.pain.rawValue
+        }
+        if hasFatigue { return false }
+
+        let bestReps = item.actualReps.filter { $0 > 0 }.max() ?? 0
+        guard bestReps >= prescribedMin else { return false }
+
+        let validRIRs = item.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
+            guard idx < item.actualLoads.count, item.actualLoads[idx] > 0 else { return nil }
+            return rir
+        }
+        if !validRIRs.isEmpty {
+            let avgRIR = Double(validRIRs.reduce(0, +)) / Double(validRIRs.count)
+            if avgRIR < Double(item.targetRIR) - 0.5 { return false }
+        }
+        return true
+    }
+
+    /// Compute consecutive clean same-wave sessions for an exercise.
+    /// Lightweight — used by CoachingEngine at call sites without needing full projection.
+    static func consecutiveCleanCount(
+        exerciseId: String,
+        waveRaw: String?,
+        repMin: Int,
+        allSessions: [Session],
+        referenceDate: Date = Date()
+    ) -> Int {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        let today = Calendar.current.startOfDay(for: referenceDate)
+
+        let sessionsWithWork = allSessions
+            .filter { Calendar.current.startOfDay(for: $0.date) < today }
+            .filter { s in
+                s.items.contains { item in
+                    ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == canonicalId &&
+                    item.actualLoads.contains { $0 > 0 }
+                }
+            }
+
+        let sameWaveSessions: [Session] = {
+            guard let wave = waveRaw?.lowercased(), !wave.isEmpty else { return sessionsWithWork }
+            let filtered = sessionsWithWork.filter { s in
+                s.items.first?.waveRaw?.lowercased() == wave
+            }
+            return filtered.isEmpty ? sessionsWithWork : filtered
+        }()
+
+        var count = 0
+        for session in sameWaveSessions.suffix(3).reversed() {
+            guard let item = session.items.first(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+            }) else { break }
+            if isCleanSession(item, prescribedMin: repMin) {
+                count += 1
+            } else {
+                break
+            }
+        }
+        return count
+    }
+
+    // MARK: - Full Projection
 
     static func project(
         exerciseId: String,
@@ -149,7 +221,6 @@ enum LoadProjectionService {
                 }
             }
 
-        // Prefer same-wave sessions, fall back to any session
         let sameWaveSessions: [Session] = {
             guard let wave = currentWaveRaw?.lowercased(), !wave.isEmpty else { return [] }
             return sessionsWithWork.filter { s in
@@ -163,7 +234,6 @@ enum LoadProjectionService {
               let lastItem = lastSession.items.first(where: {
                   ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
               }) else {
-            // No same-wave history — use e1RM floor if available
             if e1rmFloorLoad > 0 {
                 return LoadProjection(suggestedLoad: e1rmFloorLoad, basis: e1rmBasis, consecutiveCleanCount: 0)
             }
@@ -184,47 +254,17 @@ enum LoadProjectionService {
             return nil
         }
 
-        // Evaluate clean session: reps ≥ prescribedMin, RIR on target, no fatigue flags
-        func isClean(_ item: SessionItem, prescribedMin: Int) -> Bool {
-            // Compromised sessions don't count as clean
-            if let reason = item.loadOverrideReason {
-                switch reason {
-                case .jointTenderness, .generalFatigue: return false
-                case .equipmentConstraint, .deliberateDeload: break
-                }
-            }
-            let hasFatigue = item.setFeedbackBySet.contains {
-                $0 == SetFeedback.soreness.rawValue ||
-                $0 == SetFeedback.disruption.rawValue ||
-                $0 == SetFeedback.pain.rawValue
-            }
-            if hasFatigue { return false }
-
-            let bestReps = item.actualReps.filter { $0 > 0 }.max() ?? 0
-            guard bestReps >= prescribedMin else { return false }
-
-            let validRIRs = item.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
-                guard idx < item.actualLoads.count, item.actualLoads[idx] > 0 else { return nil }
-                return rir
-            }
-            if !validRIRs.isEmpty {
-                let avgRIR = Double(validRIRs.reduce(0, +)) / Double(validRIRs.count)
-                if avgRIR < Double(item.targetRIR) - 0.5 { return false }
-            }
-            return true
-        }
-
         let prescribedMin = lastItem.repMin ?? repMin
         let prescribedMax = lastItem.repMax ?? repMax
 
-        // Count consecutive clean sessions from most recent backwards
+        // Count consecutive clean sessions using the promoted static method
         let recentSameWave = Array(candidateSessions.suffix(3))
         var consecutiveClean = 0
         for session in recentSameWave.reversed() {
             guard let item = session.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
             }) else { break }
-            if isClean(item, prescribedMin: prescribedMin) {
+            if isCleanSession(item, prescribedMin: prescribedMin) {
                 consecutiveClean += 1
             } else {
                 break
@@ -248,11 +288,9 @@ enum LoadProjectionService {
             if tooMuchFatigue {
                 return (lastLoad * 0.95 / loadIncrement).rounded() * loadIncrement
             }
-            // Only increase if 2+ consecutive clean sessions confirmed
             if consecutiveClean >= 2 {
                 return ((lastLoad + loadIncrement) / loadIncrement).rounded() * loadIncrement
             }
-            // Hold — not enough consecutive clean sessions to earn the increase
             return (lastLoad / loadIncrement).rounded() * loadIncrement
         }()
 

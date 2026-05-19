@@ -1318,7 +1318,17 @@ final class SessionScreenViewModel: ObservableObject {
                         ? set.dropSets.map { $0.serialized }.joined(separator: ",")
                         : ""
 
-                    if let recommendation = CoachingEngine.recommend(for: matchingItem, mesoPhase: session.mesoPhase) {
+                    let cleanCount = LoadProjectionService.consecutiveCleanCount(
+                        exerciseId: matchingItem.exerciseId,
+                        waveRaw: matchingItem.waveRaw,
+                        repMin: matchingItem.repMin ?? matchingItem.targetReps,
+                        allSessions: (try? context.fetch(FetchDescriptor<Session>())) ?? []
+                    )
+                    if let recommendation = CoachingEngine.recommend(
+                        for: matchingItem,
+                        mesoPhase: session.mesoPhase,
+                        consecutiveCleanCount: cleanCount
+                    ) {
                         exercise.coachMessage = recommendation.message
                     } else {
                         exercise.coachMessage = ""

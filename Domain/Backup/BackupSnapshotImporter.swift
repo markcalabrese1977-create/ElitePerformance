@@ -10,7 +10,8 @@ struct BackupSnapshotImportResult {
 }
 
 enum BackupSnapshotImporter {
-    static func importFullBackupJSON(from url: URL, modelContext: ModelContext) throws -> BackupSnapshotImportResult {
+    static func importFullBackupJSON(from url: URL, modelContainer: ModelContainer) throws -> BackupSnapshotImportResult {
+        let modelContext = ModelContext(modelContainer)
         let data = try Data(contentsOf: url)
 
         let decoder = JSONDecoder()
@@ -72,7 +73,7 @@ enum BackupSnapshotImporter {
                 readinessStars: sessionDTO.readinessStars,
                 sessionNotes: sessionDTO.sessionNotes,
                 weekIndex: sessionDTO.weekInMeso ?? 1,
-                items: [],
+                dayLabel: sessionDTO.dayLabel, items: [],
                 completedAt: sessionDTO.completedAt,
                 programIndex: sessionDTO.programIndex,
                 hkWorkoutUUID: sessionDTO.hkWorkoutUUID,

@@ -59,6 +59,7 @@ struct SessionBackupDTO: Codable {
     let sessionNotes: String?
 
     let weekInMeso: Int?
+    let dayLabel: String?
     let programIndex: Int?
 
     let hkWorkoutUUID: String?

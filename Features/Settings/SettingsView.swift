@@ -8,8 +8,6 @@ struct SettingsView: View {
     @Query private var appStates: [AppState]
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
-    
-    
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
@@ -17,7 +15,7 @@ struct SettingsView: View {
     @State private var showImportBackupPicker = false
     @State private var importMessage: String = ""
     @State private var showImportAlert = false
-    
+
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
@@ -27,7 +25,7 @@ struct SettingsView: View {
     private var appState: AppState? {
         appStates.first
     }
-    
+
     private var scheduledStartDate: Date? {
         appState?.scheduledNextMesoStartDate ?? MesoLifecycle.scheduledStartDate
     }
@@ -46,10 +44,8 @@ struct SettingsView: View {
                 )
             }
 
-            // MARK: - Mesocycle (single section)
+            // MARK: - Mesocycle
             Section("Mesocycle") {
-
-                // Future date picker (for scheduling)
                 DatePicker("Next meso start", selection: $nextMesoDate, displayedComponents: [.date])
 
                 Button("Schedule Next Mesocycle") {
@@ -89,7 +85,6 @@ struct SettingsView: View {
 
                 Divider()
 
-                // Full rollover (label reset + activeStartDate metrics cutoff + clear schedule)
                 Button(role: .destructive) {
                     let today = Calendar.current.startOfDay(for: Date())
                     MesoLifecycle.confirmStartNewMeso(on: today)
@@ -107,7 +102,6 @@ struct SettingsView: View {
 
                 Divider()
 
-                // Optional: label-only reset (keep if you want)
                 Button(role: .destructive) {
                     let today = Calendar.current.startOfDay(for: Date())
                     MesoLabel.startNewMeso(on: today)
@@ -120,9 +114,8 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            
-            // MARK: - Data Repair
 
+            // MARK: - Data Repair
             Section("Data Repair") {
                 Button("Fix Exercise ID Mismatches") {
                     fixExerciseIdMismatches()
@@ -131,49 +124,44 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            
+
             // MARK: - Export
             Section("Export") {
-                
                 Button("Import Full Backup (JSON)") {
                     showImportBackupPicker = true
                 }
                 .foregroundStyle(.red)
+
                 Button("Export Full Backup (JSON)") {
                     exportError = nil
                     do {
                         let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
-
                         guard FileManager.default.fileExists(atPath: result.url.path) else {
                             exportItem = nil
                             exportError = "Backup file was not created at:\n\(result.url.path)"
                             return
                         }
-
                         exportItem = ExportShareItem(url: result.url)
                     } catch {
                         exportItem = nil
                         exportError = error.localizedDescription
                     }
                 }
-                
+
                 Button("Export Completed Sessions (CSV)") {
                     exportError = nil
                     do {
                         let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
-
                         guard result.rowCount > 0 else {
                             exportItem = nil
                             exportError = "No completed sessions found to export."
                             return
                         }
-
                         guard FileManager.default.fileExists(atPath: result.url.path) else {
                             exportItem = nil
                             exportError = "Export file was not created at:\n\(result.url.path)"
                             return
                         }
-
                         exportItem = ExportShareItem(url: result.url)
                     } catch {
                         exportItem = nil
@@ -206,30 +194,35 @@ struct SettingsView: View {
                 guard let url = urls.first else { return }
 
                 let didAccess = url.startAccessingSecurityScopedResource()
-                defer {
-                    if didAccess {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
 
-                let restore = try BackupSnapshotImporter.importFullBackupJSON(
-                    from: url,
-                    modelContext: context
-                )
-
-                
-                
-                importMessage = """
-                Restored backup successfully.
-
-                Meso blocks: \(restore.mesoBlockCount)
-                Sessions: \(restore.sessionCount)
-                Session history: \(restore.sessionHistoryCount)
-                Exercise notes: \(restore.exerciseNoteCount)
-                """
+                // Post notification first — tears down live SwiftData views before deletion
                 NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
-                showImportAlert = true
 
+                Task { @MainActor in
+                    defer {
+                        if didAccess {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(150))
+                    do {
+                        let restore = try BackupSnapshotImporter.importFullBackupJSON(
+                            from: url,
+                            modelContainer: context.container
+                        )
+                        importMessage = """
+                        Restored backup successfully.
+
+                        Meso blocks: \(restore.mesoBlockCount)
+                        Sessions: \(restore.sessionCount)
+                        Session history: \(restore.sessionHistoryCount)
+                        Exercise notes: \(restore.exerciseNoteCount)
+                        """
+                    } catch {
+                        importMessage = "Backup import failed: \(error.localizedDescription)"
+                    }
+                    showImportAlert = true
+                }
             } catch {
                 importMessage = "Backup import failed: \(error.localizedDescription)"
                 showImportAlert = true
@@ -251,7 +244,8 @@ struct SettingsView: View {
             }
         }
     }
-    // MARK: - Safe next-meso generation
+
+    // MARK: - Helpers
 
     private func fixExerciseIdMismatches() {
         let descriptor = FetchDescriptor<SessionItem>()
@@ -265,9 +259,7 @@ struct SettingsView: View {
         for item in items {
             guard let snapshot = item.exerciseNameSnapshot,
                   !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-
             guard let correctId = ExerciseCatalog.canonicalBuiltInId(forExerciseName: snapshot) else { continue }
-
             if item.exerciseId != correctId {
                 print("🔧 Fixing \(snapshot): \(item.exerciseId) → \(correctId)")
                 item.exerciseId = correctId
@@ -282,7 +274,7 @@ struct SettingsView: View {
             presentMesoGenerationMessage("No mismatches found.")
         }
     }
-    
+
     private func presentMesoGenerationMessage(_ message: String) {
         mesoGenerationMessage = message
         showMesoGenerationAlert = true
@@ -290,23 +282,18 @@ struct SettingsView: View {
 
     private func inferredTrainingWeekdays() -> [Int] {
         let cal = Calendar.current
-
-        // Prefer future/planned-ish sessions first, because they reflect the active template.
         let candidateSessions = sessions
             .filter { $0.items.isEmpty == false }
             .sorted { $0.date < $1.date }
-
         let weekdays = Array(
             Set(candidateSessions.map { cal.component(.weekday, from: $0.date) })
         ).sorted()
-
         return weekdays
     }
 
     private func hasSessionsOnOrAfter(_ startDate: Date) -> Bool {
         let cal = Calendar.current
         let startDay = cal.startOfDay(for: startDate)
-
         return sessions.contains { session in
             cal.startOfDay(for: session.date) >= startDay
         }
@@ -316,7 +303,6 @@ struct SettingsView: View {
         let cal = Calendar.current
         let startDay = cal.startOfDay(for: nextMesoDate)
 
-        // Safety 1: do not generate over existing sessions
         guard !hasSessionsOnOrAfter(startDay) else {
             presentMesoGenerationMessage(
                 "Sessions already exist on or after \(startDay.formatted(date: .long, time: .omitted)). Choose a later start date or clear the overlap first."
@@ -324,9 +310,7 @@ struct SettingsView: View {
             return
         }
 
-        // Safety 2: infer weekdays from current schedule
         let weekdays = inferredTrainingWeekdays()
-
         guard weekdays.count == DUP10WeekTemplate.template.trainingDaysPerWeek else {
             presentMesoGenerationMessage(
                 "Could not infer a valid \(DUP10WeekTemplate.template.trainingDaysPerWeek)-day training schedule from existing sessions."
@@ -342,13 +326,12 @@ struct SettingsView: View {
                 template: DUP10WeekTemplate.template,
                 calendar: cal
             )
-
             presentMesoGenerationMessage(
                 "Generated a new 10-week DUP block starting \(startDay.formatted(date: .long, time: .omitted))."
             )
         } catch {
             presentMesoGenerationMessage(
-                "Couldn’t generate the next mesocycle: \(error.localizedDescription)"
+                "Couldn't generate the next mesocycle: \(error.localizedDescription)"
             )
         }
     }

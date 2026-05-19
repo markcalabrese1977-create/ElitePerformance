@@ -19,7 +19,7 @@ struct CoachingRecommendation {
 
 struct CoachingEngine {
 
-    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil, mesoPhase: MesoPhase = .early) -> CoachingRecommendation? {
+    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil, mesoPhase: MesoPhase = .early, consecutiveCleanCount: Int = 0) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
 
@@ -399,7 +399,13 @@ struct CoachingEngine {
         }()
 
         if hitRepTarget && nearTargetRIR {
-            let msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session."
+            let msg: String
+            if consecutiveCleanCount >= 1 {
+                let nextLoad = String(format: "%.1f", (baseLoad + (minLoadIncrement ?? 2.5)))
+                msg = "On target again — two clean sessions confirmed. Load steps up to \(nextLoad) next session."
+            } else {
+                msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session — one more clean session earns the increase."
+            }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 

@@ -73,7 +73,7 @@ enum BackupSnapshotExporter {
                     readinessStars: session.readinessStars,
                     sessionNotes: session.sessionNotes,
                     weekInMeso: session.weekInMeso,
-                    programIndex: session.programIndex,
+                    dayLabel: session.dayLabel, programIndex: session.programIndex,
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
                     hkWorkoutEnd: session.hkWorkoutEnd,
