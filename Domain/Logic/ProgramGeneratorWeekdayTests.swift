@@ -25,10 +25,16 @@ struct ProgramGeneratorWeekdayTests {
         let context = container.mainContext
 
         let result = OnboardingResult(
-            goal: .hypertrophy,
-            daysPerWeek: 6,
-            weekdays: [1, 2, 3, 4, 6, 7]   // Sun, Mon, Tue, Wed, Fri, Sat (Thu off)
-        )
+                    goal: .hypertrophy,
+                    experience: .intermediate,
+                    daysPerWeek: 6,
+                    trainingDaysOfWeek: [1, 2, 3, 4, 6, 7],
+                    equipmentProfile: .commercial,
+                    sessionLengthMinutes: 60,
+                    injuryFlags: [],
+                    usesKilograms: false,
+                    minLoadIncrement: 2.5
+                )
 
         ProgramGenerator.seedInitialProgram(
             goal: result.goal,

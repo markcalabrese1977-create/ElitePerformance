@@ -22,19 +22,57 @@ enum ProgramApplicationService {
     ) {
         let strategy = selectStrategy(for: result)
 
-        print(
-            "DEBUG ProgramApplicationService.apply – goal=\(result.goal), " +
-            "daysPerWeek=\(result.daysPerWeek), " +
-            "weekdays=\(result.trainingDaysOfWeek), " +
-            "strategy=\(debugLabel(for: strategy))"
-        )
+        execute(strategy, context: context, startDate: startDate)
 
-        execute(
-            strategy,
-            context: context,
-            startDate: startDate
-        )
+        // Write UserProfile — persists onboarding answers for use by coaching engine
+        writeUserProfile(from: result, context: context)
     }
+
+    // MARK: - UserProfile persistence
+
+    private static func writeUserProfile(from result: OnboardingResult, context: ModelContext) {
+        // Fetch or create — only one UserProfile should exist
+        let descriptor = FetchDescriptor<UserProfile>()
+        let existing = (try? context.fetch(descriptor))?.first
+
+        if let profile = existing {
+            // Update existing profile
+            profile.experience = result.experience
+            profile.primaryGoal = goalToPrimaryGoal(result.goal)
+            profile.daysPerWeek = result.daysPerWeek
+            profile.sessionLengthMinutes = result.sessionLengthMinutes
+            profile.equipmentProfile = result.equipmentProfile
+            profile.injuryFlags = result.injuryFlags
+            profile.minLoadIncrement = result.minLoadIncrement
+            profile.usesKilograms = result.usesKilograms
+        } else {
+            // Create new profile
+            let profile = UserProfile(
+                experience: result.experience,
+                primaryGoal: goalToPrimaryGoal(result.goal),
+                daysPerWeek: result.daysPerWeek,
+                sessionLengthMinutes: result.sessionLengthMinutes,
+                equipmentProfile: result.equipmentProfile,
+                injuryFlags: result.injuryFlags,
+                minLoadIncrement: result.minLoadIncrement,
+                usesKilograms: result.usesKilograms
+            )
+            context.insert(profile)
+        }
+
+        try? context.save()
+    }
+
+    private static func goalToPrimaryGoal(_ goal: Goal) -> PrimaryGoal {
+        switch goal {
+        case .hypertrophy: return .hypertrophy
+        case .strength:    return .strength
+        case .fatLoss:     return .fatLoss
+        case .longevity:   return .longevity
+        }
+    }
+
+    // MARK: - Strategy selection
 
     private static func selectStrategy(for result: OnboardingResult) -> Strategy {
         let weekdays = normalizedWeekdays(from: result)
@@ -47,15 +85,17 @@ enum ProgramApplicationService {
             goal: result.goal,
             experience: result.experience,
             daysPerWeek: weekdays.count,
-            trainingDaysOfWeek: weekdays
+            trainingDaysOfWeek: weekdays,
+            equipmentProfile: result.equipmentProfile,
+            sessionLengthMinutes: result.sessionLengthMinutes,
+            injuryFlags: result.injuryFlags,
+            usesKilograms: result.usesKilograms,
+            minLoadIncrement: result.minLoadIncrement
         )
 
         let template = selectCatalogTemplate(for: normalizedResult)
 
-        return .catalogGenerated(
-            result: normalizedResult,
-            template: template
-        )
+        return .catalogGenerated(result: normalizedResult, template: template)
     }
 
     private static func selectCatalogTemplate(for result: OnboardingResult) -> CatalogTemplateKind {
@@ -82,7 +122,6 @@ enum ProgramApplicationService {
                     trainingWeekdays: trainingWeekdays,
                     context: context
                 )
-                print("DEBUG ProgramApplicationService.execute – completed DUP replace flow")
             } catch {
                 print("ERROR ProgramApplicationService.execute – DUP replace failed: \(error)")
             }
@@ -94,7 +133,6 @@ enum ProgramApplicationService {
                 startDate: startDate,
                 template: template
             )
-            print("DEBUG ProgramApplicationService.execute – completed catalog apply flow for template=\(template.rawValue)")
         }
     }
 
@@ -102,14 +140,5 @@ enum ProgramApplicationService {
         result.trainingDaysOfWeek
             .map { min(max($0, 1), 7) }
             .sorted()
-    }
-
-    private static func debugLabel(for strategy: Strategy) -> String {
-        switch strategy {
-        case .dup10WeekHypertrophy6Day:
-            return "dup10WeekHypertrophy6Day"
-        case .catalogGenerated(_, let template):
-            return "catalogGenerated.\(template.rawValue)"
-        }
     }
 }
