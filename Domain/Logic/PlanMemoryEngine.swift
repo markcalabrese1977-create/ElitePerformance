@@ -96,7 +96,7 @@ struct PlanMemoryEngine {
                     count: targetItem.plannedLoadsBySet.count
                 )
             }
-
+            
             // Pain carry-forward
             let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
                 $0 == SetFeedback.pain.rawValue
@@ -128,9 +128,25 @@ struct PlanMemoryEngine {
                 targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
             }
 
-            if let reason = signal.reason, targetItem.coachNote == nil {
-                targetItem.coachNote = reason
-            }
+            // Volume regulation note
+                        if let reason = signal.reason, targetItem.coachNote == nil {
+                            targetItem.coachNote = reason
+                        }
+
+                        // Progression coaching note — only if no higher-priority note already set
+                        if let projection = projection, targetItem.coachNote == nil {
+                            let loadStr = String(format: "%.1f", projection.suggestedLoad)
+                            switch projection.basis {
+                            case .consecutiveCleanProgression:
+                                targetItem.coachNote = "✅ Two clean sessions confirmed. Load stepping up to \(loadStr)."
+                            case .sameWaveProgression where projection.consecutiveCleanCount == 1:
+                                targetItem.coachNote = "ℹ️ One more clean session at \(loadStr) earns the increase."
+                            case .currentMesoPeak, .crossMesoBaseline:
+                                targetItem.coachNote = "ℹ️ Load set from your best performance this meso."
+                            default:
+                                break
+                            }
+                        }
         }
     }
 
