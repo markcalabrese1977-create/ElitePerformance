@@ -12,6 +12,7 @@
 		D51A8C0A2FAE614A00127E79 /* E1RMCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51A8C092FAE614800127E79 /* E1RMCalculator.swift */; };
 		D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */; };
 		D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */; };
+		D53213A12FBCFA5600E01E39 /* MesoSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */; };
 		D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D536A6A12EF7265F0036BB4E /* MesoLabel.swift */; };
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
@@ -93,6 +94,7 @@
 		D51A8C092FAE614800127E79 /* E1RMCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculator.swift; sourceTree = "<group>"; };
 		D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitWorkoutSummarySyncService.swift; sourceTree = "<group>"; };
 		D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoPerformanceAnalyzer.swift; sourceTree = "<group>"; };
+		D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoSummaryView.swift; sourceTree = "<group>"; };
 		D536A6A12EF7265F0036BB4E /* MesoLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoLabel.swift; sourceTree = "<group>"; };
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
@@ -398,6 +400,7 @@
 		D5E293552EC410DD00034D78 /* History */ = {
 			isa = PBXGroup;
 			children = (
+				D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */,
 				D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */,
 				D5C48EFB2F1C0F6D00495C46 /* ExerciseHistorySheet.swift */,
 				D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */,
@@ -641,6 +644,7 @@
 				D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
+				D53213A12FBCFA5600E01E39 /* MesoSummaryView.swift in Sources */,
 				D5BCD44D2F9D0B97005007F6 /* SessionRecapView.swift in Sources */,
 				D5846D692FB5341E00797E98 /* SetFeedback.swift in Sources */,
 				D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */,
