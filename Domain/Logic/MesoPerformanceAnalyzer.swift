@@ -254,7 +254,8 @@ enum MesoPerformanceAnalyzer {
 
             // Display name and muscle
             let catalog = ExerciseCatalog.all.first { $0.id == exerciseId }
-            let displayName = catalog?.name ?? ExerciseCatalog.displayName(for: exerciseId)
+            let snapshotName = sessionsWithExercise.first?.item.exerciseNameSnapshot
+            let displayName = catalog?.name ?? snapshotName ?? ExerciseCatalog.displayName(for: exerciseId)
             let primaryMuscle = catalog?.primaryMuscle.rawValue.capitalized
 
             exerciseSummaries.append(ExercisePerformanceSummary(

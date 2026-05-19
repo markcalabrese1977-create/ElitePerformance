@@ -102,7 +102,7 @@ struct ProgramPlanView: View {
                             Text("Week \(weekGroup.weekIndex)")
                                 .font(.headline)
 
-                            Text(weekGroup.rangeText)
+
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -112,9 +112,9 @@ struct ProgramPlanView: View {
                                 ProgramDayDetailView(session: session)
                             } label: {
                                 programRow(
-                                    for: session,
-                                    computedWeek: weekGroup.weekIndex,
-                                    computedDay: index + 1
+                                                                    for: session,
+                                                                    computedWeek: weekGroup.weekIndex,
+                                                                    computedDay: session.dayNumberInWeek
                                 )
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -415,13 +415,10 @@ struct ProgramPlanView: View {
                     return lhs.date < rhs.date
                 }
 
-            let start = daySessions.first?.date ?? Date()
-            let end = daySessions.last?.date ?? start
 
             return WeekGroup(
                 weekIndex: week,
-                startDate: start,
-                endDate: end,
+
                 sessions: daySessions
             )
         }
@@ -429,18 +426,11 @@ struct ProgramPlanView: View {
 
     private struct WeekGroup: Identifiable {
         let weekIndex: Int
-        let startDate: Date
-        let endDate: Date
         let sessions: [Session]
 
         var id: Int { weekIndex }
 
-        var rangeText: String {
-            let df = DateFormatter()
-            df.dateStyle = .medium
-            df.timeStyle = .none
-            return "\(df.string(from: startDate)) – \(df.string(from: endDate))"
-        }
+        
     }
 
     // MARK: - Row view

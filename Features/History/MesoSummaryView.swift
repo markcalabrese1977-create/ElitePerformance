@@ -49,24 +49,24 @@ struct MesoSummaryView: View {
                     Button("Close") { dismiss() }
                 }
             }
-            .task {
-                await buildAnalysis()
-            }
+            .onAppear {
+                            buildAnalysis()
+                        }
         }
     }
 
     // MARK: - Build analysis
 
-    private func buildAnalysis() async {
-        let descriptor = FetchDescriptor<Session>(
-            sortBy: [SortDescriptor(\Session.date, order: .forward)]
-        )
-        let allSessions = (try? context.fetch(descriptor)) ?? []
-        let mesoSessionIDs = Set(meso.sessions.map { $0.persistentModelID })
-        let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
+    private func buildAnalysis() {
+            let descriptor = FetchDescriptor<Session>(
+                sortBy: [SortDescriptor(\Session.date, order: .forward)]
+            )
+            let allSessions = (try? context.fetch(descriptor)) ?? []
+            let mesoSessionIDs = Set(meso.sessions.map { $0.persistentModelID })
+            let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
 
-        analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
-    }
+            analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
+        }
 
     // MARK: - Verdict header
 

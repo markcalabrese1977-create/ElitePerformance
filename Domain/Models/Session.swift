@@ -399,6 +399,12 @@ extension SessionStatus {
     }
 }
 extension Session {
+    /// Day number within the training week (1–6), derived from programIndex.
+    var dayNumberInWeek: Int {
+        guard let pi = programIndex, pi > 0 else { return 1 }
+        return ((pi - 1) % 6) + 1
+    }
+    
     var weekDayLabel: String {
         let week = weekIndex
 

@@ -19,6 +19,8 @@ struct SettingsView: View {
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
+    
+    @State private var showMesoSummaryDebug = false
 
     @State private var nextMesoDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
 
@@ -115,6 +117,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // MARK: - Debug
+                        Section("Debug") {
+                            Button("Preview Meso Summary") {
+                                showMesoSummaryDebug = true
+                            }
+                        }
+            
             // MARK: - Data Repair
             Section("Data Repair") {
                 Button("Fix Exercise ID Mismatches") {
@@ -184,6 +193,11 @@ struct SettingsView: View {
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
         }
+        .sheet(isPresented: $showMesoSummaryDebug) {
+                    if let meso = (try? context.fetch(FetchDescriptor<MesoBlock>()))?.first(where: { $0.status == .active }) {
+                        MesoSummaryView(meso: meso) { _ in }
+                    }
+                }
         .fileImporter(
             isPresented: $showImportBackupPicker,
             allowedContentTypes: [.json],
