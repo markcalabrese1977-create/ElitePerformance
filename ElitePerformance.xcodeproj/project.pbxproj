@@ -13,6 +13,8 @@
 		D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */; };
 		D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */; };
 		D53213A12FBCFA5600E01E39 /* MesoSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */; };
+		D53214212FC218EB00E01E39 /* StringExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53214202FC2184500E01E39 /* StringExtensions.swift */; };
+		D53214222FC218F100E01E39 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D532141F2FC2183000E01E39 /* FlowLayout.swift */; };
 		D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D536A6A12EF7265F0036BB4E /* MesoLabel.swift */; };
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
@@ -95,6 +97,8 @@
 		D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitWorkoutSummarySyncService.swift; sourceTree = "<group>"; };
 		D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoPerformanceAnalyzer.swift; sourceTree = "<group>"; };
 		D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoSummaryView.swift; sourceTree = "<group>"; };
+		D532141F2FC2183000E01E39 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
+		D53214202FC2184500E01E39 /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
 		D536A6A12EF7265F0036BB4E /* MesoLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoLabel.swift; sourceTree = "<group>"; };
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
@@ -269,6 +273,15 @@
 			path = Planner;
 			sourceTree = "<group>";
 		};
+		D532141E2FC2182A00E01E39 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				D53214202FC2184500E01E39 /* StringExtensions.swift */,
+				D532141F2FC2183000E01E39 /* FlowLayout.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
 		D5813F972F4910A500CCE909 = {
 			isa = PBXGroup;
 			children = (
@@ -294,6 +307,7 @@
 		D5E293142EC4102800034D78 = {
 			isa = PBXGroup;
 			children = (
+				D532141E2FC2182A00E01E39 /* Utilities */,
 				D54A949A2F91BBB900EFBF25 /* Shared */,
 				D5E293782EC4110700034D78 /* Tests */,
 				D5E2934A2EC410DD00034D78 /* App */,
@@ -621,6 +635,7 @@
 				D5846D622FB4ECA700797E98 /* CustomExercise.swift in Sources */,
 				D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */,
 				D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */,
+				D53214222FC218F100E01E39 /* FlowLayout.swift in Sources */,
 				D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */,
 				D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */,
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
@@ -673,6 +688,7 @@
 				D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */,
 				D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */,
 				D55002072F43883F00908F53 /* MesoBlock.swift in Sources */,
+				D53214212FC218EB00E01E39 /* StringExtensions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

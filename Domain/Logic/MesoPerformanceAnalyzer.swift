@@ -44,7 +44,16 @@ struct ExercisePerformanceSummary {
     let verdict: ExerciseVerdict
 
     /// Whether this exercise set a new e1RM record (vs all prior mesos).
-    let isPR: Bool
+        let isPR: Bool
+
+        /// Total completed sets for this exercise across the meso.
+        let totalSets: Int
+
+        /// Total completed reps for this exercise across the meso.
+        let totalReps: Int
+
+        /// Total volume (load × reps) for this exercise across the meso.
+        let totalVolume: Double
 }
 
 /// Full end-of-meso analysis result.
@@ -258,17 +267,36 @@ enum MesoPerformanceAnalyzer {
             let displayName = catalog?.name ?? snapshotName ?? ExerciseCatalog.displayName(for: exerciseId)
             let primaryMuscle = catalog?.primaryMuscle.rawValue.capitalized
 
-            exerciseSummaries.append(ExercisePerformanceSummary(
-                exerciseId: exerciseId,
-                exerciseName: displayName,
-                primaryMuscle: primaryMuscle,
-                e1rmBySession: e1rmBySession,
-                peakE1RM: peakE1RM,
-                openingLoad: openingLoad,
-                closingLoad: closingLoad,
-                verdict: verdict,
-                isPR: isPR
-            ))
+            // Per-exercise totals
+                        var exSets = 0
+                        var exReps = 0
+                        var exVolume: Double = 0
+                        for (_, item) in sessionsWithExercise {
+                            let setCount = min(item.actualLoads.count, item.actualReps.count)
+                            for idx in 0..<setCount {
+                                let load = item.actualLoads[idx]
+                                let reps = item.actualReps[idx]
+                                guard load > 0, reps > 0 else { continue }
+                                exSets += 1
+                                exReps += reps
+                                exVolume += load * Double(reps)
+                            }
+                        }
+
+                        exerciseSummaries.append(ExercisePerformanceSummary(
+                            exerciseId: exerciseId,
+                            exerciseName: displayName,
+                            primaryMuscle: primaryMuscle,
+                            e1rmBySession: e1rmBySession,
+                            peakE1RM: peakE1RM,
+                            openingLoad: openingLoad,
+                            closingLoad: closingLoad,
+                            verdict: verdict,
+                            isPR: isPR,
+                            totalSets: exSets,
+                            totalReps: exReps,
+                            totalVolume: exVolume
+                        ))
         }
 
         // Sort by primary muscle then name

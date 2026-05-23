@@ -67,6 +67,29 @@ struct MesoSummaryView: View {
 
             analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
         }
+    
+    private func seedMaintenanceBlock() {
+            let trainingWeekdays = meso.sessions
+                .map { Calendar.current.component(.weekday, from: $0.date) }
+                .reduce(into: Set<Int>()) { $0.insert($1) }
+                .sorted()
+
+            let startDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+
+            do {
+                try MaintenanceProgramSeeder.seed(
+                    from: meso,
+                    trainingWeekdays: trainingWeekdays,
+                    totalWeeks: 4,
+                    startDate: startDate,
+                    context: context
+                )
+                onNextBlock(.maintenanceBlock)
+                dismiss()
+            } catch {
+                print("ERROR MaintenanceProgramSeeder: \(error)")
+            }
+        }
 
     // MARK: - Verdict header
 
@@ -220,14 +243,20 @@ struct MesoSummaryView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
-                        verdictBadge(summary.verdict)
+                                            verdictBadge(summary.verdict)
 
-                        if let open = summary.openingLoad, let close = summary.closingLoad, open > 0 {
-                            Text("\(formatLoad(open)) → \(formatLoad(close))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                                            if let open = summary.openingLoad, let close = summary.closingLoad, open > 0 {
+                                                Text("\(formatLoad(open)) → \(formatLoad(close))")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+
+                                            if summary.totalSets > 0 {
+                                                Text("\(summary.totalSets) sets · \(formatVolume(summary.totalVolume))")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.tertiary)
+                                            }
+                                        }
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption)
@@ -243,16 +272,28 @@ struct MesoSummaryView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     if let peak = summary.peakE1RM {
-                        HStack {
-                            Text("Peak e1RM")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.0f", peak))
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                    }
+                                            HStack {
+                                                Text("Peak e1RM")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                Spacer()
+                                                Text(String(format: "%.0f", peak))
+                                                    .font(.caption)
+                                                    .fontWeight(.semibold)
+                                            }
+                                        }
+
+                                        if summary.totalSets > 0 {
+                                            HStack {
+                                                Text("Volume")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                Spacer()
+                                                Text("\(summary.totalSets) sets · \(summary.totalReps) reps · \(formatVolume(summary.totalVolume))")
+                                                    .font(.caption)
+                                                    .fontWeight(.semibold)
+                                            }
+                                        }
 
                     if summary.e1rmBySession.count >= 2 {
                         Chart {
@@ -321,14 +362,13 @@ struct MesoSummaryView: View {
                 }
 
                 nextBlockButton(
-                    title: "Start maintenance block",
-                    subtitle: "Hold your gains. Reduced volume, same loads, lower RIR targets.",
-                    icon: "equal.circle",
-                    color: .green
-                ) {
-                    onNextBlock(.maintenanceBlock)
-                    dismiss()
-                }
+                                    title: "Start maintenance block",
+                                    subtitle: "Hold your gains. Reduced volume, same loads, lower RIR targets.",
+                                    icon: "equal.circle",
+                                    color: .green
+                                ) {
+                                    seedMaintenanceBlock()
+                                }
 
                 nextBlockButton(
                     title: "I'll decide later",

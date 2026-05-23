@@ -1199,7 +1199,7 @@ final class SessionScreenViewModel: ObservableObject {
         case "a": return "Strength"
         case "b": return "Hypertrophy"
         case "c": return "Intensification"
-        case "deload": return "Deload"
+        case "deload": return session.meso?.name.lowercased().contains("maintenance") == true ? "Maintenance" : "Deload"
         case let w?: return w.capitalized
         default: return nil
         }

@@ -183,7 +183,7 @@ struct ProgramGenerator {
                     isDeload: isDeload
                 )
 
-                print("DEBUG ProgramGenerator.seedInitialProgram – week=\(weekIndex + 1) day=\(dayIndex + 1) template=\(template.rawValue) plan=\(dayPlan.title)")
+
                 
                 let session = Session(
                     date: date,
@@ -223,16 +223,9 @@ struct ProgramGenerator {
         }
 
         do {
-            try context.save()
-            print("DEBUG ProgramGenerator.seedInitialProgram – created sessions: \(createdSessions)")
-            print("DEBUG ProgramGenerator.seedInitialProgram – created meso block: \(mesoName)")
-
-            let fetch = FetchDescriptor<Session>()
-            if let sessions = try? context.fetch(fetch) {
-                print("DEBUG ProgramGenerator.seedInitialProgram – sessions after save: \(sessions.count)")
-            } else {
-                print("DEBUG ProgramGenerator.seedInitialProgram – fetch after save failed")
-            }
+                    try context.save()
+            
+            
             // MARK: - End-of-meso load anchoring
                         // Seed loads for all new meso sessions from previous meso's performance.
                         // Without this, every new meso opens with 0 loads and requires one cold session.
@@ -243,7 +236,7 @@ struct ProgramGenerator {
     }
     /// Seed suggested loads for all sessions in a newly created meso block
         /// using LoadProjectionService against completed sessions from prior mesos.
-        private static func anchorLoadsForNewMeso(mesoBlock: MesoBlock, context: ModelContext) {
+    static func anchorLoadsForNewMeso(mesoBlock: MesoBlock, context: ModelContext) {
             let profileDescriptor = FetchDescriptor<UserProfile>()
             let loadIncrement: Double = (try? context.fetch(profileDescriptor).first?.minLoadIncrement) ?? 2.5
 

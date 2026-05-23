@@ -26,10 +26,27 @@ struct CoachingEngine {
         let count = min(reps.count, loads.count)
         guard count > 0 else { return nil }
 
-        // Guard 1 — Deload week: never make progression calls on deload sessions
-        if item.waveRaw?.lowercased() == "deload" {
-            return nil
-        }
+        // Guard 1 — Deload/maintenance week: no progression calls, hold-biased message only
+                if item.waveRaw?.lowercased() == "deload" {
+                    guard item.suggestedLoad > 0 else { return nil }
+                    let hasAnyActualData = (0..<count).contains { reps[$0] > 0 || loads[$0] > 0 }
+                    guard hasAnyActualData else { return nil }
+                    let pumpNote: String = {
+                        let ratings = (0..<min(count, item.pumpRatingsBySet.count)).compactMap {
+                            PumpRating(rawValue: item.pumpRatingsBySet[$0])
+                        }.filter { $0 != .none }
+                        guard !ratings.isEmpty else { return "" }
+                        let avg = ratings.map { $0.rawValue }.reduce(0, +) / ratings.count
+                        switch PumpRating(rawValue: avg) ?? .none {
+                        case .good:      return " Pump was good — the stimulus is there at reduced volume."
+                        case .excellent: return " Pump was excellent — your body is responding well to the lighter load."
+                        case .poor:      return " Pump was poor — that's fine at this volume. Focus is retention, not stimulus."
+                        default:         return ""
+                        }
+                    }()
+                    let msg = "Maintenance session. Goal is retention — hold this load, manage fatigue, and carry it into the next block.\(pumpNote)"
+                    return CoachingRecommendation(message: msg, nextSuggestedLoad: item.suggestedLoad)
+                }
 
         // Guard 2 — No baseline: if suggestedLoad is 0 there's nothing to progress from
         if item.suggestedLoad <= 0 {

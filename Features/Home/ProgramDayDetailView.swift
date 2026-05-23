@@ -52,11 +52,12 @@ struct ProgramDayDetailView: View {
                                 )
                             },
                             onNoteTapped: {
-                                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-                                let name = ExerciseCatalog.displayName(for: canonicalId)
-                                noteTarget = NoteTarget(exerciseId: canonicalId, exerciseName: name)
-                            }
-                        )
+                                                            let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                                                            let name = ExerciseCatalog.displayName(for: canonicalId)
+                                                            noteTarget = NoteTarget(exerciseId: canonicalId, exerciseName: name)
+                                                        },
+                                                        isMaintenance: session.meso?.name.lowercased().contains("maintenance") == true
+                                                    )
                     }
                     .onMove(perform: moveItems)
                     .onDelete(perform: deleteItems)
@@ -196,28 +197,46 @@ struct ProgramDayDetailView: View {
             let profileDescriptor = FetchDescriptor<UserProfile>()
             let loadIncrement: Double = (try? modelContext.fetch(profileDescriptor).first?.minLoadIncrement) ?? 2.5
 
+            // Maintenance sessions use deload wave but must not have loads reduced by projection.
+                        // Detect via meso name — hold current suggested load and skip projection entirely.
+                        let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+
             for item in orderedItems {
-                let projection = LoadProjectionService.project(
-                    exerciseId: item.exerciseId,
-                    targetReps: item.targetReps,
-                    targetRIR: item.targetRIR,
-                    repMin: item.repMin ?? item.targetReps,
-                    repMax: item.repMax ?? item.targetReps,
-                    currentWaveRaw: item.waveRaw,
-                    allSessions: sessions,
-                    activeMesoSessionIDs: activeMesoIDs,
-                    loadIncrement: loadIncrement
-                )
+                                        if isMaintenanceSession {
+                                            // Hold current load and reps — maintenance goal is retention, not progression.
+                                            // Sync per-set loads from suggestedLoad, trimmed strictly to targetSets.
+                                            if item.suggestedLoad <= 0 {
+                                                seedSuggestedLoadIfNeeded(item)
+                                            }
+                                            let load = item.suggestedLoad
+                                            let setCount = item.targetSets
+                                            item.plannedLoadsBySet = Array(repeating: load, count: setCount)
+                                            item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
+                                            item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                                            continue
+                                        }
 
-                if let projection = projection, projection.suggestedLoad > 0 {
-                    foundHistory = true
-                    item.suggestedLoad = projection.suggestedLoad
-                } else {
-                    seedSuggestedLoadIfNeeded(item)
-                }
+                                        let projection = LoadProjectionService.project(
+                                            exerciseId: item.exerciseId,
+                                            targetReps: item.targetReps,
+                                            targetRIR: item.targetRIR,
+                                            repMin: item.repMin ?? item.targetReps,
+                                            repMax: item.repMax ?? item.targetReps,
+                                            currentWaveRaw: item.waveRaw,
+                                            allSessions: sessions,
+                                            activeMesoSessionIDs: activeMesoIDs,
+                                            loadIncrement: loadIncrement
+                                        )
 
-                autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
-            }
+                                        if let projection = projection, projection.suggestedLoad > 0 {
+                                            foundHistory = true
+                                            item.suggestedLoad = projection.suggestedLoad
+                                        } else {
+                                            seedSuggestedLoadIfNeeded(item)
+                                        }
+
+                                        autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
+                                    }
 
             do {
                 try modelContext.save()
@@ -242,9 +261,18 @@ struct ProgramDayDetailView: View {
     }
     
     private func autoGeneratePerSetPlanForThisDay() {
-        for item in orderedItems {
-            autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: false)
-        }
+            let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+            for item in orderedItems {
+                if isMaintenanceSession {
+                    let load = item.suggestedLoad
+                    let setCount = item.targetSets
+                    item.plannedLoadsBySet = Array(repeating: load, count: setCount)
+                    item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
+                    item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                    continue
+                }
+                autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: false)
+            }
 
         do {
             try modelContext.save()
@@ -257,7 +285,9 @@ struct ProgramDayDetailView: View {
     }
 
     private func autoGeneratePerSetPlan(for item: SessionItem, overwriteLoadsFromSuggested: Bool) {
-        let setCount = max(4, item.targetSets)
+        let isMaintenance = item.waveRaw?.lowercased() == "deload" &&
+                    (item.prescriptionNotes?.lowercased().contains("maintenance") == true)
+                let setCount = isMaintenance ? item.targetSets : max(4, item.targetSets)
 
         func ensureIntArray(_ array: inout [Int]) {
             if array.count < setCount {
@@ -676,6 +706,7 @@ private struct ProgramExercisePlanRow: View {
     let onDelete: () -> Void
     let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
+        var isMaintenance: Bool = false
 
     /// Local text versions of loads so 0.5 / 2.5 / 47.5 all work consistently.
     @State private var loadTexts: [String] = []
@@ -897,9 +928,9 @@ private struct ProgramExercisePlanRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            let setRows = max(4, item.targetSets)
+            let setRows = isMaintenance ? item.targetSets : max(4, item.targetSets)
 
-            ForEach(0..<setRows, id: \.self) { idx in
+                        ForEach(0..<setRows, id: \.self) { idx in
                 HStack(spacing: 8) {
                     Text("Set \(idx + 1)")
                         .font(.caption2)
@@ -1082,7 +1113,7 @@ private struct ProgramExercisePlanRow: View {
     // MARK: - Load text state + bindings
 
     private func syncLoadTextsFromItem() {
-        let setRows = max(4, max(item.targetSets, item.plannedLoadsBySet.count))
+        let setRows = isMaintenance ? item.targetSets : max(4, max(item.targetSets, item.plannedLoadsBySet.count))
 
         // Ensure local cache is the right size
         if loadTexts.count != setRows {

@@ -4,9 +4,10 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
-    @Query private var users: [User]
-    @Query private var appStates: [AppState]
-    @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
+
+        @Query private var appStates: [AppState]
+        @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
+        @Query private var profiles: [UserProfile]
 
     // MARK: - Export state
     @State private var exportItem: ExportShareItem? = nil
@@ -33,18 +34,105 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        let user = users.first
+
 
         Form {
-            Section("Progression") {
-                Toggle(
-                    "Auto-progression",
-                    isOn: Binding(
-                        get: { user?.progressionEnabled ?? true },
-                        set: { v in user?.progressionEnabled = v }
-                    )
-                )
-            }
+            // MARK: - Profile
+                        if let profile = profiles.first {
+                            Section("Profile") {
+                                Picker("Goal", selection: Binding(
+                                    get: { profile.primaryGoal },
+                                    set: { profile.primaryGoal = $0 }
+                                )) {
+                                    Text("Hypertrophy").tag(PrimaryGoal.hypertrophy)
+                                    Text("Strength").tag(PrimaryGoal.strength)
+                                    Text("Fat Loss").tag(PrimaryGoal.fatLoss)
+                                    Text("Longevity").tag(PrimaryGoal.longevity)
+                                }
+
+                                Picker("Experience", selection: Binding(
+                                    get: { profile.experience },
+                                    set: { profile.experience = $0 }
+                                )) {
+                                    ForEach(TrainingExperience.allCases, id: \.self) {
+                                        Text($0.label).tag($0)
+                                    }
+                                }
+
+                                Picker("Equipment", selection: Binding(
+                                    get: { profile.equipmentProfile },
+                                    set: { profile.equipmentProfile = $0 }
+                                )) {
+                                    Text("Commercial Gym").tag(EquipmentProfile.commercial)
+                                    Text("Home Gym").tag(EquipmentProfile.homeGym)
+                                    Text("Dumbbells Only").tag(EquipmentProfile.dumbbellsOnly)
+                                }
+
+                                Toggle("Use Kilograms", isOn: Binding(
+                                    get: { profile.usesKilograms },
+                                    set: { profile.usesKilograms = $0 }
+                                ))
+
+                                HStack {
+                                    Text("Min Load Increment")
+                                    Spacer()
+                                    TextField("lbs", value: Binding(
+                                        get: { profile.minLoadIncrement },
+                                        set: { profile.minLoadIncrement = $0 }
+                                    ), format: .number)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 60)
+                                    Text(profile.usesKilograms ? "kg" : "lbs")
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                HStack {
+                                    Text("Session Length")
+                                    Spacer()
+                                    TextField("min", value: Binding(
+                                        get: { profile.sessionLengthMinutes },
+                                        set: { profile.sessionLengthMinutes = $0 }
+                                    ), format: .number)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 60)
+                                    Text("min")
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Joint Limitations")
+                                        .font(.subheadline)
+                                    FlowLayout(spacing: 8) {
+                                        ForEach(InjuryFlag.allCases, id: \.self) { flag in
+                                            let isSelected = profile.injuryFlags.contains(flag)
+                                            Button {
+                                                var flags = profile.injuryFlags
+                                                if isSelected {
+                                                    flags.removeAll { $0 == flag }
+                                                } else {
+                                                    flags.append(flag)
+                                                }
+                                                profile.injuryFlags = flags
+                                            } label: {
+                                                Text(flag.rawValue.camelCaseToWords())
+                                                    .font(.caption)
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 5)
+                                                    .background(isSelected ? Color.blue : Color(.systemGray5))
+                                                    .foregroundColor(isSelected ? .white : .primary)
+                                                    .clipShape(Capsule())
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+            
+
 
             // MARK: - Mesocycle
             Section("Mesocycle") {

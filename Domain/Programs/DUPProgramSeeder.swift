@@ -68,6 +68,6 @@ enum DUPProgramSeeder {
         }
 
         try context.save()
-        print("✅ DUPProgramSeeder created \(createdCount) planned sessions in meso block '\(blockName)'.")
+        
     }
 }
