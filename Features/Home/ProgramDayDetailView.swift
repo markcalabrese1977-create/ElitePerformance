@@ -44,13 +44,12 @@ struct ProgramDayDetailView: View {
                             onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { delete(item) },
                             onHistoryTapped: { exerciseId, exerciseName in
-                                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
-                                let canonicalName = ExerciseCatalog.displayName(for: canonicalId)
-                                historyTarget = HistoryTarget(
-                                    exerciseId: canonicalId,
-                                    exerciseName: canonicalName
-                                )
-                            },
+                                                            let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+                                                            historyTarget = HistoryTarget(
+                                                                exerciseId: canonicalId,
+                                                                exerciseName: exerciseName
+                                                            )
+                                                        },
                             onNoteTapped: {
                                                             let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                                                             let name = ExerciseCatalog.displayName(for: canonicalId)
