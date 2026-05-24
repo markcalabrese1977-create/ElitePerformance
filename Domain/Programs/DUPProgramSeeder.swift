@@ -25,11 +25,15 @@ enum DUPProgramSeeder {
         let normalizedWeekdays = Array(Set(trainingWeekdays)).sorted()
 
         guard normalizedWeekdays.count == template.trainingDaysPerWeek else {
-            throw DUPProgramSeederError.invalidWeekdayCount(
-                expected: template.trainingDaysPerWeek,
-                got: normalizedWeekdays.count
-            )
-        }
+                    throw DUPProgramSeederError.invalidWeekdayCount(
+                        expected: template.trainingDaysPerWeek,
+                        got: normalizedWeekdays.count
+                    )
+                }
+                // Note: for 2-day users on a 3-day template, the scheduler
+                // will only schedule sessions on the provided weekdays.
+                // This guard intentionally stays strict — callers must pass
+                // the correct weekday count for the selected template.
 
         let startDay = calendar.startOfDay(for: startDate)
 

@@ -11,13 +11,65 @@ enum WaveType: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var displayName: String {
-        switch self {
-        case .a: return "A"
-        case .b: return "B"
-        case .c: return "C"
-        case .deload: return "Deload"
+            switch self {
+            case .a: return "A"
+            case .b: return "B"
+            case .c: return "C"
+            case .deload: return "Deload"
+            }
         }
-    }
+
+        /// Program-aware display label derived from wave type and meso name.
+        static func label(forRaw raw: String?, mesoName: String?) -> String? {
+            guard let raw else { return nil }
+            let wave = raw.lowercased()
+            let meso = mesoName?.lowercased() ?? ""
+
+            if wave == "deload" {
+                return meso.contains("maintenance") ? "Maintenance" : "Deload"
+            }
+
+            let isDUP = meso.contains("dup")
+            let isUL = meso.contains("upper / lower") && !meso.contains("pump")
+            let isHybrid = meso.contains("pump")
+            let isPPL = meso.contains("push / pull") || meso.contains("push/pull")
+            let isFullBody = meso.contains("full body")
+
+            if isDUP {
+                switch wave {
+                case "a": return "Strength"
+                case "b": return "Hypertrophy"
+                case "c": return "Intensification"
+                default: return nil
+                }
+            }
+
+            if isUL || isHybrid {
+                switch wave {
+                case "a": return "Baseline"
+                case "b": return "Volume"
+                case "c": return "Intensity"
+                default: return nil
+                }
+            }
+
+            if isPPL || isFullBody {
+                switch wave {
+                case "a": return "Accumulation"
+                case "b": return "Development"
+                case "c": return "Intensification"
+                default: return nil
+                }
+            }
+
+            // Default fallback
+            switch wave {
+            case "a": return "Baseline"
+            case "b": return "Volume"
+            case "c": return "Intensity"
+            default: return raw.capitalized
+            }
+        }
 }
 
 enum IntensifierType: String, Codable, CaseIterable, Identifiable {

@@ -1,42 +1,70 @@
+// Domain/Logic/ProgramApplicationService.swift
 import Foundation
 import SwiftData
 
 enum ProgramApplicationService {
-    enum Strategy {
-        case dup10WeekHypertrophy6Day(trainingWeekdays: [Int])
-        case catalogGenerated(
-            result: OnboardingResult,
-            template: CatalogTemplateKind
-        )
-    }
-
-    enum CatalogTemplateKind: String {
-        case defaultPPL
-        case upperLower
-    }
 
     static func apply(
         _ result: OnboardingResult,
         context: ModelContext,
         startDate: Date = Date()
     ) {
-        let strategy = selectStrategy(for: result)
+        let weekdays = normalizedWeekdays(from: result)
+        let template = selectTemplate(goal: result.goal, daysPerWeek: weekdays.count)
 
-        execute(strategy, context: context, startDate: startDate)
+        do {
+            try DUPProgramReplaceService.replacePlannedProgram(
+                startDate: startDate,
+                trainingWeekdays: weekdays,
+                context: context,
+                template: template
+            )
+        } catch {
+            print("ERROR ProgramApplicationService.apply – seeding failed: \(error)")
+        }
 
-        // Write UserProfile — persists onboarding answers for use by coaching engine
         writeUserProfile(from: result, context: context)
+    }
+
+    // MARK: - Template selection
+
+    static func selectTemplate(goal: Goal, daysPerWeek: Int) -> ProgramTemplate {
+        switch (goal, daysPerWeek) {
+
+        // 6-day hypertrophy — DUP is the best-in-class option
+        case (.hypertrophy, 6):
+            return DUP10WeekTemplate.template
+
+        // 5-day — hybrid upper/lower + pump
+        case (_, 5):
+            return Hybrid5DayTemplate.template
+
+        // 4-day — upper/lower for all goals
+        case (_, 4):
+            return UpperLower4DayTemplate.template
+
+        // 3-day — PPL for all goals
+        case (_, 3):
+            return PPL3WeekTemplate.template
+
+        // 2-day — PPL covers this (only 2 of 3 days used)
+        // Fall through to PPL and let the scheduler handle day count
+        case (_, 2):
+                    return FullBody2DayTemplate.template
+
+        // Fallback — upper/lower is the most broadly applicable
+        default:
+            return UpperLower4DayTemplate.template
+        }
     }
 
     // MARK: - UserProfile persistence
 
-    private static func writeUserProfile(from result: OnboardingResult, context: ModelContext) {
-        // Fetch or create — only one UserProfile should exist
+    static func writeUserProfile(from result: OnboardingResult, context: ModelContext) {
         let descriptor = FetchDescriptor<UserProfile>()
         let existing = (try? context.fetch(descriptor))?.first
 
         if let profile = existing {
-            // Update existing profile
             profile.experience = result.experience
             profile.primaryGoal = goalToPrimaryGoal(result.goal)
             profile.daysPerWeek = result.daysPerWeek
@@ -46,7 +74,6 @@ enum ProgramApplicationService {
             profile.minLoadIncrement = result.minLoadIncrement
             profile.usesKilograms = result.usesKilograms
         } else {
-            // Create new profile
             let profile = UserProfile(
                 experience: result.experience,
                 primaryGoal: goalToPrimaryGoal(result.goal),
@@ -69,70 +96,6 @@ enum ProgramApplicationService {
         case .strength:    return .strength
         case .fatLoss:     return .fatLoss
         case .longevity:   return .longevity
-        }
-    }
-
-    // MARK: - Strategy selection
-
-    private static func selectStrategy(for result: OnboardingResult) -> Strategy {
-        let weekdays = normalizedWeekdays(from: result)
-
-        if result.goal == .hypertrophy && weekdays.count == 6 {
-            return .dup10WeekHypertrophy6Day(trainingWeekdays: weekdays)
-        }
-
-        let normalizedResult = OnboardingResult(
-            goal: result.goal,
-            experience: result.experience,
-            daysPerWeek: weekdays.count,
-            trainingDaysOfWeek: weekdays,
-            equipmentProfile: result.equipmentProfile,
-            sessionLengthMinutes: result.sessionLengthMinutes,
-            injuryFlags: result.injuryFlags,
-            usesKilograms: result.usesKilograms,
-            minLoadIncrement: result.minLoadIncrement
-        )
-
-        let template = selectCatalogTemplate(for: normalizedResult)
-
-        return .catalogGenerated(result: normalizedResult, template: template)
-    }
-
-    private static func selectCatalogTemplate(for result: OnboardingResult) -> CatalogTemplateKind {
-        switch (result.goal, result.daysPerWeek) {
-        case (.strength, 4):
-            return .upperLower
-        case (.longevity, 4):
-            return .upperLower
-        default:
-            return .defaultPPL
-        }
-    }
-
-    private static func execute(
-        _ strategy: Strategy,
-        context: ModelContext,
-        startDate: Date
-    ) {
-        switch strategy {
-        case .dup10WeekHypertrophy6Day(let trainingWeekdays):
-            do {
-                try DUPProgramReplaceService.replacePlannedProgram(
-                    startDate: startDate,
-                    trainingWeekdays: trainingWeekdays,
-                    context: context
-                )
-            } catch {
-                print("ERROR ProgramApplicationService.execute – DUP replace failed: \(error)")
-            }
-
-        case .catalogGenerated(let normalizedResult, let template):
-            ProgramCatalog.applyOnboardingResult(
-                normalizedResult,
-                context: context,
-                startDate: startDate,
-                template: template
-            )
         }
     }
 

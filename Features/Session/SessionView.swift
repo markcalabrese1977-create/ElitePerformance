@@ -1195,15 +1195,9 @@ final class SessionScreenViewModel: ObservableObject {
     @Published var exercises: [UISessionExercise]
 
     var currentWaveLabel: String? {
-        switch session.items.compactMap({ $0.waveRaw }).first?.lowercased() {
-        case "a": return "Strength"
-        case "b": return "Hypertrophy"
-        case "c": return "Intensification"
-        case "deload": return session.meso?.name.lowercased().contains("maintenance") == true ? "Maintenance" : "Deload"
-        case let w?: return w.capitalized
-        default: return nil
+            let wave = session.items.compactMap({ $0.waveRaw }).first
+            return WaveType.label(forRaw: wave, mesoName: session.meso?.name)
         }
-    }
     
     var sessionDate: Date {
         session.date

@@ -456,7 +456,7 @@ enum HistorySummaryBuilder {
                 let catalog = catalogById[exerciseId]
                 let uiExercise = uiByExerciseId[exerciseId]
                 
-                let resolvedWaveLabel = waveDisplayName(from: uiExercise?.waveRaw)
+                let resolvedWaveLabel = WaveType.label(forRaw: uiExercise?.waveRaw, mesoName: session.meso?.name)
                 let resolvedPrescriptionLabel = prescriptionLabel(
                     repMin: uiExercise?.repMin,
                     repMax: uiExercise?.repMax,
@@ -567,22 +567,7 @@ enum HistorySummaryBuilder {
         return weight * (1.0 + Double(reps) / 30.0)
     }
     
-    private static func waveDisplayName(from raw: String?) -> String? {
-        guard let raw else { return nil }
 
-        switch raw.lowercased() {
-        case "a":
-            return "Strength"
-        case "b":
-            return "Hypertrophy"
-        case "c":
-            return "Intensification"
-        case "deload":
-            return "Deload"
-        default:
-            return raw.capitalized
-        }
-    }
 
     private static func prescriptionLabel(
         repMin: Int?,
