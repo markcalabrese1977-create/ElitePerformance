@@ -174,6 +174,40 @@ struct ExerciseCatalog {
         primaryMuscle: .chest,
         isCompound: true
     )
+    static let declineBenchPress = CatalogExercise(
+            id: "decline_bench_press",
+            name: "Decline Bench Press",
+            primaryMuscle: .chest,
+            isCompound: true
+        )
+
+        static let dumbbellFly = CatalogExercise(
+            id: "dumbbell_fly",
+            name: "Dumbbell Fly",
+            primaryMuscle: .chest,
+            isCompound: false
+        )
+
+        static let pecDeck = CatalogExercise(
+            id: "pec_deck",
+            name: "Pec Deck",
+            primaryMuscle: .chest,
+            isCompound: false
+        )
+
+        static let cableCrossover = CatalogExercise(
+            id: "cable_crossover",
+            name: "Cable Crossover",
+            primaryMuscle: .chest,
+            isCompound: false
+        )
+
+        static let pushUp = CatalogExercise(
+            id: "push_up",
+            name: "Push-Up",
+            primaryMuscle: .chest,
+            isCompound: true
+        )
     // MARK: - Triceps
 
     static let cableTricepRopePushdown = CatalogExercise(
@@ -209,6 +243,40 @@ struct ExerciseCatalog {
         primaryMuscle: .triceps,
         isCompound: false
     )
+    static let ezBarSkullCrusher = CatalogExercise(
+            id: "ez_bar_skull_crusher",
+            name: "EZ Bar Skull Crusher",
+            primaryMuscle: .triceps,
+            isCompound: false
+        )
+
+        static let dumbbellOverheadTricepExtension = CatalogExercise(
+            id: "dumbbell_overhead_tricep_extension",
+            name: "Dumbbell Overhead Tricep Extension",
+            primaryMuscle: .triceps,
+            isCompound: false
+        )
+
+        static let cableTricepPushdownStraightBar = CatalogExercise(
+            id: "cable_tricep_pushdown_straight_bar",
+            name: "Cable Tricep Pushdown (Straight Bar)",
+            primaryMuscle: .triceps,
+            isCompound: false
+        )
+
+        static let dip = CatalogExercise(
+            id: "dip",
+            name: "Dip",
+            primaryMuscle: .triceps,
+            isCompound: true
+        )
+
+        static let assistedDip = CatalogExercise(
+            id: "assisted_dip",
+            name: "Assisted Dip",
+            primaryMuscle: .triceps,
+            isCompound: true
+        )
     // MARK: - Core / Anti-rotation
 
     static let pallofPress = CatalogExercise(
@@ -265,6 +333,48 @@ struct ExerciseCatalog {
         primaryMuscle: .core,
         isCompound: true
     )
+    
+    static let abWheelRollout = CatalogExercise(
+            id: "ab_wheel_rollout",
+            name: "Ab Wheel Rollout",
+            primaryMuscle: .core,
+            isCompound: true
+        )
+
+        static let cableWoodchop = CatalogExercise(
+            id: "cable_woodchop",
+            name: "Cable Woodchop",
+            primaryMuscle: .core,
+            isCompound: false
+        )
+
+        static let plank = CatalogExercise(
+            id: "plank",
+            name: "Plank",
+            primaryMuscle: .core,
+            isCompound: false
+        )
+
+        static let russianTwist = CatalogExercise(
+            id: "russian_twist",
+            name: "Russian Twist",
+            primaryMuscle: .core,
+            isCompound: false
+        )
+
+        static let declineSitUp = CatalogExercise(
+            id: "decline_sit_up",
+            name: "Decline Sit-Up",
+            primaryMuscle: .core,
+            isCompound: false
+        )
+
+        static let toesToBar = CatalogExercise(
+            id: "toes_to_bar",
+            name: "Toes to Bar",
+            primaryMuscle: .core,
+            isCompound: true
+        )
     // MARK: - Quads / Hinge / Glutes
 
     static let hackSquat = CatalogExercise(
@@ -356,6 +466,68 @@ struct ExerciseCatalog {
         primaryMuscle: .hamstrings,
         isCompound: false
     )
+    static let gobletSquat = CatalogExercise(
+            id: "goblet_squat",
+            name: "Goblet Squat",
+            primaryMuscle: .quads,
+            isCompound: true
+        )
+
+        static let frontSquat = CatalogExercise(
+            id: "front_squat",
+            name: "Front Squat",
+            primaryMuscle: .quads,
+            isCompound: true
+        )
+
+        static let smithMachineSquat = CatalogExercise(
+            id: "smith_machine_squat",
+            name: "Smith Machine Squat",
+            primaryMuscle: .quads,
+            isCompound: true
+        )
+
+        static let sumoDeadlift = CatalogExercise(
+            id: "sumo_deadlift",
+            name: "Sumo Deadlift",
+            primaryMuscle: .hamstrings,
+            isCompound: true
+        )
+
+        static let conventionalDeadlift = CatalogExercise(
+            id: "conventional_deadlift",
+            name: "Conventional Deadlift",
+            primaryMuscle: .hamstrings,
+            isCompound: true
+        )
+
+        static let nordicCurl = CatalogExercise(
+            id: "nordic_curl",
+            name: "Nordic Curl",
+            primaryMuscle: .hamstrings,
+            isCompound: false
+        )
+
+        static let gluteBridge = CatalogExercise(
+            id: "glute_bridge",
+            name: "Glute Bridge",
+            primaryMuscle: .glutes,
+            isCompound: true
+        )
+
+        static let stepUp = CatalogExercise(
+            id: "step_up",
+            name: "Step-Up",
+            primaryMuscle: .quads,
+            isCompound: true
+        )
+
+        static let reverseHyperextension = CatalogExercise(
+            id: "reverse_hyperextension",
+            name: "Reverse Hyperextension",
+            primaryMuscle: .glutes,
+            isCompound: false
+        )
 
     // MARK: - Calves
 
@@ -421,6 +593,54 @@ struct ExerciseCatalog {
         primaryMuscle: .back,
         isCompound: true
     )
+    static let barbellRow = CatalogExercise(
+            id: "barbell_row",
+            name: "Barbell Row",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let tBarRow = CatalogExercise(
+            id: "t_bar_row",
+            name: "T-Bar Row",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let machineRow = CatalogExercise(
+            id: "machine_row",
+            name: "Machine Row",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let pullUp = CatalogExercise(
+            id: "pull_up",
+            name: "Pull-Up",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let chinUp = CatalogExercise(
+            id: "chin_up",
+            name: "Chin-Up",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let assistedPullUp = CatalogExercise(
+            id: "assisted_pull_up",
+            name: "Assisted Pull-Up",
+            primaryMuscle: .back,
+            isCompound: true
+        )
+
+        static let cablePullover = CatalogExercise(
+            id: "cable_pullover",
+            name: "Cable Pullover",
+            primaryMuscle: .back,
+            isCompound: false
+        )
     
     // MARK: - Rear delts / Shoulders
 
@@ -458,6 +678,47 @@ struct ExerciseCatalog {
         primaryMuscle: .shoulders,
         isCompound: false
     )
+    static let dumbbellShoulderPress = CatalogExercise(
+            id: "dumbbell_shoulder_press",
+            name: "Dumbbell Shoulder Press",
+            primaryMuscle: .shoulders,
+            isCompound: true
+        )
+
+        static let machineShoulderPress = CatalogExercise(
+            id: "machine_shoulder_press",
+            name: "Machine Shoulder Press",
+            primaryMuscle: .shoulders,
+            isCompound: true
+        )
+
+        static let cableFacePull = CatalogExercise(
+            id: "cable_face_pull",
+            name: "Cable Face Pull",
+            primaryMuscle: .shoulders,
+            isCompound: false
+        )
+
+        static let uprightRow = CatalogExercise(
+            id: "upright_row",
+            name: "Upright Row",
+            primaryMuscle: .shoulders,
+            isCompound: true
+        )
+
+        static let dumbbellRearDeltFly = CatalogExercise(
+            id: "dumbbell_rear_delt_fly",
+            name: "Dumbbell Rear Delt Fly",
+            primaryMuscle: .shoulders,
+            isCompound: false
+        )
+
+        static let cableRearDeltFly = CatalogExercise(
+            id: "cable_rear_delt_fly",
+            name: "Cable Rear Delt Fly",
+            primaryMuscle: .shoulders,
+            isCompound: false
+        )
     // MARK: - Biceps / Forearms
 
     static let ezBarCurl = CatalogExercise(
@@ -498,52 +759,125 @@ struct ExerciseCatalog {
         primaryMuscle: .biceps,
         isCompound: false
     )
+    static let barbellCurl = CatalogExercise(
+            id: "barbell_curl",
+            name: "Barbell Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let concentrationCurl = CatalogExercise(
+            id: "concentration_curl",
+            name: "Concentration Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let preacherCurl = CatalogExercise(
+            id: "preacher_curl",
+            name: "Preacher Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let inclineDumbbellCurl = CatalogExercise(
+            id: "incline_dumbbell_curl",
+            name: "Incline Dumbbell Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let cableOverheadCurl = CatalogExercise(
+            id: "cable_overhead_curl",
+            name: "Cable Overhead Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let spiderCurl = CatalogExercise(
+            id: "spider_curl",
+            name: "Spider Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
+
+        static let machineCurl = CatalogExercise(
+            id: "machine_curl",
+            name: "Machine Curl",
+            primaryMuscle: .biceps,
+            isCompound: false
+        )
 
     // MARK: - All exercises array
 
     /// Master list used by lookups throughout the app.
     static var builtIn: [CatalogExercise] = [
         // Chest / push
-        benchPress,
-        closeGripBenchPress,
-        pinPress,
-        inclineDumbbellPress,
-        seatedCableFly,
-        dumbbellPress,
-        machineChestPress,
-        seatedCablePress,
+                benchPress,
+                closeGripBenchPress,
+                pinPress,
+                inclineDumbbellPress,
+                seatedCableFly,
+                dumbbellPress,
+                machineChestPress,
+                seatedCablePress,
+                declineBenchPress,
+                dumbbellFly,
+                pecDeck,
+                cableCrossover,
+                pushUp,
 
-        // Triceps
-        cableTricepRopePushdown,
-        overheadRopeTricepExtension,
-        smithMachineDip,
-        tricepKickback,
-        singleArmCableTricepExtension,
+                // Triceps
+                        cableTricepRopePushdown,
+                        overheadRopeTricepExtension,
+                        smithMachineDip,
+                        tricepKickback,
+                        singleArmCableTricepExtension,
+                        ezBarSkullCrusher,
+                        dumbbellOverheadTricepExtension,
+                        cableTricepPushdownStraightBar,
+                        dip,
+                        assistedDip,
 
-        // Core
-        pallofPress,
-        cableRopeCrunch,
-        declineCableCrunch,
-        hangingStraightLegRaise,
-        hangingKneeRaise,
-        deadBug,
-        suitcaseCarry,
-        farmerCarry,
+                // Core
+                        pallofPress,
+                        cableRopeCrunch,
+                        declineCableCrunch,
+                        hangingStraightLegRaise,
+                        hangingKneeRaise,
+                        deadBug,
+                        suitcaseCarry,
+                        farmerCarry,
+                        abWheelRollout,
+                        cableWoodchop,
+                        plank,
+                        russianTwist,
+                        declineSitUp,
+                        toesToBar,
 
-        // Quads / hinge / glutes
-        hackSquat,
-        legExtension,
-        legPress,
-        bulgarianSplitSquat,
-        walkingLunge,
-        romanianDeadlift,
-        lyingLegCurl,
-        seatedLegCurl,
-        machineHipThrust,
-        cableGluteKickback,
-        cablePullThrough,
-        backExtension45,
-        benchBackExtension,
+                // Quads / hinge / glutes
+                        hackSquat,
+                        legExtension,
+                        legPress,
+                        bulgarianSplitSquat,
+                        walkingLunge,
+                        romanianDeadlift,
+                        lyingLegCurl,
+                        seatedLegCurl,
+                        machineHipThrust,
+                        cableGluteKickback,
+                        cablePullThrough,
+                        backExtension45,
+                        benchBackExtension,
+                        gobletSquat,
+                        frontSquat,
+                        smithMachineSquat,
+                        sumoDeadlift,
+                        conventionalDeadlift,
+                        nordicCurl,
+                        gluteBridge,
+                        stepUp,
+                        reverseHyperextension,
 
         // Calves
         smithMachineCalves,
@@ -551,27 +885,47 @@ struct ExerciseCatalog {
         legPressCalfRaise,
         sledCalfPress,
 
-        // Back / pull
-        wideGripPulldown,
-        pulldownNormalGrip,
-        dumbbellRowSingleArm,
-        chestSupportedInclineDumbbellRow,
-        seatedCableRow,
+                // Back / pull
+                        wideGripPulldown,
+                        pulldownNormalGrip,
+                        dumbbellRowSingleArm,
+                        chestSupportedInclineDumbbellRow,
+                        seatedCableRow,
+                        barbellRow,
+                        tBarRow,
+                        machineRow,
+                        pullUp,
+                        chinUp,
+                        assistedPullUp,
+                        cablePullover,
 
-        // Shoulders / rear delts
-        inclineRearDeltFly,
-        dumbbellLateralRaise,
-        seatedSmithMachineShoulderPress,
-        arnoldPress,
-        singleArmCableLateralRaise,
+                // Shoulders / rear delts
+                        inclineRearDeltFly,
+                        dumbbellLateralRaise,
+                        seatedSmithMachineShoulderPress,
+                        arnoldPress,
+                        singleArmCableLateralRaise,
+                        dumbbellShoulderPress,
+                        machineShoulderPress,
+                        cableFacePull,
+                        uprightRow,
+                        dumbbellRearDeltFly,
+                        cableRearDeltFly,
 
-        // Biceps / forearms
-        ezBarCurl,
-        hammerCurl,
-        cableRopeHammerCurl,
-        ezBarReverseCurl,
-        singleArmCableCurl,
-        supinationPronationCurl
+                // Biceps / forearms
+                        ezBarCurl,
+                        hammerCurl,
+                        cableRopeHammerCurl,
+                        ezBarReverseCurl,
+                        singleArmCableCurl,
+                        supinationPronationCurl,
+                        barbellCurl,
+                        concentrationCurl,
+                        preacherCurl,
+                        inclineDumbbellCurl,
+                        cableOverheadCurl,
+                        spiderCurl,
+                        machineCurl,
     ]
     static var all: [CatalogExercise] {
         builtIn
@@ -736,72 +1090,117 @@ extension ExerciseCatalog {
 
         // MARK: Primary Chest Press
         case "bench_press",
-             "close_grip_bench_press",
-             "pin_press",
-             "incline_dumbbell_press",
-             "dumbbell_press",
-             "machine_chest_press",
-             "seated_cable_press":
-            return .primaryChestPress
+                     "close_grip_bench_press",
+                     "pin_press",
+                     "incline_dumbbell_press",
+                     "dumbbell_press",
+                     "machine_chest_press",
+                     "seated_cable_press",
+                     "decline_bench_press",
+                     "push_up":
+                    return .primaryChestPress
 
         // MARK: Secondary Press / Arms
         case "cable_tricep_rope_pushdown",
-             "overhead_rope_tricep_extension",
-             "smith_machine_dip",
-             "tricep_kickback",
-             "single_arm_cable_tricep_extension",
-             "wide_grip_pulldown",
-             "pulldown_normal_grip",
-             "dumbbell_row_single_arm",
-             "seated_cable_row",
-             "chest_supported_incline_dumbbell_row",
-             "seated_smith_machine_shoulder_press",
-             "arnold_press":
-            return .secondaryPressOrArms
+                     "overhead_rope_tricep_extension",
+                     "smith_machine_dip",
+                     "tricep_kickback",
+                     "single_arm_cable_tricep_extension",
+                     "ez_bar_skull_crusher",
+                     "dumbbell_overhead_tricep_extension",
+                     "cable_tricep_pushdown_straight_bar",
+                     "dip",
+                     "assisted_dip",
+                     "wide_grip_pulldown",
+                     "pulldown_normal_grip",
+                     "dumbbell_row_single_arm",
+                     "seated_cable_row",
+                     "chest_supported_incline_dumbbell_row",
+                     "barbell_row",
+                     "t_bar_row",
+                     "machine_row",
+                     "pull_up",
+                     "chin_up",
+                     "assisted_pull_up",
+                     "seated_smith_machine_shoulder_press",
+                     "arnold_press",
+                     "dumbbell_shoulder_press",
+                     "machine_shoulder_press",
+                     "upright_row":
+                    return .secondaryPressOrArms
 
         // MARK: Primary Leg
         case "hack_squat",
-             "leg_press",
-             "bulgarian_split_squat",
-             "walking_lunge",
-             "romanian_deadlift",
-             "machine_hip_thrust":
-            return .primaryLeg
+                     "leg_press",
+                     "bulgarian_split_squat",
+                     "walking_lunge",
+                     "romanian_deadlift",
+                     "machine_hip_thrust",
+                     "goblet_squat",
+                     "front_squat",
+                     "smith_machine_squat",
+                     "sumo_deadlift",
+                     "conventional_deadlift",
+                     "glute_bridge",
+                     "step_up":
+                    return .primaryLeg
 
         // MARK: Pump / Isolation
         case "seated_cable_fly",
-             "leg_extension",
-             "lying_leg_curl",
-             "seated_leg_curl",
-             "cable_glute_kickback",
-             "smith_machine_calves",
-             "seated_calf_raise",
-             "leg_press_calf_raise",
-             "sled_calf_press",
-             "ez_bar_curl",
-             "hammer_curl",
-             "cable_rope_hammer_curl",
-             "single_arm_cable_curl",
-             "supination_pronation_curl",
-             "ez_bar_reverse_curl",
-             "dumbbell_lateral_raise",
-             "single_arm_cable_lateral_raise",
-             "incline_rear_delt_fly",
-             "cable_rope_crunch",
-             "decline_cable_crunch",
-             "hanging_straight_leg_raise",
-             "hanging_knee_raise":
-            return .pumpIsolation
+                     "dumbbell_fly",
+                     "pec_deck",
+                     "cable_crossover",
+                     "leg_extension",
+                     "lying_leg_curl",
+                     "seated_leg_curl",
+                     "cable_glute_kickback",
+                     "nordic_curl",
+                     "reverse_hyperextension",
+                     "smith_machine_calves",
+                     "seated_calf_raise",
+                     "leg_press_calf_raise",
+                     "sled_calf_press",
+                     "ez_bar_curl",
+                     "hammer_curl",
+                     "cable_rope_hammer_curl",
+                     "single_arm_cable_curl",
+                     "supination_pronation_curl",
+                     "ez_bar_reverse_curl",
+                     "barbell_curl",
+                     "concentration_curl",
+                     "preacher_curl",
+                     "incline_dumbbell_curl",
+                     "cable_overhead_curl",
+                     "spider_curl",
+                     "machine_curl",
+                     "dumbbell_lateral_raise",
+                     "single_arm_cable_lateral_raise",
+                     "incline_rear_delt_fly",
+                     "dumbbell_rear_delt_fly",
+                     "cable_rear_delt_fly",
+                     "cable_face_pull",
+                     "cable_pullover",
+                     "cable_rope_crunch",
+                     "decline_cable_crunch",
+                     "hanging_straight_leg_raise",
+                     "hanging_knee_raise",
+                     "ab_wheel_rollout",
+                     "cable_woodchop",
+                     "plank",
+                     "decline_sit_up",
+                     "toes_to_bar":
+                    return .pumpIsolation
 
         // MARK: Low Back / Stability
         case "cable_pull_through",
-             "back_extension_45",
-             "bench_back_extension",
-             "pallof_press",
-             "dead_bug",
-             "suitcase_carry",
-             "farmer_carry":
-            return .lowBackStability
+                     "back_extension_45",
+                     "bench_back_extension",
+                     "pallof_press",
+                     "dead_bug",
+                     "suitcase_carry",
+                     "farmer_carry",
+                     "russian_twist":
+                    return .lowBackStability
 
         default:
             return nil
