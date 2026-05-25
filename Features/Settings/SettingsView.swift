@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
 
-        @Query private var appStates: [AppState]
+
         @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
         @Query private var profiles: [UserProfile]
 
@@ -21,16 +21,6 @@ struct SettingsView: View {
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
     
-
-    @State private var nextMesoDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
-
-    private var appState: AppState? {
-        appStates.first
-    }
-
-    private var scheduledStartDate: Date? {
-        appState?.scheduledNextMesoStartDate ?? MesoLifecycle.scheduledStartDate
-    }
 
     var body: some View {
 
@@ -134,75 +124,22 @@ struct SettingsView: View {
 
 
             // MARK: - Mesocycle
-            Section("Mesocycle") {
-                DatePicker("Next meso start", selection: $nextMesoDate, displayedComponents: [.date])
+                        Section("Mesocycle") {
+                            Button(role: .destructive) {
+                                let today = Calendar.current.startOfDay(for: Date())
+                                MesoLifecycle.confirmStartNewMeso(on: today)
+                                AppStateBridge.setActiveMesoStartDate(today, in: context)
+                                AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
+                                AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
+                                AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
+                            } label: {
+                                Text("Reset Mesocycle to Week 1")
+                            }
 
-                Button("Schedule Next Mesocycle") {
-                    let d0 = Calendar.current.startOfDay(for: nextMesoDate)
-                    MesoLifecycle.scheduleNextMeso(on: d0)
-                    AppStateBridge.setScheduledNextMesoStartDate(d0, in: context)
-                }
-
-                Button("Generate Next Mesocycle Block") {
-                    presentMesoGenerationMessage(
-                        "Not available yet. Future meso generation is temporarily disabled until multi-mesocycle session grouping is fully supported."
-                    )
-                }
-                .disabled(true)
-
-                Text("Temporarily disabled until multi-mesocycle support is complete.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let scheduled = scheduledStartDate {
-                    Text("Scheduled for \(scheduled.formatted(date: .long, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Button(role: .destructive) {
-                        MesoLifecycle.clearScheduledNextMeso()
-                        AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
-                        AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
-                    } label: {
-                        Text("Cancel Scheduled Start")
-                    }
-                } else {
-                    Text("Not scheduled.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                Button(role: .destructive) {
-                    let today = Calendar.current.startOfDay(for: Date())
-                    MesoLifecycle.confirmStartNewMeso(on: today)
-                    AppStateBridge.setActiveMesoStartDate(today, in: context)
-                    AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
-                    AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
-                    AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
-                } label: {
-                    Text("Start New Mesocycle Now (Reset to W1D1)")
-                }
-
-                Text("Uses a confirmation guard on the start date so you can delay if needed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Button(role: .destructive) {
-                    let today = Calendar.current.startOfDay(for: Date())
-                    MesoLabel.startNewMeso(on: today)
-                    AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
-                } label: {
-                    Text("Reset Labels Only (W1D1 from Today)")
-                }
-
-                Text("Resets week/day labels only. Does not modify history or active meso metrics cutoff.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                            Text("Use this if your program got out of sync. Resets week and day labels to W1D1 from today without deleting your history.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
 
             
@@ -330,11 +267,7 @@ struct SettingsView: View {
         } message: {
             Text(importMessage)
         }
-        .onAppear {
-            if let scheduled = scheduledStartDate {
-                nextMesoDate = Calendar.current.startOfDay(for: scheduled)
-            }
-        }
+        
     }
 
     // MARK: - Helpers
@@ -391,42 +324,7 @@ struct SettingsView: View {
         }
     }
 
-    private func generateNextMesocycleBlock() {
-        let cal = Calendar.current
-        let startDay = cal.startOfDay(for: nextMesoDate)
 
-        guard !hasSessionsOnOrAfter(startDay) else {
-            presentMesoGenerationMessage(
-                "Sessions already exist on or after \(startDay.formatted(date: .long, time: .omitted)). Choose a later start date or clear the overlap first."
-            )
-            return
-        }
-
-        let weekdays = inferredTrainingWeekdays()
-        guard weekdays.count == DUP10WeekTemplate.template.trainingDaysPerWeek else {
-            presentMesoGenerationMessage(
-                "Could not infer a valid \(DUP10WeekTemplate.template.trainingDaysPerWeek)-day training schedule from existing sessions."
-            )
-            return
-        }
-
-        do {
-            try DUPProgramSeeder.seed(
-                startDate: startDay,
-                trainingWeekdays: weekdays,
-                context: context,
-                template: DUP10WeekTemplate.template,
-                calendar: cal
-            )
-            presentMesoGenerationMessage(
-                "Generated a new 10-week DUP block starting \(startDay.formatted(date: .long, time: .omitted))."
-            )
-        } catch {
-            presentMesoGenerationMessage(
-                "Couldn't generate the next mesocycle: \(error.localizedDescription)"
-            )
-        }
-    }
 }
 
 // MARK: - Sheet item wrapper
