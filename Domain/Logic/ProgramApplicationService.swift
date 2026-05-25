@@ -57,6 +57,23 @@ enum ProgramApplicationService {
             return UpperLower4DayTemplate.template
         }
     }
+    
+    static func recommendationReason(goal: Goal, daysPerWeek: Int) -> String {
+            switch (goal, daysPerWeek) {
+            case (.hypertrophy, 6):
+                return "You're training 6 days a week with a hypertrophy goal — the 10-Week DUP Meso is the best fit. Daily Undulating Periodization rotates strength, hypertrophy, and intensification waves across the week, giving every muscle group multiple quality stimuli while keeping fatigue manageable. This is the most sophisticated program in the app."
+            case (_, 5):
+                return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The two heavy upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
+            case (_, 4):
+                return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size without joint stress."
+            case (_, 3):
+                return "Three days a week with Push/Pull/Legs hits every major muscle group with a full dedicated session. Each day has a clear primary stimulus — horizontal push, vertical pull, quad and posterior chain — so nothing gets undertrained. The wave progression keeps intensity building across the 10-week block."
+            case (_, 2):
+                return "Two days a week means every session has to count. Full-body training is the right call — both days hit every major muscle group so nothing falls behind. Day A is push-biased, Day B is pull-biased, and the wave progression builds across the block. Simple, efficient, and effective."
+            default:
+                return "Based on your goal and schedule, this program gives you the right balance of frequency, volume, and progressive overload to make consistent progress."
+            }
+        }
 
     // MARK: - UserProfile persistence
 

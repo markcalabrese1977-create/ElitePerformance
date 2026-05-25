@@ -70,7 +70,7 @@ struct OnboardingFlowView: View {
     // Page 5 — Joint limitations
     @State private var selectedInjuryFlags: Set<InjuryFlag> = []
 
-    private let totalPages = 5
+    private let totalPages = 6
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,13 +79,14 @@ struct OnboardingFlowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch pageIndex {
-                    case 0: goalPage
-                    case 1: experiencePage
-                    case 2: schedulePage
-                    case 3: equipmentPage
-                    case 4: jointPage
-                    default: goalPage
-                    }
+                                        case 0: goalPage
+                                        case 1: experiencePage
+                                        case 2: schedulePage
+                                        case 3: equipmentPage
+                                        case 4: jointPage
+                                        case 5: programPreviewPage
+                                        default: goalPage
+                                        }
                 }
                 .padding()
             }
@@ -470,6 +471,110 @@ struct OnboardingFlowView: View {
         }
     }
 
+    // MARK: - Page 6: Program Preview
+
+        private var programPreviewPage: some View {
+            let weekdays = selectedWeekdays.map { min(max($0, 1), 7) }.sorted()
+            let template = ProgramApplicationService.selectTemplate(
+                goal: selectedGoal,
+                daysPerWeek: weekdays.count
+            )
+            let reason = ProgramApplicationService.recommendationReason(
+                        goal: selectedGoal,
+                        daysPerWeek: weekdays.count
+                    )
+
+            return VStack(alignment: .leading, spacing: 24) {
+                pageHeader(
+                    title: "Your program",
+                    subtitle: "Based on your answers, here's what we're building."
+                )
+
+                // Program card
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(template.name)
+                                .font(.headline)
+                            Text("\(template.totalWeeks) weeks · \(template.trainingDaysPerWeek) days/week")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                    }
+
+                    Divider()
+
+                    Text(reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.blue.opacity(0.06))
+                )
+
+                // Week 1 structure
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Week 1 structure")
+                        .font(.subheadline.bold())
+
+                    VStack(spacing: 6) {
+                        ForEach(template.dayTemplates.sorted { $0.dayNumber < $1.dayNumber }, id: \.id) { day in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(day.title)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text(day.role)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("\(day.exerciseTemplates.filter { $0.priority != .optional }.count) exercises")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(.systemGray6))
+                            )
+                        }
+                    }
+                }
+
+                Text("You can swap any exercise at any time. Your schedule and loads are yours to adjust.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+            }
+        }
+
+        private func experienceToProgramLevel(_ exp: TrainingExperience) -> ProgramExperienceLevel {
+            switch exp {
+            case .new:          return .new
+            case .intermediate: return .intermediate
+            case .advanced:     return .advanced
+            }
+        }
+
+        private func equipmentToProgramProfile(_ profile: EquipmentProfile) -> ProgramEquipmentProfile {
+            switch profile {
+            case .commercial:    return .commercialGym
+            case .homeGym:       return .homeGymRack
+            case .dumbbellsOnly: return .dumbbellsAndCables
+            }
+        }   
+    
     // MARK: - Shared page header
 
     private func pageHeader(title: String, subtitle: String) -> some View {
@@ -497,17 +602,17 @@ struct OnboardingFlowView: View {
             Spacer()
 
             if pageIndex < totalPages - 1 {
-                Button("Next") {
-                    withAnimation { pageIndex += 1 }
-                }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Button(action: finish) {
-                    Text("Create Program")
-                        .frame(minWidth: 140)
-                }
-                .buttonStyle(.borderedProminent)
-            }
+                            Button("Next") {
+                                withAnimation { pageIndex += 1 }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else {
+                            Button(action: finish) {
+                                Text("Let's go")
+                                    .frame(minWidth: 140)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
