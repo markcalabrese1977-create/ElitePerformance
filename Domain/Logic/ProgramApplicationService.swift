@@ -31,9 +31,9 @@ enum ProgramApplicationService {
     static func selectTemplate(goal: Goal, daysPerWeek: Int) -> ProgramTemplate {
         switch (goal, daysPerWeek) {
 
-        // 6-day hypertrophy — DUP is the best-in-class option
-        case (.hypertrophy, 6):
-            return DUP10WeekTemplate.template
+            // 6-day — DUP is the best option regardless of goal
+                    case (_, 6):
+                        return DUP10WeekTemplate.template
 
         // 5-day — hybrid upper/lower + pump
         case (_, 5):
@@ -60,8 +60,8 @@ enum ProgramApplicationService {
     
     static func recommendationReason(goal: Goal, daysPerWeek: Int) -> String {
             switch (goal, daysPerWeek) {
-            case (.hypertrophy, 6):
-                return "You're training 6 days a week with a hypertrophy goal — the 10-Week DUP Meso is the best fit. Daily Undulating Periodization rotates strength, hypertrophy, and intensification waves across the week, giving every muscle group multiple quality stimuli while keeping fatigue manageable. This is the most sophisticated program in the app."
+            case (_, 6):
+                        return "Six days a week is serious training. The 10-Week DUP Meso is the best fit — Daily Undulating Periodization rotates strength, hypertrophy, and intensification waves across the week, giving every muscle group multiple quality stimuli while keeping fatigue manageable. This is the most sophisticated program in the app."
             case (_, 5):
                 return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The two heavy upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
             case (_, 4):
