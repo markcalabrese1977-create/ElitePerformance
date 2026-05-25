@@ -21,7 +21,6 @@ struct SettingsView: View {
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
     
-    @State private var showMesoSummaryDebug = false
 
     @State private var nextMesoDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
 
@@ -205,19 +204,14 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // MARK: - Debug
-                        Section("Debug") {
-                            Button("Preview Meso Summary") {
-                                showMesoSummaryDebug = true
-                            }
-                        }
+
             
             // MARK: - Data Repair
             Section("Data Repair") {
-                Button("Fix Exercise ID Mismatches") {
+                Button("Repair Exercise Data") {
                     fixExerciseIdMismatches()
                 }
-                Text("Corrects session items where the stored exercise ID doesn't match the exercise name snapshot. Run this once if history is showing the wrong exercise.")
+                Text("Run this if exercise history is showing incorrect exercises. Safe to run at any time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -281,11 +275,7 @@ struct SettingsView: View {
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
         }
-        .sheet(isPresented: $showMesoSummaryDebug) {
-                    if let meso = (try? context.fetch(FetchDescriptor<MesoBlock>()))?.first(where: { $0.status == .active }) {
-                        MesoSummaryView(meso: meso) { _ in }
-                    }
-                }
+
         .fileImporter(
             isPresented: $showImportBackupPicker,
             allowedContentTypes: [.json],
