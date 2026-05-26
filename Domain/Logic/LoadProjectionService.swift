@@ -185,10 +185,8 @@ enum LoadProjectionService {
 
         // MARK: - Current meso peak (no decay)
 
-        let currentMesoPeakE1RM: Double = allCandidates
-            .filter { activeMesoSessionIDs.contains($0.sessionID) }
-            .map { $0.e1rm }
-            .max() ?? 0
+        let currentMesoCandidates = allCandidates.filter { activeMesoSessionIDs.contains($0.sessionID) }
+        let currentMesoPeakE1RM: Double = currentMesoCandidates.map { $0.e1rm }.max() ?? 0
 
         // MARK: - Cross-meso decay-weighted baseline
 
@@ -325,6 +323,22 @@ enum LoadProjectionService {
         let descriptor = FetchDescriptor<MesoBlock>()
         let blocks = (try? context.fetch(descriptor)) ?? []
         let active = blocks.first { $0.status == .active }
-        return Set(active?.sessions.map { $0.persistentModelID } ?? [])
+        guard let activeSessions = active?.sessions else { return [] }
+
+        // Cap to sessions from the last 4 weeks only.
+        // A single meso can span 10+ weeks — treating all of them as "current"
+        // means the peak e1RM is taken from the wrong wave or an early week,
+        // producing load suggestions that don't reflect current capacity.
+        let cutoff = Date().addingTimeInterval(-28 * 86400)
+        let recent = activeSessions.filter { $0.date >= cutoff }
+
+        // If nothing in the last 4 weeks (e.g. fresh restore, gap in training),
+        // fall back to the most recent 2 sessions so projection still works.
+        if recent.isEmpty {
+            let sorted = activeSessions.sorted { $0.date > $1.date }
+            return Set(sorted.prefix(2).map { $0.persistentModelID })
+        }
+
+        return Set(recent.map { $0.persistentModelID })
     }
 }

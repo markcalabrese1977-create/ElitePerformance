@@ -61,15 +61,11 @@ struct PlanMemoryEngine {
 
             guard isPlanEffectivelyEmpty(targetItem) else { continue }
 
-            // Copy structural plan fields
-            targetItem.targetReps    = sourceItem.targetReps
-            targetItem.targetSets    = sourceItem.targetSets
-            targetItem.targetRIR     = sourceItem.targetRIR
+            // Carry forward load only — never overwrite prescription fields.
+            // targetReps, targetRIR, repMin, repMax are set by the materializer
+            // at seed time and belong to the target session's wave, not the source's.
             targetItem.suggestedLoad = sourceItem.suggestedLoad
-            targetItem.repMin        = sourceItem.repMin
-            targetItem.repMax        = sourceItem.repMax
 
-            targetItem.plannedRepsBySet  = sourceItem.plannedRepsBySet
             targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
 
             guard progressionEnabled else { continue }

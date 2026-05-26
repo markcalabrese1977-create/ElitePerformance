@@ -215,9 +215,13 @@ struct ProgramDayDetailView: View {
                                             continue
                                         }
 
+                                        // Use repMin as the effective target when set — targetReps may be
+                                        // stale from a prior wave's carry-forward. repMin/repMax are always
+                                        // wave-correct since they come from the prescription, not carry-forward.
+                                        let effectiveReps = item.repMin ?? item.targetReps
                                         let projection = LoadProjectionService.project(
                                             exerciseId: item.exerciseId,
-                                            targetReps: item.targetReps,
+                                            targetReps: effectiveReps,
                                             targetRIR: item.targetRIR,
                                             repMin: item.repMin ?? item.targetReps,
                                             repMax: item.repMax ?? item.targetReps,
@@ -408,7 +412,7 @@ struct ProgramDayDetailView: View {
             // ✅ Source of truth: past sessions only.
             // A session might still be `.planned` even if you logged it.
             let now = Date()
-            let past = all.filter { $0.date <= now }
+            let past = all.filter { $0.date <= now && $0.status == .completed }
 
             return Array(past.prefix(limit))
         } catch {
