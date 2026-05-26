@@ -42,7 +42,7 @@ struct MesoSummaryView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle("Meso Complete")
+            .navigationTitle(meso.status == .archived ? "Meso Complete" : "Meso Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

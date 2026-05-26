@@ -8,6 +8,8 @@ struct ProgramPlanView: View {
     @Query(sort: \Session.date, order: .forward)
     private var sessions: [Session]
     
+    var onViewMesoSummary: (() -> Void)? = nil
+    
 
     // Swipe delete (surgical)
     @State private var sessionPendingDelete: Session?
@@ -68,24 +70,34 @@ struct ProgramPlanView: View {
     }
 
     private var activeBlockHeaderSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(activeBlockName ?? "Program")
-                    .font(.headline)
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(activeBlockName ?? "Program")
+                        .font(.headline)
 
-                if let startDate = activeBlockStartDate {
-                    Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
+                    if let startDate = activeBlockStartDate {
+                        Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("\(activeBlockSessionCount) upcoming session\(activeBlockSessionCount == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
 
-                Text("\(activeBlockSessionCount) upcoming session\(activeBlockSessionCount == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    if onViewMesoSummary != nil {
+                        Button {
+                            onViewMesoSummary?()
+                        } label: {
+                            Label("View Meso Summary", systemImage: "chart.bar.xaxis")
+                                .font(.caption)
+                        }
+                        .padding(.top, 2)
+                    }
+                }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
         }
-    }
     
     private var content: some View {
         List {

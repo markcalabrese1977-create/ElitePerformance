@@ -27,7 +27,9 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            ProgramPlanView()
+            ProgramPlanView(onViewMesoSummary: activeMeso != nil ? {
+                            showMesoSummary = true
+                        } : nil)
                 .navigationTitle("Program")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
