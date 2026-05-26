@@ -263,8 +263,9 @@ enum MesoPerformanceAnalyzer {
 
             // Display name and muscle
             let catalog = ExerciseCatalog.all.first { $0.id == exerciseId }
-            let snapshotName = sessionsWithExercise.first?.item.exerciseNameSnapshot
-            let displayName = catalog?.name ?? snapshotName ?? ExerciseCatalog.displayName(for: exerciseId)
+                        let snapshotName = sessionsWithExercise.first?.item.exerciseNameSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+                        guard catalog != nil || snapshotName != nil else { continue }
+                        let displayName = catalog?.name ?? snapshotName ?? exerciseId
             let primaryMuscle = catalog?.primaryMuscle.rawValue.capitalized
 
             // Per-exercise totals

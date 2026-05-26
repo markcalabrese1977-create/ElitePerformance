@@ -145,13 +145,21 @@ struct SettingsView: View {
             
             // MARK: - Data Repair
             Section("Data Repair") {
-                Button("Repair Exercise Data") {
-                    fixExerciseIdMismatches()
-                }
-                Text("Run this if exercise history is showing incorrect exercises. Safe to run at any time.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                            Button("Repair Exercise Data") {
+                                fixExerciseIdMismatches()
+                            }
+                            Text("Run this if exercise history is showing incorrect exercises. Safe to run at any time.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                Button("Remove Unrecognized Exercises") {
+                                    removeOrphanedExerciseItems()
+                                    removeOrphanedHistoryExercises()
+                                }
+                            Text("Removes logged sets from exercises that can no longer be identified. Does not delete sessions.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
             // MARK: - Export
             Section("Export") {
@@ -299,7 +307,67 @@ struct SettingsView: View {
             presentMesoGenerationMessage("No mismatches found.")
         }
     }
+    
+    private func removeOrphanedExerciseItems() {
+            let descriptor = FetchDescriptor<SessionItem>()
+            guard let items = try? context.fetch(descriptor) else {
+                presentMesoGenerationMessage("Failed to fetch session items.")
+                return
+            }
 
+            var removedCount = 0
+
+            for item in items {
+                let id = item.exerciseId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty else { continue }
+
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: id)
+                let isKnown = ExerciseCatalog.builtIn.contains { $0.id == canonical }
+                let isCustomId = canonical.hasPrefix("custom_")
+
+                if !isKnown && !isCustomId {
+                    context.delete(item)
+                    removedCount += 1
+                }
+            }
+
+            if removedCount > 0 {
+                try? context.save()
+                presentMesoGenerationMessage("Removed \(removedCount) unrecognized exercise\(removedCount == 1 ? "" : "s").")
+            } else {
+                presentMesoGenerationMessage("No unrecognized exercises found.")
+            }
+        }
+
+    private func removeOrphanedHistoryExercises() {
+            let descriptor = FetchDescriptor<SessionHistory>()
+            guard let histories = try? context.fetch(descriptor) else { return }
+
+        let uuidPattern = #"^[0-9a-fA-F\s\-]{32,}$"#
+            var removedCount = 0
+
+            for history in histories {
+                let before = history.exercises.count
+                history.exercises = history.exercises.filter { exercise in
+                    let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let words = name.components(separatedBy: .whitespaces)
+                                        let hexChars = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+                                        let isUUID = words.count >= 2 && words.allSatisfy { word in
+                                            !word.isEmpty && word.unicodeScalars.allSatisfy { hexChars.contains($0) }
+                                        }
+                    return !isUUID
+                }
+                removedCount += before - history.exercises.count
+            }
+
+            if removedCount > 0 {
+                try? context.save()
+                presentMesoGenerationMessage("Removed \(removedCount) unrecognized exercise record\(removedCount == 1 ? "" : "s") from history.")
+            } else {
+                presentMesoGenerationMessage("No unrecognized records found.")
+            }
+        }
+    
     private func presentMesoGenerationMessage(_ message: String) {
         mesoGenerationMessage = message
         showMesoGenerationAlert = true
