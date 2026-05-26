@@ -21,26 +21,41 @@ struct MesoSummaryView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var analysis: MesoAnalysis? = nil
+        @State private var analysisComplete: Bool = false
     @State private var expandedExerciseId: String? = nil
 
     var body: some View {
         NavigationStack {
             Group {
                 if let analysis = analysis {
-                    ScrollView {
-                        VStack(spacing: 20) {
-                            verdictHeader(analysis)
-                            statsRow(analysis)
-                            volumeRampChart(analysis)
-                            exerciseSection(analysis)
-                            nextBlockSection(analysis)
-                        }
-                        .padding()
-                    }
-                } else {
-                    ProgressView("Analyzing meso...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                                    ScrollView {
+                                        VStack(spacing: 20) {
+                                            verdictHeader(analysis)
+                                            statsRow(analysis)
+                                            volumeRampChart(analysis)
+                                            exerciseSection(analysis)
+                                            nextBlockSection(analysis)
+                                        }
+                                        .padding()
+                                    }
+                                } else if analysisComplete {
+                                    VStack(spacing: 16) {
+                                        Image(systemName: "chart.bar.xaxis")
+                                            .font(.system(size: 48))
+                                            .foregroundStyle(.secondary)
+                                        Text("No completed sessions yet")
+                                            .font(.headline)
+                                        Text("Complete at least one session to see your meso analysis.")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 32)
+                                    }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                } else {
+                                    ProgressView("Analyzing meso...")
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                }
             }
             .navigationTitle(meso.status == .archived ? "Meso Complete" : "Meso Summary")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,7 +80,8 @@ struct MesoSummaryView: View {
             let mesoSessionIDs = Set(meso.sessions.map { $0.persistentModelID })
             let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
 
-            analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
+        analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
+                    analysisComplete = true
         }
     
     private func seedMaintenanceBlock() {
