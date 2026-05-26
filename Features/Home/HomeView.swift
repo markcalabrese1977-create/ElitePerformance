@@ -102,16 +102,11 @@ struct HomeView: View {
             }
 
         case .maintenanceBlock:
-            // Maintenance block seeder — not yet implemented
-            // Will be wired when MaintenanceProgramSeeder is built
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                showMesoRolloverGuard = true
-            }
+                    // Seeding already completed in MesoSummaryView.seedMaintenanceBlock()
+                    break
 
         case .custom:
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                showMesoRolloverGuard = true
-            }
+                    break
         }
     }
 
