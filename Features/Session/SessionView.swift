@@ -2120,6 +2120,7 @@ final class SessionScreenViewModel: ObservableObject {
             existingHistory.totalVolume = recap.totalVolume
             existingHistory.date = session.date
             existingHistory.sessionId = existingHistory.sessionId ?? session.id
+            existingHistory.mechanicalLoad = MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session)
             existingHistory.dayLabelSnapshot = normalizedDayLabelSnapshot
             existingHistory.exercises = historyExercises
             existingHistory.mesoBlockId = mesoBlockId
@@ -2136,6 +2137,7 @@ final class SessionScreenViewModel: ObservableObject {
                 totalVolume: recap.totalVolume,
                 sessionId: session.id,
                 dayLabelSnapshot: normalizedDayLabelSnapshot,
+                mechanicalLoad: MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session),
                 mesoBlockId: mesoBlockId,
                 mesoBlockNameSnapshot: mesoBlockNameSnapshot,
                 exercises: historyExercises

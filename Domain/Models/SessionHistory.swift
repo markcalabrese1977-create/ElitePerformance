@@ -15,6 +15,9 @@ final class SessionHistory {
     var sessionId: UUID?
     var dayLabelSnapshot: String?
 
+    // Computed session metrics snapshot
+    var mechanicalLoad: Double?
+
     // Durable block identity
     var mesoBlockId: UUID?
     var mesoBlockNameSnapshot: String?
@@ -32,6 +35,7 @@ final class SessionHistory {
         totalVolume: Double,
         sessionId: UUID? = nil,
         dayLabelSnapshot: String? = nil,
+        mechanicalLoad: Double? = nil,
         mesoBlockId: UUID? = nil,
         mesoBlockNameSnapshot: String? = nil,
         exercises: [SessionHistoryExercise]
@@ -45,6 +49,7 @@ final class SessionHistory {
         self.totalVolume = totalVolume
         self.sessionId = sessionId
         self.dayLabelSnapshot = dayLabelSnapshot
+        self.mechanicalLoad = mechanicalLoad
         self.mesoBlockId = mesoBlockId
         self.mesoBlockNameSnapshot = mesoBlockNameSnapshot
         self.exercises = exercises

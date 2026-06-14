@@ -464,6 +464,14 @@ private struct HistoryDayDetailView: View {
                 }
             }
 
+            if let mechLoad = history.mechanicalLoad, mechLoad > 0 {
+                HStack {
+                    Text("Mechanical load").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.0f", mechLoad)).font(.caption)
+                }
+            }
+
             if totalReps > 0 {
                 HStack {
                     Text("Total reps").font(.caption).foregroundStyle(.secondary)
