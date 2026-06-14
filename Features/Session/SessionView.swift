@@ -2092,10 +2092,14 @@ final class SessionScreenViewModel: ObservableObject {
         let mesoBlockId = session.meso?.id
         let mesoBlockNameSnapshot = session.meso?.name
 
-        // 🔑 Try to find an existing history entry for this same session day/week
+        // 🔑 Try to find an existing history entry for this session.
+        // Match on sessionId when available (stable across date changes).
+        // Fall back to date+week for legacy history entries that predate sessionId.
+        let targetSessionId = session.id
         let descriptor = FetchDescriptor<SessionHistory>(
             predicate: #Predicate<SessionHistory> { history in
-                history.date == targetDate && history.weekIndex == targetWeek
+                history.sessionId == targetSessionId ||
+                (history.sessionId == nil && history.date == targetDate && history.weekIndex == targetWeek)
             }
         )
 
@@ -2114,6 +2118,8 @@ final class SessionScreenViewModel: ObservableObject {
             existingHistory.totalExercises = recap.exerciseCount
             existingHistory.totalSets = recap.setCount
             existingHistory.totalVolume = recap.totalVolume
+            existingHistory.date = session.date
+            existingHistory.sessionId = existingHistory.sessionId ?? session.id
             existingHistory.dayLabelSnapshot = normalizedDayLabelSnapshot
             existingHistory.exercises = historyExercises
             existingHistory.mesoBlockId = mesoBlockId
@@ -2121,13 +2127,14 @@ final class SessionScreenViewModel: ObservableObject {
         } else {
             // First time completing this session → insert a new history row
             let history = SessionHistory(
-                date: recap.date,
+                date: session.date,
                 weekIndex: recap.weekIndex,
                 title: recap.title,
                 subtitle: recap.subtitle,
                 totalExercises: recap.exerciseCount,
                 totalSets: recap.setCount,
                 totalVolume: recap.totalVolume,
+                sessionId: session.id,
                 dayLabelSnapshot: normalizedDayLabelSnapshot,
                 mesoBlockId: mesoBlockId,
                 mesoBlockNameSnapshot: mesoBlockNameSnapshot,
