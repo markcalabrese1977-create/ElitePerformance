@@ -2062,8 +2062,12 @@ final class SessionScreenViewModel: ObservableObject {
         print("🔁 persistCompletion called – exercises: \(recap.exerciseCount), sets: \(recap.setCount), volume: \(recap.totalVolume)")
 
         // Mark the underlying session as completed (first time only we set completedAt)
+        // Also update session.date to today so history and Auto+ reflect when the
+        // session was actually performed, not when it was originally seeded.
         if session.completedAt == nil {
-            session.completedAt = Date()
+            let now = Date()
+            session.completedAt = now
+            session.date = now
         }
         session.status = .completed
 
