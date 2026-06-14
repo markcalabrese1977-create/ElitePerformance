@@ -85,6 +85,10 @@ struct SessionRecapView: View {
         sortedItems.reduce(0) { $0 + $1.totalVolume }
     }
 
+    private var mechanicalLoad: Double {
+        MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session)
+    }
+
     private var completionPercent: Double {
         guard plannedSetsTotal > 0 else { return 0 }
         return (Double(loggedSetsTotal) / Double(plannedSetsTotal)) * 100.0
@@ -269,6 +273,15 @@ struct SessionRecapView: View {
                 Spacer()
                 Text(formattedVolume(totalVolume))
                     .fontWeight(.semibold)
+            }
+
+            if mechanicalLoad > 0 {
+                HStack {
+                    Text("Mechanical load")
+                    Spacer()
+                    Text(String(format: "%.0f", mechanicalLoad))
+                        .fontWeight(.semibold)
+                }
             }
 
             if let avg = averageLastSetRIR {

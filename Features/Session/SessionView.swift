@@ -2700,6 +2700,25 @@ struct UISessionSet: Identifiable {
         var bestE1RM: Double? {
             exercises.compactMap { $0.topE1RM }.max()
         }
+
+        /// Mechanical load: intensity-weighted volume across all sets.
+        /// Formula: Σ (load × reps × relative_intensity) where relative_intensity = load / e1RM
+        var mechanicalLoad: Double {
+            var total = 0.0
+            for exercise in exercises {
+                guard let item = exercise.sessionItem else { continue }
+                let setCount = min(item.actualLoads.count, item.actualReps.count)
+                for idx in 0..<setCount {
+                    let load = item.actualLoads[idx]
+                    let reps = item.actualReps[idx]
+                    guard load > 0, reps > 0 else { continue }
+                    let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
+                    guard e1rm > 0 else { continue }
+                    total += load * Double(reps) * (load / e1rm)
+                }
+            }
+            return total.rounded()
+        }
     }
     
     struct SessionRecapExercise: Identifiable {
@@ -2846,6 +2865,17 @@ struct UISessionSet: Identifiable {
                             .foregroundStyle(.secondary)
                         Text("\(Int(recap.totalVolume))")
                             .font(.headline)
+                    }
+                }
+
+                if recap.mechanicalLoad > 0 {
+                    HStack {
+                        Text("Mechanical load")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.0f", recap.mechanicalLoad))
+                            .font(.caption)
                     }
                 }
                 
