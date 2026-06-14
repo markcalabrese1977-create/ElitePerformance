@@ -282,9 +282,25 @@ enum LoadProjectionService {
         let missesCount = repsBySet.filter { $0 < (prescribedMin - 1) }.count
         let tooMuchFatigue = missesCount >= 2
 
+        // Detect if the last session was performed with more in the tank than planned.
+        // avgRIR > targetRIR means the lifter had extra reserve — a stronger signal
+        // to increase than hitting target exactly. One clean session is sufficient.
+        let lastValidRIRs = lastItem.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
+            guard idx < lastItem.actualLoads.count, lastItem.actualLoads[idx] > 0 else { return nil }
+            return rir
+        }
+        let lastAvgRIR = lastValidRIRs.isEmpty ? Double(lastItem.targetRIR) :
+            Double(lastValidRIRs.reduce(0, +)) / Double(lastValidRIRs.count)
+        let hadExtraReserve = lastAvgRIR > Double(lastItem.targetRIR) + 0.5
+
         let sameWaveLoad: Double = {
             if tooMuchFatigue {
                 return (lastLoad * 0.95 / loadIncrement).rounded() * loadIncrement
+            }
+            // Extra reserve last session (actual RIR well above target) + clean = increase now.
+            // Standard path requires 2 consecutive clean sessions.
+            if consecutiveClean >= 1 && hadExtraReserve {
+                return ((lastLoad + loadIncrement) / loadIncrement).rounded() * loadIncrement
             }
             if consecutiveClean >= 2 {
                 return ((lastLoad + loadIncrement) / loadIncrement).rounded() * loadIncrement
@@ -292,7 +308,7 @@ enum LoadProjectionService {
             return (lastLoad / loadIncrement).rounded() * loadIncrement
         }()
 
-        let sameWaveBasis: LoadProjectionBasis = consecutiveClean >= 2
+        let sameWaveBasis: LoadProjectionBasis = (consecutiveClean >= 2 || (consecutiveClean >= 1 && hadExtraReserve))
             ? .consecutiveCleanProgression(sessions: consecutiveClean)
             : .sameWaveProgression
 
