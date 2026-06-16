@@ -226,6 +226,24 @@ enum BackupSnapshotImporter {
             AppStateBridge.syncToUserDefaults(from: restoredAppState)
         }
 
+        // Sync restored custom exercises to UserDefaults so ExerciseCatalog.all
+        // can resolve their names without a ModelContext (used by displayName).
+        let restoredCustom = (snapshot.customExercises ?? []).compactMap { dto -> CatalogExercise? in
+            guard !dto.id.isEmpty, !dto.name.isEmpty else { return nil }
+            return CatalogExercise(
+                id: dto.id,
+                name: dto.name,
+                primaryMuscle: MuscleGroup(rawValue: dto.primaryMuscleRaw ?? "") ?? .chest,
+                isCompound: dto.isCompound
+            )
+        }
+        if !restoredCustom.isEmpty,
+           let data = try? JSONEncoder().encode(restoredCustom) {
+            UserDefaults.standard.set(data, forKey: "custom_exercises_v2")
+            NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
+            print("✅ Synced \(restoredCustom.count) custom exercise(s) to UserDefaults after restore")
+        }
+
         return BackupSnapshotImportResult(
             mesoBlockCount: snapshot.mesoBlocks.count,
             sessionCount: snapshot.sessions.count,

@@ -928,7 +928,25 @@ struct ExerciseCatalog {
                         machineCurl,
     ]
     static var all: [CatalogExercise] {
-        builtIn
+        let userDefaultsCustom: [CatalogExercise] = {
+            guard let data = UserDefaults.standard.data(forKey: universalCustomKey),
+                  let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data)
+            else { return [] }
+            return decoded
+        }()
+
+        // Merge built-in + UserDefaults custom, deduplicating by ID.
+        // UserDefaults is the canonical store for custom exercises accessible
+        // without a ModelContext — SwiftData is the source of truth but requires
+        // a context to query, which static display functions don't have.
+        var seen = Set<String>()
+        var merged: [CatalogExercise] = []
+        for ex in builtIn + userDefaultsCustom {
+            if seen.insert(ex.id).inserted {
+                merged.append(ex)
+            }
+        }
+        return merged
     }
 }
 extension ExerciseCatalog {

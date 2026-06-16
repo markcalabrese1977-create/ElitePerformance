@@ -47,6 +47,7 @@ struct ElitePerformanceApp: App {
             SessionHistoryBlockBackfill.runIfNeeded(in: context)
             SessionDayLabelBackfill.runIfNeeded(in: context)
             CustomExerciseStoreMigration.runIfNeeded(in: context)
+            CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
