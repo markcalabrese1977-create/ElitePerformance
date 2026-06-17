@@ -150,6 +150,7 @@ private struct HistorySetDetail: Identifiable {
                 case .pain: return "pain"
                 case .soreness: return "soreness"
                 case .disruption: return "disruption"
+                case .fatigue: return "fatigue"
                 case .none: return "skipped"
                 }
             }()
@@ -175,6 +176,7 @@ private struct HistorySetDetail: Identifiable {
             case .pain: return Color.red.opacity(0.8)
             case .soreness: return Color.yellow.opacity(0.8)
             case .disruption: return Color.orange.opacity(0.8)
+            case .fatigue: return Color.purple.opacity(0.8)
             case .none: return isSkipped ? Color(UIColor.tertiaryLabel) : Color(UIColor.secondaryLabel)
             }
         }

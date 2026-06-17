@@ -34,6 +34,7 @@
 		D5813F962F48C28700CCE909 /* ExerciseSessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */; };
 		D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293542EC410DD00034D78 /* HistoryView.swift */; };
 		D5813FE12F49433D00CCE909 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5813FE02F49433600CCE909 /* AnalyticsView.swift */; };
+		D5839A4B2FDF0B640074635A /* MechanicalLoadHealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5839A4A2FDF0B640074635A /* MechanicalLoadHealthKitService.swift */; };
 		D5846D622FB4ECA700797E98 /* CustomExercise.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5846D612FB4ECA500797E98 /* CustomExercise.swift */; };
 		D5846D692FB5341E00797E98 /* SetFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5846D682FB5341C00797E98 /* SetFeedback.swift */; };
 		D58476E92F40F48000FE3F46 /* (null) in Sources */ = {isa = PBXBuildFile; };
@@ -115,6 +116,7 @@
 		D5603BD72F9FF3DC00664B58 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
 		D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSessionDetailView.swift; sourceTree = "<group>"; };
 		D5813FE02F49433600CCE909 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		D5839A4A2FDF0B640074635A /* MechanicalLoadHealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadHealthKitService.swift; sourceTree = "<group>"; };
 		D5846D612FB4ECA500797E98 /* CustomExercise.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomExercise.swift; sourceTree = "<group>"; };
 		D5846D682FB5341C00797E98 /* SetFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetFeedback.swift; sourceTree = "<group>"; };
 		D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetsV1CSVExporter.swift; sourceTree = "<group>"; };
@@ -160,6 +162,16 @@
 		D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProjectionService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D5839A492FDF0A330074635A /* Exceptions for "ElitePerformance" folder in "ElitePerformance" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D5E2931C2EC4102800034D78 /* ElitePerformance */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D536A6312EF4790E0036BB4E /* Components */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -203,6 +215,9 @@
 		};
 		D5E2931F2EC4102800034D78 /* ElitePerformance */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D5839A492FDF0A330074635A /* Exceptions for "ElitePerformance" folder in "ElitePerformance" target */,
+			);
 			path = ElitePerformance;
 			sourceTree = "<group>";
 		};
@@ -398,6 +413,7 @@
 				D5E293952EC7BBFB00034D78 /* Engines */,
 				D5E2934E2EC410DD00034D78 /* Logic */,
 				D5E293522EC410DD00034D78 /* Models */,
+				D5839A4A2FDF0B640074635A /* MechanicalLoadHealthKitService.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -626,6 +642,7 @@
 				D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */,
 				D53214222FC218F100E01E39 /* FlowLayout.swift in Sources */,
 				D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */,
+				D5839A4B2FDF0B640074635A /* MechanicalLoadHealthKitService.swift in Sources */,
 				D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */,
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
 				D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */,
@@ -833,10 +850,11 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ElitePerformance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and writes your mechanical training load to Apple Health after each session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -884,10 +902,11 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ElitePerformance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and writes your mechanical training load to Apple Health after each session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

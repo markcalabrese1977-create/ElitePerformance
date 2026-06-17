@@ -1439,6 +1439,7 @@ final class SessionScreenViewModel: ObservableObject {
                 case .pain: return .skippedPain
                 case .soreness: return .skippedSoreness
                 case .disruption: return .skippedDisruption
+                case .fatigue: return .skippedFatigue
                 case .none: return .skipped
                 }
             }()
@@ -2291,6 +2292,7 @@ extension SessionScreenViewModel {
                                         case .pain: return .skippedPain
                                         case .soreness: return .skippedSoreness
                                         case .disruption: return .skippedDisruption
+                                        case .fatigue: return .skippedFatigue
                                         case .none: return .skipped
                                         }
                                     } else if let reps = actualReps, reps > 0 {
@@ -2374,10 +2376,11 @@ enum SetStatus: Equatable {
     case skippedPain
     case skippedSoreness
     case skippedDisruption
+    case skippedFatigue
 
     var isAnySkip: Bool {
         switch self {
-        case .skipped, .skippedPain, .skippedSoreness, .skippedDisruption: return true
+        case .skipped, .skippedPain, .skippedSoreness, .skippedDisruption, .skippedFatigue: return true
         default: return false
         }
     }
@@ -2387,6 +2390,7 @@ enum SetStatus: Equatable {
         case .skippedPain: return .pain
         case .skippedSoreness: return .soreness
         case .skippedDisruption: return .disruption
+        case .skippedFatigue: return .fatigue
         default: return .none
         }
     }
@@ -2397,6 +2401,7 @@ enum SetStatus: Equatable {
         case .skippedPain: return "Pain"
         case .skippedSoreness: return "Soreness"
         case .skippedDisruption: return "Disruption"
+        case .skippedFatigue: return "Fatigue"
         default: return ""
         }
     }
@@ -2407,6 +2412,7 @@ enum SetStatus: Equatable {
         case .skippedPain: return .red
         case .skippedSoreness: return .yellow
         case .skippedDisruption: return .orange
+        case .skippedFatigue: return .purple
         default: return .secondary
         }
     }

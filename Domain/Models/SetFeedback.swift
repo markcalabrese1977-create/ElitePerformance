@@ -7,6 +7,7 @@ enum SetFeedback: String, Codable {
     case pain = "pain"               // joint/structural — stop signal
     case soreness = "soreness"       // muscular — informational
     case disruption = "disruption"   // general fatigue/strength loss
+    case fatigue = "fatigue"         // systemic fatigue/tired — distinct from disruption
 }
 
 /// Pump quality on completed sets.

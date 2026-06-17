@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Elite Performance Coach writes your mechanical training load score to Apple Health so Health Dashboard can track strength training stress alongside cardiovascular load.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>Elite Performance Coach reads workout data from Apple Health to correlate training history with performance.</string>
+</dict>
+</plist>
