@@ -5,11 +5,28 @@ struct BackupSnapshotV1: Codable {
     let exportedAt: Date
 
     let appState: AppStateBackupDTO?
+    let userProfile: UserProfileBackupDTO?
     let mesoBlocks: [MesoBlockBackupDTO]
     let sessions: [SessionBackupDTO]
     let sessionHistory: [SessionHistoryBackupDTO]
     let exerciseNotes: [ExerciseNoteBackupDTO]
     let customExercises: [CustomExerciseBackupDTO]
+}
+
+// MARK: - UserProfile
+
+struct UserProfileBackupDTO: Codable {
+    let profileId: UUID?
+    let createdAt: Date?
+    let experienceRaw: String?
+    let primaryGoalRaw: String?
+    let daysPerWeek: Int?
+    let sessionLengthMinutes: Int?
+    let equipmentProfileRaw: String?
+    let injuryFlagRaws: [String]?
+    let minLoadIncrement: Double?
+    let unitPreferenceRaw: String?
+    let bodyWeight: Double?
 }
 
 // MARK: - AppState

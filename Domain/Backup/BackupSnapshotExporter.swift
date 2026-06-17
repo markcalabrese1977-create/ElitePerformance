@@ -34,6 +34,8 @@ enum BackupSnapshotExporter {
             FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
         )
 
+        let userProfile = try modelContext.fetch(FetchDescriptor<UserProfile>()).first
+
         let snapshot = BackupSnapshotV1(
             version: 1,
             exportedAt: Date(),
@@ -48,6 +50,21 @@ enum BackupSnapshotExporter {
                     mesoAnchorDate: $0.mesoAnchorDate,
                     mesoAnchorDayNumber: $0.mesoAnchorDayNumber,
                     appModeRaw: $0.appModeRaw
+                )
+            },
+            userProfile: userProfile.map {
+                UserProfileBackupDTO(
+                    profileId: $0.profileId,
+                    createdAt: $0.createdAt,
+                    experienceRaw: $0.experienceRaw,
+                    primaryGoalRaw: $0.primaryGoalRaw,
+                    daysPerWeek: $0.daysPerWeek,
+                    sessionLengthMinutes: $0.sessionLengthMinutes,
+                    equipmentProfileRaw: $0.equipmentProfileRaw,
+                    injuryFlagRaws: $0.injuryFlagRaws,
+                    minLoadIncrement: $0.minLoadIncrement,
+                    unitPreferenceRaw: $0.unitPreferenceRaw,
+                    bodyWeight: $0.bodyWeight
                 )
             },
             mesoBlocks: mesoBlocks.map { block in

@@ -21,6 +21,24 @@ enum BackupSnapshotImporter {
 
         try clearExistingBackupManagedData(in: modelContext)
 
+        // MARK: - UserProfile
+        if let dto = snapshot.userProfile {
+            let profile = UserProfile(
+                id: dto.profileId ?? UUID(),
+                createdAt: dto.createdAt ?? Date(),
+                experience: TrainingExperience(rawValue: dto.experienceRaw ?? "") ?? .intermediate,
+                primaryGoal: PrimaryGoal(rawValue: dto.primaryGoalRaw ?? "") ?? .hypertrophy,
+                daysPerWeek: dto.daysPerWeek ?? 4,
+                sessionLengthMinutes: dto.sessionLengthMinutes ?? 60,
+                equipmentProfile: EquipmentProfile(rawValue: dto.equipmentProfileRaw ?? "") ?? .commercial,
+                injuryFlags: (dto.injuryFlagRaws ?? []).compactMap { InjuryFlag(rawValue: $0) },
+                minLoadIncrement: dto.minLoadIncrement ?? 2.5,
+                usesKilograms: dto.unitPreferenceRaw == "kg",
+                bodyWeight: dto.bodyWeight
+            )
+            modelContext.insert(profile)
+        }
+
         // MARK: - AppState
         if let dto = snapshot.appState {
             let appState = AppState(
@@ -260,6 +278,7 @@ enum BackupSnapshotImporter {
         let sessions = try modelContext.fetch(FetchDescriptor<Session>())
         let mesoBlocks = try modelContext.fetch(FetchDescriptor<MesoBlock>())
         let customExercises = try modelContext.fetch(FetchDescriptor<CustomExercise>())
+        let userProfiles = try modelContext.fetch(FetchDescriptor<UserProfile>())
 
         for object in appStates { modelContext.delete(object) }
         for object in notes { modelContext.delete(object) }
@@ -267,6 +286,7 @@ enum BackupSnapshotImporter {
         for object in sessions { modelContext.delete(object) }
         for object in mesoBlocks { modelContext.delete(object) }
         for object in customExercises { modelContext.delete(object) }
+        for object in userProfiles { modelContext.delete(object) }
 
         try modelContext.save()
     }
