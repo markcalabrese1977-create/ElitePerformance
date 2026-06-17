@@ -19,21 +19,17 @@ enum MechanicalLoadHealthKitService {
 
     @MainActor
     static func writeAfterSession(_ session: Session) async {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-
         let score = calculateMechanicalLoad(from: session)
         guard score > 0 else {
-            print("ℹ️ MechanicalLoad: score is 0, skipping HealthKit write")
+            print("ℹ️ MechanicalLoad: score is 0, skipping write")
             return
         }
 
-        do {
-            try await requestWriteAuthorizationIfNeeded()
-            try await writeSample(score: score, date: session.completedAt ?? session.date)
-            print("✅ MechanicalLoad: wrote \(String(format: "%.1f", score)) to HealthKit")
-        } catch {
-            print("⚠️ MechanicalLoad: HealthKit write failed: \(error)")
-        }
+        // Write to shared App Group so HealthDashboard can read it.
+        // Custom HKQuantityType identifiers are not supported for third-party
+        // apps without special entitlements, so we use shared UserDefaults instead.
+        let date = session.completedAt ?? session.date
+        MechanicalLoadSharedStore.write(score: score, for: date)
     }
 
     // MARK: - Calculation
