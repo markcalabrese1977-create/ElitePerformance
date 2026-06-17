@@ -968,6 +968,7 @@ private struct SessionSetRowView: View {
                                                 Button("Pain") { onSkip(.pain) }
                                                 Button("Soreness") { onSkip(.soreness) }
                                                 Button("Disruption") { onSkip(.disruption) }
+                                                Button("Fatigue") { onSkip(.fatigue) }
                                             }
                                         }
 
@@ -1007,6 +1008,11 @@ private struct SessionSetRowView: View {
                                                 onSkip(.disruption)
                                             } label: {
                                                 Label("Disruption", systemImage: "bolt.slash.fill")
+                                            }
+                                            Button {
+                                                onSkip(.fatigue)
+                                            } label: {
+                                                Label("Fatigue", systemImage: "zzz")
                                             }
                                         } label: {
                                             Text("Skip")

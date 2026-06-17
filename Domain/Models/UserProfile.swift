@@ -59,6 +59,7 @@ final class UserProfile {
     var injuryFlagRaws: [String]
     var minLoadIncrement: Double
     var unitPreferenceRaw: String
+    var bodyWeight: Double?
 
     var experience: TrainingExperience {
         get { TrainingExperience(rawValue: experienceRaw) ?? .intermediate }
@@ -91,7 +92,8 @@ final class UserProfile {
         equipmentProfile: EquipmentProfile = .commercial,
         injuryFlags: [InjuryFlag] = [],
         minLoadIncrement: Double = 2.5,
-        usesKilograms: Bool = false
+        usesKilograms: Bool = false,
+        bodyWeight: Double? = nil
     ) {
         self.profileId = id
         self.createdAt = createdAt
@@ -103,5 +105,6 @@ final class UserProfile {
         self.injuryFlagRaws = injuryFlags.map { $0.rawValue }
         self.minLoadIncrement = minLoadIncrement
         self.unitPreferenceRaw = usesKilograms ? "kg" : "lbs"
+        self.bodyWeight = bodyWeight
     }
 }

@@ -24,6 +24,7 @@ struct CatalogExercise: Identifiable, Hashable, Codable {
     let name: String         // display name
     let primaryMuscle: MuscleGroup
     let isCompound: Bool
+    var isBodyweight: Bool = false
 }
 
 /// Central catalog of all exercises the system understands right now.
@@ -206,7 +207,8 @@ struct ExerciseCatalog {
             id: "push_up",
             name: "Push-Up",
             primaryMuscle: .chest,
-            isCompound: true
+            isCompound: true,
+            isBodyweight: true
         )
     // MARK: - Triceps
 
@@ -268,7 +270,8 @@ struct ExerciseCatalog {
             id: "dip",
             name: "Dip",
             primaryMuscle: .triceps,
-            isCompound: true
+            isCompound: true,
+            isBodyweight: true
         )
 
         static let assistedDip = CatalogExercise(
@@ -505,7 +508,8 @@ struct ExerciseCatalog {
             id: "nordic_curl",
             name: "Nordic Curl",
             primaryMuscle: .hamstrings,
-            isCompound: false
+            isCompound: false,
+            isBodyweight: true
         )
 
         static let gluteBridge = CatalogExercise(
@@ -618,14 +622,16 @@ struct ExerciseCatalog {
             id: "pull_up",
             name: "Pull-Up",
             primaryMuscle: .back,
-            isCompound: true
+            isCompound: true,
+            isBodyweight: true
         )
 
         static let chinUp = CatalogExercise(
             id: "chin_up",
             name: "Chin-Up",
             primaryMuscle: .back,
-            isCompound: true
+            isCompound: true,
+            isBodyweight: true
         )
 
         static let assistedPullUp = CatalogExercise(

@@ -77,6 +77,20 @@ struct SettingsView: View {
                                 }
 
                                 HStack {
+                                    Text("Body Weight")
+                                    Spacer()
+                                    TextField("0", value: Binding(
+                                        get: { profile.bodyWeight ?? 0 },
+                                        set: { profile.bodyWeight = $0 > 0 ? $0 : nil }
+                                    ), format: .number)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 60)
+                                    Text(profile.usesKilograms ? "kg" : "lbs")
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                HStack {
                                     Text("Session Length")
                                     Spacer()
                                     TextField("min", value: Binding(
