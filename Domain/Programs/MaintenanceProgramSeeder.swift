@@ -315,6 +315,88 @@ enum MaintenanceProgramSeeder {
         try? context.save()
     }
 
+    // MARK: - Diagnostic: Audit Existing Maintenance Block for Mis-Prescribed Items
+
+    /// One-time, READ-ONLY diagnostic. Walks the currently active maintenance
+    /// meso's sessions and reports any SessionItem whose waveRaw isn't
+    /// "deload" — these are exercises added via addExercise() BEFORE today's
+    /// fix, which silently fell through to normal progression coaching
+    /// instead of the maintenance retention message. Makes no changes.
+    /// One-time repair: patches waveRaw = "deload" on mismatched items found
+    /// by auditCurrentMaintenanceBlock. Does NOT touch targetSets, targetReps,
+    /// targetRIR, suggestedLoad, or plannedLoadsBySet — those reflect the
+    /// user's deliberate customization via the Program tab and must be
+    /// preserved exactly. Only fixes the coaching-recognition signal.
+    static func repairCurrentMaintenanceBlock(context: ModelContext) {
+        let mesoDescriptor = FetchDescriptor<MesoBlock>()
+        guard let blocks = try? context.fetch(mesoDescriptor) else {
+            print("⚠️ Repair: could not fetch meso blocks")
+            return
+        }
+
+        guard let maintenanceMeso = blocks.first(where: {
+            $0.status == .active && $0.name.lowercased().contains("maintenance")
+        }) else {
+            print("ℹ️ Repair: no active maintenance meso found")
+            return
+        }
+
+        var repairedCount = 0
+
+        for session in maintenanceMeso.sessions {
+            for item in session.items {
+                let isDeload = item.waveRaw?.lowercased() == "deload"
+                guard !isDeload else { continue }
+
+                item.waveRaw = WaveType.deload.rawValue
+                if item.prescriptionNotes == nil || item.prescriptionNotes?.isEmpty == true {
+                    item.prescriptionNotes = "Maintenance — hold loads, manage fatigue."
+                }
+                repairedCount += 1
+            }
+        }
+
+        try? context.save()
+        print("✅ REPAIR COMPLETE — patched waveRaw on \\(repairedCount) item(s). targetSets/targetReps/targetRIR/loads untouched.")
+    }
+
+    static func auditCurrentMaintenanceBlock(context: ModelContext) {
+        let mesoDescriptor = FetchDescriptor<MesoBlock>()
+        guard let blocks = try? context.fetch(mesoDescriptor) else {
+            print("⚠️ Audit: could not fetch meso blocks")
+            return
+        }
+
+        guard let maintenanceMeso = blocks.first(where: {
+            $0.status == .active && $0.name.lowercased().contains("maintenance")
+        }) else {
+            print("ℹ️ Audit: no active maintenance meso found")
+            return
+        }
+
+        print("🔍 AUDIT — Maintenance Block: \(maintenanceMeso.name)")
+        print("   Total sessions: \(maintenanceMeso.sessions.count)")
+
+        var mismatchCount = 0
+        var checkedCount = 0
+
+        let sortedSessions = maintenanceMeso.sessions.sorted { $0.date < $1.date }
+
+        for session in sortedSessions {
+            for item in session.items {
+                checkedCount += 1
+                let isDeload = item.waveRaw?.lowercased() == "deload"
+                if !isDeload {
+                    mismatchCount += 1
+                    let name = item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: item.exerciseId)
+                    print("   ❌ MISMATCH — \(name) | session date: \(session.date.formatted(date: .abbreviated, time: .omitted)) | dayLabel: \(session.dayLabel ?? "nil") | waveRaw: \(item.waveRaw ?? "nil")")
+                }
+            }
+        }
+
+        print("🔍 AUDIT COMPLETE — checked \(checkedCount) items, found \(mismatchCount) mismatched item(s) across \(sortedSessions.count) sessions")
+    }
+
     // MARK: - Reusable Maintenance Prescription
 
     /// Builds a single maintenance-style SessionItem for one exercise.

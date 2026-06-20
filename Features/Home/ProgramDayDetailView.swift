@@ -16,6 +16,8 @@ struct ProgramDayDetailView: View {
     @State private var noteTarget: NoteTarget?
     @State private var propagateAddToFutureSessions: Bool = true
     @State private var propagateChangesToFutureSessions: Bool = true
+    @State private var showDayLabelEditor: Bool = false
+    @State private var dayLabelDraft: String = ""
 
     // MARK: - Derived ordered items
 
@@ -92,6 +94,15 @@ struct ProgramDayDetailView: View {
         } message: {
             Text(feedbackMessage)
         }
+        .alert("Rename Day", isPresented: $showDayLabelEditor) {
+            TextField("Day label", text: $dayLabelDraft)
+            Button("Cancel", role: .cancel) { }
+            Button("Save") {
+                renameDayLabel(to: dayLabelDraft)
+            }
+        } message: {
+            Text("This name also updates future sessions on the same day of the week.")
+        }
         
         // ✅ ADD THIS
         .sheet(isPresented: $showingAddExerciseSheet) {
@@ -133,8 +144,19 @@ struct ProgramDayDetailView: View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
                 if let sessionDayLabel {
-                    Text(sessionDayLabel)
-                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(sessionDayLabel)
+                            .font(.headline)
+                        Button {
+                            dayLabelDraft = sessionDayLabel
+                            showDayLabelEditor = true
+                        } label: {
+                            Image(systemName: "pencil.circle")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
 
                 Text(sessionLabel)
@@ -442,21 +464,88 @@ struct ProgramDayDetailView: View {
     
     // MARK: - CRUD helpers
 
+    private func renameDayLabel(to newLabel: String) {
+        let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        session.dayLabel = trimmed
+
+        if propagateChangesToFutureSessions {
+            let today = Calendar.current.startOfDay(for: Date())
+            let targetWeekday = Calendar.current.component(.weekday, from: session.date)
+
+            let descriptor = FetchDescriptor<Session>(
+                predicate: #Predicate { s in s.date > today }
+            )
+
+            if let futureSessions = try? modelContext.fetch(descriptor) {
+                let sameDay = futureSessions.filter {
+                    $0.id != session.id &&
+                    $0.status == .planned &&
+                    Calendar.current.component(.weekday, from: $0.date) == targetWeekday
+                }
+                for future in sameDay {
+                    future.dayLabel = trimmed
+                }
+            }
+        }
+
+        do {
+            try modelContext.save()
+            presentFeedback("Day renamed to \"\(trimmed)\".")
+        } catch {
+            print("⚠️ Failed to rename day: \(error)")
+        }
+    }
+
     private func addExercise(from catalog: CatalogExercise) {
         let nextOrder = (session.items.map { $0.order }.max() ?? 0) + 1
 
-        // Create new SessionItem with sensible defaults
-        let newItem = SessionItem(
-            order: nextOrder,
-            exerciseId: catalog.id,
-            exerciseNameSnapshot: catalog.name,
-            targetReps: 10,
-            targetSets: 3,
-            targetRIR: 2,
-            suggestedLoad: 0
-        )
+        // Maintenance sessions need the deload-style prescription so the coaching
+        // engine recognizes the new item as a maintenance exercise (it gates on
+        // waveRaw == "deload"). Without this, exercises added mid-block fall
+        // through to normal progression coaching instead of the retention message.
+        let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+        print("🔍 addExercise debug — session.meso name: \(session.meso?.name ?? "nil"), isMaintenanceSession: \(isMaintenanceSession)")
 
-        let setCount = 4
+        let newItem: SessionItem
+        let setCount: Int
+
+        if isMaintenanceSession {
+            setCount = 2
+            newItem = SessionItem(
+                order: nextOrder,
+                exerciseId: catalog.id,
+                exerciseNameSnapshot: catalog.name,
+                targetReps: 10,
+                targetSets: setCount,
+                targetRIR: 3,
+                suggestedLoad: 0,
+                waveRaw: WaveType.deload.rawValue,
+                priorityRaw: ExercisePriority.standard.rawValue,
+                setMin: 2,
+                setMax: 3,
+                repMin: 8,
+                repMax: 12,
+                targetRIRMin: 3,
+                targetRIRMax: 4,
+                intensifierRaw: IntensifierType.none.rawValue,
+                intensifierNotes: nil,
+                prescriptionNotes: "Maintenance — hold loads, manage fatigue."
+            )
+        } else {
+            setCount = 4
+            newItem = SessionItem(
+                order: nextOrder,
+                exerciseId: catalog.id,
+                exerciseNameSnapshot: catalog.name,
+                targetReps: 10,
+                targetSets: 3,
+                targetRIR: 2,
+                suggestedLoad: 0
+            )
+        }
+
         newItem.plannedRepsBySet       = Array(repeating: newItem.targetReps, count: setCount)
         newItem.plannedLoadsBySet      = Array(repeating: 0.0,               count: setCount)
         newItem.plannedRIRsBySet       = Array(repeating: newItem.targetRIR, count: setCount)
