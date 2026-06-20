@@ -138,6 +138,183 @@ enum MaintenanceProgramSeeder {
         ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: mesoBlock, context: context)
     }
 
+    // MARK: - Path B: Seed Maintenance Block From a New Program Template
+
+    /// Seeds a maintenance block using a freshly chosen ProgramTemplate's day
+    /// structure, rather than cloning the prior meso. Applies the same
+    /// maintenance prescription as Path A (deload wave, 2 sets, RIR 3-4) to
+    /// every exercise in the template's rosters.
+    ///
+    /// Load anchoring: searches the user's FULL session history (not just the
+    /// prior meso) per exercise for the most recent/best e1RM. Falls back to 0
+    /// (Auto+ seeds normally) if no history exists for that exercise — this is
+    /// expected for exercises that don't overlap with the user's prior split.
+    static func seedFromNewProgram(
+        template: ProgramTemplate,
+        totalWeeks: Int,
+        startDate: Date = Date(),
+        context: ModelContext,
+        calendar: Calendar = .current
+    ) throws {
+        let startDay = calendar.startOfDay(for: startDate)
+
+        // 1) Archive active mesos
+        let mesoDescriptor = FetchDescriptor<MesoBlock>()
+        let existingBlocks = try context.fetch(mesoDescriptor)
+        for block in existingBlocks where block.status == .active {
+            block.status = .archived
+        }
+
+        // 2) Delete non-completed sessions on or after startDate
+        let sessionDescriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\.date, order: .forward)]
+        )
+        let allSessions = try context.fetch(sessionDescriptor)
+        let sessionsToDelete = allSessions.filter { session in
+            let sessionDay = calendar.startOfDay(for: session.date)
+            return sessionDay >= startDay && session.status != .completed
+        }
+        for session in sessionsToDelete {
+            context.delete(session)
+        }
+        try context.save()
+
+        // 3) Materialize each day-slot once (week 1) purely to get the
+        // exercise roster + title — maintenance uses the same prescription
+        // every week, so we don't need per-week wave resolution.
+        let daysPerWeek = template.trainingDaysPerWeek
+        var dayRosters: [(dayNumber: Int, title: String, roster: [(exerciseId: String, name: String?, order: Int)])] = []
+
+        for dayNumber in 1...daysPerWeek {
+            guard let materialized = try? DUPSessionMaterializer.materializeDay(
+                template: template,
+                weekNumber: 1,
+                dayNumber: dayNumber
+            ) else { continue }
+
+            let roster = materialized.exercises.map {
+                (exerciseId: $0.exerciseId, name: ExerciseCatalog.displayName(for: $0.exerciseId), order: $0.order)
+            }
+            dayRosters.append((dayNumber: dayNumber, title: materialized.title, roster: roster))
+        }
+
+        guard !dayRosters.isEmpty else {
+            print("MaintenanceProgramSeeder.seedFromNewProgram: template produced no day rosters, aborting.")
+            return
+        }
+
+        // 4) Build session dates using the template's natural weekday pattern.
+        let effectiveWeekdays = defaultWeekdays(for: daysPerWeek)
+        let totalSessions = daysPerWeek * totalWeeks
+        let sessionDates = buildSessionDates(
+            calendar: calendar,
+            today: startDay,
+            weekdays: effectiveWeekdays,
+            totalSessions: totalSessions
+        )
+
+        // 5) Create meso block
+        let mesoBlock = MesoBlock(
+            name: "Maintenance Block",
+            startDate: startDay,
+            status: .active,
+            notes: "Seeded from \(template.name) on \(startDay.formatted(date: .abbreviated, time: .omitted))",
+            totalWeeks: totalWeeks
+        )
+        context.insert(mesoBlock)
+
+        // 6) Seed sessions — same maintenance prescription every week
+        var createdCount = 0
+        for weekIndex in 0..<totalWeeks {
+            for (slotIndex, day) in dayRosters.enumerated() {
+                let globalIndex = weekIndex * daysPerWeek + slotIndex
+                guard globalIndex < sessionDates.count else { continue }
+
+                let date = sessionDates[globalIndex]
+                let items = applyMaintenancePrescription(to: day.roster)
+
+                let session = Session(
+                    date: date,
+                    status: .planned,
+                    readinessStars: 0,
+                    sessionNotes: "\(day.title) · Maintenance",
+                    weekIndex: weekIndex + 1,
+                    dayLabel: day.title,
+                    items: items
+                )
+                session.meso = mesoBlock
+                session.programIndex = day.dayNumber
+                context.insert(session)
+                createdCount += 1
+            }
+        }
+
+        try context.save()
+
+        // 7) Anchor loads from FULL session history (not just prior meso),
+        // per exercise. Falls back to 0 if no history exists for that exercise.
+        anchorLoadsFromFullHistory(mesoBlock: mesoBlock, context: context)
+    }
+
+    /// Searches the user's entire session history (across all mesos) for the
+    /// best/most-recent e1RM per exercise, anchoring each maintenance item's
+    /// suggestedLoad accordingly. Exercises with no prior history start at 0,
+    /// same as normal first-session behavior (Auto+ seeds from there).
+    private static func anchorLoadsFromFullHistory(mesoBlock: MesoBlock, context: ModelContext) {
+        let allSessionsDescriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\.date, order: .forward)]
+        )
+        guard let allSessions = try? context.fetch(allSessionsDescriptor) else { return }
+
+        let mesoSessionIDs = Set(mesoBlock.sessions.map { $0.persistentModelID })
+        let historicalSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
+
+        for session in mesoBlock.sessions {
+            for item in session.items {
+                let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+
+                let candidates = historicalSessions.compactMap { s -> (e1rm: Double, date: Date)? in
+                    guard let match = s.items.first(where: {
+                        ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+                    }) else { return nil }
+
+                    let setCount = min(match.actualLoads.count, match.actualReps.count)
+                    guard setCount > 0 else { return nil }
+
+                    var bestE1RM = 0.0
+                    for idx in 0..<setCount {
+                        let load = match.actualLoads[idx]
+                        let reps = match.actualReps[idx]
+                        guard load > 0, reps > 0 else { continue }
+                        let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
+                        bestE1RM = max(bestE1RM, e1rm)
+                    }
+                    guard bestE1RM > 0 else { return nil }
+                    return (e1rm: bestE1RM, date: s.date)
+                }
+
+                guard !candidates.isEmpty else { continue }
+
+                let decayWeighted = E1RMCalculator.decayWeightedE1RM(
+                    from: candidates.map { ($0.e1rm, $0.date) }
+                )
+                guard decayWeighted > 0 else { continue }
+
+                // Maintenance targets RIR 3-4 — back-calculate at the deload
+                // prescription's target reps/RIR for this exercise.
+                let load = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
+                let rounded = E1RMCalculator.rounded(load, increment: 2.5)
+                guard rounded > 0 else { continue }
+
+                item.suggestedLoad = rounded
+                let setCount = max(0, item.targetSets)
+                item.plannedLoadsBySet = Array(repeating: rounded, count: setCount)
+            }
+        }
+
+        try? context.save()
+    }
+
     // MARK: - Reusable Maintenance Prescription
 
     /// Builds a single maintenance-style SessionItem for one exercise.
