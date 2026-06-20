@@ -113,33 +113,7 @@ enum MaintenanceProgramSeeder {
                 let date = sessionDates[globalIndex]
                 let roster = dayRosters[dayLabel] ?? []
 
-                let items: [SessionItem] = roster.map { exercise in
-                    // Maintenance prescription: 2 sets, rep range from deload wave,
-                    // RIR 3-4, no intensifier
-                    SessionItem(
-                        order: exercise.order,
-                        exerciseId: exercise.exerciseId,
-                        exerciseNameSnapshot: exercise.name,
-                        targetReps: 10,
-                        targetSets: 2,
-                        targetRIR: 3,
-                        suggestedLoad: 0.0,
-                        waveRaw: WaveType.deload.rawValue,
-                        priorityRaw: ExercisePriority.standard.rawValue,
-                        setMin: 2,
-                        setMax: 3,
-                        repMin: 8,
-                        repMax: 12,
-                        targetRIRMin: 3,
-                        targetRIRMax: 4,
-                        intensifierRaw: IntensifierType.none.rawValue,
-                        intensifierNotes: nil,
-                        prescriptionNotes: "Maintenance — hold loads, manage fatigue.",
-                        plannedRepsBySet: [10, 10],
-                        plannedLoadsBySet: [0.0, 0.0],
-                        plannedRIRsBySet: [3, 3]
-                    )
-                }
+                let items: [SessionItem] = applyMaintenancePrescription(to: roster)
 
                 let session = Session(
                     date: date,
@@ -162,6 +136,48 @@ enum MaintenanceProgramSeeder {
 
         // 8) Anchor loads from previous meso peak
         ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: mesoBlock, context: context)
+    }
+
+    // MARK: - Reusable Maintenance Prescription
+
+    /// Builds a single maintenance-style SessionItem for one exercise.
+    /// Shared by both Path A (continue current split) and Path B (choose new
+    /// program) so both paths apply identical retention-focused prescription:
+    /// 2 sets, RIR 3-4, deload wave — regardless of where the roster came from.
+    static func makeMaintenanceItem(exerciseId: String, name: String?, order: Int) -> SessionItem {
+        SessionItem(
+            order: order,
+            exerciseId: exerciseId,
+            exerciseNameSnapshot: name,
+            targetReps: 10,
+            targetSets: 2,
+            targetRIR: 3,
+            suggestedLoad: 0.0,
+            waveRaw: WaveType.deload.rawValue,
+            priorityRaw: ExercisePriority.standard.rawValue,
+            setMin: 2,
+            setMax: 3,
+            repMin: 8,
+            repMax: 12,
+            targetRIRMin: 3,
+            targetRIRMax: 4,
+            intensifierRaw: IntensifierType.none.rawValue,
+            intensifierNotes: nil,
+            prescriptionNotes: "Maintenance — hold loads, manage fatigue.",
+            plannedRepsBySet: [10, 10],
+            plannedLoadsBySet: [0.0, 0.0],
+            plannedRIRsBySet: [3, 3]
+        )
+    }
+
+    /// Applies the maintenance prescription across an entire day's roster.
+    /// Roster can come from a prior meso's sessions (Path A) or a freshly
+    /// chosen ProgramTemplate's day (Path B) — this function doesn't care
+    /// about the source, only the (exerciseId, name, order) shape.
+    static func applyMaintenancePrescription(
+        to roster: [(exerciseId: String, name: String?, order: Int)]
+    ) -> [SessionItem] {
+        roster.map { makeMaintenanceItem(exerciseId: $0.exerciseId, name: $0.name, order: $0.order) }
     }
 
     // MARK: - Helpers (mirrors ProgramGenerator private helpers)
