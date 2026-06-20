@@ -69,6 +69,12 @@ struct MesoSummaryView: View {
             .onAppear {
                             buildAnalysis()
                         }
+            .sheet(isPresented: $showProgramPicker) {
+                MaintenanceProgramPickerView {
+                    onNextBlock(.maintenanceBlock)
+                    dismiss()
+                }
+            }
         }
     }
 
