@@ -23,6 +23,8 @@ struct MesoSummaryView: View {
     @State private var analysis: MesoAnalysis? = nil
         @State private var analysisComplete: Bool = false
     @State private var expandedExerciseId: String? = nil
+    @State private var showMaintenancePathChoice: Bool = false
+    @State private var showProgramPicker: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -85,8 +87,19 @@ struct MesoSummaryView: View {
         }
     
     private func seedMaintenanceBlock() {
-            let trainingWeekdays = meso.sessions
-                .map { Calendar.current.component(.weekday, from: $0.date) }
+            // Derive training weekdays from the MODE weekday per dayLabel, not a
+            // union of every weekday ever seen across the meso. Unioning absorbs
+            // one-off anomalies (e.g. a skip/reorder that landed a session on a
+            // normal rest day), permanently corrupting the maintenance schedule.
+            var weekdayCountsByLabel: [String: [Int: Int]] = [:]
+            for session in meso.sessions {
+                let label = session.dayLabel ?? "Day \(session.programIndex)"
+                let weekday = Calendar.current.component(.weekday, from: session.date)
+                weekdayCountsByLabel[label, default: [:]][weekday, default: 0] += 1
+            }
+
+            let trainingWeekdays = weekdayCountsByLabel.values
+                .compactMap { counts in counts.max(by: { $0.value < $1.value })?.key }
                 .reduce(into: Set<Int>()) { $0.insert($1) }
                 .sorted()
 
@@ -383,7 +396,22 @@ struct MesoSummaryView: View {
                                     icon: "equal.circle",
                                     color: .green
                                 ) {
-                                    seedMaintenanceBlock()
+                                    showMaintenancePathChoice = true
+                                }
+                                .confirmationDialog(
+                                    "Start maintenance block",
+                                    isPresented: $showMaintenancePathChoice,
+                                    titleVisibility: .visible
+                                ) {
+                                    Button("Continue current split") {
+                                        seedMaintenanceBlock()
+                                    }
+                                    Button("Choose a new program") {
+                                        showProgramPicker = true
+                                    }
+                                    Button("Cancel", role: .cancel) { }
+                                } message: {
+                                    Text("Continue your current split at reduced volume, or switch to a different program structure for this maintenance phase.")
                                 }
 
                 nextBlockButton(
