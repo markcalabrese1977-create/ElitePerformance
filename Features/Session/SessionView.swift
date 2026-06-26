@@ -1902,6 +1902,11 @@ final class SessionScreenViewModel: ObservableObject {
 
         if exercises.allSatisfy({ $0.isComplete }) {
             session.status = .completed
+            if session.completedAt == nil {
+                let now = Date()
+                session.completedAt = now
+                session.date = now
+            }
         } else if anyLoggedSet {
             session.status = .inProgress
         } else {
