@@ -210,20 +210,7 @@ private struct HistoryDayDetailView: View {
     }
 
     private func waveDisplayName(from raw: String?) -> String? {
-        guard let raw else { return nil }
-
-        switch raw.lowercased() {
-        case "a":
-            return "Strength"
-        case "b":
-            return "Hypertrophy"
-        case "c":
-            return "Intensification"
-        case "deload":
-            return "Deload"
-        default:
-            return raw.capitalized
-        }
+        WaveType.label(forRaw: raw, mesoName: sourceSession?.meso?.name)
     }
 
     private func prescriptionLabel(

@@ -345,15 +345,8 @@ struct ExerciseHistorySheet: View {
 
     // MARK: - Load history
 
-    private func waveDisplayName(from raw: String?) -> String? {
-        guard let raw else { return nil }
-        switch raw.lowercased() {
-        case "a":       return "Strength"
-        case "b":       return "Hypertrophy"
-        case "c":       return "Intensification"
-        case "deload":  return "Deload"
-        default:        return raw.capitalized
-        }
+    private func waveDisplayName(from raw: String?, mesoName: String? = nil) -> String? {
+        WaveType.label(forRaw: raw, mesoName: mesoName)
     }
 
     private func prescriptionLabel(repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?) -> String? {
@@ -401,7 +394,7 @@ struct ExerciseHistorySheet: View {
 
                 guard let uiEx else { continue }
 
-                let waveLabel = waveDisplayName(from: uiEx.waveRaw)
+                let waveLabel = waveDisplayName(from: uiEx.waveRaw, mesoName: session.meso?.name)
                 let prescription = prescriptionLabel(
                     repMin: uiEx.repMin,
                     repMax: uiEx.repMax,

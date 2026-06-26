@@ -1637,15 +1637,47 @@ final class SessionScreenViewModel: ObservableObject {
                 }()
         let defaultLoad: Double = recentLoad
 
-        let newItem = SessionItem(
-            order: nextOrder,
-            exerciseId: catalogExercise.id,
-            targetReps: defaultReps,
-            targetSets: defaultSets,
-            targetRIR: defaultRIR,
-            suggestedLoad: defaultLoad,
-            plannedLoadsBySet: Array(repeating: defaultLoad, count: 4)
-        )
+        // Maintenance sessions need the deload-style prescription so the coaching
+        // engine recognizes the new item as a maintenance exercise (CoachingEngine
+        // gates its retention-message branch on waveRaw == "deload"). Without this,
+        // exercises added mid-block from the Today tab fall through to normal
+        // progression coaching instead of the maintenance retention message.
+        let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+
+        let newItem: SessionItem
+        if isMaintenanceSession {
+            let maintenanceSetCount = 2
+            newItem = SessionItem(
+                order: nextOrder,
+                exerciseId: catalogExercise.id,
+                targetReps: 10,
+                targetSets: maintenanceSetCount,
+                targetRIR: 3,
+                suggestedLoad: defaultLoad,
+                waveRaw: WaveType.deload.rawValue,
+                priorityRaw: ExercisePriority.standard.rawValue,
+                setMin: 2,
+                setMax: 3,
+                repMin: 8,
+                repMax: 12,
+                targetRIRMin: 3,
+                targetRIRMax: 4,
+                intensifierRaw: IntensifierType.none.rawValue,
+                intensifierNotes: nil,
+                prescriptionNotes: "Maintenance — hold loads, manage fatigue.",
+                plannedLoadsBySet: Array(repeating: defaultLoad, count: maintenanceSetCount)
+            )
+        } else {
+            newItem = SessionItem(
+                order: nextOrder,
+                exerciseId: catalogExercise.id,
+                targetReps: defaultReps,
+                targetSets: defaultSets,
+                targetRIR: defaultRIR,
+                suggestedLoad: defaultLoad,
+                plannedLoadsBySet: Array(repeating: defaultLoad, count: 4)
+            )
+        }
 
         // Attach to session + persist
         session.items.append(newItem)

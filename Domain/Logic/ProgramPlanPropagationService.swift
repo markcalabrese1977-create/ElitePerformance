@@ -35,11 +35,20 @@ struct ProgramPlanPropagationService {
         do {
             let futureSessions = try context.fetch(descriptor)
 
+            print("🔍 PROPAGATION DEBUG")
+            print("   source date: \(programSession.date), weekday: \(targetWeekday), meso: \(programSession.meso?.name ?? "nil")")
+            print("   total future sessions fetched: \(futureSessions.count)")
+            for s in futureSessions {
+                let wd = Calendar.current.component(.weekday, from: s.date)
+                print("     candidate date: \(s.date) weekday: \(wd) status: \(s.status) meso: \(s.meso?.name ?? "nil") id-match: \(s.id == sourceSessionId)")
+            }
+
             let futurePlannedSameDay = futureSessions.filter {
                 $0.id != sourceSessionId &&
                 $0.status == .planned &&
                 Calendar.current.component(.weekday, from: $0.date) == targetWeekday
             }
+            print("   matched after filter: \(futurePlannedSameDay.count)")
 
             let sourceItems = programSession.items.sorted { $0.order < $1.order }
             let sourceIds = Set(sourceItems.map { $0.exerciseId })

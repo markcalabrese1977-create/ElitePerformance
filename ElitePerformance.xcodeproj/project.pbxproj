@@ -43,6 +43,7 @@
 		D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */; };
 		D58618262ECCA931006EF818 /* TrainingProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618252ECCA92A006EF818 /* TrainingProgram.swift */; };
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
+		D588C08A2FE3670400B019A7 /* MechanicalLoadSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */; };
 		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */; };
@@ -76,6 +77,7 @@
 		D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */; };
 		D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F582FB895AF00C9E38C /* Notifications.swift */; };
 		D5EC0F5B2FB8B97500C9E38C /* LoadProjectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */; };
+		D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -124,6 +126,7 @@
 		D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoRolloverGuardSheet.swift; sourceTree = "<group>"; };
 		D58618252ECCA92A006EF818 /* TrainingProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingProgram.swift; sourceTree = "<group>"; };
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
+		D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadSharedStore.swift; sourceTree = "<group>"; };
 		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift; sourceTree = "<group>"; };
@@ -160,6 +163,7 @@
 		D5E85F052ED12EC200D115D0 /* NumericTextFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumericTextFields.swift; sourceTree = "<group>"; };
 		D5EC0F582FB895AF00C9E38C /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProjectionService.swift; sourceTree = "<group>"; };
+		D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceProgramPickerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -414,6 +418,7 @@
 				D5E2934E2EC410DD00034D78 /* Logic */,
 				D5E293522EC410DD00034D78 /* Models */,
 				D5839A4A2FDF0B640074635A /* MechanicalLoadHealthKitService.swift */,
+				D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -421,6 +426,7 @@
 		D5E293552EC410DD00034D78 /* History */ = {
 			isa = PBXGroup;
 			children = (
+				D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */,
 				D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */,
 				D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */,
 				D5C48EFB2F1C0F6D00495C46 /* ExerciseHistorySheet.swift */,
@@ -670,7 +676,9 @@
 				D5846D692FB5341E00797E98 /* SetFeedback.swift in Sources */,
 				D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */,
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */,
+				D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */,
 				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
+				D588C08A2FE3670400B019A7 /* MechanicalLoadSharedStore.swift in Sources */,
 				D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */,
 				D5E293A02EC7C4EB00034D78 /* Goal.swift in Sources */,
 				D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */,
@@ -868,7 +876,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -920,7 +928,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
