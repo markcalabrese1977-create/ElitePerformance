@@ -98,11 +98,15 @@ struct MaintenanceProgramPickerView: View {
         errorMessage = nil
 
         do {
+            let startDate = Date()
             try MaintenanceProgramSeeder.seedFromNewProgram(
                 template: template,
                 totalWeeks: selectedWeeks,
+                startDate: startDate,
                 context: context
             )
+            MesoLifecycle.confirmStartNewMeso(on: startDate)
+            AppStateBridge.setActiveMesoStartDate(startDate, in: context)
             isSeeding = false
             onSeeded()
             dismiss()

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MesoRolloverGuardSheet: View {
+    @Environment(\.modelContext) private var context
     @Binding var isPresented: Bool
     @Binding var rescheduleDate: Date
 
@@ -23,7 +24,9 @@ struct MesoRolloverGuardSheet: View {
 
                 Section {
                     Button {
-                        MesoLifecycle.confirmStartNewMeso(on: Date())
+                        let startDate = Date()
+                        MesoLifecycle.confirmStartNewMeso(on: startDate)
+                        AppStateBridge.setActiveMesoStartDate(startDate, in: context)
                         isPresented = false
                         Haptics.success()
                     } label: {

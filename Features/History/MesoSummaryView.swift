@@ -119,6 +119,8 @@ struct MesoSummaryView: View {
                     startDate: startDate,
                     context: context
                 )
+                MesoLifecycle.confirmStartNewMeso(on: startDate)
+                AppStateBridge.setActiveMesoStartDate(startDate, in: context)
                 onNextBlock(.maintenanceBlock)
                 dismiss()
             } catch {

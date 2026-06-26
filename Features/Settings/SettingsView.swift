@@ -173,6 +173,13 @@ struct SettingsView: View {
                             Text("Removes logged sets from exercises that can no longer be identified. Does not delete sessions.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                Button("Sync meso start date") {
+                    syncMesoStartDate()
+                }
+                Text("Re-anchors Analytics to the currently active mesocycle block. Use this if Analytics is showing data from a previous block.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                         }
 
             // MARK: - Export
@@ -385,6 +392,23 @@ struct SettingsView: View {
     private func presentMesoGenerationMessage(_ message: String) {
         mesoGenerationMessage = message
         showMesoGenerationAlert = true
+    }
+
+    private func syncMesoStartDate() {
+        let descriptor = FetchDescriptor<MesoBlock>()
+        guard let blocks = try? context.fetch(descriptor) else {
+            presentMesoGenerationMessage("Failed to fetch meso blocks.")
+            return
+        }
+        guard let activeMeso = blocks.first(where: { $0.status == .active }) else {
+            presentMesoGenerationMessage("No active mesocycle found.")
+            return
+        }
+
+        MesoLifecycle.confirmStartNewMeso(on: activeMeso.startDate)
+        AppStateBridge.setActiveMesoStartDate(activeMeso.startDate, in: context)
+        let formatted = activeMeso.startDate.formatted(date: .abbreviated, time: .omitted)
+        presentMesoGenerationMessage("Synced meso start date to \(formatted).")
     }
 
     private func inferredTrainingWeekdays() -> [Int] {
