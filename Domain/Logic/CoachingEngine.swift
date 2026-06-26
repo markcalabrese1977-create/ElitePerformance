@@ -3,7 +3,9 @@ import Foundation
 // COACHING AUTHORITY — TRUTH PASS v1
 // Canonical target: CoachingEngine (message path)
 // Current user-visible authority: SessionScreenViewModel.coachMessage() — LEGACY
-// Status: CoachingEngine confirmed dead in production as of truth pass (April 2026)
+// Status: live in production — recommend()'s message is wired into exercise.coachMessage
+// (SessionView.swift) and rendered in SessionExerciseCardView on every set logged.
+// (SessionRecapView's separate recommend() calls remain dead — zero instantiation sites.)
 // Phase 1 scope: wire CoachingEngine.message into exercise.coachMessage only
 // nextSuggestedLoad: NOT wired in Phase 1 — load authority is a separate truth pass
 // Frozen: Progression.swift, coachMessage()
@@ -424,6 +426,22 @@ struct CoachingEngine {
                 msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session — one more clean session earns the increase."
             }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // 5.5) Extra reserve — actual RIR well above target, reps hit, no fatigue → increase.
+        // Mirrors LoadProjectionService.project's hadExtraReserve: avgRIR > targetRIR + 0.5
+        // is a stronger signal to increase than hitting target exactly.
+        if let avgRIR, avgRIR > Double(targetRIR) + 0.5, bestReps >= plannedBottomReps, !hasFatigueFlag {
+            let suggested: Double = {
+                if let decision = progressionDecision, decision.action == .increaseLoad {
+                    return min(decision.nextLoad, loadSanityCap)
+                }
+                let step = loadStep(for: baseLoad)
+                return nextLoad(from: baseLoad, step: step) ?? baseLoad
+            }()
+            let nextLoad = min(suggested, loadSanityCap)
+            let msg = "Extra reserve detected — load increase suggested. Next session: \(String(format: "%.1f", nextLoad))."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }
 
         // 6) Catch-all
