@@ -138,6 +138,11 @@ enum LoadProjectionService {
         customExercises: [CustomExercise] = []
     ) -> LoadProjection? {
 
+        // Defense in depth: maintenance/deload items hold their load — never
+        // progress them, regardless of caller. PlanMemoryEngine already guards
+        // this before calling project(), but this protects every other caller too.
+        if currentWaveRaw?.lowercased() == "deload" { return nil }
+
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         let today = Calendar.current.startOfDay(for: referenceDate)
         let effectiveTargetReps = targetReps > 0 ? targetReps : (repMin + repMax) / 2

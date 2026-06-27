@@ -73,6 +73,13 @@ struct PlanMemoryEngine {
 
             guard progressionEnabled else { continue }
 
+            // Maintenance/deload items hold their carried-forward load — no progression
+            // suggestion, no volume auto-regulation. Mirrors the hold applied by
+            // ProgramDayDetailView.autoGenerateSuggestedLoadsFromHistoryForThisDay's
+            // isMaintenanceSession check, but via waveRaw since this runs automatically
+            // on every session completion, not just when the user taps Auto+.
+            if targetItem.waveRaw?.lowercased() == "deload" { continue }
+
             // MARK: - Load Projection via LoadProjectionService
 
             let projection = LoadProjectionService.project(
