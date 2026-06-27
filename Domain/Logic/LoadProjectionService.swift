@@ -134,7 +134,8 @@ enum LoadProjectionService {
         activeMesoSessionIDs: Set<PersistentIdentifier>,
         loadIncrement: Double = 2.5,
         referenceDate: Date = Date(),
-        bodyWeight: Double? = nil
+        bodyWeight: Double? = nil,
+        customExercises: [CustomExercise] = []
     ) -> LoadProjection? {
 
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
@@ -252,7 +253,7 @@ enum LoadProjectionService {
             if lastItem.suggestedLoad > 0 { return lastItem.suggestedLoad }
             // No load anywhere — fall back to bodyweight as the floor for BW exercises
             // instead of bailing with nil below.
-            if ExerciseCatalog.isBodyweight(exerciseId: lastItem.exerciseId), let bw = bodyWeight, bw > 0 {
+            if ExerciseCatalog.isBodyweight(exerciseId: lastItem.exerciseId, customExercises: customExercises), let bw = bodyWeight, bw > 0 {
                 return bw
             }
             return 0

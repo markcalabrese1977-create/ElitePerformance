@@ -201,7 +201,8 @@ enum BackupSnapshotExporter {
                     name: ex.name,
                     primaryMuscleRaw: ex.primaryMuscleRaw,
                     isCompound: ex.isCompound,
-                    createdAt: ex.createdAt
+                    createdAt: ex.createdAt,
+                    isBodyweight: ex.isBodyweight
                 )
             }
         )

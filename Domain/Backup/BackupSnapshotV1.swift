@@ -213,4 +213,5 @@ struct CustomExerciseBackupDTO: Codable {
     let primaryMuscleRaw: String
     let isCompound: Bool
     let createdAt: Date
+    var isBodyweight: Bool = false
 }

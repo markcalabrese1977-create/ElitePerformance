@@ -13,6 +13,7 @@ enum ProgramGenerator {
         let profile = try? context.fetch(profileDescriptor).first
         let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
         let bodyWeight = profile?.bodyWeight
+        let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
 
         let allSessionsDescriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
@@ -35,7 +36,8 @@ enum ProgramGenerator {
                     allSessions: allSessions,
                     activeMesoSessionIDs: activeMesoIDs,
                     loadIncrement: loadIncrement,
-                    bodyWeight: bodyWeight
+                    bodyWeight: bodyWeight,
+                    customExercises: customExercises
                 )
 
                 guard let projection = projection, projection.suggestedLoad > 0 else { continue }

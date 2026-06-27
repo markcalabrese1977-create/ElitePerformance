@@ -111,6 +111,7 @@ struct CreateCustomExerciseSheet: View {
     @State private var name: String = ""
     @State private var primary: MuscleGroup = .shoulders
     @State private var isCompound: Bool = false
+    @State private var isBodyweight: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -130,6 +131,7 @@ struct CreateCustomExerciseSheet: View {
 
                 Section("Type") {
                     Toggle("Compound movement", isOn: $isCompound)
+                    Toggle("Bodyweight exercise", isOn: $isBodyweight)
                 }
 
                 Section {
@@ -152,6 +154,7 @@ struct CreateCustomExerciseSheet: View {
                             name: trimmed,
                             primaryMuscle: primary,
                             isCompound: isCompound,
+                            isBodyweight: isBodyweight,
                             in: modelContext
                         )
                         onDone(ex)

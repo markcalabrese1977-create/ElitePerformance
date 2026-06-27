@@ -78,6 +78,7 @@ struct ExerciseCatalog {
         name: String,
         primaryMuscle: MuscleGroup,
         isCompound: Bool,
+        isBodyweight: Bool = false,
         in context: ModelContext
     ) -> CatalogExercise {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -101,13 +102,14 @@ struct ExerciseCatalog {
             id: id,
             name: trimmed,
             primaryMuscleRaw: primaryMuscle.rawValue,
-            isCompound: isCompound
+            isCompound: isCompound,
+            isBodyweight: isBodyweight
         )
         context.insert(custom)
         try? context.save()
         NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
 
-        return CatalogExercise(id: id, name: trimmed, primaryMuscle: primaryMuscle, isCompound: isCompound)
+        return CatalogExercise(id: id, name: trimmed, primaryMuscle: primaryMuscle, isCompound: isCompound, isBodyweight: isBodyweight)
     }
 
     static func deleteCustomExercises(ids: [String], in context: ModelContext) {
@@ -981,6 +983,16 @@ extension ExerciseCatalog {
     static func isBodyweight(exerciseId: String) -> Bool {
         let canonicalId = canonicalExerciseId(for: exerciseId)
         return all.first(where: { $0.id == canonicalId })?.isBodyweight ?? false
+    }
+
+    /// Same as `isBodyweight(exerciseId:)`, but checks SwiftData-backed custom
+    /// exercises first — callers with a ModelContext should prefer this overload.
+    static func isBodyweight(exerciseId: String, customExercises: [CustomExercise]) -> Bool {
+        let canonicalId = canonicalExerciseId(for: exerciseId)
+        if let custom = customExercises.first(where: { $0.id == canonicalId }) {
+            return custom.isBodyweight
+        }
+        return isBodyweight(exerciseId: exerciseId)
     }
 
     static func canonicalBuiltInId(forExerciseName name: String) -> String? {

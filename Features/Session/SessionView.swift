@@ -568,7 +568,9 @@ private struct SessionExerciseCardView: View {
     // MARK: - Coach v5 (ProgressionEngine) helpers
 
     private var isBodyweightExercise: Bool {
-        ExerciseCatalog.isBodyweight(exerciseId: exercise.exerciseId)
+        let descriptor = FetchDescriptor<CustomExercise>()
+        let customExercises = (try? modelContext.fetch(descriptor)) ?? []
+        return ExerciseCatalog.isBodyweight(exerciseId: exercise.exerciseId, customExercises: customExercises)
     }
 
     private var userProfile: UserProfile? {
