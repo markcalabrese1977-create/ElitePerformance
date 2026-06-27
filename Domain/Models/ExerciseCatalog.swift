@@ -65,6 +65,13 @@ struct ExerciseCatalog {
         return results.map { $0.asCatalogExercise }
     }
 
+    private static func loadUniversalCustomExercises() -> [CatalogExercise] {
+        guard let data = UserDefaults.standard.data(forKey: universalCustomKey),
+              let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data)
+        else { return [] }
+        return decoded
+    }
+
     private static func saveCustom(_ list: [CatalogExercise]) {
         do {
             let data = try JSONEncoder().encode(list)
@@ -107,19 +114,28 @@ struct ExerciseCatalog {
         )
         context.insert(custom)
         try? context.save()
-        NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
 
-        return CatalogExercise(id: id, name: trimmed, primaryMuscle: primaryMuscle, isCompound: isCompound, isBodyweight: isBodyweight)
+        let catalogExercise = CatalogExercise(id: id, name: trimmed, primaryMuscle: primaryMuscle, isCompound: isCompound, isBodyweight: isBodyweight)
+
+        // Mirror into the UserDefaults store too — `all`/`displayName(for:)` and other
+        // context-free lookups only read from there, not from SwiftData directly.
+        var mirrored = loadUniversalCustomExercises()
+        mirrored.append(catalogExercise)
+        saveCustom(mirrored)
+
+        return catalogExercise
     }
 
     static func deleteCustomExercises(ids: [String], in context: ModelContext) {
         let descriptor = FetchDescriptor<CustomExercise>()
-        let all = (try? context.fetch(descriptor)) ?? []
-        for item in all where ids.contains(item.id) {
+        let allCustom = (try? context.fetch(descriptor)) ?? []
+        for item in allCustom where ids.contains(item.id) {
             context.delete(item)
         }
         try? context.save()
-        NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
+
+        let mirrored = loadUniversalCustomExercises().filter { !ids.contains($0.id) }
+        saveCustom(mirrored)
     }
     
     // MARK: - Chest / Push (horizontal / vertical)
@@ -936,12 +952,7 @@ struct ExerciseCatalog {
                         machineCurl,
     ]
     static var all: [CatalogExercise] {
-        let userDefaultsCustom: [CatalogExercise] = {
-            guard let data = UserDefaults.standard.data(forKey: universalCustomKey),
-                  let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data)
-            else { return [] }
-            return decoded
-        }()
+        let userDefaultsCustom = loadUniversalCustomExercises()
 
         // Merge built-in + UserDefaults custom, deduplicating by ID.
         // UserDefaults is the canonical store for custom exercises accessible

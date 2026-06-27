@@ -1696,6 +1696,7 @@ final class SessionScreenViewModel: ObservableObject {
             newItem = SessionItem(
                 order: nextOrder,
                 exerciseId: catalogExercise.id,
+                exerciseNameSnapshot: catalogExercise.name,
                 targetReps: 10,
                 targetSets: maintenanceSetCount,
                 targetRIR: 3,
@@ -1711,17 +1712,28 @@ final class SessionScreenViewModel: ObservableObject {
                 intensifierRaw: IntensifierType.none.rawValue,
                 intensifierNotes: nil,
                 prescriptionNotes: "Maintenance — hold loads, manage fatigue.",
-                plannedLoadsBySet: Array(repeating: defaultLoad, count: maintenanceSetCount)
+                plannedRepsBySet: Array(repeating: 10, count: maintenanceSetCount),
+                plannedLoadsBySet: Array(repeating: defaultLoad, count: maintenanceSetCount),
+                plannedRIRsBySet: Array(repeating: 3, count: maintenanceSetCount),
+                actualReps: Array(repeating: 0, count: maintenanceSetCount),
+                actualLoads: Array(repeating: 0.0, count: maintenanceSetCount),
+                actualRIRs: Array(repeating: 0, count: maintenanceSetCount)
             )
         } else {
             newItem = SessionItem(
                 order: nextOrder,
                 exerciseId: catalogExercise.id,
+                exerciseNameSnapshot: catalogExercise.name,
                 targetReps: defaultReps,
                 targetSets: defaultSets,
                 targetRIR: defaultRIR,
                 suggestedLoad: defaultLoad,
-                plannedLoadsBySet: Array(repeating: defaultLoad, count: 4)
+                plannedRepsBySet: Array(repeating: defaultReps, count: 4),
+                plannedLoadsBySet: Array(repeating: defaultLoad, count: 4),
+                plannedRIRsBySet: Array(repeating: defaultRIR, count: 4),
+                actualReps: Array(repeating: 0, count: 4),
+                actualLoads: Array(repeating: 0.0, count: 4),
+                actualRIRs: Array(repeating: 0, count: 4)
             )
         }
 
