@@ -598,19 +598,21 @@ struct ProgramDayDetailView: View {
 
     private func move(_ item: SessionItem, direction: Int) {
         // direction: -1 = up, +1 = down
-        guard let currentIndex = session.items.firstIndex(where: { $0.id == item.id }) else { return }
+        var items = orderedItems
+        guard let currentIndex = items.firstIndex(where: { $0.id == item.id }) else { return }
         let newIndex = currentIndex + direction
-        guard session.items.indices.contains(newIndex) else { return }
+        guard items.indices.contains(newIndex) else { return }
 
-        session.items.swapAt(currentIndex, newIndex)
+        items.swapAt(currentIndex, newIndex)
 
-        // Re-write orders to be 1...N based on current array position
-        for (idx, sessionItem) in session.items.enumerated() {
+        // Re-write orders to be 1...N based on the sorted-array position
+        for (idx, sessionItem) in items.enumerated() {
             sessionItem.order = idx + 1
         }
 
-        // ✅ NEW: propagate program edits forward into future planned sessions
-        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        if propagateChangesToFutureSessions {
+            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        }
 
         do {
             try modelContext.save()
