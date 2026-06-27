@@ -12,17 +12,7 @@ enum LoadDisplay {
     }
 
     private static func isBodyweightExercise(_ id: String) -> Bool {
-        // Expand this list as needed
-        let bwIds: Set<String> = [
-            "pull_up",
-            "chin_up",
-            "dip",
-            "push_up",
-            "inverted_row",
-            "plank",
-            "hanging_knee_raise"
-        ]
-        return bwIds.contains(id)
+        ExerciseCatalog.isBodyweight(exerciseId: id)
     }
 }
 

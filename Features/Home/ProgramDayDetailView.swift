@@ -216,7 +216,9 @@ struct ProgramDayDetailView: View {
             let activeMesoIDs = LoadProjectionService.activeMesoSessionIDs(from: modelContext)
 
             let profileDescriptor = FetchDescriptor<UserProfile>()
-            let loadIncrement: Double = (try? modelContext.fetch(profileDescriptor).first?.minLoadIncrement) ?? 2.5
+            let profile = try? modelContext.fetch(profileDescriptor).first
+            let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
+            let bodyWeight = profile?.bodyWeight
 
             // Maintenance sessions use deload wave but must not have loads reduced by projection.
                         // Detect via meso name — hold current suggested load and skip projection entirely.
@@ -250,7 +252,8 @@ struct ProgramDayDetailView: View {
                                             currentWaveRaw: item.waveRaw,
                                             allSessions: sessions,
                                             activeMesoSessionIDs: activeMesoIDs,
-                                            loadIncrement: loadIncrement
+                                            loadIncrement: loadIncrement,
+                                            bodyWeight: bodyWeight
                                         )
 
                                         if let projection = projection, projection.suggestedLoad > 0 {

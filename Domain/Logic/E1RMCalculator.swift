@@ -26,6 +26,14 @@ struct E1RMCalculator {
         return (load / increment).rounded() * increment
     }
 
+    /// Resolves the load to use for volume/e1RM math: the logged actual load if any,
+    /// otherwise the user's bodyweight for known bodyweight exercises.
+    static func effectiveLoad(actualLoad: Double, exerciseId: String, bodyWeight: Double?) -> Double {
+        if actualLoad > 0 { return actualLoad }
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId), let bw = bodyWeight, bw > 0 { return bw }
+        return 0
+    }
+
     /// RIR-weighted e1RM from a single session's sets.
     ///
     /// Sets performed at or above the target RIR get full weight (1.0).

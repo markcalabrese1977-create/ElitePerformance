@@ -133,7 +133,8 @@ enum LoadProjectionService {
         allSessions: [Session],
         activeMesoSessionIDs: Set<PersistentIdentifier>,
         loadIncrement: Double = 2.5,
-        referenceDate: Date = Date()
+        referenceDate: Date = Date(),
+        bodyWeight: Double? = nil
     ) -> LoadProjection? {
 
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
@@ -168,8 +169,12 @@ enum LoadProjectionService {
                 guard setCount > 0 else { return nil }
 
                 let sets: [(load: Double, reps: Int, actualRIR: Int)] = (0..<setCount).compactMap { idx in
-                    let load = item.actualLoads[idx]
                     let reps = item.actualReps[idx]
+                    let load = E1RMCalculator.effectiveLoad(
+                        actualLoad: item.actualLoads[idx],
+                        exerciseId: item.exerciseId,
+                        bodyWeight: bodyWeight
+                    )
                     guard load > 0, reps > 0 else { return nil }
                     let rir = idx < item.actualRIRs.count ? item.actualRIRs[idx] : item.targetRIR
                     return (load: load, reps: reps, actualRIR: rir)
@@ -243,7 +248,14 @@ enum LoadProjectionService {
             let actuals = Array(lastItem.actualLoads.prefix(setCount)).filter { $0 > 0 }
             if let first = actuals.first { return first }
             let planned = Array(lastItem.plannedLoadsBySet.prefix(setCount)).filter { $0 > 0 }
-            return planned.first ?? lastItem.suggestedLoad
+            if let first = planned.first { return first }
+            if lastItem.suggestedLoad > 0 { return lastItem.suggestedLoad }
+            // No load anywhere — fall back to bodyweight as the floor for BW exercises
+            // instead of bailing with nil below.
+            if ExerciseCatalog.isBodyweight(exerciseId: lastItem.exerciseId), let bw = bodyWeight, bw > 0 {
+                return bw
+            }
+            return 0
         }()
         guard lastLoad > 0 else {
             if e1rmFloorLoad > 0 {

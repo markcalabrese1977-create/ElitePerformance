@@ -10,7 +10,9 @@ enum ProgramGenerator {
     /// using LoadProjectionService against completed sessions from prior mesos.
     static func anchorLoadsForNewMeso(mesoBlock: MesoBlock, context: ModelContext) {
         let profileDescriptor = FetchDescriptor<UserProfile>()
-        let loadIncrement: Double = (try? context.fetch(profileDescriptor).first?.minLoadIncrement) ?? 2.5
+        let profile = try? context.fetch(profileDescriptor).first
+        let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
+        let bodyWeight = profile?.bodyWeight
 
         let allSessionsDescriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
@@ -32,7 +34,8 @@ enum ProgramGenerator {
                     currentWaveRaw: item.waveRaw,
                     allSessions: allSessions,
                     activeMesoSessionIDs: activeMesoIDs,
-                    loadIncrement: loadIncrement
+                    loadIncrement: loadIncrement,
+                    bodyWeight: bodyWeight
                 )
 
                 guard let projection = projection, projection.suggestedLoad > 0 else { continue }

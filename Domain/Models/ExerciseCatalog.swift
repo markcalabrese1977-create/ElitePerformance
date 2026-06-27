@@ -977,6 +977,12 @@ extension ExerciseCatalog {
         return legacyExerciseIdAliases[normalized] ?? normalized
     }
 
+    /// Single source of truth for whether an exercise is bodyweight-based.
+    static func isBodyweight(exerciseId: String) -> Bool {
+        let canonicalId = canonicalExerciseId(for: exerciseId)
+        return all.first(where: { $0.id == canonicalId })?.isBodyweight ?? false
+    }
+
     static func canonicalBuiltInId(forExerciseName name: String) -> String? {
         let normalized = normalizedExerciseName(name)
 

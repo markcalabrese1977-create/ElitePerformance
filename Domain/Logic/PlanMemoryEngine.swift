@@ -23,7 +23,9 @@ struct PlanMemoryEngine {
 
         // Fetch UserProfile for load increment preference
         let profileDescriptor = FetchDescriptor<UserProfile>()
-        let loadIncrement: Double = (try? context.fetch(profileDescriptor).first?.minLoadIncrement) ?? 2.5
+        let profile = try? context.fetch(profileDescriptor).first
+        let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
+        let bodyWeight = profile?.bodyWeight
 
         // Auto-progression gate
         let progressionEnabled: Bool = {
@@ -81,7 +83,8 @@ struct PlanMemoryEngine {
                 currentWaveRaw: targetItem.waveRaw,
                 allSessions: allSessions,
                 activeMesoSessionIDs: activeMesoIDs,
-                loadIncrement: loadIncrement
+                loadIncrement: loadIncrement,
+                bodyWeight: bodyWeight
             )
 
             if let projection = projection, projection.suggestedLoad > 0 {

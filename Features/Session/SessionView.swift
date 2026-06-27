@@ -217,7 +217,7 @@ struct SessionView: View {
 
                 // ✅ Session Complete → Recap → persistCompletion (History + Apple Health)
                 Button {
-                    let recap = viewModel.buildRecap()
+                    let recap = viewModel.buildRecap(using: modelContext)
                     activeSheet = .recap(recap)
                 } label: {
                     Label("Complete", systemImage: "checkmark.circle")
@@ -239,7 +239,7 @@ struct SessionView: View {
                 SessionCompleteBar(
                     isEnabled: true,
                     onComplete: {
-                        let recap = viewModel.buildRecap()
+                        let recap = viewModel.buildRecap(using: modelContext)
                         activeSheet = .recap(recap)
                     }
                 )
@@ -456,7 +456,7 @@ struct SessionView: View {
             Spacer()
 
             Button {
-                activeSheet = .recap(viewModel.buildRecap())
+                activeSheet = .recap(viewModel.buildRecap(using: modelContext))
             } label: {
                 Text("Recap")
                     .font(.caption2)
@@ -2033,7 +2033,10 @@ final class SessionScreenViewModel: ObservableObject {
 
     // MARK: - Recap + Persistence (History)
 
-    func buildRecap() -> SessionRecap {
+    func buildRecap(using context: ModelContext) -> SessionRecap {
+        let profileDescriptor = FetchDescriptor<UserProfile>()
+        let bodyWeight = try? context.fetch(profileDescriptor).first?.bodyWeight
+
         var exerciseSummaries: [SessionRecapExercise] = []
         exerciseSummaries.reserveCapacity(exercises.count)
 
@@ -2053,10 +2056,15 @@ final class SessionScreenViewModel: ObservableObject {
                 let reps = set.actualReps ?? set.plannedReps
                 let load = set.actualLoad ?? set.plannedLoad
                 let rir  = set.actualRIR ?? set.plannedRIR
+                let effLoad = E1RMCalculator.effectiveLoad(
+                    actualLoad: load,
+                    exerciseId: exercise.exerciseId,
+                    bodyWeight: bodyWeight
+                )
 
                 setsCompleted += 1
                 totalRepsForExercise += reps
-                totalVolume += Double(reps) * load
+                totalVolume += Double(reps) * effLoad
 
                 // Track the last completed set's RIR
                 if let rir = rir {
@@ -2064,8 +2072,8 @@ final class SessionScreenViewModel: ObservableObject {
                 }
 
                 // Epley e1RM estimate for this set
-                if load > 0 && reps > 0 {
-                    let e1 = load * (1.0 + Double(reps) / 30.0)
+                if effLoad > 0 && reps > 0 {
+                    let e1 = effLoad * (1.0 + Double(reps) / 30.0)
                     if let currentTop = topE1RM {
                         if e1 > currentTop {
                             topE1RM = e1
