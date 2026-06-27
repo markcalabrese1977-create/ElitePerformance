@@ -203,6 +203,9 @@ struct SessionView: View {
                         },
                         onAddSetTapped: { [exerciseId = exercise.id] in
                             viewModel.addSet(toExerciseID: exerciseId, context: modelContext)
+                        },
+                        onBodyweightSettingsTapped: {
+                            activeSheet = .settings
                         }
                     )
                 }
@@ -372,6 +375,9 @@ struct SessionView: View {
                 exerciseName: exerciseName,
                 onClose: { activeSheet = nil }
             )
+
+        case .settings:
+            SettingsView()
         }
     }
 
@@ -505,6 +511,7 @@ private enum ActiveSheet: Identifiable {
     case history(exerciseId: String, exerciseName: String)
     case note(exerciseId: String, exerciseName: String)
     case addExercise
+    case settings
 
     var id: String {
         switch self {
@@ -518,6 +525,8 @@ private enum ActiveSheet: Identifiable {
             return "note-\(exerciseId)"
         case .addExercise:
             return "add-exercise"
+        case .settings:
+            return "settings"
         }
     }
 }
@@ -554,10 +563,18 @@ private struct SessionExerciseCardView: View {
     let onHistoryTapped: () -> Void
     let onNoteTapped: () -> Void
     let onAddSetTapped: () -> Void
+    let onBodyweightSettingsTapped: () -> Void
 
     // MARK: - Coach v5 (ProgressionEngine) helpers
 
+    private var isBodyweightExercise: Bool {
+        ExerciseCatalog.isBodyweight(exerciseId: exercise.exerciseId)
+    }
 
+    private var userProfile: UserProfile? {
+        let descriptor = FetchDescriptor<UserProfile>()
+        return try? modelContext.fetch(descriptor).first
+    }
 
     private var repRange: RepRange {
         if let min = exercise.repMin, let max = exercise.repMax {
@@ -731,6 +748,10 @@ private struct SessionExerciseCardView: View {
                         SessionSetRowView(
                             uiSet: set,
                             repRange: repRange,
+                            isBodyweightExercise: isBodyweightExercise,
+                            bodyWeight: userProfile?.bodyWeight,
+                            usesKilograms: userProfile?.usesKilograms ?? false,
+                            onBodyweightSettingsTapped: onBodyweightSettingsTapped,
                             onLoadChanged: { text in
                                 onLoadChanged(set.index, text)
                             },
@@ -799,6 +820,10 @@ private struct SessionExerciseCardView: View {
 private struct SessionSetRowView: View {
     let uiSet: UISessionSet
     let repRange: RepRange
+    let isBodyweightExercise: Bool
+    let bodyWeight: Double?
+    let usesKilograms: Bool
+    let onBodyweightSettingsTapped: () -> Void
 
     let onLoadChanged: (String) -> Void
     let onRepsChanged: (String) -> Void
@@ -819,7 +844,11 @@ private struct SessionSetRowView: View {
     private var isLocked: Bool {
             uiSet.status == .completed || uiSet.status.isAnySkip
         }
-    
+
+    private func formattedWeight(_ value: Double) -> String {
+        value == floor(value) ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+
 
 
     var body: some View {
@@ -861,7 +890,7 @@ private struct SessionSetRowView: View {
             }
 
             // PLAN / SUGGESTED line
-            Text("\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange))")
+            Text("\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
                 .font(.caption)
                 .foregroundStyle(uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
                 .lineLimit(2)
@@ -874,15 +903,30 @@ private struct SessionSetRowView: View {
                     Text("Load")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    TextField("0", text: Binding(
-                        get: { uiSet.actualLoadText },
-                        set: { onLoadChanged($0) }
-                    ))
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 72)
-                    .disabled(isLocked)
-                    .opacity(isLocked ? 0.6 : 1.0)
+                    if isBodyweightExercise {
+                        if let bodyWeight, bodyWeight > 0 {
+                            Text("BW (\(formattedWeight(bodyWeight)) \(usesKilograms ? "kg" : "lb"))")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        } else {
+                            Button(action: onBodyweightSettingsTapped) {
+                                Text("BW — set in Settings")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        TextField("0", text: Binding(
+                            get: { uiSet.actualLoadText },
+                            set: { onLoadChanged($0) }
+                        ))
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 72)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
                 }
 
                 // Reps
@@ -2692,12 +2736,12 @@ struct UISessionSet: Identifiable {
             )
         }
     }
-    func plannedDescription(with repRange: RepRange) -> String {
+    func plannedDescription(with repRange: RepRange, isBodyweight: Bool = false) -> String {
         if plannedLoad == 0 && plannedReps == 0 { return "—" }
-        
+
         let loadText: String
         if plannedLoad == 0 {
-            loadText = "0.0"
+            loadText = isBodyweight ? "BW" : "0.0"
         } else {
             loadText = String(format: "%.1f", plannedLoad)
         }

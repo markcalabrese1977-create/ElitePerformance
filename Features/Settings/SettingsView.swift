@@ -238,6 +238,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onAppear(perform: ensureProfileExists)
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
         }
@@ -430,6 +431,14 @@ struct SettingsView: View {
         }
     }
 
+    /// The Profile section (including Body Weight) only renders when a UserProfile
+    /// exists. Onboarding normally creates one, but accounts that skipped that path
+    /// would otherwise see no Profile section and no way to create one.
+    private func ensureProfileExists() {
+        guard profiles.isEmpty else { return }
+        context.insert(UserProfile())
+        try? context.save()
+    }
 
 }
 
