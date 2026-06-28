@@ -29,13 +29,16 @@ struct ExerciseSwapPropagationService {
 
             // Filter in Swift to avoid SwiftData macro enum-case limitations.
             let futurePlanned = futureSessions.filter { $0.status == .planned }
+            let canonicalFrom = ExerciseCatalog.canonicalExerciseId(for: fromExerciseId)
+            let toName = ExerciseCatalog.displayName(for: toExerciseId)
 
             for session in futurePlanned {
                 var didChange = false
 
                 for item in session.items {
-                    if item.exerciseId == fromExerciseId {
+                    if ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == canonicalFrom {
                         item.exerciseId = toExerciseId
+                        item.exerciseNameSnapshot = toName
                         didChange = true
                     }
                 }

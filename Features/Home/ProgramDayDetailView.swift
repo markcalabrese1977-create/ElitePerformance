@@ -14,6 +14,7 @@ struct ProgramDayDetailView: View {
     @State private var showFeedbackAlert = false
     @State private var historyTarget: HistoryTarget?
     @State private var noteTarget: NoteTarget?
+    @State private var swapTarget: SwapTarget?
     @State private var propagateAddToFutureSessions: Bool = true
     @State private var propagateChangesToFutureSessions: Bool = true
     @State private var showDayLabelEditor: Bool = false
@@ -45,6 +46,7 @@ struct ProgramDayDetailView: View {
                             onMoveUp:  { move(item, direction: -1) },
                             onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { delete(item) },
+                            onSwapTapped: { swapTarget = SwapTarget(item: item) },
                             onHistoryTapped: { exerciseId, exerciseName in
                                                             let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
                                                             historyTarget = HistoryTarget(
@@ -131,6 +133,21 @@ struct ProgramDayDetailView: View {
                 exerciseId: target.exerciseId,
                 exerciseName: target.exerciseName,
                 onClose: { noteTarget = nil }
+            )
+        }
+        .sheet(item: $swapTarget) { target in
+            ProgramExerciseSwapSheet(
+                currentExerciseId: target.item.exerciseId,
+                currentExerciseName: ExerciseCatalog.displayName(
+                    for: ExerciseCatalog.canonicalExerciseId(for: target.item.exerciseId)
+                ),
+                onSelect: { catalogExercise in
+                    swapExercise(target.item, to: catalogExercise)
+                    swapTarget = nil
+                },
+                onCancel: {
+                    swapTarget = nil
+                }
             )
         }
     }
@@ -573,6 +590,35 @@ struct ProgramDayDetailView: View {
         }
     }
 
+    private func swapExercise(_ item: SessionItem, to catalogExercise: CatalogExercise) {
+        let fromExerciseId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+
+        // Identity changes; the prescription shape (sets/reps/RIR/wave/priority/etc.)
+        // stays — only the exercise filling this slot changes.
+        item.exerciseId = catalogExercise.id
+        item.exerciseNameSnapshot = catalogExercise.name
+        item.suggestedLoad = 0
+        item.plannedLoadsBySet = Array(repeating: 0.0, count: item.plannedLoadsBySet.count)
+        item.actualLoads = Array(repeating: 0.0, count: item.actualLoads.count)
+        item.actualReps = Array(repeating: 0, count: item.actualReps.count)
+        item.actualRIRs = Array(repeating: 0, count: item.actualRIRs.count)
+        item.coachNote = nil
+
+        if propagateChangesToFutureSessions {
+            ExerciseSwapPropagationService.apply(
+                fromExerciseId: fromExerciseId,
+                toExerciseId: catalogExercise.id,
+                in: modelContext
+            )
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("⚠️ Failed to swap exercise: \(error)")
+        }
+    }
+
     private func delete(_ item: SessionItem) {
         guard let index = session.items.firstIndex(where: { $0.id == item.id }) else { return }
         let removedOrder = session.items[index].order
@@ -794,6 +840,93 @@ private struct NoteTarget: Identifiable {
     let exerciseId: String
     let exerciseName: String
 }
+private struct SwapTarget: Identifiable {
+    let id = UUID()
+    let item: SessionItem
+}
+
+// MARK: - Swap Sheet
+
+/// Sheet to pick a replacement exercise from the catalog for a plan slot.
+/// Shows "recommended" (same primary muscle group) first, then all others.
+/// Intentionally separate from SessionView's ExerciseSwapSheet, which is
+/// private and typed to that screen's UISessionExercise view-model.
+private struct ProgramExerciseSwapSheet: View {
+    let currentExerciseId: String
+    let currentExerciseName: String
+    let onSelect: (CatalogExercise) -> Void
+    let onCancel: () -> Void
+
+    @State private var showingCreateCustom = false
+
+    private var options: [CatalogExercise] {
+        let all = ExerciseCatalog.all
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentExerciseId)
+
+        guard let currentCatalog = all.first(where: { $0.id == canonicalId }) else {
+            return all
+        }
+
+        let same = all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
+        let others = all.filter {
+            $0.id != currentCatalog.id && $0.primaryMuscle != currentCatalog.primaryMuscle
+        }
+
+        return same + others
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        showingCreateCustom = true
+                    } label: {
+                        Label("Create Custom Exercise", systemImage: "plus.circle.fill")
+                    }
+                }
+
+                Section {
+                    ForEach(options) { exercise in
+                        Button {
+                            onSelect(exercise)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(exercise.name)
+                                    .font(.body)
+
+                                Text(exercise.primaryMuscle.rawValue.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Choose a replacement for \(currentExerciseName)")
+                }
+            }
+            .navigationTitle("Swap Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+            }
+            .sheet(isPresented: $showingCreateCustom) {
+                CreateCustomExerciseSheet(
+                    onDone: { newExercise in
+                        showingCreateCustom = false
+                        onSelect(newExercise)
+                    },
+                    onCancel: { showingCreateCustom = false }
+                )
+            }
+        }
+    }
+}
+
 // MARK: - Per-exercise plan row
 
 private struct ProgramExercisePlanRow: View {
@@ -803,6 +936,7 @@ private struct ProgramExercisePlanRow: View {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onDelete: () -> Void
+    let onSwapTapped: () -> Void
     let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
         var isMaintenance: Bool = false
@@ -904,6 +1038,11 @@ private struct ProgramExercisePlanRow: View {
 
                 Button(action: onMoveDown) {
                     Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+
+                Button(action: onSwapTapped) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.borderless)
 

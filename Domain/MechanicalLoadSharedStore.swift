@@ -1,4 +1,4 @@
-// Domain/MechanicalLoadSharedStore.swift
+    // Domain/MechanicalLoadSharedStore.swift
 import Foundation
 
 /// Writes mechanical load scores to a shared App Group UserDefaults container
