@@ -180,6 +180,13 @@ struct SettingsView: View {
                 Text("Re-anchors Analytics to the currently active mesocycle block. Use this if Analytics is showing data from a previous block.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Button("Repair maintenance loads") {
+                    repairMaintenanceLoads()
+                }
+                Text("Resets inflated planned loads on upcoming maintenance sessions back to your last completed actuals for that exercise. Run this once after updating to a version that holds maintenance loads correctly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                         }
 
             // MARK: - Export
@@ -410,6 +417,63 @@ struct SettingsView: View {
         AppStateBridge.setActiveMesoStartDate(activeMeso.startDate, in: context)
         let formatted = activeMeso.startDate.formatted(date: .abbreviated, time: .omitted)
         presentMesoGenerationMessage("Synced meso start date to \(formatted).")
+    }
+
+    /// One-time repair for loads that were inflated by progressive overload
+    /// before LoadProjectionService/PlanMemoryEngine learned to hold
+    /// maintenance/deload items. Resets each upcoming maintenance item's
+    /// suggestedLoad/plannedLoadsBySet back to the most recently completed
+    /// session's actual loads for that exercise, scoped to the active meso.
+    private func repairMaintenanceLoads() {
+        let descriptor = FetchDescriptor<MesoBlock>()
+        guard let blocks = try? context.fetch(descriptor) else {
+            presentMesoGenerationMessage("Failed to fetch meso blocks.")
+            return
+        }
+        guard let activeMeso = blocks.first(where: { $0.status == .active }) else {
+            presentMesoGenerationMessage("No active mesocycle found.")
+            return
+        }
+
+        let blockSessions = activeMeso.sessions
+        let completedSessionsByDateDesc = blockSessions
+            .filter { $0.status == .completed }
+            .sorted { $0.date > $1.date }
+        let upcomingSessions = blockSessions.filter {
+            $0.status == .planned || $0.status == .inProgress
+        }
+
+        var repairedDetails: [String] = []
+
+        for upcoming in upcomingSessions {
+            for item in upcoming.items {
+                guard item.waveRaw?.lowercased() == "deload", item.suggestedLoad > 0 else { continue }
+
+                guard let mostRecentCompletedItem = completedSessionsByDateDesc
+                    .compactMap({ $0.items.first { $0.exerciseId == item.exerciseId } })
+                    .first
+                else { continue } // no completed session for this exercise yet — leave seeded value
+
+                let oldLoad = item.suggestedLoad
+                let actualLoad = mostRecentCompletedItem.actualLoads.first(where: { $0 > 0 }) ?? 0
+
+                item.suggestedLoad = actualLoad
+                item.plannedLoadsBySet = mostRecentCompletedItem.actualLoads
+
+                let name = item.exerciseNameSnapshot ?? item.exerciseId
+                repairedDetails.append("\(name): \(String(format: "%.1f", oldLoad)) → \(String(format: "%.1f", actualLoad))")
+            }
+        }
+
+        if !repairedDetails.isEmpty {
+            try? context.save()
+            presentMesoGenerationMessage(
+                "Repaired \(repairedDetails.count) maintenance load\(repairedDetails.count == 1 ? "" : "s"):\n"
+                + repairedDetails.joined(separator: "\n")
+            )
+        } else {
+            presentMesoGenerationMessage("No inflated maintenance loads found.")
+        }
     }
 
     private func inferredTrainingWeekdays() -> [Int] {
