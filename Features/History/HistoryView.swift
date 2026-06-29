@@ -135,17 +135,14 @@ private struct HistorySetDetail: Identifiable {
     let isSkipped: Bool
     let feedback: SetFeedback
     let pumpRating: PumpRating
+    let exerciseId: String
 
     let rpUsed: Bool
     let rpPattern: String
 
-    // BUG: cannot call isBodyweight() here without exerciseId — load == 0 proxy still in use.
-    // HistorySetDetail has no exerciseId stored on it; the caller
-    // (HistoryView.exerciseDetails) has uiEx.exerciseId in scope at both
-    // construction sites, but threading it in would require a new
-    // initializer parameter. See OPEN Q12 in TestOpenQuestions.swift.
     private func loadText(_ load: Double) -> String {
-        load == 0 ? "BW" : String(format: "%.0f", load)
+        if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
+        return String(format: "%.0f", load)
     }
 
     var lineText: String {
@@ -326,6 +323,7 @@ private struct HistoryDayDetailView: View {
                                                         isSkipped: false,
                                                         feedback: .none,
                                                         pumpRating: set.pumpRating,
+                                                        exerciseId: uiEx.exerciseId,
                                                         rpUsed: set.usedRestPause,
                                                         rpPattern: set.restPausePattern
                                                     )
@@ -340,6 +338,7 @@ private struct HistoryDayDetailView: View {
                                                         isSkipped: true,
                                                         feedback: set.status.feedbackValue,
                                                         pumpRating: .none,
+                                                        exerciseId: uiEx.exerciseId,
                                                         rpUsed: false,
                                                         rpPattern: ""
                                                     )
