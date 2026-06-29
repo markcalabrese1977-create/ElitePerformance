@@ -192,19 +192,16 @@ final class LoadWriteTests: XCTestCase {
     }
 
     // MARK: - T-B.6: Post-restore seeding fidelity
-    // BUG UNVERIFIED
     //
-    // Same confirmed-broken behavior as InvariantTests' T-N.12, written
-    // independently here per the catalog's explicit instruction not to skip
-    // this one. Root cause (confirmed via source): ProgramGenerator
-    // .anchorLoadsForNewMeso seeds maintenance items by calling
-    // LoadProjectionService.project(currentWaveRaw: item.waveRaw). Every
-    // maintenance item's waveRaw is "deload" (MaintenanceProgramSeeder
-    // .makeMaintenanceItem), and project() now unconditionally returns nil
-    // for waveRaw == "deload" (added this session, for a different bug).
-    // Until anchorLoadsForNewMeso is given its own path that doesn't route
-    // through that guard, restored/seeded maintenance loads silently stay at 0
-    // no matter how much real history exists.
+    // FIXED: same root cause as InvariantTests' T-N.12, written independently
+    // here per the catalog's explicit instruction not to skip this one.
+    // ProgramGenerator.anchorLoadsForNewMeso used to seed maintenance items by
+    // calling LoadProjectionService.project(currentWaveRaw: item.waveRaw).
+    // Every maintenance item's waveRaw is "deload"
+    // (MaintenanceProgramSeeder.makeMaintenanceItem), and project()'s deload
+    // guard unconditionally returned nil for all of them. anchorLoadsForNewMeso
+    // now reads e1RM directly from history instead — see OPEN Q1 in
+    // TestOpenQuestions.swift.
     func test_B6_restoredHistoryAnchorsMaintenanceLoad() throws {
         let context = try makeContext()
         let priorMeso = MesoBlock(name: "Prior Meso", startDate: cal.date(byAdding: .day, value: -60, to: Date())!, status: .archived, totalWeeks: 8)
@@ -228,7 +225,7 @@ final class LoadWriteTests: XCTestCase {
 
         ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: maintenanceMeso, context: context)
 
-        XCTAssertGreaterThan(maintenanceItem.suggestedLoad, 0, "BUG UNVERIFIED: RDL has clean 225x10-11 history but anchors at 0 — see root cause above")
+        XCTAssertGreaterThan(maintenanceItem.suggestedLoad, 0, "RDL has clean 225x10-11 history — anchoring must read it, not stay at 0")
     }
 
     // MARK: - T-B.7: Volume auto-regulation reduces set count + resizes

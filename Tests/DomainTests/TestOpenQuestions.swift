@@ -6,27 +6,25 @@
 
 // OPEN Q1: T-B.6/T-K.4/T-N.12 — Post-restore seeding fidelity
 //   Is Machine Hip Thrust (410x10) and RDL (225x10-13) correctly seeded after
-//   a Jayson-style restore? Flagged May 26. Resolution status: CONFIRMED BROKEN
-//   (not "unverified") as of this session — root cause identified via direct
-//   source read, not just suspected:
-//     ProgramGenerator.anchorLoadsForNewMeso (the Path-A maintenance loader)
-//     anchors suggestedLoad by calling LoadProjectionService.project(
-//     currentWaveRaw: item.waveRaw). Every maintenance item is seeded with
-//     waveRaw == "deload" (MaintenanceProgramSeeder.makeMaintenanceItem).
-//     LoadProjectionService.project() now has a top-of-function guard —
-//     added THIS session, for an unrelated bug (maintenance items getting
-//     progressively overloaded) — that unconditionally returns nil whenever
-//     currentWaveRaw == "deload". That guard also silently defeats
-//     anchorLoadsForNewMeso for every maintenance item: the projection is
-//     always nil, so suggestedLoad is left at its seeded 0 regardless of how
-//     much real history exists. Reproduced directly in
-//     InvariantTests.test_N12_maintenanceSeedingAnchorsLoadFromHistory and
-//     LoadWriteTests.test_B6_restoredHistoryAnchorsMaintenanceLoad — both
-//     currently fail, confirming the regression.
-//   Fix direction (not implemented — out of scope for this test-writing pass):
-//     anchorLoadsForNewMeso needs its own load-projection path that doesn't
-//     route through the deload-aware project() guard, since its job is
-//     one-time *initial* anchoring from history, not ongoing progression.
+//   a Jayson-style restore? Flagged May 26. RESOLVED AND FIXED: root cause was
+//   ProgramGenerator.anchorLoadsForNewMeso (the Path-A maintenance loader)
+//   anchoring suggestedLoad by calling LoadProjectionService.project(
+//   currentWaveRaw: item.waveRaw). Every maintenance item is seeded with
+//   waveRaw == "deload" (MaintenanceProgramSeeder.makeMaintenanceItem), and
+//   project()'s deload guard (added earlier the same session, for the
+//   unrelated maintenance-overload bug) unconditionally returned nil for
+//   every one of them. Fix: anchorLoadsForNewMeso no longer calls project()
+//   at all — it now reads e1RM directly from session history
+//   (decay-weighted), mirroring the sibling Path-B loader,
+//   MaintenanceProgramSeeder.anchorLoadsFromFullHistory, which never had
+//   this problem because it never routed through project() either. The
+//   guard itself was correct for its actual intended caller
+//   (PlanMemoryEngine.carryForwardPlans) — this caller just shouldn't have
+//   been going through it, since anchoring a new block's initial loads is a
+//   one-time read-from-history operation, not an ongoing progression
+//   decision. InvariantTests.test_N12_maintenanceSeedingAnchorsLoadFromHistory
+//   and LoadWriteTests.test_B6_restoredHistoryAnchorsMaintenanceLoad both
+//   pass now.
 
 // OPEN Q2: T-A.8 — Guard precedence
 //   When pain + deload + extra-reserve all fire, what is the exact evaluation

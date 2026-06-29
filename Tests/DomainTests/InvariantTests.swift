@@ -418,19 +418,16 @@ final class InvariantTests: XCTestCase {
     }
 
     // MARK: - T-N.12: Restored history >= template defaults for seeding (post-restore seeding fidelity)
-    // BUG T-B.6 UNVERIFIED
     //
-    // CONFIRMED BROKEN VIA SOURCE, not just "unverified": ProgramGenerator.anchorLoadsForNewMeso
-    // (the Path-A loader used by MaintenanceProgramSeeder.seed) anchors each item's
-    // suggestedLoad by calling LoadProjectionService.project(currentWaveRaw: item.waveRaw).
-    // Every maintenance item is seeded with waveRaw == "deload" (MaintenanceProgramSeeder
-    // .makeMaintenanceItem). LoadProjectionService.project() now has a top-of-function
-    // guard — added this session for a different bug (maintenance items getting
-    // progressively overloaded) — that unconditionally returns nil whenever
-    // currentWaveRaw == "deload". That guard also silently defeats
-    // anchorLoadsForNewMeso for every maintenance item: the projection is always nil,
-    // so suggestedLoad is left at its seeded 0, regardless of how much real history
-    // exists. This test reproduces it directly against rich, unambiguous history.
+    // FIXED: ProgramGenerator.anchorLoadsForNewMeso (the Path-A loader used by
+    // MaintenanceProgramSeeder.seed) used to anchor each item's suggestedLoad
+    // by calling LoadProjectionService.project(currentWaveRaw: item.waveRaw).
+    // Every maintenance item is seeded with waveRaw == "deload"
+    // (MaintenanceProgramSeeder.makeMaintenanceItem), and project()'s deload
+    // guard unconditionally returned nil for every one of them, silently
+    // defeating anchoring regardless of how much real history existed.
+    // anchorLoadsForNewMeso now reads e1RM directly from history instead of
+    // routing through project() at all — see OPEN Q1 in TestOpenQuestions.swift.
     func test_N12_maintenanceSeedingAnchorsLoadFromHistory() throws {
         let context = try makeContext()
         let cal = Calendar.current
@@ -463,11 +460,8 @@ final class InvariantTests: XCTestCase {
 
         ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: maintenanceMeso, context: context)
 
-        // EXPECTED (per anchorLoadsForNewMeso's own doc comment "Anchor loads from
-        // previous meso peak"): suggestedLoad should reflect the 410 history.
-        // CONFIRMED CURRENTLY FAILING: the deload guard in LoadProjectionService.project()
-        // makes this always nil for maintenance items, so suggestedLoad stays 0.
-        XCTAssertGreaterThan(newMaintenanceItem.suggestedLoad, 0, "BUG T-B.6: maintenance load anchoring is silently defeated by the deload guard in LoadProjectionService.project()")
+        // Anchor loads from previous meso peak — suggestedLoad should reflect the 410 history.
+        XCTAssertGreaterThan(newMaintenanceItem.suggestedLoad, 0, "maintenance load anchoring must read from history, not stay at the seeded 0")
     }
 
     // MARK: - T-N.13: On completed session, next session's coached loads are correctly applied (DoD gate)
