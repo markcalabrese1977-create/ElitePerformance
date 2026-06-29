@@ -139,6 +139,11 @@ private struct HistorySetDetail: Identifiable {
     let rpUsed: Bool
     let rpPattern: String
 
+    // BUG: cannot call isBodyweight() here without exerciseId — load == 0 proxy still in use.
+    // HistorySetDetail has no exerciseId stored on it; the caller
+    // (HistoryView.exerciseDetails) has uiEx.exerciseId in scope at both
+    // construction sites, but threading it in would require a new
+    // initializer parameter. See OPEN Q12 in TestOpenQuestions.swift.
     private func loadText(_ load: Double) -> String {
         load == 0 ? "BW" : String(format: "%.0f", load)
     }

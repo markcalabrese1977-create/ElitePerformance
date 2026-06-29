@@ -474,7 +474,7 @@ struct ExerciseHistorySheet: View {
 
     private func formatSetToken(load: Double, reps: Int, rir: Int?, usedRP: Bool, rpPattern: String) -> String {
         let loadString: String = {
-            if load == 0 { return "BW" }
+            if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
             if load == floor(load) { return String(format: "%.0f", load) }
             return String(format: "%.1f", load)
         }()

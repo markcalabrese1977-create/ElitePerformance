@@ -259,12 +259,34 @@
 //   ExerciseCatalog.isBodyweight(exerciseId:) properly. Concrete consequence:
 //   a non-bodyweight exercise logged with a 0 load for any reason (data
 //   entry skip, failed rep, etc.) displays as "BW" in History views, which
-//   is simply wrong for that exercise. BUG CONFIRMED and left failing in
-//   BodyweightMechanicsTests.test_H1_BUG_historyViewsUseLoadZeroAsBodyweightProxyInsteadOfCatalog
-//   (StubTests.swift). The three private functions take only a Double load
-//   parameter, so fixing this for real requires threading exerciseId through
-//   all three call sites — out of scope for a test-only task. Do not fix
-//   here, flag for next task.
+//   is simply wrong for that exercise.
+//   RESOLVED (this commit) for 2 of 3 sites: ExerciseSessionDetailView
+//   .formatLoad and ExerciseHistorySheet.formatSetToken both had exerciseId
+//   already available as a view-level property in the same struct, so the
+//   fix was a straight substitution — `if v == 0,
+//   ExerciseCatalog.isBodyweight(exerciseId: ...) { return "BW" }` — matching
+//   the pattern already used by Domain/Logic/LoadDisplay.swift and
+//   Features/Session/SessionView.swift's isBodyweightExercise.
+//   STILL OPEN for the third site: HistoryView.swift's private
+//   HistorySetDetail.loadText. HistorySetDetail is a small UI-only struct
+//   with no exerciseId stored on it. The caller, HistoryView.exerciseDetails,
+//   does have uiEx.exerciseId in scope at both construction sites (lines
+//   ~316 and ~330), but threading it into HistorySetDetail would require
+//   adding a new initializer parameter — out of scope per the fix task's
+//   explicit instruction not to add new parameters just to make a site
+//   fixable. Left unchanged with a `// BUG:` comment at the source
+//   (HistoryView.swift:142). Test coverage:
+//   BodyweightMechanicsTests.test_H1_historyViewsNowConsultCatalogInsteadOfLoadZeroProxy
+//   (StubTests.swift) was rewritten from a BUG-CONFIRMED-style transcription
+//   of the old broken predicate into a transcription of the new, fixed
+//   predicate (both display methods are private SwiftUI View methods,
+//   still uncallable directly from this test target) — it now asserts the
+//   fixed logic correctly distinguishes a real bodyweight exercise from a
+//   non-bodyweight one logged at load == 0, rather than re-proving the bug
+//   existed. Actual SwiftUI rendering remains unverified either way; that
+//   would require view-hosting test infrastructure this target doesn't
+//   have. Do not fix the third site here, flag for next task if it's worth
+//   the signature change.
 
 // OPEN Q13 (NEW): ProgramCatalog.recommend has zero production call sites,
 //   and its scoring function has at least three confirmed real bugs

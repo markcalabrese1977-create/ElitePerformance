@@ -106,7 +106,7 @@ struct ExerciseSessionDetailView: View {
     }
 
     private func formatLoad(_ v: Double) -> String {
-        if v == 0 { return "BW" }
+        if v == 0, ExerciseCatalog.isBodyweight(exerciseId: canonicalExerciseId) { return "BW" }
         if v.rounded(.towardZero) == v { return String(Int(v)) }
         return String(format: "%.1f", v)
     }

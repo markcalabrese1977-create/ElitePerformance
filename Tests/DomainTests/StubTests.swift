@@ -1152,36 +1152,49 @@ final class BodyweightMechanicsTests: XCTestCase {
         XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: "bench_press"))
     }
 
-    // BUG CONFIRMED: three display sites bypass ExerciseCatalog.isBodyweight()
-    // entirely and use `load == 0` as a proxy for "this is a bodyweight
-    // exercise" instead of checking exercise identity —
-    // Features/History/ExerciseSessionDetailView.swift:109 (formatLoad),
-    // Features/History/ExerciseHistorySheet.swift:477 (formatSetToken),
-    // Features/History/HistoryView.swift:143 (loadText). All three are
-    // `private` functions/computed properties that take only a `Double load`
-    // parameter — no exerciseId — so they are structurally incapable of
-    // consulting the real catalog even in principle without a signature
-    // change (out of scope for a test-only task). Transcribed below (they
-    // cannot be called directly from this test target) to prove the
-    // divergence: a non-bodyweight exercise logged with actualLoad == 0 (a
-    // data-entry skip, a failed rep, etc.) would incorrectly display "BW" in
-    // History, while ExerciseCatalog.isBodyweight — the real authority — says
-    // false. Do not fix here, flag for next task. See OPEN Q12 in
-    // TestOpenQuestions.swift.
-    func test_H1_BUG_historyViewsUseLoadZeroAsBodyweightProxyInsteadOfCatalog() {
-        let nonBodyweightExerciseId = "bench_press"
-        XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: nonBodyweightExerciseId))
-
-        // Transcription of the shared `load == 0 ? "BW" : ...` predicate used
-        // identically by all three History display sites named above.
-        func transcribedHistoryDisplay(load: Double) -> String {
-            load == 0 ? "BW" : String(format: "%.0f", load)
+    // FIXED: two of the three display sites that used to bypass
+    // ExerciseCatalog.isBodyweight() and treat any `load == 0` as "this is a
+    // bodyweight exercise" now consult the real catalog instead —
+    // Features/History/ExerciseSessionDetailView.swift:108 (formatLoad) and
+    // Features/History/ExerciseHistorySheet.swift:475 (formatSetToken). Both
+    // had exerciseId already in scope (a view-level property), so the fix
+    // was a straight substitution matching the pattern already used by
+    // Domain/Logic/LoadDisplay.swift and Features/Session/SessionView.swift's
+    // isBodyweightExercise.
+    //
+    // Features/History/HistoryView.swift's HistorySetDetail.loadText is a
+    // third, still-unfixed site: HistorySetDetail is a small UI-only struct
+    // with no exerciseId stored on it. The caller (HistoryView.exerciseDetails)
+    // does have uiEx.exerciseId in scope at both construction sites, but
+    // wiring it into HistorySetDetail requires adding a new initializer
+    // parameter — exactly what the fix task's instructions said not to do
+    // just to make a site fixable. Left unchanged with a `// BUG:` comment
+    // at the source. See OPEN Q12 in TestOpenQuestions.swift.
+    //
+    // Both fixed sites are `private` methods on SwiftUI View structs, so
+    // they cannot be called directly from this test target — transcribed
+    // below using the real, POST-FIX predicate (not the old load-only
+    // proxy) to confirm it now correctly distinguishes exercise identity
+    // instead of load value. SwiftUI rendering itself remains unverified
+    // here; that would require view-hosting test infrastructure this target
+    // doesn't have.
+    func test_H1_historyViewsNowConsultCatalogInsteadOfLoadZeroProxy() {
+        // Transcription of the fixed predicate shared by
+        // ExerciseSessionDetailView.formatLoad and
+        // ExerciseHistorySheet.formatSetToken.
+        func fixedHistoryDisplay(load: Double, exerciseId: String) -> String {
+            if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
+            if load == floor(load) { return String(format: "%.0f", load) }
+            return String(format: "%.1f", load)
         }
 
-        let displayedForZeroLoadBenchPress = transcribedHistoryDisplay(load: 0)
         XCTAssertNotEqual(
-            displayedForZeroLoadBenchPress, "BW",
-            "BUG CONFIRMED: History views show \"BW\" for any load == 0 regardless of exercise identity, contradicting ExerciseCatalog.isBodyweight(exerciseId: \"bench_press\") == false"
+            fixedHistoryDisplay(load: 0, exerciseId: "bench_press"), "BW",
+            "a non-bodyweight exercise logged at load == 0 must no longer display BW"
+        )
+        XCTAssertEqual(
+            fixedHistoryDisplay(load: 0, exerciseId: "pull_up"), "BW",
+            "a real bodyweight exercise must still display BW at load == 0"
         )
     }
 
