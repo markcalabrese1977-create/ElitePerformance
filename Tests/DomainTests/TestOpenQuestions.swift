@@ -320,3 +320,61 @@
 //   flag for next task — and note any fix should consider whether
 //   ProgramCatalog should be wired into onboarding at all, or deleted as
 //   superseded dead code, before investing in repairing its scoring logic.
+
+// OPEN Q14 (NEW): there is no persisted propagation toggle anywhere in source
+//   Discovered while building T-J.1. Grepped the whole app for
+//   propagationEnabled/shouldPropagate/propagateChanges/propagationToggle:
+//   the only hit is `propagateChangesToFutureSessions`, a private `@State
+//   var ... = true` local to ProgramDayDetailView
+//   (Features/Home/ProgramDayDetailView.swift:19) — pure SwiftUI
+//   presentation state, not backed by UserDefaults, UserProfile, or
+//   AppState. It resets to true every time the view opens fresh; there is
+//   no way to "remember" a user's opt-out across view appearances, let
+//   alone across app launches. SessionView's swap/add-exercise flows
+//   (Features/Session/SessionView.swift:264-304) use an entirely different
+//   mechanism — a per-action confirmation dialog ("Apply to future
+//   sessions" vs. "Keep this session only") — not a toggle at all.
+//   Neither ExerciseSwapPropagationService.apply nor
+//   ProgramPlanPropagationService.applyPlanEditsForward has any internal
+//   gating logic; both propagate unconditionally whenever called. "Opt-out"
+//   is purely a decision about whether the View calls the service, made
+//   fresh every time, never persisted, never reaching the domain layer.
+//   This is the same class of testability gap as OPEN Q4/Q10/Q11 (private
+//   View-local state/logic with no model-layer surface) — not a bug, just a
+//   design fact worth knowing before anyone assumes "the user's propagation
+//   preference is remembered." Tested as the structural fact it is in
+//   PropagationToggleAndServiceTests.test_J1_propagationIsEntirelyACallSiteDecisionNotAServiceInternal
+//   (StubTests.swift): calling vs. not calling the service is the entire
+//   behavior surface; there is no third state to test.
+
+// OPEN Q15 (NEW): CustomExerciseBackupDTO.isBodyweight does NOT default
+//   safely when omitted — old backups with custom exercises fail to import
+//   Discovered while building T-K.3. CustomExerciseBackupDTO.isBodyweight is
+//   declared as `var isBodyweight: Bool = false` (Domain/Backup
+//   /BackupSnapshotV1.swift:216) — a stored property with a default value,
+//   but NOT `Bool?` and NOT decoded via `decodeIfPresent` anywhere (unlike
+//   setFeedbackBySet/pumpRatingsBySet, which are `[String]?`/`[Int]?` and
+//   coalesced with `?? []` in BackupSnapshotImporter, and unlike bodyWeight/
+//   dayLabel, which are genuinely Optional). The original assumption when
+//   first investigating this — that Swift's compiler-synthesized Codable
+//   conformance falls back to a property's declared default value when its
+//   JSON key is absent — is WRONG. Empirically confirmed: decoding a
+//   customExercises entry that omits "isBodyweight" throws
+//   DecodingError.keyNotFound, it does not default to false.
+//   BUG CONFIRMED: any real backup that predates the isBodyweight field
+//   (Domain/Backup/BackupSnapshotV1.swift's customExercises array) and
+//   contains at least one custom exercise will fail this exact way on
+//   import — the entire top-level JSONDecoder().decode(BackupSnapshotV1
+//   .self, from:) call throws, so the WHOLE backup fails to import, not
+//   just the affected custom exercise. Left failing with a BUG CONFIRMED
+//   comment in BackupRestoreImportTests
+//   .test_K3_BUG_customExerciseBackupDTOThrowsOnMissingIsBodyweightInsteadOfDefaulting
+//   (StubTests.swift) — confirms the throw directly rather than asserting a
+//   working fallback that doesn't exist. test_K3_oldBackupMissingNewerFieldsImportsCleanly
+//   (the main old-backup-import-works test) does NOT include any
+//   customExercises entries, specifically to avoid masking this with a
+//   false pass. Do not fix here, flag for next task — the fix is likely
+//   changing isBodyweight to `Bool?` (matching setFeedbackBySet/
+//   pumpRatingsBySet's pattern) and having BackupSnapshotImporter
+//   coalesce with `?? false`, but that's a production code change out of
+//   scope for a test-only task.
