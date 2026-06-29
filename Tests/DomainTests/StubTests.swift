@@ -1319,7 +1319,8 @@ final class UserProfileModelCoverageTests: XCTestCase {
     // there's no "maxSessionMinutes" — the real field is
     // sessionLengthMinutes; and there's no single "hasJointLimitations" bool
     // — the real field is injuryFlags: [InjuryFlag], an array of specific
-    // joint flags. Tested below using the real field names.
+    // joint flags. Tested below using the real field names. "unit" no
+    // longer applies either — usesKilograms was removed entirely (Q18).
     func test_I1_allUserProfileFieldsRoundTrip() throws {
         let context = try makeContext()
         let profile = UserProfile(
@@ -1330,7 +1331,6 @@ final class UserProfileModelCoverageTests: XCTestCase {
             equipmentProfile: .homeGym,
             injuryFlags: [.knees, .shoulders],
             minLoadIncrement: 5.0,
-            usesKilograms: true,
             bodyWeight: 195.0
         )
         context.insert(profile)
@@ -1344,7 +1344,6 @@ final class UserProfileModelCoverageTests: XCTestCase {
         XCTAssertEqual(fetched.equipmentProfile, .homeGym)
         XCTAssertEqual(Set(fetched.injuryFlags), Set([.knees, .shoulders]))
         XCTAssertEqual(fetched.minLoadIncrement, 5.0)
-        XCTAssertTrue(fetched.usesKilograms)
         XCTAssertEqual(fetched.bodyWeight, 195.0)
     }
 }
@@ -1503,7 +1502,7 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
         let result = OnboardingResult(
             goal: .hypertrophy, experience: .intermediate, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
-            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            sessionLengthMinutes: 60, injuryFlags: [],
             minLoadIncrement: 2.5
         )
         ProgramApplicationService.apply(result, context: context, startDate: Date())
@@ -1531,7 +1530,7 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
         let result = OnboardingResult(
             goal: .hypertrophy, experience: .new, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
-            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            sessionLengthMinutes: 60, injuryFlags: [],
             minLoadIncrement: 2.5
         )
         ProgramApplicationService.apply(result, context: context, startDate: Date())
@@ -1566,7 +1565,7 @@ final class UserProfileSingleRecordTests: XCTestCase {
         let firstResult = OnboardingResult(
             goal: .hypertrophy, experience: .new, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
-            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            sessionLengthMinutes: 60, injuryFlags: [],
             minLoadIncrement: 2.5
         )
         ProgramApplicationService.writeUserProfile(from: firstResult, context: context)
@@ -1574,7 +1573,7 @@ final class UserProfileSingleRecordTests: XCTestCase {
         let secondResult = OnboardingResult(
             goal: .fatLoss, experience: .advanced, daysPerWeek: 5,
             trainingDaysOfWeek: [1, 2, 3, 4, 5], equipmentProfile: .homeGym,
-            sessionLengthMinutes: 45, injuryFlags: [.knees], usesKilograms: true,
+            sessionLengthMinutes: 45, injuryFlags: [.knees],
             minLoadIncrement: 5.0
         )
         ProgramApplicationService.writeUserProfile(from: secondResult, context: context)
@@ -2032,7 +2031,9 @@ final class BackupRestoreImportTests: XCTestCase {
         let profile = try XCTUnwrap(try checkContext.fetch(FetchDescriptor<UserProfile>()).first)
         XCTAssertEqual(profile.bodyWeight, 200.0)
         XCTAssertEqual(profile.daysPerWeek, 5)
-        XCTAssertTrue(profile.usesKilograms)
+        // usesKilograms removed (Q18) — profileDTO's unitPreferenceRaw:
+        // "kg" above is decoded but intentionally dropped on import; no
+        // longer asserted here.
 
         let custom = try XCTUnwrap(try checkContext.fetch(FetchDescriptor<CustomExercise>()).first)
         XCTAssertTrue(custom.isBodyweight)
@@ -2718,57 +2719,13 @@ final class UnitAndIncrementChangeTests: XCTestCase {
         return ModelContext(container)
     }
 
-    // T-M.12: unit switch mid-meso — stored load must never be mutated by a
-    // unit-preference change.
-    func test_M12_unitSwitchLeavesStoredLoadUnchanged() throws {
-        let context = try makeContext()
-        let profile = UserProfile(usesKilograms: false)
-        context.insert(profile)
-
-        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 225, plannedLoadsBySet: [225, 225, 225])
-        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item])
-        context.insert(session)
-        try context.save()
-
-        profile.usesKilograms = true
-        try context.save()
-
-        XCTAssertEqual(item.suggestedLoad, 225, "switching the unit preference must never mutate stored numeric loads")
-        XCTAssertEqual(item.plannedLoadsBySet, [225, 225, 225])
-    }
-
-    // BUG CONFIRMED: switching UserProfile.unitPreference does not convert
-    // anything — usesKilograms (Domain/Models/UserProfile.swift:80-83) is
-    // purely a display-label toggle ("kg" vs "lbs"/"lb" suffix text, e.g.
-    // Features/Settings/SettingsView.swift:75,89 and Features/Session
-    // /SessionView.swift:910). Grepped the whole app for an actual lbs<->kg
-    // numeric conversion (×2.20462 or equivalent) and found none anywhere.
-    // So a SessionItem logged as "225" while usesKilograms == false displays
-    // as "225 lb"; after switching usesKilograms to true, the exact same
-    // stored 225 displays as "225 kg" — a real ~2.2x real-world weight
-    // discrepancy, the mirror image of the inflation bug T-M.12 worried
-    // about (zero conversion where a real one is expected, instead of an
-    // accidental double conversion). Do not fix here, flag for next task.
-    // See OPEN Q18 in TestOpenQuestions.swift.
-    func test_M12_BUG_unitSwitchNeverConvertsTheDisplayedNumberAtAll() {
-        let rawLoad = 225.0
-
-        // Transcription of the actual display pattern (e.g. SessionView
-        // .swift:910's `"\(formattedWeight) \(usesKilograms ? "kg" : "lb")"`)
-        // — the number itself is never touched by any conversion, only the
-        // unit suffix changes.
-        func displayedNumber(rawLoad: Double, usesKilograms: Bool) -> Double {
-            rawLoad
-        }
-
-        let displayedAsLbs = displayedNumber(rawLoad: rawLoad, usesKilograms: false)
-        let displayedAsKg = displayedNumber(rawLoad: rawLoad, usesKilograms: true)
-        let properlyConvertedKg = displayedAsLbs / 2.20462
-
-        XCTAssertEqual(
-            displayedAsKg, properlyConvertedKg, accuracy: 0.5,
-            "BUG CONFIRMED: switching the unit preference should convert the displayed number (225 lb ≈ 102 kg), but the raw value is relabeled unconverted (\"225 kg\") instead"
-        )
+    // T-M.12: unit switch mid-meso.
+    func test_M12_unitSwitchMidMeso() {
+        // usesKilograms removed in this commit (Q18 cleanup) — no unit
+        // switching in v1.x. All loads stored and displayed in lbs.
+        // Re-implement when kg support is added properly (canonical
+        // storage + real display conversion, not a label-only toggle).
+        XCTAssertTrue(true) // explicit no-op — feature removed
     }
 
     // T-M.13: increment change mid-meso — future re-rounds, historical load

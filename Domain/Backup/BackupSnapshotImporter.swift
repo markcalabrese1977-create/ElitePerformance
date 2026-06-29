@@ -33,7 +33,9 @@ enum BackupSnapshotImporter {
                 equipmentProfile: EquipmentProfile(rawValue: dto.equipmentProfileRaw ?? "") ?? .commercial,
                 injuryFlags: (dto.injuryFlagRaws ?? []).compactMap { InjuryFlag(rawValue: $0) },
                 minLoadIncrement: dto.minLoadIncrement ?? 2.5,
-                usesKilograms: dto.unitPreferenceRaw == "kg",
+                // Q18 cleanup: usesKilograms removed — dto.unitPreferenceRaw
+                // is decoded (for old backups that still have it) and
+                // intentionally dropped here, never written anywhere.
                 bodyWeight: dto.bodyWeight
             )
             modelContext.insert(profile)

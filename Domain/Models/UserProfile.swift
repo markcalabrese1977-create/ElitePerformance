@@ -46,6 +46,14 @@ enum EquipmentProfile: String, Codable {
 
 
 // MARK: - UserProfile model
+//
+// Q18 cleanup: unitPreferenceRaw (the actual stored attribute backing the
+// now-removed usesKilograms computed property) was dropped here. This
+// codebase has no VersionedSchema/SchemaMigrationPlan anywhere — UserProfile
+// is registered via a plain Schema([...]) + ModelContainer(for:configurations:)
+// in App/ElitePerformanceApp.swift — so SwiftData's lightweight/automatic
+// migration handles the dropped column on next launch; no migration plan to
+// update.
 @Model
 final class UserProfile {
     var profileId: UUID
@@ -58,7 +66,6 @@ final class UserProfile {
     var equipmentProfileRaw: String
     var injuryFlagRaws: [String]
     var minLoadIncrement: Double
-    var unitPreferenceRaw: String
     var bodyWeight: Double?
 
     var experience: TrainingExperience {
@@ -77,10 +84,6 @@ final class UserProfile {
         get { injuryFlagRaws.compactMap { InjuryFlag(rawValue: $0) } }
         set { injuryFlagRaws = newValue.map { $0.rawValue } }
     }
-    var usesKilograms: Bool {
-        get { unitPreferenceRaw == "kg" }
-        set { unitPreferenceRaw = newValue ? "kg" : "lbs" }
-    }
 
     init(
         id: UUID = UUID(),
@@ -92,7 +95,6 @@ final class UserProfile {
         equipmentProfile: EquipmentProfile = .commercial,
         injuryFlags: [InjuryFlag] = [],
         minLoadIncrement: Double = 2.5,
-        usesKilograms: Bool = false,
         bodyWeight: Double? = nil
     ) {
         self.profileId = id
@@ -104,7 +106,6 @@ final class UserProfile {
         self.equipmentProfileRaw = equipmentProfile.rawValue
         self.injuryFlagRaws = injuryFlags.map { $0.rawValue }
         self.minLoadIncrement = minLoadIncrement
-        self.unitPreferenceRaw = usesKilograms ? "kg" : "lbs"
         self.bodyWeight = bodyWeight
     }
 }

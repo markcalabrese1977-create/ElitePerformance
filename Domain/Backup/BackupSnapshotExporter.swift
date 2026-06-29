@@ -63,7 +63,10 @@ enum BackupSnapshotExporter {
                     equipmentProfileRaw: $0.equipmentProfileRaw,
                     injuryFlagRaws: $0.injuryFlagRaws,
                     minLoadIncrement: $0.minLoadIncrement,
-                    unitPreferenceRaw: $0.unitPreferenceRaw,
+                    // Q18 cleanup: UserProfile.unitPreferenceRaw no longer
+                    // exists — the DTO field stays (Optional already) so old
+                    // app versions importing a new export still decode fine.
+                    unitPreferenceRaw: nil,
                     bodyWeight: $0.bodyWeight
                 )
             },

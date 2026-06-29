@@ -25,6 +25,10 @@ struct UserProfileBackupDTO: Codable {
     let equipmentProfileRaw: String?
     let injuryFlagRaws: [String]?
     let minLoadIncrement: Double?
+    // Q18 cleanup: usesKilograms/unitPreferenceRaw removed from UserProfile.
+    // Kept here, still Optional, purely so old backups that have this key
+    // still decode without error — BackupSnapshotImporter now ignores the
+    // decoded value entirely, and BackupSnapshotExporter always writes nil.
     let unitPreferenceRaw: String?
     let bodyWeight: Double?
 }

@@ -89,7 +89,6 @@ enum ProgramApplicationService {
             profile.equipmentProfile = result.equipmentProfile
             profile.injuryFlags = result.injuryFlags
             profile.minLoadIncrement = result.minLoadIncrement
-            profile.usesKilograms = result.usesKilograms
         } else {
             let profile = UserProfile(
                 experience: result.experience,
@@ -98,8 +97,7 @@ enum ProgramApplicationService {
                 sessionLengthMinutes: result.sessionLengthMinutes,
                 equipmentProfile: result.equipmentProfile,
                 injuryFlags: result.injuryFlags,
-                minLoadIncrement: result.minLoadIncrement,
-                usesKilograms: result.usesKilograms
+                minLoadIncrement: result.minLoadIncrement
             )
             context.insert(profile)
         }

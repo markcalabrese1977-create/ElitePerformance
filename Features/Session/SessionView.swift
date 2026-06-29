@@ -752,7 +752,6 @@ private struct SessionExerciseCardView: View {
                             repRange: repRange,
                             isBodyweightExercise: isBodyweightExercise,
                             bodyWeight: userProfile?.bodyWeight,
-                            usesKilograms: userProfile?.usesKilograms ?? false,
                             onBodyweightSettingsTapped: onBodyweightSettingsTapped,
                             onLoadChanged: { text in
                                 onLoadChanged(set.index, text)
@@ -824,7 +823,6 @@ private struct SessionSetRowView: View {
     let repRange: RepRange
     let isBodyweightExercise: Bool
     let bodyWeight: Double?
-    let usesKilograms: Bool
     let onBodyweightSettingsTapped: () -> Void
 
     let onLoadChanged: (String) -> Void
@@ -907,7 +905,7 @@ private struct SessionSetRowView: View {
                         .foregroundStyle(.secondary)
                     if isBodyweightExercise {
                         if let bodyWeight, bodyWeight > 0 {
-                            Text("BW (\(formattedWeight(bodyWeight)) \(usesKilograms ? "kg" : "lb"))")
+                            Text("BW (\(formattedWeight(bodyWeight)) lb)")
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         } else {

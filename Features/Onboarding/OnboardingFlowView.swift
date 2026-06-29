@@ -38,7 +38,6 @@ struct OnboardingResult: Codable {
     var equipmentProfile: EquipmentProfile
     var sessionLengthMinutes: Int
     var injuryFlags: [InjuryFlag]
-    var usesKilograms: Bool
     var minLoadIncrement: Double
 }
 
@@ -64,7 +63,6 @@ struct OnboardingFlowView: View {
     // Page 4 — Equipment + Session length
     @State private var selectedEquipment: EquipmentProfile = .commercial
     @State private var sessionLengthMinutes: Int = 60
-    @State private var usesKilograms: Bool = false
     @State private var selectedLoadIncrement: Double = 2.5
 
     // Page 5 — Joint limitations
@@ -347,29 +345,6 @@ struct OnboardingFlowView: View {
                 Stepper(value: $sessionLengthMinutes, in: 30...120, step: 15) {
                     Text("\(sessionLengthMinutes) minutes")
                         .font(.headline)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Units")
-                    .font(.subheadline.bold())
-
-                HStack(spacing: 8) {
-                    ForEach(["lbs", "kg"], id: \.self) { unit in
-                        Button {
-                            usesKilograms = unit == "kg"
-                        } label: {
-                            Text(unit)
-                                .font(.subheadline)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill((usesKilograms ? unit == "kg" : unit == "lbs") ? Color.blue.opacity(0.15) : Color(.systemGray6))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
             }
 
@@ -685,7 +660,6 @@ struct OnboardingFlowView: View {
             equipmentProfile: selectedEquipment,
             sessionLengthMinutes: sessionLengthMinutes,
             injuryFlags: Array(selectedInjuryFlags),
-            usesKilograms: usesKilograms,
             minLoadIncrement: selectedLoadIncrement
         )
 

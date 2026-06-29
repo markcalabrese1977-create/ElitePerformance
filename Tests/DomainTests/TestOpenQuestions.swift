@@ -428,29 +428,40 @@
 //   correctly produces a hold; see
 //   .test_M6_failureWithBigRepCrashHoldsNeverIncreasesNoNaN in the same file.
 
-// OPEN Q18 (NEW): switching UserProfile.usesKilograms doesn't convert
-//   anything — it's a pure display-label toggle, with zero lbs<->kg
-//   numeric conversion logic anywhere in the codebase.
-//   Discovered while building T-M.12. The task's premise was a "canonical
-//   storage unit + display conversion" system where switching units might
-//   risk a ~2.2x inflation bug. The actual system has no conversion logic
-//   at all: usesKilograms (Domain/Models/UserProfile.swift:80-83) only
-//   controls which suffix text ("kg" vs "lbs"/"lb") is appended next to a
-//   number (e.g. Features/Settings/SettingsView.swift:75,89, Features
-//   /Session/SessionView.swift:910) — the underlying SessionItem.
-//   suggestedLoad/actualLoads/plannedLoadsBySet values are never touched.
-//   Grepped the whole app for an actual conversion factor (2.20462 or
-//   equivalent) and found none. Practical effect: a load logged as "225"
-//   while in lbs mode displays as "225 kg" after switching the toggle —
-//   the same number, now implying a real-world weight roughly 2.2x heavier
-//   than what was actually lifted. This is the mirror image of the
-//   inflation bug the task catalog worried about (an accidental ×2.2),
-//   not an accidental ×2.2, but a missing ÷2.2 — zero conversion where a
-//   real one is expected. Do not fix here, flag for next task. Confirmed
-//   by UnitAndIncrementChangeTests
-//   .test_M12_BUG_unitSwitchNeverConvertsTheDisplayedNumberAtAll
-//   (StubTests.swift) — left failing on purpose. The companion test,
-//   .test_M12_unitSwitchLeavesStoredLoadUnchanged, passes: at least the
-//   stored model value is never mutated by the toggle, which is the
-//   correct behavior for the *storage* half of this question even though
-//   the *display* half is broken.
+// OPEN Q18 — RESOLVED: usesKilograms removed entirely (this commit).
+//   No unit conversion logic existed; removal was cleaner than fixing.
+//   Re-add with proper canonical-storage + display-conversion architecture
+//   when kg users exist or are targeted.
+//
+//   Originally discovered while building T-M.12: switching
+//   UserProfile.usesKilograms didn't convert anything — it was a pure
+//   display-label toggle ("kg" vs "lbs"/"lb" suffix text), with zero
+//   lbs<->kg numeric conversion logic anywhere in the codebase. A load
+//   logged as "225" while in lbs mode would display as "225 kg" after
+//   switching the toggle — the same number, now implying a real-world
+//   weight roughly 2.2x heavier than what was actually lifted. There were
+//   no kg users and no kg requests, so rather than build the missing
+//   conversion math, the entire feature was removed:
+//   - UserProfile.unitPreferenceRaw (the real stored attribute backing the
+//     usesKilograms computed property) and usesKilograms itself
+//     (Domain/Models/UserProfile.swift) — deleted. No VersionedSchema exists
+//     in this codebase, so SwiftData's lightweight migration handles the
+//     dropped column on next launch.
+//   - Settings UI toggle and the two "kg"/"lbs" display ternaries
+//     (Features/Settings/SettingsView.swift) — removed; both now hardcode "lbs".
+//   - Onboarding's "Units" picker, its OnboardingResult.usesKilograms field,
+//     and its @State (Features/Onboarding/OnboardingFlowView.swift) — removed.
+//     It was an embedded sub-section of the equipment page, not its own of
+//     the 6 onboarding pages, so no page renumbering was needed.
+//   - ProgramApplicationService.writeUserProfile — usesKilograms read/write
+//     removed.
+//   - SessionView's SessionSetRowView.usesKilograms param and its
+//     "kg"/"lb" ternary (Features/Session/SessionView.swift:910) — removed;
+//     now hardcodes "lb".
+//   - UserProfileBackupDTO.unitPreferenceRaw (Domain/Backup
+//     /BackupSnapshotV1.swift) — kept as Optional, purely so old backups
+//     that still have the key decode without error.
+//     BackupSnapshotImporter now decodes and discards it; BackupSnapshotExporter
+//     always writes nil for new exports.
+//   T-M.12 (StubTests.swift) is now an honest no-op:
+//   test_M12_unitSwitchMidMeso.

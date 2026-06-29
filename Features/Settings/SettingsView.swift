@@ -57,11 +57,6 @@ struct SettingsView: View {
                                     Text("Dumbbells Only").tag(EquipmentProfile.dumbbellsOnly)
                                 }
 
-                                Toggle("Use Kilograms", isOn: Binding(
-                                    get: { profile.usesKilograms },
-                                    set: { profile.usesKilograms = $0 }
-                                ))
-
                                 HStack {
                                     Text("Min Load Increment")
                                     Spacer()
@@ -72,7 +67,7 @@ struct SettingsView: View {
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text(profile.usesKilograms ? "kg" : "lbs")
+                                    Text("lbs")
                                         .foregroundStyle(.secondary)
                                 }
 
@@ -86,7 +81,7 @@ struct SettingsView: View {
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text(profile.usesKilograms ? "kg" : "lbs")
+                                    Text("lbs")
                                         .foregroundStyle(.secondary)
                                 }
 
