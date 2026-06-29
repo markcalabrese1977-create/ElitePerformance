@@ -39,6 +39,8 @@ struct OnboardingResult: Codable {
     var sessionLengthMinutes: Int
     var injuryFlags: [InjuryFlag]
     var minLoadIncrement: Double
+    /// User-chosen meso start date from the date picker on the final page.
+    var startDate: Date
 }
 
 // MARK: - Flow
@@ -67,6 +69,9 @@ struct OnboardingFlowView: View {
 
     // Page 5 — Joint limitations
     @State private var selectedInjuryFlags: Set<InjuryFlag> = []
+
+    // Page 6 — Start date picker
+    @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
 
     private let totalPages = 6
 
@@ -530,6 +535,20 @@ struct OnboardingFlowView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Start date picker
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Start date")
+                        .font(.subheadline.bold())
+                    DatePicker(
+                        "Start date",
+                        selection: $mesoStartDate,
+                        in: MesoLifecycle.mesoStartDateRange,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                }
+
                 Spacer()
             }
         }
@@ -660,7 +679,8 @@ struct OnboardingFlowView: View {
             equipmentProfile: selectedEquipment,
             sessionLengthMinutes: sessionLengthMinutes,
             injuryFlags: Array(selectedInjuryFlags),
-            minLoadIncrement: selectedLoadIncrement
+            minLoadIncrement: selectedLoadIncrement,
+            startDate: mesoStartDate
         )
 
         onComplete(result)

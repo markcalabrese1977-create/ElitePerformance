@@ -11,6 +11,7 @@ struct MaintenanceProgramPickerView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    let startDate: Date
     let onSeeded: () -> Void
 
     @State private var selectedTemplate: ProgramTemplate?
@@ -98,7 +99,6 @@ struct MaintenanceProgramPickerView: View {
         errorMessage = nil
 
         do {
-            let startDate = Date()
             try MaintenanceProgramSeeder.seedFromNewProgram(
                 template: template,
                 totalWeeks: selectedWeeks,

@@ -9,6 +9,21 @@ enum MesoLifecycle {
 
     private static var calendar: Calendar { .current }
 
+    // MARK: - Meso start date picker constraints
+    // Shared across all meso-seeding confirmation sites (onboarding, new
+    // meso restart, maintenance block) so the picker behaves identically
+    // everywhere. Past allows backdating a block already effectively in
+    // progress; future allows planning ahead without seeding immediately.
+    static var mesoStartDateRange: ClosedRange<Date> {
+        let past = calendar.date(byAdding: .day, value: -30, to: .now)!
+        let future = calendar.date(byAdding: .day, value: 28, to: .now)!
+        return past...future
+    }
+
+    static var defaultMesoStartDate: Date {
+        calendar.date(byAdding: .day, value: 1, to: .now)! // tomorrow
+    }
+
     // MARK: - Active meso start (metrics cutoff)
     static var activeStartDate: Date {
         let t = UserDefaults.standard.double(forKey: activeStartEpochKey)

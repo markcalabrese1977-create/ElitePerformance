@@ -25,6 +25,7 @@ struct MesoSummaryView: View {
     @State private var expandedExerciseId: String? = nil
     @State private var showMaintenancePathChoice: Bool = false
     @State private var showProgramPicker: Bool = false
+    @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
 
     var body: some View {
         NavigationStack {
@@ -70,7 +71,7 @@ struct MesoSummaryView: View {
                             buildAnalysis()
                         }
             .sheet(isPresented: $showProgramPicker) {
-                MaintenanceProgramPickerView {
+                MaintenanceProgramPickerView(startDate: mesoStartDate) {
                     onNextBlock(.maintenanceBlock)
                     dismiss()
                 }
@@ -109,7 +110,7 @@ struct MesoSummaryView: View {
                 .reduce(into: Set<Int>()) { $0.insert($1) }
                 .sorted()
 
-            let startDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            let startDate = mesoStartDate
 
             do {
                 try MaintenanceProgramSeeder.seed(
@@ -386,6 +387,23 @@ struct MesoSummaryView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Start date picker — shared by Path A (continue split) and
+            // Path B (new program). The date chosen here flows into both
+            // seedMaintenanceBlock() and MaintenanceProgramPickerView.
+            HStack {
+                Text("Start date")
+                    .font(.subheadline)
+                Spacer()
+                DatePicker(
+                    "Start date",
+                    selection: $mesoStartDate,
+                    in: MesoLifecycle.mesoStartDateRange,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+            }
 
             VStack(spacing: 10) {
                 nextBlockButton(

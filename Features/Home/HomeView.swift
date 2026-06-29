@@ -120,7 +120,7 @@ struct HomeView: View {
             ProgramApplicationService.apply(
                 result,
                 context: modelContext,
-                startDate: Date()
+                startDate: result.startDate
             )
         }
     }

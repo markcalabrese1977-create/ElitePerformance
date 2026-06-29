@@ -17,7 +17,7 @@ struct ContentView: View {
                         ProgramApplicationService.apply(
                             result,
                             context: modelContext,
-                            startDate: Date()
+                            startDate: result.startDate
                         )
                     }
                     .navigationTitle("Welcome")

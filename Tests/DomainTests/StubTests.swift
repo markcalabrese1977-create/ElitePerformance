@@ -1503,7 +1503,7 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
             goal: .hypertrophy, experience: .intermediate, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
             sessionLengthMinutes: 60, injuryFlags: [],
-            minLoadIncrement: 2.5
+            minLoadIncrement: 2.5, startDate: Date()
         )
         ProgramApplicationService.apply(result, context: context, startDate: Date())
 
@@ -1531,7 +1531,7 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
             goal: .hypertrophy, experience: .new, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
             sessionLengthMinutes: 60, injuryFlags: [],
-            minLoadIncrement: 2.5
+            minLoadIncrement: 2.5, startDate: Date()
         )
         ProgramApplicationService.apply(result, context: context, startDate: Date())
 
@@ -1566,7 +1566,7 @@ final class UserProfileSingleRecordTests: XCTestCase {
             goal: .hypertrophy, experience: .new, daysPerWeek: 3,
             trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
             sessionLengthMinutes: 60, injuryFlags: [],
-            minLoadIncrement: 2.5
+            minLoadIncrement: 2.5, startDate: Date()
         )
         ProgramApplicationService.writeUserProfile(from: firstResult, context: context)
 
@@ -1574,7 +1574,7 @@ final class UserProfileSingleRecordTests: XCTestCase {
             goal: .fatLoss, experience: .advanced, daysPerWeek: 5,
             trainingDaysOfWeek: [1, 2, 3, 4, 5], equipmentProfile: .homeGym,
             sessionLengthMinutes: 45, injuryFlags: [.knees],
-            minLoadIncrement: 5.0
+            minLoadIncrement: 5.0, startDate: Date()
         )
         ProgramApplicationService.writeUserProfile(from: secondResult, context: context)
 
