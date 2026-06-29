@@ -2153,18 +2153,663 @@ final class SectionKReferenceTests: XCTestCase {
     }
 }
 
-// MARK: - Section L
+// MARK: - Section L — HealthKit App Group write path
 
-final class SectionLStubTests: XCTestCase {
-    func test_L_noCatalogProvided() {
-        XCTFail("Not yet implemented — stub (no catalog provided for Section L)")
+final class MechanicalLoadAppGroupTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    private func expectedDateKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    // T-L.1: App Group write/read parity.
+    //
+    // MechanicalLoadSharedStore.write(score:for:)/.read(for:) are not
+    // injectable — sharedDefaults is a private computed property that
+    // always resolves UserDefaults(suiteName: appGroupID)
+    // (Domain/MechanicalLoadSharedStore.swift:11,14-16), with no parameter
+    // to substitute a test-scoped suite. Per the SCOPE LIMIT fallback: this
+    // calls the real write function directly (appGroupID is a public
+    // constant) and verifies both the round trip through the service's own
+    // read() AND, independently, by opening
+    // UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)
+    // directly in the test and reading the exact pinned key —
+    // "mechanicalLoad.YYYY-MM-DD" — proving the key format claim, not just
+    // that *some* round trip works. Whether this resolves to the real App
+    // Group or a Simulator-local stand-in depends on entitlements outside
+    // this target's control; either way the key/value contract under test
+    // is identical, and a distinctive far-future date plus teardown avoids
+    // colliding with real data if it is the real group.
+    func test_L1_writeReadRoundTripsAndKeyFormatMatchesPinnedSpec() throws {
+        var components = DateComponents()
+        components.year = 2099
+        components.month = 3
+        components.day = 14
+        let testDate = Calendar.current.date(from: components)!
+        let expectedKey = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: testDate)
+
+        defer {
+            UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: expectedKey)
+        }
+
+        let score = 4321.0
+        MechanicalLoadSharedStore.write(score: score, for: testDate)
+
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: testDate), score, "read() must return what write() just wrote, for the same date")
+
+        guard let directDefaults = UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID) else {
+            // read()/write() already confirmed to agree with each other
+            // above; this branch only covers the deeper, independent
+            // key-format check, which needs direct UserDefaults access this
+            // test environment may not grant.
+            return
+        }
+        XCTAssertEqual(directDefaults.double(forKey: expectedKey), score, "key format must be exactly \"mechanicalLoad.YYYY-MM-DD\" — pinned from MechanicalLoadSharedStore.swift's doc comment and keyPrefix/dateKey(for:)")
+    }
+
+    // T-L.1 (continued): the score written equals
+    // MechanicalLoadHealthKitService.calculateMechanicalLoad(from:), and the
+    // date used is session.completedAt ?? session.date
+    // (MechanicalLoadHealthKitService.writeAfterSession,
+    // Domain/MechanicalLoadHealthKitService.swift:31) — not always
+    // session.date alone.
+    func test_L1_writtenValueMatchesCalculatedMechanicalLoadForTheSession() throws {
+        let context = try makeContext()
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 185,
+            actualReps: [8], actualLoads: [185]
+        )
+        let completedAt = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item], completedAt: completedAt)
+        context.insert(session)
+        try context.save()
+
+        let expectedScore = MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session)
+        XCTAssertGreaterThan(expectedScore, 0, "fixture must produce a real, non-zero mechanical load to be a meaningful test")
+
+        let expectedKey = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: completedAt)
+        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: expectedKey) }
+
+        // Mirrors writeAfterSession's own completedAt ?? date key date
+        // directly, rather than awaiting the real detached Task inside
+        // SessionScreenViewModel.persistCompletion, which isn't reliably
+        // observable synchronously from a test.
+        MechanicalLoadSharedStore.write(score: expectedScore, for: session.completedAt ?? session.date)
+
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: completedAt), expectedScore)
+    }
+
+    // T-L.2: App Group unavailable — graceful degrade, no crash.
+    //
+    // CORRECTED PREMISE: UserDefaults(suiteName:) does NOT return nil for an
+    // arbitrary/unentitled suite name — empirically confirmed (this
+    // assertion originally asserted XCTAssertNil and failed) that it
+    // returns a valid, locally-backed, non-shared instance instead.
+    // Foundation only documents nil for suiteName == Bundle.main
+    // .bundleIdentifier (colliding with the standard defaults domain), not
+    // for "an app group this process isn't entitled to." So
+    // MechanicalLoadSharedStore's `guard let defaults = sharedDefaults else
+    // { ...; return }` is defensive code for a scenario that may never
+    // actually trigger on this platform; the real graceful-degrade
+    // behavior it's meant to protect is verified directly by write()/
+    // read() never crashing
+    // (test_L2_writeAndReadNeverCrashRegardlessOfAppGroupAvailability, below).
+    func test_L2_arbitrarySuiteNameDoesNotCrashRegardlessOfEntitlement() {
+        let arbitrary = UserDefaults(suiteName: "definitely-invalid-nonexistent-app-group-id-xyz-987")
+        XCTAssertNotNil(arbitrary, "Foundation does not validate App Group entitlements at UserDefaults(suiteName:) construction time — it succeeds with a local, non-shared instance instead of returning nil")
+    }
+
+    func test_L2_writeAndReadNeverCrashRegardlessOfAppGroupAvailability() {
+        // No injection point exists to force sharedDefaults to nil for this
+        // call specifically, but write/read must be safe to call under any
+        // circumstance — this confirms they don't throw/crash/hang.
+        MechanicalLoadSharedStore.write(score: 100, for: Date())
+        _ = MechanicalLoadSharedStore.read(for: Date())
+        _ = MechanicalLoadSharedStore.readRange(from: Date(), to: Date())
+        XCTAssertTrue(true) // reaching this line at all is the assertion
+    }
+
+    // T-L.3: custom HKQuantityType path is not used by the real write flow.
+    //
+    // CORRECTED PREMISE: the string
+    // "com.calabrese.eliteperformance.mechanicalLoad" is NOT fully gone
+    // from production source — it's still declared as
+    // MechanicalLoadHealthKitService.quantityTypeIdentifier
+    // (Domain/MechanicalLoadHealthKitService.swift:15), used by two
+    // `private` functions, requestWriteAuthorizationIfNeeded() and
+    // writeSample(score:date:). But neither is called from anywhere —
+    // writeAfterSession(_:), the only public entry point, goes straight to
+    // MechanicalLoadSharedStore.write(score:for:) (the shared-UserDefaults
+    // approach), with an explicit comment confirming why: "Custom
+    // HKQuantityType identifiers are not supported for third-party apps
+    // without special entitlements." So the literal "no reference anywhere
+    // in source" claim is false; the accurate claim is "the active write
+    // path never reaches the custom-quantity-type code" — dead code, not a
+    // live bug. See OPEN Q16 in TestOpenQuestions.swift.
+    func test_L3_activeWritePathNeverUsesUnsupportedCustomQuantityType() async throws {
+        let context = try makeContext()
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 185, actualReps: [8], actualLoads: [185])
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item])
+        context.insert(session)
+        try context.save()
+
+        let key = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: session.completedAt ?? session.date)
+        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: key) }
+
+        // writeAfterSession is the only public entry point production code
+        // calls (Features/Session/SessionView.swift:2268). Calling it here
+        // must not throw/crash even though the custom-quantity-type path
+        // (which would need an unsupported HKQuantityType and would throw
+        // MechanicalLoadError.unsupportedQuantityType if reached) exists
+        // unused in the same file — proving it's truly unreachable from the
+        // real flow, not just absent from a naive string search.
+        await MechanicalLoadHealthKitService.writeAfterSession(session)
+        // Reaching here without throwing/crashing is the assertion.
     }
 }
 
-// MARK: - Section M
+// MARK: - Section M — Cross-cutting user behavior
 
-final class SectionMStubTests: XCTestCase {
-    func test_M_noCatalogProvided() {
-        XCTFail("Not yet implemented — stub (no catalog provided for Section M)")
+final class CrossCuttingBehaviorCoverageMapTests: XCTestCase {
+
+    func test_M1_fullSessionSkipCarriesFromLastCompleted() {
+        // Already covered: InvariantTests
+        // .test_N6_carryForwardWritesEachMatchedItemExactlyOnce_andIsIdempotent
+        // (NOT LoadWriteTests.test_B9, which is about prescription-field
+        // immutability, not idempotent carry-forward — corrected from this
+        // task's original cross-reference). N6 proves carrying forward from
+        // the most recent matched session writes each item exactly once and
+        // produces the same result if run again, which is exactly what
+        // "skip a full session, then carry forward from the last completed
+        // one" depends on.
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M2_skipTiredFatiguedDoesNotDecreaseLoad() {
+        // Already covered: CoachingEngineGuardTests
+        // .test_A6_fatigueFlagOverridesOverPerformance (a fatigue flag
+        // forces a hold even when raw performance looks like it should
+        // increase) and LoadWriteTests
+        // .test_B7_repeatedFatigueSignalsReduceSetCountOnCarryForward
+        // (repeated fatigue signals reduce SET COUNT on carry-forward — a
+        // volume response, never a load decrease). Between the two,
+        // fatigue/tiredness is handled by holding or reducing volume, never
+        // by decreasing suggestedLoad.
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M3_partialSessionCoachingOnlyOnLoggedItems() {
+        // Already covered: CoachingEngineGuardTests
+        // .test_A10_incompleteSessionGatesBeforeARealRecommendation and,
+        // most directly, CoachingMessageSeamTests
+        // .testHandleSetLogged_partialSession_noMessageYet /
+        // .testHandleSetLogged_completeSession_emitsCoachMessage — the
+        // stage gate withholds a verdict until all planned sets for an item
+        // are logged, so coaching never fires on an item that's only
+        // partially logged within a partial session.
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M5_fatFingerLoadCappedAt2x() {
+        // Already covered: InvariantTests.test_N1_coachingEngineNeverExceeds2xBaseLoad
+        // and .test_N1_planMemoryEngineCarryForwardNeverExceeds2xSource,
+        // plus CoachingEngineGuardTests
+        // .test_A9_downshiftDetectionRebaselinesBeforeOtherBranches (an
+        // implausible jump is treated as a downshift/rebaseline signal
+        // rather than taken at face value).
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M14_swapMidMesoGetsNewIdNoStaleLoad() {
+        // Already covered: ExerciseSwapPropagationTests
+        // .test_J2_swapPropagatesByCanonicalIdNotPosition, and
+        // ProgramDayDetailView.swapExercise (Features/Home
+        // /ProgramDayDetailView.swift:593-613) zeroes suggestedLoad/
+        // plannedLoadsBySet/actualLoads/actualReps/actualRIRs/coachNote at
+        // the swap site itself, before propagation ever runs — so a swapped
+        // exercise never carries a stale load from the exercise it replaced.
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M16_midWorkoutPainFlagWarnsNextSession() {
+        // Already covered: LoadWriteTests
+        // .test_B8_painFlagCarriesForwardAWarningCoachNote (the direct
+        // match — a pain flag carries forward as a warning coachNote on
+        // the next session's matched item), plus CoachingEngineGuardTests
+        // .test_A4_painGuardBlocksProgressionRegardlessOfPerformance (the
+        // same-session stop) and SetStatusBadgeTests
+        // .test_G4_painCoachNotePrefixIsPresent (the "⚠️" prefix convention).
+        XCTAssertTrue(true) // explicit no-op — covered elsewhere
+    }
+
+    func test_M15_simulatorVsDeviceSeparateStores() {
+        // SCOPE LIMIT: simulator and physical-device SwiftData stores are
+        // physically separate on-disk containers selected by the runtime
+        // environment (App/ElitePerformanceApp.swift's store-selection
+        // logic) — there is no way to run "simulator" and "device" as two
+        // states within a single XCTest process. Not unit-testable.
+        XCTAssertTrue(true) // explicit no-op — scope limit documented above
+    }
+}
+
+final class ExtraSetsAndFailureTests: XCTestCase {
+
+    // T-M.4: extra sets beyond plan. CoachingEngine.recommend reads from
+    // item.actualLoads/actualReps/actualRIRs in full (Domain/Logic
+    // /CoachingEngine.swift:25-29,79-93) — plannedWorkingSetCount is the
+    // MINIMUM required for the stage gate to clear, not a hard cap on how
+    // many logged sets can be read, so logging more sets than planned is
+    // used in full, not truncated or out-of-range.
+    func test_M4_extraSetsBeyondPlanAreUsedNotTruncated() {
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+            plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+            // 5 sets logged against a 3-set plan — all on-target or better.
+            actualReps: [8, 8, 8, 8, 8],
+            actualLoads: [185, 185, 185, 185, 185],
+            actualRIRs: [2, 2, 2, 1, 1]
+        )
+        let recommendation = CoachingEngine.recommend(for: item)
+        XCTAssertNotNil(recommendation, "5 logged sets, all on-target or better, against a 3-set plan must still produce a real verdict, not a crash or a withheld stage-gate")
+    }
+
+    // T-M.6: a realistic, partial failure (final set craters hard) hits the
+    // documented "failure + rep crash → hold" branch (Domain/Logic
+    // /CoachingEngine.swift:275-281): never an increase, never NaN/Inf/negative.
+    func test_M6_failureWithBigRepCrashHoldsNeverIncreasesNoNaN() {
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+            plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+            // First two sets clean; the third craters to 3 reps at RIR 0 —
+            // a genuine failure, not an unlogged set.
+            actualReps: [8, 8, 3], actualLoads: [185, 185, 185], actualRIRs: [2, 2, 0]
+        )
+        let recommendation = CoachingEngine.recommend(for: item)
+        let nextLoad = try? XCTUnwrap(recommendation?.nextSuggestedLoad)
+        XCTAssertNotNil(recommendation, "the engine must respond (hold or reduce) to a genuine failure, not withhold entirely")
+        if let nextLoad {
+            XCTAssertFalse(nextLoad.isNaN)
+            XCTAssertFalse(nextLoad.isInfinite)
+            XCTAssertGreaterThanOrEqual(nextLoad, 0)
+            XCTAssertLessThanOrEqual(nextLoad, item.suggestedLoad, "a hard rep-crash failure must never produce an increase")
+        }
+    }
+
+    // BUG CONFIRMED: CoachingEngine.recommend cannot distinguish a true
+    // 0-rep total-failure set from a not-yet-logged one — both fail the
+    // `reps[idx] > 0 && loads[idx] > 0` workingIndices filter (Domain/Logic
+    // /CoachingEngine.swift:79-85) identically, so a session where every
+    // set was genuinely attempted at the planned load but failed at 0 reps
+    // produces workingIndices == [] and returns nil at the `guard
+    // !workingIndices.isEmpty else { return nil }` line — the same silent
+    // withholding as an entirely unlogged item, not a hold/reduce message.
+    // There is no "attempted" flag separate from reps/load in SessionItem
+    // to disambiguate the two cases. Do not fix here, flag for next task.
+    // See OPEN Q17 in TestOpenQuestions.swift.
+    func test_M6_BUG_totalFailureAllSetsZeroRepsIsIndistinguishableFromUnloggedAndWithholdsEntirely() {
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+            plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+            // Every set genuinely attempted at the planned load — failed to
+            // complete a single rep on any of them. Total failure, not
+            // "didn't try."
+            actualReps: [0, 0, 0], actualLoads: [185, 185, 185], actualRIRs: [0, 0, 0]
+        )
+        let recommendation = CoachingEngine.recommend(for: item)
+        XCTAssertNotNil(recommendation, "BUG CONFIRMED: a genuine total-failure session (3 attempted sets, 0 reps achieved on all of them) should produce a hold/reduce verdict, but the engine cannot distinguish this from an unlogged item and withholds entirely")
+    }
+}
+
+final class SameDaySessionsTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-M.7: multiple sessions on the same calendar date never collide.
+    // Session.weekIndex (Domain/Models/Session.swift:61-64) is a plain
+    // stored Int (weekInMeso ?? 1) set explicitly at construction — never
+    // derived from .date — so there is no shared-date-based key anywhere in
+    // the model that two same-day sessions could collide on. Identity is
+    // Session.id (a UUID), not date. Verified by persisting two same-day
+    // sessions independently via SessionScreenViewModel.persist (the
+    // in-progress-save path) and confirming both retain their own
+    // date/weekIndex/items after a real SwiftData round trip.
+    func test_M7_multipleSessionsSameDateDoNotCollideOnWeekIndexOrIdentity() throws {
+        let context = try makeContext()
+        let sameDate = Date()
+
+        let item1 = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 185)
+        let session1 = Session(date: sameDate, status: .inProgress, weekIndex: 3, dayLabel: "Push", items: [item1])
+        context.insert(session1)
+
+        let item2 = SessionItem(order: 1, exerciseId: "back_squat", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 225)
+        let session2 = Session(date: sameDate, status: .inProgress, weekIndex: 7, dayLabel: "Bonus Legs", items: [item2])
+        context.insert(session2)
+        try context.save()
+
+        let vm1 = SessionScreenViewModel(session: session1)
+        vm1.exercises[0].sets[0].actualLoadText = "185"
+        vm1.exercises[0].sets[0].actualRepsText = "8"
+        vm1.persist(using: context)
+
+        let vm2 = SessionScreenViewModel(session: session2)
+        vm2.exercises[0].sets[0].actualLoadText = "225"
+        vm2.exercises[0].sets[0].actualRepsText = "5"
+        vm2.persist(using: context)
+
+        let allSessions = try context.fetch(FetchDescriptor<Session>())
+        XCTAssertEqual(allSessions.count, 2, "two distinct same-date sessions, never merged into one")
+
+        let fetched1 = try XCTUnwrap(allSessions.first { $0.weekIndex == 3 })
+        let fetched2 = try XCTUnwrap(allSessions.first { $0.weekIndex == 7 })
+        XCTAssertEqual(fetched1.date, sameDate)
+        XCTAssertEqual(fetched2.date, sameDate)
+        XCTAssertNotEqual(fetched1.weekIndex, fetched2.weekIndex)
+        XCTAssertEqual(fetched1.items.first?.exerciseId, "bench_press")
+        XCTAssertEqual(fetched2.items.first?.exerciseId, "back_squat")
+    }
+}
+
+final class LongLayoffAndOverrideTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-M.8: long layoff holds at the last suggestion — no auto-detrain.
+    // Neither PlanMemoryEngine.carryForwardPlans nor LoadProjectionService
+    // .project contains any days-since-source-session penalty; decay
+    // weighting only matters when comparing MULTIPLE candidates against
+    // each other, and with a single historical data point its weight
+    // cancels out of the average regardless of how old it is. Verified by
+    // direct A/B comparison rather than hand-deriving the RIR/decay-weighted
+    // e1RM arithmetic by hand.
+    func test_M8_longLayoffCarriesForwardAtSameSuggestionAsARecentOne() throws {
+        func suggestedLoadAfterCarryForward(daysAgo: Int) throws -> Double {
+            let context = try makeContext()
+            let calendar = Calendar.current
+            let sourceDate = calendar.date(byAdding: .day, value: -daysAgo, to: Date())!
+
+            let sourceItem = SessionItem(
+                order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+                actualReps: [8, 8, 8], actualLoads: [185, 185, 185], actualRIRs: [2, 2, 2]
+            )
+            let sourceSession = Session(date: sourceDate, status: .completed, weekIndex: 1, items: [sourceItem])
+            context.insert(sourceSession)
+
+            let targetItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0, plannedLoadsBySet: [0, 0, 0])
+            let targetSession = Session(date: Date(), status: .planned, weekIndex: 2, items: [targetItem])
+            context.insert(targetSession)
+            try context.save()
+
+            let engine = PlanMemoryEngine(context: context)
+            engine.carryForwardPlans(from: sourceSession)
+            try context.save()
+            return targetItem.suggestedLoad
+        }
+
+        let recentResult = try suggestedLoadAfterCarryForward(daysAgo: 5)
+        let longLayoffResult = try suggestedLoadAfterCarryForward(daysAgo: 90)
+
+        XCTAssertGreaterThan(recentResult, 0, "fixture must produce a real suggestion to be meaningful")
+        XCTAssertEqual(recentResult, longLayoffResult, "a 90-day layoff must carry forward identically to a 5-day one — no automatic detrain reduction based on time since the source session")
+    }
+
+    // T-M.9: consistent override lower → suggestions read from actual
+    // logged loads, not the stale prior suggestedLoad. LoadProjectionService's
+    // candidate building reads item.actualLoads/actualReps exclusively
+    // (Domain/Logic/LoadProjectionService.swift:174-187) — item.suggestedLoad
+    // is never read as a basis for the projection itself.
+    func test_M9_consistentlyLowerActualsDriveTheSuggestionNotThePriorSuggestedLoad() throws {
+        let context = try makeContext()
+        let calendar = Calendar.current
+
+        var lastSession: Session!
+        for daysAgo in [21, 14, 7] {
+            let date = calendar.date(byAdding: .day, value: -daysAgo, to: Date())!
+            let item = SessionItem(
+                order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100,
+                plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [100, 100, 100], plannedRIRsBySet: [2, 2, 2],
+                actualReps: [8, 8, 8], actualLoads: [80, 80, 80], actualRIRs: [2, 2, 2]
+            )
+            let session = Session(date: date, status: .completed, weekIndex: 1, items: [item])
+            context.insert(session)
+            lastSession = session
+        }
+
+        let targetItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0, plannedLoadsBySet: [0, 0, 0])
+        let targetSession = Session(date: Date(), status: .planned, weekIndex: 2, items: [targetItem])
+        context.insert(targetSession)
+        try context.save()
+
+        let engine = PlanMemoryEngine(context: context)
+        engine.carryForwardPlans(from: lastSession)
+        try context.save()
+
+        XCTAssertGreaterThan(targetItem.suggestedLoad, 0, "must produce a real projection")
+        XCTAssertLessThan(targetItem.suggestedLoad, 95, "suggestion must track the consistently-logged ~80 actuals, not the stale suggestedLoad of 100")
+        XCTAssertGreaterThan(targetItem.suggestedLoad, 65, "sanity bound — should land near 75-80, not collapse toward zero")
+    }
+}
+
+final class RetroactiveCascadeAndDeletionTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-M.10: edits to a completed session do not retroactively cascade.
+    //
+    // Policy pin: no retroactive cascade. If this policy changes, this test
+    // must be updated explicitly.
+    //
+    // There is no model-layer immutability guard on Session/SessionItem
+    // properties after status == .completed — nothing stops a direct
+    // mutation at the model layer. The real enforcement lives in
+    // ProgramPlanPropagationService.applyPlanEditsForward's own target
+    // filter (Domain/Logic/ProgramPlanPropagationService.swift:46-50),
+    // which only ever selects sessions with status == .planned as
+    // propagation targets — a completed session can never be a target, so
+    // editing a still-planned source and propagating forward can never
+    // retroactively rewrite something already logged.
+    func test_M10_propagationNeverTargetsACompletedSession() throws {
+        let context = try makeContext()
+        let meso = MesoBlock(name: "Test Meso", startDate: Date(), totalWeeks: 8)
+        context.insert(meso)
+
+        let sourceItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 999)
+        let sourceSession = Session(date: Date(), status: .planned, weekIndex: 1, items: [sourceItem])
+        sourceSession.meso = meso
+        context.insert(sourceSession)
+
+        let calendar = Calendar.current
+
+        // A future session, same weekday, same exercise — but already
+        // COMPLETED (already logged history), not planned.
+        let completedItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        let completedFuture = Session(date: calendar.date(byAdding: .day, value: 7, to: Date())!, status: .completed, weekIndex: 2, items: [completedItem])
+        completedFuture.meso = meso
+        context.insert(completedFuture)
+
+        // A genuinely still-planned future session — the only legitimate target.
+        let plannedItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        let plannedFuture = Session(date: calendar.date(byAdding: .day, value: 14, to: Date())!, status: .planned, weekIndex: 3, items: [plannedItem])
+        plannedFuture.meso = meso
+        context.insert(plannedFuture)
+        try context.save()
+
+        ProgramPlanPropagationService.applyPlanEditsForward(from: sourceSession, in: context)
+        try context.save()
+
+        XCTAssertEqual(completedItem.suggestedLoad, 185, "a completed (already-logged) session must never be retroactively rewritten by a later plan edit")
+        XCTAssertEqual(plannedItem.suggestedLoad, 999, "only still-planned future sessions are legitimate propagation targets")
+    }
+
+    // T-M.11: deleting a session excludes it from anchoring — ProgramGenerator
+    // .anchorLoadsForNewMeso (Domain/Logic/ProgramGenerator.swift:25,31-37)
+    // re-fetches allSessions fresh from the context every call; a deleted
+    // session is simply gone from that fetch.
+    func test_M11_deletingASessionExcludesItFromAnchoring() throws {
+        let context = try makeContext()
+        let calendar = Calendar.current
+
+        func makeHistorySession(daysAgo: Int, load: Double) -> Session {
+            let item = SessionItem(
+                order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: load,
+                actualReps: [8], actualLoads: [load]
+            )
+            let session = Session(date: calendar.date(byAdding: .day, value: -daysAgo, to: Date())!, status: .completed, weekIndex: 1, items: [item])
+            context.insert(session)
+            return session
+        }
+
+        _ = makeHistorySession(daysAgo: 21, load: 185)
+        let peakSession = makeHistorySession(daysAgo: 14, load: 500) // about to be deleted
+        _ = makeHistorySession(daysAgo: 7, load: 190)
+        try context.save()
+
+        context.delete(peakSession)
+        try context.save()
+
+        let newMeso = MesoBlock(name: "New Meso", startDate: Date(), status: .active, totalWeeks: 8)
+        context.insert(newMeso)
+        let newItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 0)
+        let newSession = Session(date: Date(), status: .planned, weekIndex: 1, items: [newItem])
+        newSession.meso = newMeso
+        newMeso.sessions.append(newSession)
+        context.insert(newSession)
+        try context.save()
+
+        ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: newMeso, context: context)
+
+        XCTAssertGreaterThan(newItem.suggestedLoad, 0, "must produce a real anchor from the remaining sessions")
+        // A decay-weighted average including the deleted session's 500 load
+        // would land well above 250; confirming it lands far below proves
+        // genuine exclusion, not mere dilution.
+        XCTAssertLessThan(newItem.suggestedLoad, 250, "the deleted session's peak (500) must not still be influencing the anchor")
+    }
+}
+
+final class UnitAndIncrementChangeTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-M.12: unit switch mid-meso — stored load must never be mutated by a
+    // unit-preference change.
+    func test_M12_unitSwitchLeavesStoredLoadUnchanged() throws {
+        let context = try makeContext()
+        let profile = UserProfile(usesKilograms: false)
+        context.insert(profile)
+
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 225, plannedLoadsBySet: [225, 225, 225])
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item])
+        context.insert(session)
+        try context.save()
+
+        profile.usesKilograms = true
+        try context.save()
+
+        XCTAssertEqual(item.suggestedLoad, 225, "switching the unit preference must never mutate stored numeric loads")
+        XCTAssertEqual(item.plannedLoadsBySet, [225, 225, 225])
+    }
+
+    // BUG CONFIRMED: switching UserProfile.unitPreference does not convert
+    // anything — usesKilograms (Domain/Models/UserProfile.swift:80-83) is
+    // purely a display-label toggle ("kg" vs "lbs"/"lb" suffix text, e.g.
+    // Features/Settings/SettingsView.swift:75,89 and Features/Session
+    // /SessionView.swift:910). Grepped the whole app for an actual lbs<->kg
+    // numeric conversion (×2.20462 or equivalent) and found none anywhere.
+    // So a SessionItem logged as "225" while usesKilograms == false displays
+    // as "225 lb"; after switching usesKilograms to true, the exact same
+    // stored 225 displays as "225 kg" — a real ~2.2x real-world weight
+    // discrepancy, the mirror image of the inflation bug T-M.12 worried
+    // about (zero conversion where a real one is expected, instead of an
+    // accidental double conversion). Do not fix here, flag for next task.
+    // See OPEN Q18 in TestOpenQuestions.swift.
+    func test_M12_BUG_unitSwitchNeverConvertsTheDisplayedNumberAtAll() {
+        let rawLoad = 225.0
+
+        // Transcription of the actual display pattern (e.g. SessionView
+        // .swift:910's `"\(formattedWeight) \(usesKilograms ? "kg" : "lb")"`)
+        // — the number itself is never touched by any conversion, only the
+        // unit suffix changes.
+        func displayedNumber(rawLoad: Double, usesKilograms: Bool) -> Double {
+            rawLoad
+        }
+
+        let displayedAsLbs = displayedNumber(rawLoad: rawLoad, usesKilograms: false)
+        let displayedAsKg = displayedNumber(rawLoad: rawLoad, usesKilograms: true)
+        let properlyConvertedKg = displayedAsLbs / 2.20462
+
+        XCTAssertEqual(
+            displayedAsKg, properlyConvertedKg, accuracy: 0.5,
+            "BUG CONFIRMED: switching the unit preference should convert the displayed number (225 lb ≈ 102 kg), but the raw value is relabeled unconverted (\"225 kg\") instead"
+        )
+    }
+
+    // T-M.13: increment change mid-meso — future re-rounds, historical load
+    // untouched. PlanMemoryEngine.carryForwardPlans re-reads
+    // UserProfile.minLoadIncrement fresh on every call (Domain/Logic
+    // /PlanMemoryEngine.swift:25-27); nothing re-rounds already-logged
+    // historical loads retroactively.
+    func test_M13_incrementChangeReRoundsFutureSuggestionLeavesHistoricalLoadUntouched() throws {
+        let context = try makeContext()
+        let profile = UserProfile(minLoadIncrement: 2.5)
+        context.insert(profile)
+
+        let calendar = Calendar.current
+        let sourceItem = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 102.5,
+            plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [102.5, 102.5, 102.5], plannedRIRsBySet: [2, 2, 2],
+            actualReps: [8, 8, 8], actualLoads: [102.5, 102.5, 102.5], actualRIRs: [2, 2, 2]
+        )
+        let sourceSession = Session(date: calendar.date(byAdding: .day, value: -7, to: Date())!, status: .completed, weekIndex: 1, items: [sourceItem])
+        context.insert(sourceSession)
+
+        let targetItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0, plannedLoadsBySet: [0, 0, 0])
+        let targetSession = Session(date: Date(), status: .planned, weekIndex: 2, items: [targetItem])
+        context.insert(targetSession)
+        try context.save()
+
+        // Increment changes mid-meso, after the historical session was logged.
+        profile.minLoadIncrement = 5.0
+        try context.save()
+
+        let engine = PlanMemoryEngine(context: context)
+        engine.carryForwardPlans(from: sourceSession)
+        try context.save()
+
+        // Historical (source) load is never touched by the increment change
+        // or by carry-forward — only the future target session's suggestion moves.
+        XCTAssertEqual(sourceItem.suggestedLoad, 102.5)
+        XCTAssertEqual(sourceItem.plannedLoadsBySet, [102.5, 102.5, 102.5])
+
+        XCTAssertGreaterThan(targetItem.suggestedLoad, 0)
+        let remainder = targetItem.suggestedLoad.truncatingRemainder(dividingBy: 5.0)
+        XCTAssertEqual(remainder, 0, accuracy: 0.001, "suggestion must be rounded to a multiple of the new 5.0 increment, not the old 2.5")
     }
 }

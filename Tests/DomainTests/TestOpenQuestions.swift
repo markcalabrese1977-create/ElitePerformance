@@ -381,3 +381,76 @@
 //   (StubTests.swift) alongside the other four "added later" fields, since
 //   it's no longer a separate failure mode — the dedicated BUG CONFIRMED
 //   test that isolated it is now redundant and was removed.
+
+// OPEN Q16 (NEW): the unsupported custom HKQuantityType path is dead code,
+//   not removed code — string + two private functions still exist, unused.
+//   Discovered while building T-L.3. The task's premise was that the old
+//   custom-HKQuantityType write path had been fully removed from source.
+//   That's not quite right: MechanicalLoadHealthKitService.swift:15 still
+//   declares `quantityTypeIdentifier = "com.calabrese.eliteperformance
+//   .mechanicalLoad"`, and two `private` functions
+//   (requestWriteAuthorizationIfNeeded(), writeSample(score:date:)) still
+//   reference it. Neither function has a single call site anywhere in the
+//   codebase — the real, only public entry point, writeAfterSession(_:),
+//   goes straight to MechanicalLoadSharedStore.write(score:for:) (shared
+//   App Group UserDefaults), with its own comment explaining why: custom
+//   HKQuantityType identifiers aren't supported for third-party apps
+//   without special entitlements. So the string and the two functions are
+//   harmless, unreachable leftovers from an earlier, abandoned approach —
+//   not a live bug, not a security/crash risk, just dead code that a naive
+//   "grep for the string" check would flag incorrectly. Tested as the
+//   structural fact it is in MechanicalLoadAppGroupTests
+//   .test_L3_activeWritePathNeverUsesUnsupportedCustomQuantityType
+//   (StubTests.swift): the real write path is exercised end-to-end and
+//   confirmed never to throw the custom-quantity-type error path. Same
+//   class of finding as OPEN Q13 (ProgramCatalog.recommend) — dead,
+//   unreferenced code discovered while testing a "this was removed" claim.
+
+// OPEN Q17 (NEW): CoachingEngine.recommend cannot tell a genuine 0-rep
+//   total-failure set apart from a not-yet-logged one — both withhold a
+//   verdict entirely instead of producing a hold/reduce recommendation.
+//   Discovered while building T-M.6. workingIndices (Domain/Logic
+//   /CoachingEngine.swift:79-85) is built from `reps[idx] > 0 && loads[idx]
+//   > 0` — a set where the lifter attempted the prescribed load and failed
+//   every single rep (reps == 0, load == the attempted weight) fails this
+//   filter exactly the same way an entirely unlogged set would. With every
+//   set in the item failing to 0 reps, workingIndices ends up empty and
+//   `guard !workingIndices.isEmpty else { return nil }` (line 91) returns
+//   nil — silence, not a hold/reduce coaching message. SessionItem has no
+//   "this set was attempted" flag independent of reps/load to disambiguate
+//   the two cases. A user who fails every rep on every set of an exercise
+//   gets zero feedback from the coach, same as if they'd skipped it
+//   entirely. Do not fix here, flag for next task. Confirmed by
+//   ExtraSetsAndFailureTests
+//   .test_M6_BUG_totalFailureAllSetsZeroRepsIsIndistinguishableFromUnloggedAndWithholdsEntirely
+//   (StubTests.swift) — left failing on purpose. A more realistic partial
+//   failure (one set craters but isn't literally 0 reps) is unaffected and
+//   correctly produces a hold; see
+//   .test_M6_failureWithBigRepCrashHoldsNeverIncreasesNoNaN in the same file.
+
+// OPEN Q18 (NEW): switching UserProfile.usesKilograms doesn't convert
+//   anything — it's a pure display-label toggle, with zero lbs<->kg
+//   numeric conversion logic anywhere in the codebase.
+//   Discovered while building T-M.12. The task's premise was a "canonical
+//   storage unit + display conversion" system where switching units might
+//   risk a ~2.2x inflation bug. The actual system has no conversion logic
+//   at all: usesKilograms (Domain/Models/UserProfile.swift:80-83) only
+//   controls which suffix text ("kg" vs "lbs"/"lb") is appended next to a
+//   number (e.g. Features/Settings/SettingsView.swift:75,89, Features
+//   /Session/SessionView.swift:910) — the underlying SessionItem.
+//   suggestedLoad/actualLoads/plannedLoadsBySet values are never touched.
+//   Grepped the whole app for an actual conversion factor (2.20462 or
+//   equivalent) and found none. Practical effect: a load logged as "225"
+//   while in lbs mode displays as "225 kg" after switching the toggle —
+//   the same number, now implying a real-world weight roughly 2.2x heavier
+//   than what was actually lifted. This is the mirror image of the
+//   inflation bug the task catalog worried about (an accidental ×2.2),
+//   not an accidental ×2.2, but a missing ÷2.2 — zero conversion where a
+//   real one is expected. Do not fix here, flag for next task. Confirmed
+//   by UnitAndIncrementChangeTests
+//   .test_M12_BUG_unitSwitchNeverConvertsTheDisplayedNumberAtAll
+//   (StubTests.swift) — left failing on purpose. The companion test,
+//   .test_M12_unitSwitchLeavesStoredLoadUnchanged, passes: at least the
+//   stored model value is never mutated by the toggle, which is the
+//   correct behavior for the *storage* half of this question even though
+//   the *display* half is broken.
