@@ -59,7 +59,7 @@
 
 // OPEN Q4: T-B.10 — Three addExercise paths
 //   Today "+", ProgramDayDetailView, PlannedSessionEditorView. Known to
-//   diverge silently. RESOLVED (partially) via direct source read:
+//   diverge silently. RESOLVED:
 //     - SessionScreenViewModel.addExercise (SessionView.swift) — correctly
 //       seeds exerciseNameSnapshot and non-empty actual/planned arrays (fixed
 //       earlier this session). Directly unit-tested in LoadWriteTests
@@ -68,20 +68,15 @@
 //       reference/"known good" implementation used to fix the SessionView
 //       path earlier this session) — but it's `private`, so it cannot be
 //       unit-tested directly without changing source visibility.
-//     - PlannedSessionEditorView.addExercise(_:) (Features/Planner
-//       /PlannedSessionEditorView.swift:80-102) — CONFIRMED to have the exact
-//       same bug class that was fixed in SessionScreenViewModel: it never
-//       sets exerciseNameSnapshot, and leaves actualReps/actualLoads
-//       /actualRIRs at SessionItem's empty-array default. This path is
-//       un-audited and currently broken the same way the other one used to
-//       be. Also `private`, so reproduced by verbatim transcription in
-//       LoadWriteTests.test_B10_KNOWN_GAP_plannedSessionEditorViewAddExerciseOmitsNameAndArrays
-//       rather than called directly.
-//   Decision still deferred: consolidate to one shared function, or keep
-//   testing all three for parity each release. Given a THIRD instance of the
-//   same bug class just turned up un-audited, consolidation looks like the
-//   stronger option, but that's a product/architecture call, not something
-//   this test-writing pass should decide unilaterally.
+//     - PlannedSessionEditorView.addExercise(_:) — had the exact same bug
+//       class that was fixed in SessionScreenViewModel (never set
+//       exerciseNameSnapshot, left actualReps/actualLoads/actualRIRs at
+//       SessionItem's empty-array default). Grepped for live references
+//       before touching anything: zero call sites anywhere in the app —
+//       confirmed dead code, not a reachable bug. Deleted
+//       (Features/Planner/PlannedSessionEditorView.swift and its now-empty
+//       Planner group) rather than fixed, since fixing dead code just teaches
+//       it to hide better. Two paths remain, both correct.
 
 // OPEN Q5: T-G.6 — Volume auto-regulation
 //   Accumulated soreness does NOT yet change set counts. Confirm

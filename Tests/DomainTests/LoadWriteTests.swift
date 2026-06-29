@@ -333,27 +333,18 @@ final class LoadWriteTests: XCTestCase {
         XCTAssertEqual(futureItem.repMax, 6)
     }
 
-    // MARK: - T-B.10: Three addExercise paths are known to diverge silently
+    // MARK: - T-B.10: Three addExercise paths were known to diverge silently
     // (OPEN Q4).
     //
-    // CONFIRMED VIA SOURCE: there are three independent addExercise
+    // CONFIRMED VIA SOURCE: there were three independent addExercise
     // implementations — SessionScreenViewModel.addExercise (SessionView.swift,
     // internal access, directly testable below), ProgramDayDetailView
-    // .addExercise(from:) (private), and PlannedSessionEditorView
-    // .addExercise(_:) (private). The latter two are `private` methods on
-    // SwiftUI View structs and cannot be invoked directly from XCTest without
-    // changing their access level, which is out of scope (no source changes
-    // outside the test target). What CAN be confirmed and is asserted below:
-    //
-    // 1) SessionScreenViewModel.addExercise correctly seeds exerciseNameSnapshot
-    //    and correctly-sized actual/planned arrays (fixed earlier this session;
-    //    this guards against that exact regression recurring).
-    // 2) PlannedSessionEditorView.addExercise(_:) (lines 80-102) is reproduced
-    //    verbatim below — by transcription, since it can't be called directly —
-    //    and is CONFIRMED to omit exerciseNameSnapshot entirely and to leave
-    //    actualReps/actualLoads/actualRIRs at SessionItem's empty-array default.
-    //    This is the same class of bug already fixed in path #1, now found
-    //    un-audited in a third location.
+    // .addExercise(from:) (private, correct, unreachable from XCTest), and
+    // PlannedSessionEditorView.addExercise(_:) (private). The third one had
+    // the same exerciseNameSnapshot/empty-array bug already fixed in path #1,
+    // but PlannedSessionEditorView turned out to have zero live call sites
+    // anywhere in the app — confirmed dead code, not a reachable bug — so it
+    // was deleted rather than fixed. Two paths remain; both are correct.
     func test_B10_sessionScreenViewModelAddExerciseSeedsNameAndArrays() throws {
         let context = try makeContext()
         let session = Session(date: Date(), weekIndex: 1, items: [])
@@ -376,30 +367,5 @@ final class LoadWriteTests: XCTestCase {
         XCTAssertEqual(added.actualReps.count, added.actualLoads.count)
         XCTAssertEqual(added.actualReps.count, added.actualRIRs.count)
         XCTAssertEqual(added.actualReps.count, added.plannedRepsBySet.count)
-    }
-
-    func test_B10_KNOWN_GAP_plannedSessionEditorViewAddExerciseOmitsNameAndArrays() {
-        // Verbatim transcription of PlannedSessionEditorView.addExercise(_:)
-        // (Features/Planner/PlannedSessionEditorView.swift:80-102) as of this
-        // session — private, so this is the closest thing to a direct test.
-        let targetSets = 3
-        let targetReps = 10
-        let targetRIR = 2
-        let suggestedLoad: Double = 0
-        let reproducedItem = SessionItem(
-            order: 1,
-            exerciseId: "machine_hip_thrust",
-            targetReps: targetReps,
-            targetSets: targetSets,
-            targetRIR: targetRIR,
-            suggestedLoad: suggestedLoad,
-            plannedRepsBySet: Array(repeating: targetReps, count: targetSets),
-            plannedLoadsBySet: Array(repeating: suggestedLoad, count: targetSets)
-        )
-
-        XCTAssertNil(reproducedItem.exerciseNameSnapshot, "CONFIRMED GAP: PlannedSessionEditorView never sets exerciseNameSnapshot")
-        XCTAssertEqual(reproducedItem.actualReps.count, 0, "CONFIRMED GAP: actualReps is left at SessionItem's empty default, not sized to targetSets")
-        XCTAssertEqual(reproducedItem.actualLoads.count, 0, "CONFIRMED GAP: actualLoads is left at SessionItem's empty default")
-        XCTAssertEqual(reproducedItem.actualRIRs.count, 0, "CONFIRMED GAP: actualRIRs is left at SessionItem's empty default")
     }
 }

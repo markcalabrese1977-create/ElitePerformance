@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		D503127F2F12BE7800980F64 /* AddExerciseSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */; };
-		D50312842F12BFDC00980F64 /* PlannedSessionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50312832F12BFDA00980F64 /* PlannedSessionEditorView.swift */; };
 		D51A8C0A2FAE614A00127E79 /* E1RMCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51A8C092FAE614800127E79 /* E1RMCalculator.swift */; };
 		D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */; };
 		D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */; };
@@ -98,7 +97,6 @@
 
 /* Begin PBXFileReference section */
 		D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExerciseSheet.swift; sourceTree = "<group>"; };
-		D50312832F12BFDA00980F64 /* PlannedSessionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannedSessionEditorView.swift; sourceTree = "<group>"; };
 		D51A8C092FAE614800127E79 /* E1RMCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculator.swift; sourceTree = "<group>"; };
 		D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitWorkoutSummarySyncService.swift; sourceTree = "<group>"; };
 		D532139E2FBCF9C700E01E39 /* MesoPerformanceAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoPerformanceAnalyzer.swift; sourceTree = "<group>"; };
@@ -288,14 +286,6 @@
 				D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */,
 			);
 			path = ExercisePicker;
-			sourceTree = "<group>";
-		};
-		D50312802F12BFAB00980F64 /* Planner */ = {
-			isa = PBXGroup;
-			children = (
-				D50312832F12BFDA00980F64 /* PlannedSessionEditorView.swift */,
-			);
-			path = Planner;
 			sourceTree = "<group>";
 		};
 		D532141E2FC2182A00E01E39 /* Utilities */ = {
@@ -492,7 +482,6 @@
 				D58476E72F40F46F00FE3F46 /* Analytics */,
 				D5550A742F1D25EF00456F8C /* Health */,
 				D5C48EFD2F1C105700495C46 /* Notes */,
-				D50312802F12BFAB00980F64 /* Planner */,
 				D503127D2F12BE5E00980F64 /* ExercisePicker */,
 				D585D5A32F043CE60073DFE3 /* Programs */,
 				D536A6312EF4790E0036BB4E /* Components */,
@@ -684,7 +673,6 @@
 				D5813F962F48C28700CCE909 /* ExerciseSessionDetailView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
 				D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */,
-				D50312842F12BFDC00980F64 /* PlannedSessionEditorView.swift in Sources */,
 				D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */,
 				D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
