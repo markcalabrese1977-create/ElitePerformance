@@ -1,19 +1,19 @@
 import XCTest
 import SwiftData
+import SwiftUI
 @testable import ElitePerformance
 
-/// Sections D–M — stubs only, per the test catalog's priority ordering
-/// (N/A/B/C implemented first; everything else deferred).
+/// Sections D–M, per the test catalog's priority ordering. D, E, F, and G are
+/// now implemented as real assertions; H, I, J, K, L, M remain honest stubs.
 ///
-/// IMPORTANT: the source prompt only gave concrete test-case IDs/descriptions
-/// for a handful of cases in these sections (T-D.1 explicitly; T-D.2/T-D.3,
-/// T-G.6, and T-K.4 only by reference from the OPEN QUESTIONS section). For
-/// the remaining sections (E, F, H, I, J, L, M) no test catalog was provided
-/// at all. Inventing fictional test-case numbers and descriptions for those
-/// would be exactly the kind of guessing this whole exercise is trying to
-/// avoid — so each of those classes contains one honest placeholder stub
-/// saying so, instead of fabricated cases. A passing stub is a silent lie;
-/// so is a fabricated one.
+/// IMPORTANT: for the sections that are still stubbed, the source prompts
+/// only gave concrete test-case IDs/descriptions for a handful of cases
+/// (T-K.4 only by reference from the OPEN QUESTIONS section). For H, I, J, L,
+/// M no test catalog was ever provided at all. Inventing fictional test-case
+/// numbers and descriptions for those would be exactly the kind of guessing
+/// this whole exercise is trying to avoid — so each of those classes contains
+/// one honest placeholder stub saying so, instead of fabricated cases. A
+/// passing stub is a silent lie; so is a fabricated one.
 
 // MARK: - Section D — Meso phase bands, cluster lookup, RIR widening, ProgressionEngine
 
@@ -561,27 +561,575 @@ final class MesoAnchoringAndAnalyzerTests: XCTestCase {
     }
 }
 
-// MARK: - Section F
+// MARK: - Section F — Maintenance block seeding (Path A / Path B)
 
-final class SectionFStubTests: XCTestCase {
-    func test_F_noCatalogProvided() {
-        XCTFail("Not yet implemented — stub (no catalog provided for Section F)")
+// Pinned from source recon (Domain/Programs/MaintenanceProgramSeeder.swift):
+//   - Path A (`seed(from:trainingWeekdays:totalWeeks:startDate:context:calendar:)`)
+//     groups the source meso's sessions by dayLabel, takes the MOST RECENT
+//     session's roster per label, applies applyMaintenancePrescription, and
+//     anchors loads via ProgramGenerator.anchorLoadsForNewMeso (full session
+//     history, decay-weighted — fixed in an earlier task this session).
+//   - Path B (`seedFromNewProgram(template:totalWeeks:startDate:context:calendar:)`)
+//     materializes week 1 of each of the template's days via
+//     DUPSessionMaterializer, applies the SAME applyMaintenancePrescription,
+//     and anchors loads via its own private anchorLoadsFromFullHistory (same
+//     direct-history approach, separately implemented).
+//   - Both paths call the identical shared applyMaintenancePrescription /
+//     makeMaintenanceItem — targetReps:10, targetSets:2, targetRIR:3,
+//     waveRaw:"deload", repMin:8, repMax:12, targetRIRMin:3, targetRIRMax:4,
+//     prescriptionNotes:"Maintenance — hold loads, manage fatigue."
+//   - MesoLifecycle.confirmStartNewMeso/AppStateBridge.setActiveMesoStartDate
+//     are NOT called inside either seeder — they're paired by hand at UI call
+//     sites (MesoSummaryView, MaintenanceProgramPickerView), per OPEN Q7.
+final class MaintenanceBlockSeedingTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    private let cal = Calendar.current
+
+    /// Minimal 1-day/week source split — used by tests that only care about
+    /// duration/lifecycle/deload-guard behavior, not day-roster fidelity.
+    private func makeSimpleSourceMeso(in context: ModelContext) -> MesoBlock {
+        let sourceMeso = MesoBlock(name: "Prior Meso", startDate: cal.date(byAdding: .day, value: -60, to: Date())!, status: .archived, totalWeeks: 8)
+        context.insert(sourceMeso)
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        let session = Session(date: cal.date(byAdding: .day, value: -10, to: Date())!, status: .completed, weekIndex: 8, dayLabel: "Push", items: [item])
+        session.meso = sourceMeso
+        session.programIndex = 1
+        context.insert(session)
+        try? context.save()
+        return sourceMeso
+    }
+
+    func test_F1_pathAContinuesCurrentSplit() throws {
+        let context = try makeContext()
+        let sourceMeso = MesoBlock(name: "Prior Meso", startDate: cal.date(byAdding: .day, value: -60, to: Date())!, status: .archived, totalWeeks: 8)
+        context.insert(sourceMeso)
+
+        let pushItem1 = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        let pushItem2 = SessionItem(order: 2, exerciseId: "incline_dumbbell_press", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 60)
+        let pushSession = Session(date: cal.date(byAdding: .day, value: -10, to: Date())!, status: .completed, weekIndex: 8, dayLabel: "Push", items: [pushItem1, pushItem2])
+        pushSession.meso = sourceMeso
+        pushSession.programIndex = 1
+
+        let pullItem1 = SessionItem(order: 1, exerciseId: "wide_grip_pulldown", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 120)
+        let pullSession = Session(date: cal.date(byAdding: .day, value: -9, to: Date())!, status: .completed, weekIndex: 8, dayLabel: "Pull", items: [pullItem1])
+        pullSession.meso = sourceMeso
+        pullSession.programIndex = 2
+
+        context.insert(pushSession)
+        context.insert(pullSession)
+        try context.save()
+
+        try MaintenanceProgramSeeder.seed(
+            from: sourceMeso,
+            trainingWeekdays: [2, 4],
+            totalWeeks: 4,
+            startDate: Date(),
+            context: context
+        )
+
+        let allMesos = try context.fetch(FetchDescriptor<MesoBlock>())
+        let maintenanceMeso = try XCTUnwrap(allMesos.first { $0.name == "Maintenance Block" })
+
+        let pushMaintenanceSession = try XCTUnwrap(maintenanceMeso.sessions.first { $0.dayLabel == "Push" })
+        let pushExerciseIds = pushMaintenanceSession.items.sorted { $0.order < $1.order }.map { $0.exerciseId }
+        XCTAssertEqual(pushExerciseIds, ["bench_press", "incline_dumbbell_press"], "maintenance Push day must carry the exact same exercises, in order, as the source split")
+
+        let pullMaintenanceSession = try XCTUnwrap(maintenanceMeso.sessions.first { $0.dayLabel == "Pull" })
+        XCTAssertEqual(pullMaintenanceSession.items.map { $0.exerciseId }, ["wide_grip_pulldown"])
+
+        for session in maintenanceMeso.sessions {
+            for item in session.items {
+                XCTAssertEqual(item.waveRaw, "deload", "every maintenance item must carry the deload wave prescription")
+            }
+        }
+    }
+
+    func test_F2_pathBSeedsFromChosenTemplateAndAnchorsFromHistory() throws {
+        let context = try makeContext()
+        // History exists for bench_press (PPL3 Push day's anchor exercise),
+        // but no history anywhere for hack_squat (PPL3 Legs day's anchor).
+        let historyMeso = MesoBlock(name: "Old Meso", startDate: cal.date(byAdding: .day, value: -60, to: Date())!, status: .archived, totalWeeks: 8)
+        context.insert(historyMeso)
+        for daysAgo in [50, 43, 36] {
+            let historyItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+            historyItem.actualReps = [8, 8, 8]
+            historyItem.actualLoads = [185, 185, 185]
+            historyItem.actualRIRs = [2, 2, 2]
+            let s = Session(date: cal.date(byAdding: .day, value: -daysAgo, to: Date())!, status: .completed, weekIndex: 1, items: [historyItem])
+            s.meso = historyMeso
+            context.insert(s)
+        }
+        try context.save()
+
+        try MaintenanceProgramSeeder.seedFromNewProgram(
+            template: PPL3WeekTemplate.template,
+            totalWeeks: 4,
+            startDate: Date(),
+            context: context
+        )
+
+        let allMesos = try context.fetch(FetchDescriptor<MesoBlock>())
+        let maintenanceMeso = try XCTUnwrap(allMesos.first { $0.name == "Maintenance Block" })
+
+        let pushSession = try XCTUnwrap(maintenanceMeso.sessions.first { $0.dayLabel == "Push" })
+        let pushExerciseIds = Set(pushSession.items.map { $0.exerciseId })
+        XCTAssertTrue(pushExerciseIds.contains("bench_press"), "exercises must come from the chosen template's own day roster")
+
+        let benchItem = try XCTUnwrap(pushSession.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertGreaterThan(benchItem.suggestedLoad, 0, "bench_press has real history — must anchor above 0")
+
+        let legsSession = try XCTUnwrap(maintenanceMeso.sessions.first { $0.dayLabel == "Legs" })
+        let hackSquatItem = try XCTUnwrap(legsSession.items.first { $0.exerciseId == "hack_squat" })
+        XCTAssertEqual(hackSquatItem.suggestedLoad, 0, "no history anywhere for hack_squat — must fall back to 0, same as normal first-session behavior")
+    }
+
+    func test_F3_applyMaintenancePrescriptionParityAcrossBothPaths() throws {
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context) // roster: bench_press only, dayLabel "Push"
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: 4, startDate: Date(), context: context)
+        let pathAMeso = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+        let pathAItem = try XCTUnwrap(pathAMeso.sessions.first?.items.first { $0.exerciseId == "bench_press" })
+
+        let context2 = try makeContext()
+        try MaintenanceProgramSeeder.seedFromNewProgram(template: PPL3WeekTemplate.template, totalWeeks: 4, startDate: Date(), context: context2)
+        let pathBMeso = try XCTUnwrap(try context2.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+        let pathBPush = try XCTUnwrap(pathBMeso.sessions.first { $0.dayLabel == "Push" })
+        let pathBItem = try XCTUnwrap(pathBPush.items.first { $0.exerciseId == "bench_press" })
+
+        // Both paths call the identical shared applyMaintenancePrescription —
+        // Path A's behavior must be unchanged by the Path B extraction.
+        XCTAssertEqual(pathAItem.targetSets, pathBItem.targetSets)
+        XCTAssertEqual(pathAItem.targetRIR, pathBItem.targetRIR)
+        XCTAssertEqual(pathAItem.repMin, pathBItem.repMin)
+        XCTAssertEqual(pathAItem.repMax, pathBItem.repMax)
+        XCTAssertEqual(pathAItem.targetRIRMin, pathBItem.targetRIRMin)
+        XCTAssertEqual(pathAItem.targetRIRMax, pathBItem.targetRIRMax)
+        XCTAssertEqual(pathAItem.waveRaw, pathBItem.waveRaw)
+        XCTAssertEqual(pathAItem.prescriptionNotes, pathBItem.prescriptionNotes)
+        XCTAssertEqual(pathAItem.targetSets, 2)
+        XCTAssertEqual(pathAItem.targetRIR, 3)
+        XCTAssertEqual(pathAItem.waveRaw, "deload")
+    }
+
+    func test_F4_durationPickerSetsExactTotalWeeks() throws {
+        for weeks in [4, 6, 8, 12] {
+            let context = try makeContext()
+            let sourceMeso = makeSimpleSourceMeso(in: context)
+            try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: weeks, startDate: Date(), context: context)
+            let maintenanceMeso = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+            XCTAssertEqual(maintenanceMeso.totalWeeks, weeks)
+        }
+
+        // Default (no totalWeeks argument) -> 4.
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], startDate: Date(), context: context)
+        let maintenanceMeso = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+        XCTAssertEqual(maintenanceMeso.totalWeeks, 4, "default duration must be 4 weeks")
+    }
+
+    func test_F5_deloadGuardPreventsDoubleProgression() throws {
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: 4, startDate: Date(), context: context)
+
+        let maintenanceMeso = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+        let sortedSessions = maintenanceMeso.sessions.sorted { $0.date < $1.date }
+        let sourceSession = sortedSessions[0]
+        let targetSession = sortedSessions[1]
+
+        let sourceItem = try XCTUnwrap(sourceSession.items.first)
+        let targetItem = try XCTUnwrap(targetSession.items.first { $0.exerciseId == sourceItem.exerciseId })
+
+        XCTAssertEqual(sourceItem.waveRaw, "deload")
+        XCTAssertEqual(targetItem.waveRaw, "deload")
+
+        // Simulate an already-anchored maintenance load, then prove neither
+        // path can move it regardless of how well the source session goes.
+        targetItem.suggestedLoad = 50
+        targetItem.plannedLoadsBySet = [50, 50]
+        sourceItem.suggestedLoad = 50
+        try context.save()
+
+        // Textbook-perfect, clearly-progressable performance on the source.
+        sourceSession.status = .completed
+        sourceItem.actualReps = [12, 12]
+        sourceItem.actualLoads = [50, 50]
+        sourceItem.actualRIRs = [4, 4]
+        try context.save()
+
+        // 1) project() must unconditionally refuse to progress a deload item.
+        let projection = LoadProjectionService.project(
+            exerciseId: sourceItem.exerciseId, targetReps: sourceItem.targetReps, targetRIR: sourceItem.targetRIR,
+            repMin: sourceItem.repMin ?? sourceItem.targetReps, repMax: sourceItem.repMax ?? sourceItem.targetReps,
+            currentWaveRaw: sourceItem.waveRaw, allSessions: [sourceSession, targetSession], activeMesoSessionIDs: []
+        )
+        XCTAssertNil(projection, "project() must refuse to progress any item flagged waveRaw == deload")
+
+        // 2) carryForwardPlans must also leave the target item's load flat.
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+        XCTAssertEqual(targetItem.suggestedLoad, 50, "deload target items must never be progressed by carry-forward, regardless of how well the source session went")
+    }
+
+    func test_F6_addedExerciseToMaintenanceSessionGetsMaintenancePrescriptionAndRetentionMessage() throws {
+        let context = try makeContext()
+        let maintenanceMeso = MesoBlock(name: "Maintenance Block", startDate: Date(), status: .active, totalWeeks: 4)
+        let session = Session(date: Date(), status: .inProgress, weekIndex: 1, dayLabel: "Push", items: [])
+        session.meso = maintenanceMeso
+        context.insert(maintenanceMeso)
+        context.insert(session)
+        try context.save()
+
+        let vm = SessionScreenViewModel(session: session)
+        vm.addExercise(ExerciseCatalog.benchPress, context: context)
+
+        let newItem = try XCTUnwrap(session.items.first { $0.exerciseId == ExerciseCatalog.benchPress.id })
+        XCTAssertEqual(newItem.waveRaw, "deload")
+        XCTAssertEqual(newItem.targetSets, 2)
+        XCTAssertEqual(newItem.targetRIR, 3)
+        XCTAssertEqual(newItem.repMin, 8)
+        XCTAssertEqual(newItem.repMax, 12)
+        XCTAssertEqual(newItem.prescriptionNotes, "Maintenance — hold loads, manage fatigue.")
+
+        // Log a clean, on-target set and confirm CoachingEngine returns the
+        // maintenance retention message, not a numeric progression call.
+        newItem.suggestedLoad = 135
+        newItem.actualReps = [10, 10]
+        newItem.actualLoads = [135, 135]
+        let recommendation = try XCTUnwrap(CoachingEngine.recommend(for: newItem))
+        XCTAssertTrue(recommendation.message.lowercased().contains("retention"), "maintenance items must get the retention message, not normal progression")
+        XCTAssertEqual(recommendation.nextSuggestedLoad, newItem.suggestedLoad, "maintenance hold means the next suggested load is unchanged")
+    }
+
+    func test_F7_weekdayDerivationIsModePerLabelNotUnion() throws {
+        // CONFIRMED VIA RECON: the mode-per-label derivation itself lives in
+        // MesoSummaryView.seedMaintenanceBlock() (Features/History/
+        // MesoSummaryView.swift:95-129), a `private` method on a SwiftUI
+        // View — not reachable from this test target without changing source
+        // visibility (out of scope, mirrors the ProgramDayDetailView
+        // .addExercise(from:) limitation in OPEN Q4). MaintenanceProgramSeeder
+        // .seed itself does no weekday derivation at all — it takes
+        // `trainingWeekdays` as a literal caller-supplied array
+        // (Array(Set(trainingWeekdays)).sorted()) and schedules every day
+        // label across that same array uniformly; it has no concept of
+        // "per-label" vs "union" whatsoever. See TestOpenQuestions.swift.
+        //
+        // This test verifies two things instead: (1) the mode algorithm
+        // exactly as documented in MesoSummaryView's comment, transcribed
+        // here since the real copy is private, correctly excludes a rest-day
+        // anomaly that a naive union would have wrongly absorbed; (2) the
+        // seeder faithfully uses ONLY the weekdays it's given — a rest-day
+        // weekday that was correctly excluded upstream does not reappear in
+        // the seeded schedule.
+
+        // Push always falls on Tuesday (weekday 3), except one anomalous
+        // session that landed on Sunday (weekday 1) — e.g. a reorder/skip.
+        let weekdayCountsByLabel: [String: [Int: Int]] = [
+            "Push": [3: 4, 1: 1] // Tuesday x4 (true pattern), Sunday x1 (anomaly)
+        ]
+
+        let modeWeekdays = weekdayCountsByLabel.values
+            .compactMap { counts in counts.max(by: { $0.value < $1.value })?.key }
+            .reduce(into: Set<Int>()) { $0.insert($1) }
+            .sorted()
+        let unionWeekdays = weekdayCountsByLabel.values
+            .flatMap { $0.keys }
+            .reduce(into: Set<Int>()) { $0.insert($1) }
+            .sorted()
+
+        XCTAssertEqual(modeWeekdays, [3], "mode-per-label must resolve to Tuesday only — the anomaly is outvoted, not absorbed")
+        XCTAssertEqual(unionWeekdays, [1, 3], "sanity: a naive union WOULD have absorbed the Sunday anomaly — this is exactly what mode-per-label avoids")
+        XCTAssertNotEqual(modeWeekdays, unionWeekdays, "the whole point of mode-per-label is that it disagrees with the union when an anomaly exists")
+
+        // The seeder itself faithfully respects whatever weekdays it's given.
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: modeWeekdays, totalWeeks: 4, startDate: Date(), context: context)
+
+        let maintenanceMeso = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+        let scheduledWeekdays = Set(maintenanceMeso.sessions.map { cal.component(.weekday, from: $0.date) })
+        XCTAssertEqual(scheduledWeekdays, Set(modeWeekdays), "the seeded schedule must use only the mode-derived weekday(s) — the excluded Sunday anomaly must not reappear")
+    }
+
+    func test_F8_mesoLifecycleIntegrationAtCallSitePattern() throws {
+        // CONFIRMED VIA RECON: MesoLifecycle.confirmStartNewMeso/
+        // AppStateBridge.setActiveMesoStartDate are NOT called inside either
+        // seeder function — they're paired by hand at UI call sites
+        // (MesoSummaryView.swift, MaintenanceProgramPickerView.swift), per
+        // OPEN Q7. This test replicates that exact call-site pattern rather
+        // than asserting against the seeder in isolation (which correctly
+        // shows no movement, matching
+        // InvariantTests.test_N11_seederAloneDoesNotMoveActiveStartDate).
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+
+        let priorMesoStartDate = cal.date(byAdding: .day, value: -100, to: Date())!
+        MesoLifecycle.confirmStartNewMeso(on: priorMesoStartDate)
+        AppStateBridge.setActiveMesoStartDate(priorMesoStartDate, in: context)
+        XCTAssertEqual(cal.startOfDay(for: MesoLifecycle.activeStartDate), cal.startOfDay(for: priorMesoStartDate), "sanity: baseline is pinned before seeding")
+
+        let newStartDate = cal.date(byAdding: .day, value: 1, to: Date())!
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: 4, startDate: newStartDate, context: context)
+
+        XCTAssertEqual(cal.startOfDay(for: MesoLifecycle.activeStartDate), cal.startOfDay(for: priorMesoStartDate), "seeding alone must not move activeStartDate, mirroring InvariantTests.test_N11")
+
+        MesoLifecycle.confirmStartNewMeso(on: newStartDate)
+        AppStateBridge.setActiveMesoStartDate(newStartDate, in: context)
+
+        XCTAssertEqual(cal.startOfDay(for: MesoLifecycle.activeStartDate), cal.startOfDay(for: newStartDate), "after the full UI call-site pattern (seed + confirmStartNewMeso + setActiveMesoStartDate), activeStartDate must reflect the maintenance block's start date")
+    }
+
+    func test_F11_seedingHasNoUndocumentedSideEffects() throws {
+        // CONFIRMED VIA RECON: "the rollover guard" (showMesoRolloverGuard)
+        // is a private @State Bool local to HomeView (Features/Home/
+        // HomeView.swift) — pure SwiftUI presentation state with no
+        // persisted/model-layer backing this test target can exercise.
+        // Neither MaintenanceProgramSeeder.seed nor seedFromNewProgram
+        // references HomeView, MesoRolloverGuardSheet, or any rollover-
+        // related state at all (grepped). The closest verifiable proxy:
+        // seeding must touch ONLY what's documented (archive active mesos,
+        // delete future non-completed sessions, create exactly one new
+        // block + its sessions) and nothing else. See TestOpenQuestions.swift.
+        let context = try makeContext()
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+
+        let untouchedPastSession = sourceMeso.sessions.first!
+        let untouchedPastStatus = untouchedPastSession.status
+        let mesoCountBefore = try context.fetch(FetchDescriptor<MesoBlock>()).count
+
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: 4, startDate: Date(), context: context)
+
+        XCTAssertEqual(untouchedPastSession.status, untouchedPastStatus, "completed source sessions must be untouched by seeding")
+        XCTAssertEqual(sourceMeso.status, .archived, "an already-archived source meso must stay archived, not be re-touched")
+
+        let mesoCountAfter = try context.fetch(FetchDescriptor<MesoBlock>()).count
+        XCTAssertEqual(mesoCountAfter, mesoCountBefore + 1, "seeding must create exactly one new MesoBlock and nothing else")
     }
 }
 
-// MARK: - Section G — Volume auto-regulation
+// Pinned from source recon (Domain/Programs/PPL3WeekTemplate.swift,
+// PPL6DayTemplate.swift): PPL3 has exactly one static "Push" day-template
+// (order:1 = bench_press, priority .anchor), reused unchanged across every
+// week — only the WavePrescription (sets/reps/RIR) varies by wave, never the
+// exercise identity. PPL6 has 6 day-templates (Push A/Pull A/Legs A/Push
+// B/Pull B/Legs B).
+final class ProgramTemplateIntegrityTests: XCTestCase {
+    func test_F9_ppl3PrimaryCompoundIdenticalAcrossEquivalentPushDays() throws {
+        let week1 = try ProgramTemplateResolver.resolveDay(template: PPL3WeekTemplate.template, weekNumber: 1, dayNumber: 1) // wave .a
+        let week4 = try ProgramTemplateResolver.resolveDay(template: PPL3WeekTemplate.template, weekNumber: 4, dayNumber: 1) // wave .a (equivalent)
+        let week2 = try ProgramTemplateResolver.resolveDay(template: PPL3WeekTemplate.template, weekNumber: 2, dayNumber: 1) // wave .b (different wave)
+
+        let anchor1 = try XCTUnwrap(week1.first { $0.order == 1 })
+        let anchor4 = try XCTUnwrap(week4.first { $0.order == 1 })
+        let anchor2 = try XCTUnwrap(week2.first { $0.order == 1 })
+
+        XCTAssertEqual(anchor1.exerciseId, "bench_press")
+        XCTAssertEqual(anchor1.exerciseId, anchor4.exerciseId, "equivalent (same-wave) Push days must share the same anchor exercise")
+        XCTAssertEqual(anchor1.exerciseId, anchor2.exerciseId, "the anchor exercise identity never changes across waves either — only its prescription does")
+        XCTAssertNotEqual(anchor1.setMin, anchor2.setMin, "sanity: the prescription itself does vary by wave even though the exercise doesn't")
+    }
+
+    func test_F9_ppl6HasSixDayTemplates() {
+        XCTAssertEqual(PPL6DayTemplate.template.dayTemplates.count, 6)
+        XCTAssertEqual(PPL6DayTemplate.template.dayTemplates.map { $0.title }, ["Push A", "Pull A", "Legs A", "Push B", "Pull B", "Legs B"])
+    }
+}
+
+final class WaveBadgeLabelTests: XCTestCase {
+    func test_F10_waveLabelDistinguishesMaintenanceFromDeload() {
+        XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "Maintenance Block"), "Maintenance")
+        XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "8-Week Hypertrophy Block"), "Deload")
+    }
+}
+
+// MARK: - Section G — Set feedback, skip taxonomy, drop sets, volume auto-regulation
+
+// Pinned from source recon (Features/Session/SessionView.swift:2480-2526):
+// SetStatus has exactly 8 cases (notStarted/inProgress/completed/skipped/
+// skippedPain/skippedSoreness/skippedDisruption/skippedFatigue), each with a
+// displayColor (.skipped: .orange, .skippedPain: .red, .skippedSoreness:
+// .yellow, .skippedDisruption: .orange, .skippedFatigue: .purple) and a
+// displayLabel (the specific reason, not generic "Skipped", for every flagged
+// case). Pain coachNote prefix is "⚠️" (PlanMemoryEngine.swift:113); soreness/
+// disruption carry-forward note prefix is "ℹ️" (PlanMemoryEngine.swift:121) —
+// advisory, not a warning.
+final class SetStatusBadgeTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    func test_G1_skipTaxonomyMapsToCorrectBadgeColor() {
+        XCTAssertEqual(SetStatus.skippedPain.displayColor, .red)
+        XCTAssertEqual(SetStatus.skippedSoreness.displayColor, .yellow)
+        XCTAssertEqual(SetStatus.skippedDisruption.displayColor, .orange)
+        XCTAssertEqual(SetStatus.skippedFatigue.displayColor, .purple)
+    }
+
+    func test_G2_painSkipSurfacesSpecificReasonNotGenericSkipped() {
+        // Covered at the CoachingEngine-guard level by T-A.3 (pain ->
+        // nextSuggestedLoad nil). This asserts the companion UI-facing fact:
+        // a pain skip's displayLabel is the specific reason ("Pain"), not the
+        // generic "Skipped" label a plain skip gets.
+        XCTAssertEqual(SetStatus.skipped.displayLabel, "Skipped")
+        XCTAssertEqual(SetStatus.skippedPain.displayLabel, "Pain")
+        XCTAssertNotEqual(SetStatus.skippedPain.displayLabel, SetStatus.skipped.displayLabel)
+    }
+
+    func test_G3_sorenessDisruptionCarryForwardWritesAdvisoryNotWarning() throws {
+        // Covered at the CoachingEngine-guard level by T-A.4 (soreness/
+        // disruption -> hold). This asserts the companion PlanMemoryEngine
+        // carry-forward fact: the note written is prefixed "ℹ️" (advisory),
+        // distinct from pain's "⚠️" (warning) prefix.
+        let context = try makeContext()
+        let sourceItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100,
+                                      setFeedbackBySet: [SetFeedback.soreness.rawValue, "", ""])
+        sourceItem.actualReps = [8, 8, 8]
+        sourceItem.actualLoads = [100, 100, 100]
+        let sourceSession = Session(date: Date(), status: .completed, weekIndex: 1, items: [sourceItem])
+
+        let targetItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        let targetSession = Session(date: Calendar.current.date(byAdding: .day, value: 1, to: Date())!, status: .planned, weekIndex: 2, items: [targetItem])
+
+        context.insert(sourceSession)
+        context.insert(targetSession)
+        try context.save()
+
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+
+        let note = try XCTUnwrap(targetItem.coachNote)
+        XCTAssertTrue(note.hasPrefix("ℹ️"), "soreness/disruption carry-forward must write an advisory (ℹ️), not a warning (⚠️)")
+        XCTAssertFalse(note.hasPrefix("⚠️"))
+    }
+
+    func test_G4_painCoachNotePrefixIsPresent() {
+        // Pinned from source (Domain/Logic/PlanMemoryEngine.swift:113). UI
+        // rendering of this prefix (ProgramDayDetailView's red-vs-orange
+        // branch at line 999) is not independently unit-testable — it's
+        // inline logic in a view body, not an exposed function.
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        item.coachNote = "⚠️ Pain was flagged in your last session for this exercise. Reassess before loading."
+        XCTAssertTrue(item.coachNote?.hasPrefix("⚠️") == true)
+    }
+}
+
+final class DropSetTests: XCTestCase {
+    func test_G5_dropSetsRoundTripAndAreNotTreatedAsExtraWorkingSets() {
+        let drops = [
+            DropSetEntry(loadText: "100", repsText: "8"),
+            DropSetEntry(loadText: "80", repsText: "6"),
+            DropSetEntry(loadText: "60", repsText: "5")
+        ]
+        let serialized = drops.map { $0.serialized }.joined(separator: ",")
+        XCTAssertEqual(serialized, "100x8,80x6,60x5")
+
+        let parsed = DropSetEntry.parse(from: serialized)
+        XCTAssertEqual(parsed.count, 3)
+        XCTAssertEqual(parsed.map { $0.loadText }, ["100", "80", "60"])
+        XCTAssertEqual(parsed.map { $0.repsText }, ["8", "6", "5"])
+
+        // CoachingEngine counts working sets from actualReps/actualLoads only
+        // — dropSetPatternsBySet is a separate per-set string field, not an
+        // additional array entry, so logging 3 drops on set 1 of 1 must not
+        // inflate the working-set count to 4 (which would break the stage
+        // gate for a targetSets:1 plan).
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 100)
+        item.actualReps = [8]
+        item.actualLoads = [100]
+        item.actualRIRs = [2]
+        item.dropSetPatternsBySet = [serialized]
+
+        let recommendation = CoachingEngine.recommend(for: item)
+        XCTAssertNotNil(recommendation, "1 working set + 3 drops on it must still satisfy a 1-set plan, not require 4")
+    }
+}
 
 final class VolumeAutoRegulationStubTests: XCTestCase {
-    func test_G6_accumulatedSorenessDoesNotYetChangeSetCounts() {
-        // T-G.6: per OPEN Q5, accumulated soreness does NOT yet change set
-        // counts as a baseline/ongoing behavior — confirm intentionally inert.
-        // Note: PlanMemoryEngine.volumeRegulationSignal (confirmed via recon
-        // while building Section B/N) DOES reduce set count by 1 after 2+
-        // recent fatigue-flagged sessions (see LoadWriteTests.test_B7). Whether
-        // that's the same "accumulated soreness" this case means, or a
-        // different/longer-horizon signal that's still a no-op, needs to be
-        // confirmed before this can be implemented for real.
-        XCTFail("Not yet implemented — stub")
+    func test_G6_accumulatedSorenessWithinASessionDoesNotChangeSetCounts() {
+        // BASELINE: volume auto-regulation is intentionally not yet wired
+        // WITHIN a single, currently-in-progress session — confirmed via a
+        // full read of CoachingEngine.recommend and SessionScreenViewModel
+        // .handleSetLogged: neither ever mutates item.targetSets based on
+        // setFeedbackBySet accumulation.
+        // When wired, update this test to assert the correct regulated
+        // behavior.
+        //
+        // IMPORTANT — this is NOT the same claim as OPEN Q5's original
+        // "intentionally absent" framing, which has since been partially
+        // superseded: PlanMemoryEngine.volumeRegulationSignal DOES reduce
+        // targetSets by 1 on CARRY-FORWARD (the next session) after 2+ of
+        // the last 3 completed sessions flagged soreness/disruption —
+        // confirmed, wired, and tested in LoadWriteTests.test_B7. That
+        // mechanism is deliberately NOT exercised here; this test is scoped
+        // to same-session, real-time accumulation only, which remains a
+        // true no-op. See TestOpenQuestions.swift.
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100,
+                                setFeedbackBySet: [SetFeedback.soreness.rawValue, SetFeedback.soreness.rawValue, SetFeedback.disruption.rawValue])
+        item.actualReps = [8, 8, 8]
+        item.actualLoads = [100, 100, 100]
+        item.actualRIRs = [2, 2, 2]
+
+        let targetSetsBefore = item.targetSets
+        _ = CoachingEngine.recommend(for: item)
+        // BASELINE: volume auto-regulation is intentionally not yet wired.
+        // When wired, update this test to assert the correct regulated behavior.
+        XCTAssertEqual(item.targetSets, targetSetsBefore, "set count must be unchanged regardless of accumulated soreness/disruption flags within a session")
+    }
+}
+
+final class BackupCompatibilityTests: XCTestCase {
+    func test_G7_backupPredatingFeedbackFieldsImportsCleanlyWithEmptyArrays() throws {
+        // Constructs a SessionItemBackupDTO JSON payload that predates
+        // setFeedbackBySet/pumpRatingsBySet (both Optional on the DTO —
+        // Domain/Backup/BackupSnapshotV1.swift:147-148) by omitting those two
+        // keys entirely, leaving every other required field present. Tests
+        // the DTO's decode + the importer's exact nil-coalescing expression
+        // (BackupSnapshotImporter.swift:173-174) directly, rather than the
+        // full snapshot import pipeline (which needs a complete profile/meso
+        // document and isn't necessary to prove this specific behavior).
+        let json = """
+        {
+            "order": 1,
+            "exerciseId": "bench_press",
+            "targetReps": 8,
+            "targetSets": 3,
+            "targetRIR": 2,
+            "suggestedLoad": 100.0,
+            "plannedRepsBySet": [8, 8, 8],
+            "plannedLoadsBySet": [100.0, 100.0, 100.0],
+            "plannedRIRsBySet": [2, 2, 2],
+            "actualReps": [8, 8, 8],
+            "actualLoads": [100.0, 100.0, 100.0],
+            "actualRIRs": [2, 2, 2],
+            "usedRestPauseFlags": [false, false, false],
+            "restPausePatternsBySet": ["", "", ""],
+            "dropSetPatternsBySet": ["", "", ""],
+            "isCompleted": true,
+            "isPR": false,
+            "logs": []
+        }
+        """
+        let data = Data(json.utf8)
+        let dto = try JSONDecoder().decode(SessionItemBackupDTO.self, from: data)
+
+        XCTAssertNil(dto.setFeedbackBySet, "a backup predating this field must decode it as nil, not crash")
+        XCTAssertNil(dto.pumpRatingsBySet)
+
+        // Mirrors BackupSnapshotImporter.swift:173-174 exactly.
+        let importedFeedback = dto.setFeedbackBySet ?? []
+        let importedPumpRatings = dto.pumpRatingsBySet ?? []
+        XCTAssertEqual(importedFeedback, [])
+        XCTAssertEqual(importedPumpRatings, [])
     }
 }
 

@@ -93,6 +93,17 @@
 //   signal that's still genuinely inert, isn't clear from the prompt as
 //   written. Needs a product decision before T-G.6 can be implemented for
 //   real instead of stubbed.
+//   RESOLVED (this commit): implemented T-G.6 scoped specifically to
+//   same-session, real-time accumulation (calling CoachingEngine.recommend
+//   repeatedly within one in-progress session never mutates targetSets) —
+//   confirmed via a full read of CoachingEngine.recommend and
+//   SessionScreenViewModel.handleSetLogged that neither touches targetSets
+//   based on setFeedbackBySet at all. This is a real, narrower claim than
+//   the original catalog entry and does NOT contradict
+//   volumeRegulationSignal's carry-forward behavior above — they're
+//   different mechanisms (same-session vs. next-session). See
+//   VolumeAutoRegulationStubTests.test_G6_accumulatedSorenessWithinASessionDoesNotChangeSetCounts
+//   in StubTests.swift.
 
 // OPEN Q6 (NEW): mesoPhase == .deload does not imply isDeloadWeek
 //   Discovered while building T-N.9. Session.isDeloadWeek is true only on
@@ -199,3 +210,38 @@
 //   the corrected mechanism (first-vs-last delta, >=2 sessions for a real
 //   verdict) is the answer anyone reads going forward, not the original
 //   guess.
+
+// OPEN Q10 (NEW): mode-per-label weekday derivation lives in a private View
+//   method, not in MaintenanceProgramSeeder
+//   Discovered while building T-F.7. The actual "mode weekday per dayLabel,
+//   not a union" logic (and its documenting comment) lives entirely inside
+//   MesoSummaryView.seedMaintenanceBlock() (Features/History/MesoSummaryView
+//   .swift:95-129) — a `private` method on a SwiftUI View. MaintenanceProgramSeeder
+//   .seed itself does zero weekday derivation: trainingWeekdays is a literal
+//   caller-supplied array (Array(Set(trainingWeekdays)).sorted()), applied
+//   uniformly to every day label. This is the same class of testability gap
+//   as OPEN Q4's ProgramDayDetailView.addExercise(from:) — correct production
+//   code, but not directly reachable from this test target without changing
+//   source visibility (out of scope for a test-only task).
+//   Handled in MaintenanceBlockSeedingTests.test_F7_weekdayDerivationIsModePerLabelNotUnion
+//   (StubTests.swift) by transcribing the documented algorithm directly (and
+//   confirming it produces the documented mode-vs-union divergence), plus
+//   confirming the seeder faithfully uses only the weekdays it's given. If
+//   MesoSummaryView's logic is ever refactored, this test's transcribed copy
+//   needs to be kept in sync by hand — it cannot drift-detect automatically.
+
+// OPEN Q11 (NEW): "the rollover guard" has no persisted, testable state
+//   Discovered while building T-F.11. showMesoRolloverGuard
+//   (Features/Home/HomeView.swift) is a private `@State` Bool local to a
+//   SwiftUI View — pure presentation state with no SwiftData/UserDefaults
+//   backing. Grepped MaintenanceProgramSeeder.swift fully: neither seed nor
+//   seedFromNewProgram references HomeView, MesoRolloverGuardSheet, or any
+//   rollover-related identifier at all. There is no "rollover guard state"
+//   reachable from a model-layer unit test to assert against, in either
+//   direction.
+//   Handled in MaintenanceBlockSeedingTests.test_F11_seedingHasNoUndocumentedSideEffects
+//   (StubTests.swift) via the closest verifiable proxy: seeding touches only
+//   what's documented (archives active mesos, leaves completed sessions
+//   alone, creates exactly one new MesoBlock) and nothing else. This does
+//   not prove the rollover guard specifically stays untriggered — that would
+//   require SwiftUI view-hosting test infrastructure this target doesn't have.
