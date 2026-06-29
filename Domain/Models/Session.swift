@@ -435,10 +435,17 @@ extension Session {
     }
 }
 extension Session {
-    /// True when this session falls in the deload week of its meso.
+    /// True when this session falls in the deload phase of its meso.
+    /// Derived from `mesoPhase` (the single source of truth for phase-band
+    /// math) so the two can never contradict each other — previously this
+    /// compared weekIndex to totalWeeks directly (exact-last-week-only),
+    /// which disagreed with mesoPhase's 90%-of-block percentage band for
+    /// every meso where the deload band spans more than one week (e.g.
+    /// totalWeeks == 10: mesoPhase already says .deload at week 9, but the
+    /// old isDeloadWeek required week 10 exactly). See OPEN Q6 in
+    /// Tests/DomainTests/TestOpenQuestions.swift.
     var isDeloadWeek: Bool {
-        guard let total = meso?.totalWeeks, total > 0 else { return false }
-        return weekIndex == total
+        mesoPhase == .deload
     }
 }
 

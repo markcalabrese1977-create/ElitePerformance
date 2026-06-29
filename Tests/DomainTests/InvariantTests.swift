@@ -302,13 +302,13 @@ final class InvariantTests: XCTestCase {
 
     // MARK: - T-N.9: mesoPhase == .deload <=> isDeloadWeek
     //
-    // CONFIRMED VIA SOURCE this is only a one-directional implication, not an
-    // iff. Session.isDeloadWeek is true only on the literal last week
-    // (weekIndex == totalWeeks). Session.mesoPhase uses percentage bands and
-    // flips to .deload at >=90% of the block. For an 11-week meso (the
-    // documented default in ChestArmsLowBackMesoProfile.totalWeeks), week 10
-    // is already >=90% (10/11 ≈ 0.909) so mesoPhase == .deload there, but
-    // isDeloadWeek is false (week 10 != week 11). See OPEN Q6.
+    // RESOLVED: was only a one-directional implication (Session.isDeloadWeek
+    // used to compare weekIndex == totalWeeks directly — last week only —
+    // while Session.mesoPhase used a >=90%-of-block percentage band, so they
+    // disagreed for any meso where the deload band spans more than one
+    // week). Fixed by making isDeloadWeek derive from mesoPhase directly
+    // (Domain/Models/Session.swift) so the two can never contradict again.
+    // See OPEN Q6 in TestOpenQuestions.swift.
 
     func test_N9_isDeloadWeekImpliesMesoPhaseDeload() {
         let meso = MesoBlock(name: "Test Meso", startDate: Date(), totalWeeks: 11)
@@ -318,12 +318,14 @@ final class InvariantTests: XCTestCase {
         XCTAssertEqual(session.mesoPhase, .deload, "the true, always-valid direction: last week implies deload phase")
     }
 
-    func test_N9_KNOWN_GAP_mesoPhaseDeloadDoesNotImplyIsDeloadWeek() {
+    func test_N9_mesoPhaseDeloadNowImpliesIsDeloadWeekToo() {
+        // Previously named _KNOWN_GAP and asserted the opposite (isDeloadWeek
+        // == false here) — that was the exact asymmetry this fix closes.
         let meso = MesoBlock(name: "Test Meso", startDate: Date(), totalWeeks: 11)
         let session = Session(date: Date(), weekIndex: 10, items: [])
         session.meso = meso
         XCTAssertEqual(session.mesoPhase, .deload, "10/11 ≈ 0.909 >= 0.90 band")
-        XCTAssertFalse(session.isDeloadWeek, "week 10 != week 11 — confirmed asymmetry, see OPEN Q6 in TestOpenQuestions.swift")
+        XCTAssertTrue(session.isDeloadWeek, "isDeloadWeek now derives from mesoPhase, so the two agree at week 10 of 11 too")
     }
 
     // MARK: - T-N.10: Maintenance items (waveRaw == "deload") never progressed

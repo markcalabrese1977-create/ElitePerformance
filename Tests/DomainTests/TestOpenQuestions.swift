@@ -114,8 +114,16 @@
 //   at totalWeeks == 10 (week 9) — the length used by every DUP template in
 //   this codebase, not just ChestArmsLowBackMesoProfile's 11-week default.
 //   MesoPhaseBandTests.test_D5_BUG_phaseContradictsIsDeloadWeekAtLateBand
-//   (StubTests.swift) asserts the strict invariant and is left failing with
-//   a BUG CONFIRMED comment. Not fixed here — flagged for next task.
+//   (StubTests.swift) asserts the strict invariant and was left failing with
+//   a BUG CONFIRMED comment.
+//   RESOLVED (this commit): Session.isDeloadWeek (Domain/Models/Session.swift)
+//   now derives directly from mesoPhase instead of comparing weekIndex to
+//   totalWeeks independently, so the two can never disagree again. Confirmed
+//   via grep this property is computed, not stored, and had zero production
+//   call sites — no historical data repair was needed. test_D5 and the
+//   updated InvariantTests.test_N9_mesoPhaseDeloadNowImpliesIsDeloadWeekToo
+//   (renamed from _KNOWN_GAP, which asserted the old broken behavior) both
+//   pass now.
 
 // OPEN Q7 (NEW): MesoLifecycle.activeStartDate is never moved by the seeders themselves
 //   Discovered while building T-N.11. None of the three seeding entry points
@@ -156,8 +164,20 @@
 //       false "declining" verdict.
 //   test_E7 confirms the orphan-UUID exclusion (catalog == nil && no
 //   exerciseNameSnapshot) DOES work correctly for per-exercise summaries —
-//   only the warmup/deload side is broken. Not fixed here — flagged for
-//   next task.
+//   only the warmup/deload side is broken.
+//   RESOLVED (this commit): Domain/Logic/MesoPerformanceAnalyzer.swift now
+//   (1) computes each session's own max load first and excludes any set
+//   below 50% of it from e1RM/peak computation (same threshold
+//   CoachingEngine uses), and (2) filters completedSessions down to
+//   nonDeloadCompletedSessions (via the now-fixed Session.isDeloadWeek, see
+//   Q6) before building exerciseIds/sessionsWithExercise, so deload weeks
+//   never reach per-exercise e1RM/verdict computation. Neither fix touches
+//   the meso-level completedSessions.isEmpty gate, per-exercise
+//   exSets/exReps/exVolume totals, or opening/closing load — out of scope
+//   per the task. test_E3 and test_E4 both pass now; test_E7 is unaffected
+//   (its fixture's session is week 1 of 8, not positionally a deload week,
+//   so the new deload filter correctly leaves it alone — it's still only
+//   testing the orphan-UUID half).
 
 // OPEN Q9 (NEW): MesoPerformanceAnalyzer's verdict is a first-vs-last delta,
 //   not a net/regression slope
@@ -174,3 +194,8 @@
 //   all. Both corrected behaviors are tested directly (not as bugs) in
 //   test_E6_analyzerVerdictThresholds and
 //   test_E8_verdictUsesFirstVsLastDeltaNotARegressionSlope.
+//   RESOLVED (this commit): not a code bug, no production change needed —
+//   the catalog's assumption was wrong, not the source. Documented here so
+//   the corrected mechanism (first-vs-last delta, >=2 sessions for a real
+//   verdict) is the answer anyone reads going forward, not the original
+//   guess.

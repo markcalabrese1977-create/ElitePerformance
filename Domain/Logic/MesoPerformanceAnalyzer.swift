@@ -169,10 +169,18 @@ enum MesoPerformanceAnalyzer {
 
         // MARK: - Per-exercise analysis
 
+        // Deload weeks are excluded from per-exercise load/e1RM/verdict
+        // computation (not from the top-level completedSessions.isEmpty
+        // "any data at all" gate above) — a deload week's necessarily-lower
+        // load isn't a real performance data point, and including it as
+        // "last" can flip a genuinely progressing meso to a false declining
+        // verdict via the first-vs-last delta below.
+        let nonDeloadCompletedSessions = completedSessions.filter { !$0.isDeloadWeek }
+
         // Collect all exercise IDs that appeared in this meso
         var exerciseIds: [String] = []
         var seenIds = Set<String>()
-        for session in completedSessions {
+        for session in nonDeloadCompletedSessions {
             for item in session.items {
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 if !seenIds.contains(canonical) {
@@ -202,7 +210,8 @@ enum MesoPerformanceAnalyzer {
 
         for exerciseId in exerciseIds {
             // Collect sessions containing this exercise, chronologically
-            let sessionsWithExercise: [(session: Session, item: SessionItem)] = completedSessions.compactMap { session in
+            // (deload weeks already excluded above).
+            let sessionsWithExercise: [(session: Session, item: SessionItem)] = nonDeloadCompletedSessions.compactMap { session in
                 guard let item = session.items.first(where: {
                     ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == exerciseId
                 }) else { return nil }
@@ -211,15 +220,28 @@ enum MesoPerformanceAnalyzer {
 
             guard sessionsWithExercise.count >= 1 else { continue }
 
-            // e1RM per session
+            // e1RM per session — warmups excluded. A set counts as a working
+            // set only if its load is >= 50% of that session's own max load
+            // for this exercise (same threshold CoachingEngine uses to
+            // exclude warmups). Without this, a low-load/high-rep warmup set
+            // can produce a higher raw Epley e1RM than the true working top
+            // set and win sessionPeak outright. Two-pass: find the session's
+            // raw max load first, then only fold sets clearing 50% of it
+            // into the e1RM/peak computation.
             var e1rmBySession: [(weekIndex: Int, date: Date, e1rm: Double)] = []
             for (session, item) in sessionsWithExercise {
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
+                let sessionMaxLoad = (0..<setCount)
+                    .map { item.actualLoads[$0] }
+                    .filter { $0 > 0 }
+                    .max() ?? 0
+
                 var sessionPeak: Double = 0
                 for idx in 0..<setCount {
                     let load = item.actualLoads[idx]
                     let reps = item.actualReps[idx]
                     guard load > 0, reps > 0 else { continue }
+                    guard load >= 0.50 * sessionMaxLoad else { continue } // exclude warmups
                     let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
                     sessionPeak = max(sessionPeak, e1rm)
                 }
