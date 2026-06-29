@@ -234,7 +234,7 @@ enum BackupSnapshotImporter {
                 primaryMuscleRaw: dto.primaryMuscleRaw,
                 isCompound: dto.isCompound,
                 createdAt: dto.createdAt,
-                isBodyweight: dto.isBodyweight
+                isBodyweight: dto.isBodyweight ?? false
             )
             modelContext.insert(custom)
         }

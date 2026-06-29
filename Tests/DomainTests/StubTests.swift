@@ -2047,14 +2047,19 @@ final class BackupRestoreImportTests: XCTestCase {
     }
 
     // T-K.3: old backup (predates setFeedbackBySet, pumpRatingsBySet,
-    // bodyWeight, dayLabel) imports cleanly through the real pipeline —
-    // validates the decodeIfPresent / Optional-default pattern end-to-end,
-    // not just at the bare-decode level (see T-G.7 for the narrower
-    // SessionItemBackupDTO-only version of this check).
+    // isBodyweight, bodyWeight, dayLabel) imports cleanly through the real
+    // pipeline — validates the decodeIfPresent / Optional-default pattern
+    // end-to-end, not just at the bare-decode level (see T-G.7 for the
+    // narrower SessionItemBackupDTO-only version of this check).
     //
-    // isBodyweight is deliberately NOT included in this payload's
-    // customExercises entry — omitting it throws instead of defaulting. See
-    // the dedicated BUG CONFIRMED test below and OPEN Q15 in
+    // isBodyweight was previously NOT decode-safe — CustomExerciseBackupDTO
+    // declared it as `var isBodyweight: Bool = false` (a default value on a
+    // non-Optional), and Swift's synthesized Codable does not fall back to a
+    // property's default when its key is absent, so omitting it threw
+    // keyNotFound instead of defaulting. FIXED (this commit):
+    // Domain/Backup/BackupSnapshotV1.swift now declares `let isBodyweight:
+    // Bool?`, and BackupSnapshotImporter.swift coalesces with `?? false` at
+    // the CustomExercise construction site. See OPEN Q15 in
     // TestOpenQuestions.swift.
     func test_K3_oldBackupMissingNewerFieldsImportsCleanly() throws {
         let container = try makeContainer()
@@ -2100,7 +2105,15 @@ final class BackupRestoreImportTests: XCTestCase {
           ],
           "sessionHistory": [],
           "exerciseNotes": [],
-          "customExercises": []
+          "customExercises": [
+            {
+              "id": "custom_old_1",
+              "name": "Old Custom Exercise",
+              "primaryMuscleRaw": "back",
+              "isCompound": false,
+              "createdAt": "2025-01-01T00:00:00Z"
+            }
+          ]
         }
         """
         let url = try writeTempJSON(json)
@@ -2115,50 +2128,11 @@ final class BackupRestoreImportTests: XCTestCase {
         let session = try XCTUnwrap(try checkContext.fetch(FetchDescriptor<Session>()).first)
         XCTAssertNil(session.dayLabel, "missing dayLabel must default to nil, not crash")
 
+        let custom = try XCTUnwrap(try checkContext.fetch(FetchDescriptor<CustomExercise>()).first)
+        XCTAssertEqual(custom.isBodyweight, false, "missing isBodyweight must default to false, not crash")
+
         let profile = try XCTUnwrap(try checkContext.fetch(FetchDescriptor<UserProfile>()).first)
         XCTAssertNil(profile.bodyWeight, "missing bodyWeight must default to nil, not crash")
-    }
-
-    // BUG CONFIRMED: CustomExerciseBackupDTO.isBodyweight
-    // (Domain/Backup/BackupSnapshotV1.swift:216) is declared `var
-    // isBodyweight: Bool = false` — a default value on a `var`, not `Bool?`
-    // and not decoded via decodeIfPresent anywhere. Swift's compiler-
-    // synthesized Codable conformance does NOT fall back to that default
-    // when the JSON key is absent — empirically confirmed here: decoding a
-    // customExercises entry that omits "isBodyweight" throws
-    // DecodingError.keyNotFound instead of defaulting to false. Any real
-    // backup predating the isBodyweight field that contains at least one
-    // custom exercise will fail this exact way on import — the entire
-    // top-level decode throws, not just the one field, so the WHOLE backup
-    // (not only the custom exercise) fails to import. Do not fix here, flag
-    // for next task. See OPEN Q15 in TestOpenQuestions.swift.
-    func test_K3_BUG_customExerciseBackupDTOThrowsOnMissingIsBodyweightInsteadOfDefaulting() throws {
-        let container = try makeContainer()
-        let json = """
-        {
-          "version": 1,
-          "exportedAt": "2025-01-01T00:00:00Z",
-          "mesoBlocks": [],
-          "sessions": [],
-          "sessionHistory": [],
-          "exerciseNotes": [],
-          "customExercises": [
-            {
-              "id": "custom_old_1",
-              "name": "Old Custom Exercise",
-              "primaryMuscleRaw": "back",
-              "isCompound": false,
-              "createdAt": "2025-01-01T00:00:00Z"
-            }
-          ]
-        }
-        """
-        let url = try writeTempJSON(json)
-
-        // Desired/correct behavior per T-K.3: an old backup predating
-        // isBodyweight should import cleanly, defaulting that field to
-        // false. It does not — left failing per BUG CONFIRMED above.
-        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container))
     }
 }
 

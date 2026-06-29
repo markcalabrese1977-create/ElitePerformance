@@ -361,20 +361,23 @@
 //   JSON key is absent — is WRONG. Empirically confirmed: decoding a
 //   customExercises entry that omits "isBodyweight" throws
 //   DecodingError.keyNotFound, it does not default to false.
-//   BUG CONFIRMED: any real backup that predates the isBodyweight field
+//   Any real backup that predates the isBodyweight field
 //   (Domain/Backup/BackupSnapshotV1.swift's customExercises array) and
-//   contains at least one custom exercise will fail this exact way on
-//   import — the entire top-level JSONDecoder().decode(BackupSnapshotV1
-//   .self, from:) call throws, so the WHOLE backup fails to import, not
-//   just the affected custom exercise. Left failing with a BUG CONFIRMED
-//   comment in BackupRestoreImportTests
-//   .test_K3_BUG_customExerciseBackupDTOThrowsOnMissingIsBodyweightInsteadOfDefaulting
-//   (StubTests.swift) — confirms the throw directly rather than asserting a
-//   working fallback that doesn't exist. test_K3_oldBackupMissingNewerFieldsImportsCleanly
-//   (the main old-backup-import-works test) does NOT include any
-//   customExercises entries, specifically to avoid masking this with a
-//   false pass. Do not fix here, flag for next task — the fix is likely
-//   changing isBodyweight to `Bool?` (matching setFeedbackBySet/
-//   pumpRatingsBySet's pattern) and having BackupSnapshotImporter
-//   coalesce with `?? false`, but that's a production code change out of
-//   scope for a test-only task.
+//   contains at least one custom exercise failed this exact way on import —
+//   the entire top-level JSONDecoder().decode(BackupSnapshotV1.self, from:)
+//   call threw, so the WHOLE backup failed to import, not just the
+//   affected custom exercise.
+//   RESOLVED (this commit): Domain/Backup/BackupSnapshotV1.swift now
+//   declares `let isBodyweight: Bool?` (matching setFeedbackBySet/
+//   pumpRatingsBySet's existing Optional pattern) instead of `var
+//   isBodyweight: Bool = false`. Domain/Backup/BackupSnapshotImporter.swift
+//   coalesces with `dto.isBodyweight ?? false` at the single
+//   CustomExercise construction site that reads it. Both existing
+//   CustomExerciseBackupDTO construction call sites
+//   (BackupSnapshotExporter.swift and the T-K.2 full-schema test) already
+//   passed isBodyweight explicitly, so neither needed a change. Re-merged
+//   the isBodyweight-omission case back into
+//   BackupRestoreImportTests.test_K3_oldBackupMissingNewerFieldsImportsCleanly
+//   (StubTests.swift) alongside the other four "added later" fields, since
+//   it's no longer a separate failure mode — the dedicated BUG CONFIRMED
+//   test that isolated it is now redundant and was removed.
