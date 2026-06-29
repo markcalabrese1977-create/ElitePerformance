@@ -3,8 +3,8 @@ import SwiftData
 import SwiftUI
 @testable import ElitePerformance
 
-/// Sections D–M, per the test catalog's priority ordering. D, E, F, and G are
-/// now implemented as real assertions; H, I, J, K, L, M remain honest stubs.
+/// Sections D–M, per the test catalog's priority ordering. D, E, F, G, H, and
+/// I are now implemented as real assertions; J, K, L, M remain honest stubs.
 ///
 /// IMPORTANT: for the sections that are still stubbed, the source prompts
 /// only gave concrete test-case IDs/descriptions for a handful of cases
@@ -1133,19 +1133,442 @@ final class BackupCompatibilityTests: XCTestCase {
     }
 }
 
-// MARK: - Section H
+// MARK: - Section H — Bodyweight mechanics
 
-final class SectionHStubTests: XCTestCase {
-    func test_H_noCatalogProvided() {
-        XCTFail("Not yet implemented — stub (no catalog provided for Section H)")
+final class BodyweightMechanicsTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-H.1: ExerciseCatalog.isBodyweight(exerciseId:) is the single source of
+    // truth for bodyweight-ness in the model layer.
+    func test_H1_isBodyweightSingleSourceOfTruth() {
+        XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: "pull_up"))
+        XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: "chin_up"))
+        XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: "bench_press"))
+    }
+
+    // BUG CONFIRMED: three display sites bypass ExerciseCatalog.isBodyweight()
+    // entirely and use `load == 0` as a proxy for "this is a bodyweight
+    // exercise" instead of checking exercise identity —
+    // Features/History/ExerciseSessionDetailView.swift:109 (formatLoad),
+    // Features/History/ExerciseHistorySheet.swift:477 (formatSetToken),
+    // Features/History/HistoryView.swift:143 (loadText). All three are
+    // `private` functions/computed properties that take only a `Double load`
+    // parameter — no exerciseId — so they are structurally incapable of
+    // consulting the real catalog even in principle without a signature
+    // change (out of scope for a test-only task). Transcribed below (they
+    // cannot be called directly from this test target) to prove the
+    // divergence: a non-bodyweight exercise logged with actualLoad == 0 (a
+    // data-entry skip, a failed rep, etc.) would incorrectly display "BW" in
+    // History, while ExerciseCatalog.isBodyweight — the real authority — says
+    // false. Do not fix here, flag for next task. See OPEN Q12 in
+    // TestOpenQuestions.swift.
+    func test_H1_BUG_historyViewsUseLoadZeroAsBodyweightProxyInsteadOfCatalog() {
+        let nonBodyweightExerciseId = "bench_press"
+        XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: nonBodyweightExerciseId))
+
+        // Transcription of the shared `load == 0 ? "BW" : ...` predicate used
+        // identically by all three History display sites named above.
+        func transcribedHistoryDisplay(load: Double) -> String {
+            load == 0 ? "BW" : String(format: "%.0f", load)
+        }
+
+        let displayedForZeroLoadBenchPress = transcribedHistoryDisplay(load: 0)
+        XCTAssertNotEqual(
+            displayedForZeroLoadBenchPress, "BW",
+            "BUG CONFIRMED: History views show \"BW\" for any load == 0 regardless of exercise identity, contradicting ExerciseCatalog.isBodyweight(exerciseId: \"bench_press\") == false"
+        )
+    }
+
+    // T-H.2: effectiveLoad resolves a logged 0 load to the user's body weight
+    // for a known bodyweight exercise.
+    func test_H2_effectiveLoadReturnsBodyWeightForZeroLoadBodyweightExercise() {
+        let result = E1RMCalculator.effectiveLoad(actualLoad: 0, exerciseId: "pull_up", bodyWeight: 180)
+        XCTAssertEqual(result, 180)
+    }
+
+    func test_H2_effectiveLoadReturnsZeroWithoutABodyWeightOnFile() {
+        // No UserProfile.bodyWeight set yet — effectiveLoad must not crash or
+        // fabricate a number, it falls back to 0 (same as a non-BW exercise).
+        let result = E1RMCalculator.effectiveLoad(actualLoad: 0, exerciseId: "pull_up", bodyWeight: nil)
+        XCTAssertEqual(result, 0)
+    }
+
+    func test_H2_effectiveLoadIgnoresBodyWeightWhenActualLoadIsLogged() {
+        // A loaded pull-up (weighted vest etc.) — actualLoad takes priority.
+        let result = E1RMCalculator.effectiveLoad(actualLoad: 25, exerciseId: "pull_up", bodyWeight: 180)
+        XCTAssertEqual(result, 25)
+    }
+
+    // T-H.3: BW display. UISessionSet.plannedDescription(with:isBodyweight:)
+    // (Features/Session/SessionView.swift:2753) is not private, so unlike the
+    // three History bugs above this call site is directly testable. Its
+    // `isBodyweight` argument is supplied by SessionView.isBodyweightExercise
+    // (SessionView.swift:573), which correctly calls
+    // ExerciseCatalog.isBodyweight(exerciseId:customExercises:) — the single
+    // source of truth. This test asserts the display predicate itself; it
+    // does not render SwiftUI, so the actual on-screen Text is not exercised
+    // here.
+    func test_H3_plannedDescriptionShowsBWForBodyweightZeroLoadNotZeroPointZero() {
+        let bwSet = UISessionSet(index: 0, plannedLoad: 0, plannedReps: 8, plannedRIR: 2)
+        let repRange = RepRange(min: 8, max: 8)
+
+        let bwText = bwSet.plannedDescription(with: repRange, isBodyweight: true)
+        XCTAssertTrue(bwText.contains("BW"))
+        XCTAssertFalse(bwText.contains("0.0"))
+
+        let nonBwText = bwSet.plannedDescription(with: repRange, isBodyweight: false)
+        XCTAssertTrue(nonBwText.contains("0.0"))
+        XCTAssertFalse(nonBwText.contains("BW"))
+    }
+
+    // T-H.4: CustomExercise.isBodyweight is a real, stored @Model attribute.
+    func test_H4_customBodyweightExerciseRoundTrips() throws {
+        let context = try makeContext()
+        let bwCustom = CustomExercise(id: "custom_bw_1", name: "Custom Pistol Squat", primaryMuscleRaw: MuscleGroup.quads.rawValue, isCompound: true, isBodyweight: true)
+        context.insert(bwCustom)
+        try context.save()
+
+        let fetched = try context.fetch(FetchDescriptor<CustomExercise>()).first { $0.id == "custom_bw_1" }
+        XCTAssertEqual(fetched?.isBodyweight, true)
+    }
+
+    func test_H4_customExerciseDefaultsIsBodyweightFalseWhenOmitted() throws {
+        let context = try makeContext()
+        // Simulates a record that predates the isBodyweight field: the
+        // initializer's inline default (`isBodyweight: Bool = false`) is the
+        // only migration mechanism in source — no VersionedSchema migration
+        // exists or is needed for this field.
+        let legacyCustom = CustomExercise(id: "legacy_1", name: "Legacy Exercise", primaryMuscleRaw: MuscleGroup.back.rawValue, isCompound: false)
+        context.insert(legacyCustom)
+        try context.save()
+
+        let fetched = try context.fetch(FetchDescriptor<CustomExercise>()).first { $0.id == "legacy_1" }
+        XCTAssertEqual(fetched?.isBodyweight, false)
     }
 }
 
-// MARK: - Section I
+final class BodyweightProgressionBaselineTests: XCTestCase {
+    // T-H.5: BW progression still bails. Confirmed via direct read of
+    // CoachingEngine.recommend (Domain/Logic/CoachingEngine.swift): guard 2
+    // returns nil whenever suggestedLoad <= 0, with no rep-based progression
+    // path for bodyweight exercises anywhere in source.
+    func test_H5_BASELINE_coachingEngineWithholdsVerdictForZeroSuggestedLoad() {
+        let item = SessionItem(
+            order: 1, exerciseId: "pull_up", targetReps: 8, targetSets: 3, targetRIR: 2,
+            suggestedLoad: 0,
+            actualReps: [8, 8, 8], actualLoads: [0, 0, 0], actualRIRs: [2, 2, 2]
+        )
+        // BASELINE: CoachingEngine returns nil for load == 0 (no rep-based progression path yet).
+        // When rep-based BW progression is implemented, this test should be updated
+        // to assert the correct rep-progression behavior instead.
+        XCTAssertNil(CoachingEngine.recommend(for: item))
+    }
+}
 
-final class SectionIStubTests: XCTestCase {
-    func test_I_noCatalogProvided() {
-        XCTFail("Not yet implemented — stub (no catalog provided for Section I)")
+final class UserProfileBackupTests: XCTestCase {
+    // T-H.6: UserProfile.bodyWeight survives the backup encode/decode round trip.
+    func test_H6_userProfileBackupDTOBodyWeightRoundTrips() throws {
+        let dto = UserProfileBackupDTO(
+            profileId: UUID(), createdAt: Date(), experienceRaw: "intermediate",
+            primaryGoalRaw: "hypertrophy", daysPerWeek: 4, sessionLengthMinutes: 60,
+            equipmentProfileRaw: "commercial", injuryFlagRaws: [], minLoadIncrement: 2.5,
+            unitPreferenceRaw: "lbs", bodyWeight: 187.5
+        )
+        let encoded = try JSONEncoder().encode(dto)
+        let decoded = try JSONDecoder().decode(UserProfileBackupDTO.self, from: encoded)
+        XCTAssertEqual(decoded.bodyWeight, 187.5)
+    }
+}
+
+// MARK: - Section I — Onboarding, ProgramCatalog, UserProfile
+
+final class UserProfileModelCoverageTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-I.1: all UserProfile fields round-trip through SwiftData.
+    //
+    // CORRECTED PREMISE: the original catalog entry's field list ("goal,
+    // experience, equipment, unit, minLoadIncrement, maxSessionMinutes,
+    // hasJointLimitations, bodyWeight") doesn't match UserProfile's real
+    // properties (Domain/Models/UserProfile.swift) on two points:
+    // there's no "maxSessionMinutes" — the real field is
+    // sessionLengthMinutes; and there's no single "hasJointLimitations" bool
+    // — the real field is injuryFlags: [InjuryFlag], an array of specific
+    // joint flags. Tested below using the real field names.
+    func test_I1_allUserProfileFieldsRoundTrip() throws {
+        let context = try makeContext()
+        let profile = UserProfile(
+            experience: .advanced,
+            primaryGoal: .strength,
+            daysPerWeek: 5,
+            sessionLengthMinutes: 75,
+            equipmentProfile: .homeGym,
+            injuryFlags: [.knees, .shoulders],
+            minLoadIncrement: 5.0,
+            usesKilograms: true,
+            bodyWeight: 195.0
+        )
+        context.insert(profile)
+        try context.save()
+
+        let fetched = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertEqual(fetched.experience, .advanced)
+        XCTAssertEqual(fetched.primaryGoal, .strength)
+        XCTAssertEqual(fetched.daysPerWeek, 5)
+        XCTAssertEqual(fetched.sessionLengthMinutes, 75)
+        XCTAssertEqual(fetched.equipmentProfile, .homeGym)
+        XCTAssertEqual(Set(fetched.injuryFlags), Set([.knees, .shoulders]))
+        XCTAssertEqual(fetched.minLoadIncrement, 5.0)
+        XCTAssertTrue(fetched.usesKilograms)
+        XCTAssertEqual(fetched.bodyWeight, 195.0)
+    }
+}
+
+final class ProgramCatalogRecommendationTests: XCTestCase {
+
+    // T-I.2: recommend() is wired and deterministic.
+    //
+    // NOTE: ProgramCatalog.recommend is NOT the function the live onboarding
+    // flow actually calls. OnboardingFlowView's completion handler
+    // (App/ContentView.swift, Features/Home/HomeView.swift) calls
+    // ProgramApplicationService.apply, which uses its own, much simpler
+    // ProgramApplicationService.selectTemplate(goal:daysPerWeek:) — a
+    // days+goal-only switch over the real DUP/PPL templates. Confirmed via
+    // grep: ProgramCatalog has zero production call sites anywhere in the
+    // app (Features/Home/ProgramPickerView.swift only mentions it in a
+    // "later we can map this in" comment). recommend() itself is real,
+    // compiles, and is a pure function — it's just orphaned. See OPEN Q13 in
+    // TestOpenQuestions.swift.
+    func test_I2_recommendIsDeterministicAndSnapshotStable() {
+        let input = ProgramCatalog.ProfileInput(
+            goal: .hypertrophy, daysPerWeek: 4, sessionMinutes: 60,
+            experience: .intermediate, equipment: .commercialGym, hasJointIssues: false
+        )
+        let first = ProgramCatalog.recommend(for: input)
+        let second = ProgramCatalog.recommend(for: input)
+
+        XCTAssertEqual(first.program.id, second.program.id, "identical input must produce an identical program")
+        XCTAssertEqual(first.reason, second.reason)
+        XCTAssertTrue(ProgramCatalog.all.contains { $0.id == first.program.id })
+    }
+
+    // T-I.3: constraint filters shape the recommendation.
+
+    // Frequency genuinely works: each (goal, exact day count) maps to a
+    // unique catalog program, since every program's minDays/maxDays/
+    // recommendedDays are identical (no overlapping ranges within a goal).
+    func test_I3_frequencyChangesRecommendedSplit() {
+        let threeDay = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 3, sessionMinutes: 60, experience: .new, equipment: .commercialGym, hasJointIssues: false)
+        let sixDay = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 6, sessionMinutes: 60, experience: .advanced, equipment: .commercialGym, hasJointIssues: false)
+
+        let rec3 = ProgramCatalog.recommend(for: threeDay)
+        let rec6 = ProgramCatalog.recommend(for: sixDay)
+
+        XCTAssertNotEqual(rec3.program.id, rec6.program.id)
+        XCTAssertEqual(rec3.program.id, "fullbody_3d_hypertrophy")
+        XCTAssertEqual(rec6.program.id, "ppl_6d_hypertrophy")
+    }
+
+    // BUG CONFIRMED: every program in ProgramCatalog.all requires
+    // .commercialGym equipment (confirmed by reading all six
+    // TrainingProgramDefinition declarations — none use any other
+    // ProgramEquipmentProfile). isEquipmentCompatible makes ANY
+    // non-commercialGym equipment incompatible with EVERY program, so
+    // `candidates` is always empty for those users, which falls back to
+    // scoring the entire unfiltered catalog (`pool = all`) — bypassing the
+    // goal+days filter too, not just equipment. Hand-traced: goal=.fatLoss,
+    // daysPerWeek=3, experience=.new, equipment=.minimal, hasJointIssues=false
+    // ties fullBody3DayFatLoss (correct goal, score 7) against
+    // fullBody3DayHypertrophy (wrong goal, also score 7), and
+    // `scored.max(by:)` keeps the first-seen max — fullBody3DayHypertrophy,
+    // declared earlier in `all`. So a fat-loss-seeking, minimal-equipment
+    // user is recommended a hypertrophy program. Do not fix here, flag for
+    // next task. See OPEN Q13 in TestOpenQuestions.swift.
+    func test_I3_BUG_minimalEquipmentBypassesGoalFilterEntirely() {
+        let profile = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 3, sessionMinutes: 60, experience: .new, equipment: .minimal, hasJointIssues: false)
+        let recommendation = ProgramCatalog.recommend(for: profile)
+        XCTAssertEqual(
+            recommendation.program.goal, .fatLoss,
+            "BUG CONFIRMED: a minimal-equipment user can be recommended a program of the WRONG goal, because equipment incompatibility silently empties the goal+days filter and falls back to scoring the whole catalog"
+        )
+    }
+
+    // BUG CONFIRMED: hasJointIssues only grants a soft +2 scoring bonus to
+    // jointFriendly programs — it never excludes non-joint-friendly programs
+    // outright. When a profile's goal+days combination matches exactly one
+    // program (the common case — every program has a unique day range per
+    // goal) and that program happens to be ppl6DayHypertrophyWarrior (the
+    // ONLY program with jointFriendly == false), hasJointIssues has nothing
+    // else to compete against and is recommended anyway. Do not fix here,
+    // flag for next task. See OPEN Q13.
+    func test_I3_BUG_jointIssuesIsOnlyASoftBonusNotAHardExclusion() {
+        let profile = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 6, sessionMinutes: 60, experience: .advanced, equipment: .commercialGym, hasJointIssues: true)
+        let recommendation = ProgramCatalog.recommend(for: profile)
+        XCTAssertTrue(
+            recommendation.program.jointFriendly,
+            "BUG CONFIRMED: hasJointIssues=true can still recommend the one program explicitly marked NOT joint-friendly (ppl_6d_hypertrophy) when it's the only goal+days match"
+        )
+    }
+
+    // BUG CONFIRMED (functional, non-crashing): sessionMinutes only ever
+    // contributes a flat +1 scoring bonus, gated by `program.recommendedDays
+    // <= profile.daysPerWeek`. Hand-traced every profile shape capable of
+    // producing a top-two contest in this six-program catalog: within a
+    // fixed goal, candidates is always 0 or 1 before any bonus applies
+    // (no overlapping day ranges), and every fallback-to-all scenario ties
+    // multiple programs that share the same recommendedDays, so they get the
+    // bonus identically and the tie still resolves by declaration order.
+    // Could not construct an input where 30 vs 90 minutes changes the
+    // winning program. Documented with one concrete pinned profile rather
+    // than an exhaustive proof. Do not fix here, flag for next task. See
+    // OPEN Q13.
+    func test_I3_BUG_sessionLengthNeverActuallyChangesTheWinningProgram() {
+        let profile30 = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 6, sessionMinutes: 30, experience: .intermediate, equipment: .commercialGym, hasJointIssues: false)
+        let profile90 = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 6, sessionMinutes: 90, experience: .intermediate, equipment: .commercialGym, hasJointIssues: false)
+
+        let rec30 = ProgramCatalog.recommend(for: profile30)
+        let rec90 = ProgramCatalog.recommend(for: profile90)
+
+        XCTAssertNotEqual(
+            rec30.program.id, rec90.program.id,
+            "BUG CONFIRMED: sessionMinutes (30 vs 90) does not change the recommended program for this profile, despite the scoring function nominally weighing it"
+        )
+    }
+
+    // T-I.5: over-constrained input never crashes and always returns a
+    // best-effort recommendation. Recommendation is a non-Optional struct by
+    // design (recommend(for:) always falls back to defaultProgram if scoring
+    // ever finds nothing), so "does not return nil" is true by type — the
+    // meaningful assertion is that the fallback is a real catalog program.
+    func test_I5_overConstrainedInputStillReturnsABestEffortRecommendation() {
+        let impossible = ProgramCatalog.ProfileInput(
+            goal: .strength, daysPerWeek: 1, sessionMinutes: 20,
+            experience: .new, equipment: .minimal, hasJointIssues: true
+        )
+        let recommendation = ProgramCatalog.recommend(for: impossible)
+        XCTAssertTrue(ProgramCatalog.all.contains { $0.id == recommendation.program.id })
+        XCTAssertFalse(recommendation.reason.isEmpty)
+    }
+}
+
+final class OnboardingSeedingIntegrationTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-I.4: preview matches seed. OnboardingFlowView's private
+    // programPreviewPage (Features/Onboarding/OnboardingFlowView.swift:476)
+    // and the real seeding path (ProgramApplicationService.apply ->
+    // DUPProgramReplaceService.replacePlannedProgram -> DUPProgramSeeder.seed
+    // -> DUPSessionMaterializer.makeSession) both ultimately key off
+    // ProgramApplicationService.selectTemplate(goal:daysPerWeek:) — not two
+    // parallel implementations that could drift. "Structurally guaranteed"
+    // rather than something this test could ever falsify by exercising the
+    // View directly (no SwiftUI view-hosting in this target). Verified here
+    // by confirming the seeded week-1 day roster (Session.dayLabel, which
+    // DUPSessionMaterializer.makeSession sets to materializedDay.title)
+    // matches the day titles of the exact template selectTemplate returns
+    // for the same inputs — the same template the preview page reads from.
+    func test_I4_previewAndSeedShareTheSameUnderlyingTemplateFunction() throws {
+        let context = try makeContext()
+        let result = OnboardingResult(
+            goal: .hypertrophy, experience: .intermediate, daysPerWeek: 3,
+            trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
+            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            minLoadIncrement: 2.5
+        )
+        ProgramApplicationService.apply(result, context: context, startDate: Date())
+
+        let expectedTemplate = ProgramApplicationService.selectTemplate(goal: result.goal, daysPerWeek: 3)
+        let seededWeek1DayLabels = Set(
+            try context.fetch(FetchDescriptor<Session>())
+                .filter { $0.weekIndex == 1 }
+                .compactMap { $0.dayLabel }
+        )
+        let templateDayTitles = Set(expectedTemplate.dayTemplates.map { $0.title })
+
+        XCTAssertFalse(seededWeek1DayLabels.isEmpty)
+        XCTAssertEqual(seededWeek1DayLabels, templateDayTitles)
+    }
+
+    // T-I.6: first session gets no progression verdict. Seeded via the real,
+    // live onboarding completion path (ProgramApplicationService.apply), not
+    // the orphaned ProgramCatalog (see OPEN Q13) — every freshly materialized
+    // SessionItem gets suggestedLoad: 0.0 (DUPSessionMaterializer
+    // .makeSessionItems), and CoachingEngine.recommend's guard 2 ("no
+    // baseline", suggestedLoad <= 0) withholds a verdict unconditionally.
+    func test_I6_freshlySeededFirstSessionNeverGetsAProgressionVerdict() throws {
+        let context = try makeContext()
+        let result = OnboardingResult(
+            goal: .hypertrophy, experience: .new, daysPerWeek: 3,
+            trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
+            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            minLoadIncrement: 2.5
+        )
+        ProgramApplicationService.apply(result, context: context, startDate: Date())
+
+        let week1Sessions = try context.fetch(FetchDescriptor<Session>()).filter { $0.weekIndex == 1 }
+        XCTAssertFalse(week1Sessions.isEmpty)
+        for session in week1Sessions {
+            for item in session.items {
+                XCTAssertNil(CoachingEngine.recommend(for: item), "brand-new program, week 1 — no baseline exists yet, CoachingEngine must withhold a verdict")
+            }
+        }
+    }
+}
+
+final class UserProfileSingleRecordTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    // T-I.7: single UserProfile record enforcement. The real subject is
+    // ProgramApplicationService.writeUserProfile(from:context:)
+    // (Domain/Logic/ProgramApplicationService.swift), which fetches the
+    // existing record and updates it in place if one exists, only inserting
+    // when there's none — exactly the "Settings update" pattern this test
+    // describes.
+    func test_I7_writeUserProfileUpdatesExistingRecordInsteadOfInsertingASecond() throws {
+        let context = try makeContext()
+        let firstResult = OnboardingResult(
+            goal: .hypertrophy, experience: .new, daysPerWeek: 3,
+            trainingDaysOfWeek: [2, 4, 6], equipmentProfile: .commercial,
+            sessionLengthMinutes: 60, injuryFlags: [], usesKilograms: false,
+            minLoadIncrement: 2.5
+        )
+        ProgramApplicationService.writeUserProfile(from: firstResult, context: context)
+
+        let secondResult = OnboardingResult(
+            goal: .fatLoss, experience: .advanced, daysPerWeek: 5,
+            trainingDaysOfWeek: [1, 2, 3, 4, 5], equipmentProfile: .homeGym,
+            sessionLengthMinutes: 45, injuryFlags: [.knees], usesKilograms: true,
+            minLoadIncrement: 5.0
+        )
+        ProgramApplicationService.writeUserProfile(from: secondResult, context: context)
+
+        let allProfiles = try context.fetch(FetchDescriptor<UserProfile>())
+        XCTAssertEqual(allProfiles.count, 1, "Settings re-running onboarding must update the existing UserProfile, not insert a second one")
+        XCTAssertEqual(allProfiles.first?.daysPerWeek, 5, "the existing record's fields must reflect the second (latest) write")
     }
 }
 

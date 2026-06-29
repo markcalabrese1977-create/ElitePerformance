@@ -245,3 +245,59 @@
 //   alone, creates exactly one new MesoBlock) and nothing else. This does
 //   not prove the rollover guard specifically stays untriggered — that would
 //   require SwiftUI view-hosting test infrastructure this target doesn't have.
+
+// OPEN Q12 (NEW): three History display sites use `load == 0` as a
+//   bodyweight-exercise proxy instead of ExerciseCatalog.isBodyweight()
+//   Discovered while building T-H.1/T-H.3. Confirmed via direct read:
+//   Features/History/ExerciseSessionDetailView.swift:109 (formatLoad),
+//   Features/History/ExerciseHistorySheet.swift:477 (formatSetToken), and
+//   Features/History/HistoryView.swift:143 (loadText) all show "BW" purely
+//   because a load value is 0 — none of them take or check exerciseId. By
+//   contrast, the two correct call sites (Domain/Logic/LoadDisplay.swift and
+//   Features/Session/SessionView.swift's isBodyweightExercise ->
+//   UISessionSet.plannedDescription(isBodyweight:)) both go through
+//   ExerciseCatalog.isBodyweight(exerciseId:) properly. Concrete consequence:
+//   a non-bodyweight exercise logged with a 0 load for any reason (data
+//   entry skip, failed rep, etc.) displays as "BW" in History views, which
+//   is simply wrong for that exercise. BUG CONFIRMED and left failing in
+//   BodyweightMechanicsTests.test_H1_BUG_historyViewsUseLoadZeroAsBodyweightProxyInsteadOfCatalog
+//   (StubTests.swift). The three private functions take only a Double load
+//   parameter, so fixing this for real requires threading exerciseId through
+//   all three call sites — out of scope for a test-only task. Do not fix
+//   here, flag for next task.
+
+// OPEN Q13 (NEW): ProgramCatalog.recommend has zero production call sites,
+//   and its scoring function has at least three confirmed real bugs
+//   Discovered while building T-I.2/T-I.3. Grepped the whole app: only
+//   Features/Home/ProgramPickerView.swift mentions ProgramCatalog at all, in
+//   a "Later we can map this into ProgramCatalog / BlockBuilder" comment —
+//   it is never instantiated or called. The live onboarding completion path
+//   (OnboardingFlowView -> ProgramApplicationService.apply) uses its own,
+//   separate, much simpler ProgramApplicationService.selectTemplate(goal:
+//   daysPerWeek:), a pure days+goal switch over the real DUP/PPL templates
+//   with no experience/equipment/joint-limitation weighting at all.
+//   ProgramCatalog.recommend is real, compiles, and is a pure deterministic
+//   function (T-I.2 passes) — it's just orphaned, so the three bugs below
+//   currently have zero live user-facing impact:
+//     - test_I3_BUG_minimalEquipmentBypassesGoalFilterEntirely: every program
+//       in ProgramCatalog.all requires .commercialGym equipment, so ANY other
+//       equipment profile empties the goal+days filter for every input and
+//       falls back to scoring the entire unfiltered catalog — a fat-loss
+//       user with minimal equipment can be recommended a hypertrophy
+//       program.
+//     - test_I3_BUG_jointIssuesIsOnlyASoftBonusNotAHardExclusion:
+//       hasJointIssues only adds a +2 bonus to jointFriendly programs, it
+//       never excludes non-joint-friendly ones — when goal+days narrows to
+//       exactly the one non-joint-friendly program (ppl_6d_hypertrophy),
+//       hasJointIssues=true changes nothing.
+//     - test_I3_BUG_sessionLengthNeverActuallyChangesTheWinningProgram:
+//       hand-traced every shape of input capable of producing a top-two
+//       contest in this six-program catalog and could not find one where 30
+//       vs 90 minutes changes the winner — the scoring bonus it grants
+//       always lands on programs that are either already winning outright or
+//       already tied (and tie-broken by declaration order) regardless of it.
+//   All three left failing with BUG CONFIRMED comments in
+//   ProgramCatalogRecommendationTests (StubTests.swift). Do not fix here,
+//   flag for next task — and note any fix should consider whether
+//   ProgramCatalog should be wired into onboarding at all, or deleted as
+//   superseded dead code, before investing in repairing its scoring logic.
