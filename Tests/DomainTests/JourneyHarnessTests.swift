@@ -301,8 +301,9 @@ final class JourneyHarnessTests: XCTestCase {
         }
 
         // MARK: d. Deload week load is lower than the prior working session's load
-        // for at least one anchor exercise. (Deload reduction is expected to come via
-        // the wave/RIR path, not via any explicit "reduce" step in PlanMemoryEngine.)
+        // for at least one anchor exercise. PlanMemoryEngine.carryForwardPlans applies
+        // a flat 60% reduction (deloadLoadReductionFactor) to suggestedLoad and
+        // plannedLoadsBySet for deload-wave targets, after the baseline copy.
         //
         // Uses waveRaw == "deload" (materializer-assigned, real per-session wave) rather
         // than isDeload (session.isDeloadWeek) to locate the deload week: isDeloadWeek's
@@ -319,17 +320,9 @@ final class JourneyHarnessTests: XCTestCase {
                       let priorFirst = priorWorkingSnapshot.plannedLoadsBySetByExercise[exerciseId]?.first else { continue }
                 if deloadFirst < priorFirst { anyLower = true }
             }
-            // BUG CONFIRMED: PlanMemoryEngine.carryForwardPlans only ever SKIPS
-            // progression for a deload-wave target (`if targetItem.waveRaw == "deload"
-            // { continue }`) — it never calls LoadProjectionService for that target, so
-            // no reduction logic runs at all. The unconditional baseline copy two lines
-            // above (`targetItem.suggestedLoad = sourceItem.suggestedLoad`) already ran
-            // before that check, so a deload week's load is the prior session's load,
-            // verbatim — never reduced. The assertion below is written to the spec's
-            // literal expectation and is expected to go RED for this reason.
             XCTAssertTrue(
                 anyLower,
-                "d. BUG CONFIRMED: expected at least one anchor exercise's deload-week plannedLoadsBySet[0] to be lower than the prior working session's — PlanMemoryEngine never reduces load for deload-wave targets, it only skips further progression after an unconditional baseline copy of the prior session's load"
+                "d. expected at least one anchor exercise's deload-week plannedLoadsBySet[0] to be lower than the prior working session's"
             )
         } else {
             XCTFail("d. expected both a deload snapshot and a prior working snapshot")

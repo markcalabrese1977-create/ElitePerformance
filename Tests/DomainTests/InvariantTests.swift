@@ -373,7 +373,8 @@ final class InvariantTests: XCTestCase {
 
         PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
 
-        XCTAssertEqual(futureItem.suggestedLoad, 100, "deload target item must hold the carried-forward load, never progress past it")
+        // 100 * 0.6 deload reduction factor (PlanMemoryEngine.deloadLoadReductionFactor)
+        XCTAssertEqual(futureItem.suggestedLoad, 60, "deload target item must hold the carried-forward load (reduced), never progress past it")
     }
 
     // MARK: - T-N.11: Every seeding path moves MesoLifecycle.activeStartDate

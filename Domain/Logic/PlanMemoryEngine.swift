@@ -16,6 +16,10 @@ struct PlanMemoryEngine {
 
     let context: ModelContext
 
+    // Flat 60% reduction for deload weeks. TODO (Phase 1.2 roadmap): replace with RIR-derived
+    // reduction via LoadProjectionService once deload-week RIR targets are reliably seeded.
+    private let deloadLoadReductionFactor: Double = 0.6
+
     /// Carry today's plan forward into the next future session(s)
     /// where plan is still empty.
     func carryForwardPlans(from session: Session) {
@@ -78,7 +82,16 @@ struct PlanMemoryEngine {
             // ProgramDayDetailView.autoGenerateSuggestedLoadsFromHistoryForThisDay's
             // isMaintenanceSession check, but via waveRaw since this runs automatically
             // on every session completion, not just when the user taps Auto+.
-            if targetItem.waveRaw?.lowercased() == "deload" { continue }
+            if targetItem.waveRaw?.lowercased() == "deload" {
+                targetItem.suggestedLoad = E1RMCalculator.rounded(
+                    targetItem.suggestedLoad * deloadLoadReductionFactor,
+                    increment: loadIncrement
+                )
+                targetItem.plannedLoadsBySet = targetItem.plannedLoadsBySet.map {
+                    E1RMCalculator.rounded($0 * deloadLoadReductionFactor, increment: loadIncrement)
+                }
+                continue
+            }
 
             // MARK: - Load Projection via LoadProjectionService
 
