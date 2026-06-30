@@ -2,106 +2,133 @@ import XCTest
 import SwiftData
 @testable import ElitePerformance
 
-/// Per-session carry-forward invariant tripwire, shared across journey tests.
+/// One invariant violation found by `invariantViolations`.
+struct InvariantViolation: Equatable {
+    let code: String
+    let detail: String
+}
+
+/// Result of checking one target session's items against history.
+struct InvariantResult {
+    var violations: [InvariantViolation] = []
+    /// Number of items for which a real "previous" was found and compared
+    /// (CAP_2X / ZEROED). Zero here on a non-trivial journey means the checker
+    /// silently compared nothing — the original vacuity defect this whole
+    /// mechanism exists to catch.
+    var comparisons: Int = 0
+}
+
+/// Pure core of the journey carry-forward invariant tripwire. No XCTAssert — only
+/// computes and returns what it found, so canary tests (JourneyCanaryTests.swift)
+/// can directly verify the checker catches each violation class, and so a green
+/// scenario test can be told apart from a vacuous one (comparisons == 0).
 ///
-/// NOT the same check as JourneyHarnessTests.swift's private `assertInvariants(after:next:)`.
-/// That version compares `completedSession` against literally the next chronological
-/// session. On a 2-day-split template (Day A / Day B strictly alternating, disjoint
-/// exercise rosters), the literally-next session NEVER shares an exerciseId with the
-/// one that just completed — so its per-exercise N.1/N.3/N.7/N.8 checks have been
-/// vacuously skipped for every transition in every existing scenario test. Verified by
-/// tracing DUPProgramScheduler.buildSchedule's index math directly: dayNumber =
-/// (zeroBased % trainingDaysPerWeek) + 1 strictly alternates 1,2,1,2,... for a 2-day
-/// template, and FullBody2DayTemplate's Day A/Day B rosters are completely disjoint.
+/// "Previous" is found the same way PlanMemoryEngine.carryForwardPlans itself
+/// finds its source/target pairing: matched by exerciseId only (never index), and
+/// restricted to sessions with status == .completed || .inProgress — mirroring
+/// carryForwardPlans' own top-of-function gate (`guard session.status == .inProgress
+/// || .completed`). That status filter matters: in Scenario 2's deliberate skip, the
+/// skipped session is never logged (stays .planned, holds stale seed values) but is
+/// still chronologically between two real sessions of the same exercise. Without the
+/// status filter, "most recent prior session by date" would incorrectly select the
+/// skipped session — which never actually fed carry-forward — instead of the real
+/// completed predecessor.
 ///
-/// This version instead mirrors PlanMemoryEngine.carryForwardPlans' OWN search —
-/// for each item in `completedSession`, find the real future session carry-forward
-/// would have targeted (`futureSessions.first(where: { future in future.items.contains(...) })`)
-/// — so the checks fire against the actual target, not an arbitrary chronological neighbor.
+/// This searches BACKWARD from `target` (find target's real previous in `history`),
+/// not forward from a source. Mathematically this identifies the same pairs the old
+/// forward-search design did (carry-forward defines a unique source/target relation,
+/// walkable from either end) — but only the backward direction lets this be expressed
+/// as a pure function of a single target session, which is what makes it canary-testable.
+func invariantViolations(forTarget target: Session, history: [Session]) -> InvariantResult {
+    var result = InvariantResult()
+
+    // ID_INTEGRITY — session-level, no previous needed.
+    let targetIds = target.items.map { $0.exerciseId }
+    if targetIds.count != Set(targetIds).count {
+        result.violations.append(InvariantViolation(
+            code: "ID_INTEGRITY",
+            detail: "target session has duplicate exerciseIds"
+        ))
+    }
+
+    // PHASE_DELOAD — session-level, structurally guaranteed in production source
+    // (Session.isDeloadWeek derives directly from Session.mesoPhase in
+    // Domain/Models/Session.swift), kept as a regression tripwire only. No canary
+    // fabricates a mismatch for this code — it cannot disagree by construction.
+    if target.isDeloadWeek != (target.mesoPhase == .deload) {
+        result.violations.append(InvariantViolation(
+            code: "PHASE_DELOAD",
+            detail: "isDeloadWeek must agree with mesoPhase"
+        ))
+    }
+
+    let priorSessions = history.filter {
+        $0.date < target.date && ($0.status == .completed || $0.status == .inProgress)
+    }
+
+    for item in target.items {
+        // PLAN_COUNT — intrinsic to the item, no previous needed.
+        if item.plannedLoadsBySet.count != item.targetSets {
+            result.violations.append(InvariantViolation(
+                code: "PLAN_COUNT",
+                detail: "\(item.exerciseId): plannedLoadsBySet.count (\(item.plannedLoadsBySet.count)) != targetSets (\(item.targetSets))"
+            ))
+        }
+
+        // NONFINITE — intrinsic to the item, no previous needed.
+        if !item.suggestedLoad.isFinite || item.suggestedLoad < 0 {
+            result.violations.append(InvariantViolation(
+                code: "NONFINITE",
+                detail: "\(item.exerciseId): suggestedLoad \(item.suggestedLoad) not finite/non-negative"
+            ))
+        }
+
+        // Real "previous" — most recent prior session (by date) containing the
+        // SAME exerciseId, matched by exerciseId only, restricted to sessions that
+        // could actually have fed carry-forward (see doc comment above).
+        guard let previousSession = priorSessions
+            .filter({ $0.items.contains(where: { $0.exerciseId == item.exerciseId }) })
+            .max(by: { $0.date < $1.date }),
+            let previousItem = previousSession.items.first(where: { $0.exerciseId == item.exerciseId })
+        else { continue }
+
+        result.comparisons += 1
+
+        // CAP_2X
+        if item.suggestedLoad > previousItem.suggestedLoad * 2.0 + 0.001 {
+            result.violations.append(InvariantViolation(
+                code: "CAP_2X",
+                detail: "\(item.exerciseId): \(item.suggestedLoad) > 2x \(previousItem.suggestedLoad)"
+            ))
+        }
+
+        // ZEROED — no zeroing after a baseline exists
+        if previousItem.suggestedLoad > 0 && item.suggestedLoad == 0 {
+            result.violations.append(InvariantViolation(
+                code: "ZEROED",
+                detail: "\(item.exerciseId): zeroed after a baseline (\(previousItem.suggestedLoad)) existed"
+            ))
+        }
+    }
+
+    return result
+}
+
+/// Thin XCTAssert wrapper over invariantViolations — the only place this becomes a
+/// test assertion. Returns comparisons made so callers can accumulate a per-test
+/// running total and assert it's > 0 (the vacuity tripwire itself).
+@discardableResult
 func assertJourneyInvariants(
-    after completedSession: Session,
-    allSessions: [Session],
+    after target: Session,
+    history: [Session],
     file: StaticString = #filePath,
     line: UInt = #line
-) {
-    guard let currentIndex = allSessions.firstIndex(where: {
-        $0.persistentModelID == completedSession.persistentModelID
-    }) else {
-        XCTFail("assertJourneyInvariants: completedSession not found in allSessions", file: file, line: line)
-        return
-    }
-    let futureSessions = Array(allSessions[(currentIndex + 1)...])
-
-    var checkedTargetSessionIDs = Set<PersistentIdentifier>()
-
-    for completedItem in completedSession.items {
-        guard let targetSession = futureSessions.first(where: { future in
-            future.items.contains(where: { $0.exerciseId == completedItem.exerciseId })
-        }) else { continue }
-
-        guard let nextItem = targetSession.items.first(where: {
-            $0.exerciseId == completedItem.exerciseId
-        }) else { continue }
-
-        // Session-level checks (N.9, exerciseId integrity) — once per unique target session.
-        if !checkedTargetSessionIDs.contains(targetSession.persistentModelID) {
-            checkedTargetSessionIDs.insert(targetSession.persistentModelID)
-
-            let targetIds = targetSession.items.map { $0.exerciseId }
-            XCTAssertEqual(
-                targetIds.count, Set(targetIds).count,
-                "exerciseId integrity: target session has duplicate exerciseIds",
-                file: file, line: line
-            )
-
-            // N.9 — tautological under the current Session.isDeloadWeek implementation
-            // (it derives directly from mesoPhase), kept as a regression tripwire.
-            XCTAssertEqual(
-                targetSession.isDeloadWeek, targetSession.mesoPhase == .deload,
-                "N.9 isDeloadWeek must agree with mesoPhase",
-                file: file, line: line
-            )
-        }
-
-        // N.1 — 2x cap
-        XCTAssertLessThanOrEqual(
-            nextItem.suggestedLoad, completedItem.suggestedLoad * 2.0 + 0.001,
-            "N.1 2x cap violated for \(completedItem.exerciseId): \(nextItem.suggestedLoad) > 2x \(completedItem.suggestedLoad)",
-            file: file, line: line
-        )
-
-        // N.3 — no zeroing after a baseline exists
-        if completedItem.suggestedLoad > 0 {
-            XCTAssertGreaterThan(
-                nextItem.suggestedLoad, 0,
-                "N.3 suggestedLoad zeroed after a baseline existed for \(completedItem.exerciseId)",
-                file: file, line: line
-            )
-        }
-
-        // N.7 — plannedLoadsBySet.count must match targetSets.
-        // FIXED: PlanMemoryEngine.carryForwardPlans now resizes the carried-forward
-        // plannedLoadsBySet to targetItem.targetSets via resizedToTargetSets (extends by
-        // repeating the last element, or truncates to the first targetCount elements)
-        // instead of leaving it at the source item's array length. Verified clean across
-        // all 14 exercises in JourneyHarnessTests Scenarios 1-3 and both
-        // CrossBlockContinuityTests paths.
-        XCTAssertEqual(
-            nextItem.plannedLoadsBySet.count, nextItem.targetSets,
-            "N.7 plannedLoadsBySet.count (\(nextItem.plannedLoadsBySet.count)) != targetSets (\(nextItem.targetSets)) for \(completedItem.exerciseId)",
-            file: file, line: line
-        )
-
-        // N.8 — finite (covers NaN too) and non-negative
-        XCTAssertTrue(
-            nextItem.suggestedLoad.isFinite,
-            "N.8 suggestedLoad not finite for \(completedItem.exerciseId)",
-            file: file, line: line
-        )
-        XCTAssertGreaterThanOrEqual(
-            nextItem.suggestedLoad, 0,
-            "N.8 suggestedLoad negative for \(completedItem.exerciseId)",
-            file: file, line: line
-        )
-    }
+) -> Int {
+    let result = invariantViolations(forTarget: target, history: history)
+    XCTAssertTrue(
+        result.violations.isEmpty,
+        result.violations.map { "\($0.code): \($0.detail)" }.joined(separator: "; "),
+        file: file, line: line
+    )
+    return result.comparisons
 }

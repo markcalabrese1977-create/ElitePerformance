@@ -12,6 +12,7 @@
 		1983FD96D3E2298656699395 /* JourneyFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */; };
 		21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */; };
 		344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */; };
+		3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */; };
 		4935C5EEE6864668BB05A199 /* CoachingEngineGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */; };
 		7920EC09B73B4EB3AAF3086E /* LoadWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */; };
 		88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */; };
@@ -105,6 +106,7 @@
 		0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyAssertions.swift; sourceTree = "<group>"; };
 		1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineGuardTests.swift; sourceTree = "<group>"; };
 		1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyFixture.swift; sourceTree = "<group>"; };
+		37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyCanaryTests.swift; sourceTree = "<group>"; };
 		5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvariantTests.swift; sourceTree = "<group>"; };
 		9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestOpenQuestions.swift; sourceTree = "<group>"; };
 		B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadWriteTests.swift; sourceTree = "<group>"; };
@@ -547,6 +549,7 @@
 				D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */,
 				0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */,
 				F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */,
+				37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -763,6 +766,7 @@
 				021FF3D2910B6E203105D029 /* JourneyHarnessTests.swift in Sources */,
 				F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */,
 				344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */,
+				3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

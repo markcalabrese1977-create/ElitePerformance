@@ -22,6 +22,11 @@ import SwiftData
 /// happens automatically, through production code, not via a manual call from this test.
 final class CrossBlockContinuityTests: XCTestCase {
 
+    /// Per-test running total of invariant comparisons actually made (see
+    /// JourneyAssertions.swift's InvariantResult.comparisons / JourneyHarnessTests.swift's
+    /// identical pattern). Reset at the top of each test below.
+    private var totalComparisons = 0
+
     // MARK: - Shared script driver
 
     /// Runs the same clean-climber pattern as JourneyHarnessTests.swift's
@@ -66,7 +71,7 @@ final class CrossBlockContinuityTests: XCTestCase {
             }
 
             try fixture.logAndComplete(JourneySessionScript(logs: logs))
-            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
+            totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
         }
 
         return peakLoadByExercise
@@ -85,7 +90,7 @@ final class CrossBlockContinuityTests: XCTestCase {
                 return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
             }
             try fixture.logAndComplete(JourneySessionScript(logs: logs))
-            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
+            totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
         }
     }
 
@@ -111,6 +116,7 @@ final class CrossBlockContinuityTests: XCTestCase {
     // MARK: - Path A: meso -> maintenance (clone source roster) -> second meso
 
     func test_crossBlock_pathA_mesoMaintenanceMeso() throws {
+        totalComparisons = 0
         let startDate = startDateSafelyInThePast(daysAgo: 150)
 
         // --- Fixture X: meso -> maintenance -> second meso ---
@@ -219,11 +225,14 @@ final class CrossBlockContinuityTests: XCTestCase {
                 "c. second meso's anchored suggestedLoad (\(anchored)) should start below the recorded pre-maintenance peak (\(peak)) for \(exerciseId) — T-E.9 performance-gated starting loads are deferred to v1.3, this reflects the current decay-weighted-average algorithm rather than a deliberate percentage gate"
             )
         }
+
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
     }
 
     // MARK: - Path B: meso -> maintenance (fresh template) -> second meso
 
     func test_crossBlock_pathB_mesoMaintenanceMeso() throws {
+        totalComparisons = 0
         let startDate = startDateSafelyInThePast(daysAgo: 150)
 
         // --- Fixture X: meso -> maintenance (Path B, fresh template) -> second meso ---
@@ -306,5 +315,7 @@ final class CrossBlockContinuityTests: XCTestCase {
                 "c. second meso's anchored suggestedLoad (\(anchored)) should start below the recorded pre-maintenance peak (\(peak)) for \(exerciseId)"
             )
         }
+
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
     }
 }

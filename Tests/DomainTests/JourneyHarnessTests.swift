@@ -18,6 +18,14 @@ import SwiftData
 ///   - Either path results in suggestedLoad > 0 on the next session.
 final class JourneyHarnessTests: XCTestCase {
 
+    /// Per-test running total of invariant comparisons actually made (see
+    /// JourneyAssertions.swift's InvariantResult.comparisons). XCTest creates a
+    /// fresh instance of this class per test method, so this naturally starts at 0
+    /// for each test — also explicitly reset at the top of every scenario test
+    /// below for clarity. Each scenario asserts this is > 0 at the end: a green
+    /// scenario must mean "checked and clean," not "never compared anything."
+    private var totalComparisons = 0
+
     /// The load a lifter would actually log for `item` this session: its current
     /// suggestedLoad if one exists, or a sensible starting weight if this is the
     /// first time this exercise has ever been scheduled (suggestedLoad == 0).
@@ -86,18 +94,20 @@ final class JourneyHarnessTests: XCTestCase {
 
     // MARK: - Invariant tripwire
     //
-    // Uses assertJourneyInvariants (Tests/DomainTests/JourneyAssertions.swift) — the
-    // local assertInvariants(after:next:) that used to live here compared completedSession
-    // against literally the next chronological session, which on this 2-day alternating
-    // split (Day A / Day B, disjoint rosters) never shares an exerciseId with what just
-    // completed. Its N.1/N.3/N.7/N.8 checks were therefore vacuous for every transition
-    // in every scenario below — only the session-level checks (N.9, exerciseId
-    // duplication) ever actually fired. assertJourneyInvariants instead finds each item's
-    // real carry-forward target the way PlanMemoryEngine itself does.
+    // Uses assertJourneyInvariants (Tests/DomainTests/JourneyAssertions.swift) — a thin
+    // XCTAssert wrapper over the pure, canary-tested invariantViolations(forTarget:history:),
+    // which finds each item's real "previous" (most recent prior COMPLETED session with
+    // the same exerciseId) the way PlanMemoryEngine.carryForwardPlans itself pairs
+    // source/target, never by chronological adjacency or array index. Each call returns
+    // the number of comparisons actually made; every scenario below accumulates this into
+    // totalComparisons and asserts it's > 0 at the end — a green scenario must mean
+    // "checked and clean," not "never compared anything." Scenario 4 previously had no
+    // invariant calls at all; it's wired in now too.
 
     // MARK: - Scenario 1: Clean climber
 
     func test_scenario1_cleanClimber() throws {
+        totalComparisons = 0
         let fixture = try JourneyFixture.make()
         var components = DateComponents()
         components.year = 2026; components.month = 7; components.day = 6
@@ -174,9 +184,10 @@ final class JourneyHarnessTests: XCTestCase {
             }
 
             try fixture.logAndComplete(JourneySessionScript(logs: logs))
-            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
+            totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
         }
 
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
         XCTAssertGreaterThan(sessionCounter, 1, "expected the full meso to produce multiple sessions")
         XCTAssertFalse(anchorExerciseIds.isEmpty, "expected at least one anchor-priority exercise")
 
@@ -280,6 +291,7 @@ final class JourneyHarnessTests: XCTestCase {
     // MARK: - Scenario 2: Fatigue, skip, pain
 
     func test_scenario2_fatigueSkipPain() throws {
+        totalComparisons = 0
         let fixture = try JourneyFixture.make()
         var components = DateComponents()
         components.year = 2026; components.month = 7; components.day = 6
@@ -294,7 +306,7 @@ final class JourneyHarnessTests: XCTestCase {
                 return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
             }
             try fixture.logAndComplete(JourneySessionScript(logs: logs), session: session)
-            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
+            totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
         }
 
         // Weeks 1-2 (sessions 1-4): log clean.
@@ -400,11 +412,14 @@ final class JourneyHarnessTests: XCTestCase {
                 "c. post-skip session's suggestedLoad must come from the last completed session's carry-forward, not zero, for \(item.exerciseId)"
             )
         }
+
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
     }
 
     // MARK: - Scenario 3: Plateau then decline
 
     func test_scenario3_plateauThenDecline() throws {
+        totalComparisons = 0
         let fixture = try JourneyFixture.make()
         var components = DateComponents()
         components.year = 2026; components.month = 7; components.day = 6
@@ -438,7 +453,7 @@ final class JourneyHarnessTests: XCTestCase {
                 return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
             }
             try fixture.logAndComplete(JourneySessionScript(logs: logs), session: session)
-            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
+            totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
 
             // MesoPerformanceAnalyzer.analyze(meso:allPriorSessions:) — real signature
             // confirmed via recon. meso.sessions is the cascade relationship, already
@@ -476,11 +491,14 @@ final class JourneyHarnessTests: XCTestCase {
         // STUB T-E.9: performance-gated starting loads not yet implemented — see
         // roadmap Phase 4.4. No assertion made here; this scenario only exercises
         // MesoPerformanceAnalyzer's verdict computation, not load-gating.
+
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
     }
 
     // MARK: - Scenario 4: Drift / idempotency
 
     func test_scenario4_idempotency() throws {
+        totalComparisons = 0
         func runCleanClimbScript(on fixture: JourneyFixture) throws {
             var components = DateComponents()
             components.year = 2026; components.month = 7; components.day = 6
@@ -506,6 +524,7 @@ final class JourneyHarnessTests: XCTestCase {
                     }
                 }
                 try fixture.logAndComplete(JourneySessionScript(logs: logs))
+                totalComparisons += assertJourneyInvariants(after: session, history: fixture.allSessionsSorted())
             }
         }
 
@@ -550,6 +569,7 @@ final class JourneyHarnessTests: XCTestCase {
             return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
         }
         try fixtureC.logAndComplete(JourneySessionScript(logs: logs))
+        totalComparisons += assertJourneyInvariants(after: firstSession, history: fixtureC.allSessionsSorted())
 
         let nextSession = try XCTUnwrap(fixtureC.currentPlannedSession())
         let loadsAfterFirstCall: [String: Double] = Dictionary(
@@ -567,5 +587,7 @@ final class JourneyHarnessTests: XCTestCase {
                 "double carry-forward on the same completed session must not compound suggestedLoad for \(item.exerciseId)"
             )
         }
+
+        XCTAssertGreaterThan(totalComparisons, 0, "tripwire never compared anything — vacuous pass")
     }
 }
