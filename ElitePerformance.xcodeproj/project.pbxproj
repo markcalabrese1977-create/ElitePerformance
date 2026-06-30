@@ -45,7 +45,7 @@
 		D5839A4B2FDF0B640074635A /* MechanicalLoadHealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5839A4A2FDF0B640074635A /* MechanicalLoadHealthKitService.swift */; };
 		D5846D622FB4ECA700797E98 /* CustomExercise.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5846D612FB4ECA500797E98 /* CustomExercise.swift */; };
 		D5846D692FB5341E00797E98 /* SetFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5846D682FB5341C00797E98 /* SetFeedback.swift */; };
-		D58476E92F40F48000FE3F46 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		D58476E92F40F48000FE3F46 /* (null) in Sources */ = {isa = PBXBuildFile; };
 		D58476EE2F410AD000FE3F46 /* SetsV1CSVExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58476ED2F410ACF00FE3F46 /* SetsV1CSVExporter.swift */; };
 		D58477132F42842000FE3F46 /* MesoLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477122F42841E00FE3F46 /* MesoLifecycle.swift */; };
 		D58477152F42851900FE3F46 /* MesoRolloverGuardSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */; };
@@ -199,57 +199,41 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D536A6312EF4790E0036BB4E /* Components */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Components;
 			sourceTree = "<group>";
 		};
 		D54892732F8E778600F2C30A /* Sync */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Sync;
 			sourceTree = "<group>";
 		};
 		D54892852F8E8DCA00F2C30A /* Backup */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Backup;
 			sourceTree = "<group>";
 		};
 		D54A949A2F91BBB900EFBF25 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Shared;
 			sourceTree = "<group>";
 		};
 		D5550A742F1D25EF00456F8C /* Health */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Health;
 			sourceTree = "<group>";
 		};
 		D585D59C2F043BC70073DFE3 /* Catalog */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Catalog;
 			sourceTree = "<group>";
 		};
 		D585D5A32F043CE60073DFE3 /* Programs */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Programs;
 			sourceTree = "<group>";
 		};
 		D5C48EFD2F1C105700495C46 /* Notes */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Notes;
 			sourceTree = "<group>";
 		};
@@ -263,36 +247,26 @@
 		};
 		D5E2932F2EC4102900034D78 /* ElitePerformanceTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = ElitePerformanceTests;
 			sourceTree = "<group>";
 		};
 		D5E2937D2EC6B51200034D78 /* MainTab */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = MainTab;
 			sourceTree = "<group>";
 		};
 		D5E293952EC7BBFB00034D78 /* Engines */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Engines;
 			sourceTree = "<group>";
 		};
 		D5E2939B2EC7BCFC00034D78 /* Debug */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Debug;
 			sourceTree = "<group>";
 		};
 		D5F89BB72F8AD54900D44DCB /* Programs */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Programs;
 			sourceTree = "<group>";
 		};
@@ -333,7 +307,7 @@
 			path = Utilities;
 			sourceTree = "<group>";
 		};
-		D5813F972F4910A500CCE909 /*  */ = {
+		D5813F972F4910A500CCE909 = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -448,7 +422,7 @@
 				D54892852F8E8DCA00F2C30A /* Backup */,
 				D54892732F8E778600F2C30A /* Sync */,
 				D5F89BB72F8AD54900D44DCB /* Programs */,
-				D5813F972F4910A500CCE909 /*  */,
+				D5813F972F4910A500CCE909,
 				D58476EC2F410AC300FE3F46 /* Export */,
 				D585D59C2F043BC70073DFE3 /* Catalog */,
 				D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */,
@@ -738,7 +712,7 @@
 				D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
-				D58476E92F40F48000FE3F46 /* BuildFile in Sources */,
+				D58476E92F40F48000FE3F46 /* (null) in Sources */,
 				D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */,
@@ -905,7 +879,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -930,7 +904,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -957,7 +931,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -982,7 +956,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
