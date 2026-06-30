@@ -85,83 +85,15 @@ final class JourneyHarnessTests: XCTestCase {
     }
 
     // MARK: - Invariant tripwire
-
-    /// Checks the per-session carry-forward invariants for every exerciseId
-    /// present in both `completedSession` and `nextSession`. Call after every
-    /// `logAndComplete`. Reads values straight off the models production code
-    /// wrote — does not recompute any engine math.
-    private func assertInvariants(
-        after completedSession: Session,
-        next nextSession: Session,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        // exerciseId integrity: no two items in nextSession share an exerciseId
-        let nextIds = nextSession.items.map { $0.exerciseId }
-        XCTAssertEqual(
-            nextIds.count, Set(nextIds).count,
-            "exerciseId integrity: nextSession has duplicate exerciseIds",
-            file: file, line: line
-        )
-
-        // N.9 — tautological under the current Session.isDeloadWeek implementation
-        // (it derives directly from mesoPhase), kept as a regression tripwire.
-        XCTAssertEqual(
-            nextSession.isDeloadWeek, nextSession.mesoPhase == .deload,
-            "N.9 isDeloadWeek must agree with mesoPhase",
-            file: file, line: line
-        )
-
-        for completedItem in completedSession.items {
-            guard let nextItem = nextSession.items.first(where: { $0.exerciseId == completedItem.exerciseId }) else {
-                continue
-            }
-
-            // N.1 — 2x cap
-            XCTAssertLessThanOrEqual(
-                nextItem.suggestedLoad, completedItem.suggestedLoad * 2.0 + 0.001,
-                "N.1 2x cap violated for \(completedItem.exerciseId): \(nextItem.suggestedLoad) > 2x \(completedItem.suggestedLoad)",
-                file: file, line: line
-            )
-
-            // N.3 — no zeroing after a baseline exists
-            if completedItem.suggestedLoad > 0 {
-                XCTAssertGreaterThan(
-                    nextItem.suggestedLoad, 0,
-                    "N.3 suggestedLoad zeroed after a baseline existed for \(completedItem.exerciseId)",
-                    file: file, line: line
-                )
-            }
-
-            // N.7 — plannedLoadsBySet.count must match targetSets.
-            // BUG CONFIRMED: PlanMemoryEngine.carryForwardPlans (Domain/Logic/PlanMemoryEngine.swift)
-            // sets `targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet` (the SOURCE
-            // item's array length), and the post-projection refill reuses that same
-            // already-copied count (`Array(repeating: finalLoad, count: targetItem.plannedLoadsBySet.count)`)
-            // instead of `targetItem.targetSets`. Any wave transition that changes the
-            // prescribed set count (e.g. wave A → B: 3 → 4 sets for bench press) leaves
-            // plannedLoadsBySet undersized relative to targetSets. Verified empirically via
-            // debug probe: source (wave A, 3 sets) → target (wave B, targetSets=4) produced
-            // plannedLoadsBySet.count == 3.
-            XCTAssertEqual(
-                nextItem.plannedLoadsBySet.count, nextItem.targetSets,
-                "N.7 BUG CONFIRMED: plannedLoadsBySet.count (\(nextItem.plannedLoadsBySet.count)) != targetSets (\(nextItem.targetSets)) for \(completedItem.exerciseId) — PlanMemoryEngine copies the source item's set count instead of resizing to the target's targetSets across wave transitions",
-                file: file, line: line
-            )
-
-            // N.8 — finite (covers NaN too) and non-negative
-            XCTAssertTrue(
-                nextItem.suggestedLoad.isFinite,
-                "N.8 suggestedLoad not finite for \(completedItem.exerciseId)",
-                file: file, line: line
-            )
-            XCTAssertGreaterThanOrEqual(
-                nextItem.suggestedLoad, 0,
-                "N.8 suggestedLoad negative for \(completedItem.exerciseId)",
-                file: file, line: line
-            )
-        }
-    }
+    //
+    // Uses assertJourneyInvariants (Tests/DomainTests/JourneyAssertions.swift) — the
+    // local assertInvariants(after:next:) that used to live here compared completedSession
+    // against literally the next chronological session, which on this 2-day alternating
+    // split (Day A / Day B, disjoint rosters) never shares an exerciseId with what just
+    // completed. Its N.1/N.3/N.7/N.8 checks were therefore vacuous for every transition
+    // in every scenario below — only the session-level checks (N.9, exerciseId
+    // duplication) ever actually fired. assertJourneyInvariants instead finds each item's
+    // real carry-forward target the way PlanMemoryEngine itself does.
 
     // MARK: - Scenario 1: Clean climber
 
@@ -242,10 +174,7 @@ final class JourneyHarnessTests: XCTestCase {
             }
 
             try fixture.logAndComplete(JourneySessionScript(logs: logs))
-
-            if let next = fixture.currentPlannedSession() {
-                assertInvariants(after: session, next: next)
-            }
+            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
         }
 
         XCTAssertGreaterThan(sessionCounter, 1, "expected the full meso to produce multiple sessions")
@@ -365,9 +294,7 @@ final class JourneyHarnessTests: XCTestCase {
                 return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
             }
             try fixture.logAndComplete(JourneySessionScript(logs: logs), session: session)
-            if let next = fixture.currentPlannedSession() {
-                assertInvariants(after: session, next: next)
-            }
+            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
         }
 
         // Weeks 1-2 (sessions 1-4): log clean.
@@ -511,9 +438,7 @@ final class JourneyHarnessTests: XCTestCase {
                 return JourneyExerciseLog(exerciseId: item.exerciseId, sets: sets)
             }
             try fixture.logAndComplete(JourneySessionScript(logs: logs), session: session)
-            if let next = fixture.currentPlannedSession() {
-                assertInvariants(after: session, next: next)
-            }
+            assertJourneyInvariants(after: session, allSessions: fixture.allSessionsSorted())
 
             // MesoPerformanceAnalyzer.analyze(meso:allPriorSessions:) — real signature
             // confirmed via recon. meso.sessions is the cascade relationship, already
