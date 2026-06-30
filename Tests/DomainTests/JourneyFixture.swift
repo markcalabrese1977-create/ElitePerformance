@@ -184,6 +184,94 @@ struct JourneyFixture {
         try context.save()
     }
 
+    // MARK: - Cross-Block Transitions
+
+    /// Seeds a maintenance block from `sourceMeso` via the real Path A entry point
+    /// (MaintenanceProgramSeeder.seed) — clones sourceMeso's day/exercise structure,
+    /// applies the maintenance prescription, and anchors loads from full session
+    /// history via the real ProgramGenerator.anchorLoadsForNewMeso, exactly as
+    /// production does. Archives sourceMeso (and any other active meso) and deletes
+    /// its non-completed future sessions, mirroring the real function's behavior.
+    @discardableResult
+    func seedMaintenanceFromMeso(
+        sourceMeso: MesoBlock,
+        trainingWeekdays: [Int] = [2, 5],
+        totalWeeks: Int = 4,
+        startDate: Date
+    ) throws -> MesoBlock {
+        try MaintenanceProgramSeeder.seed(
+            from: sourceMeso,
+            trainingWeekdays: trainingWeekdays,
+            totalWeeks: totalWeeks,
+            startDate: startDate,
+            context: context
+        )
+        return try mostRecentActiveMeso()
+    }
+
+    /// Seeds a maintenance block from a fresh ProgramTemplate via the real Path B
+    /// entry point (MaintenanceProgramSeeder.seedFromNewProgram) — does NOT clone
+    /// the prior meso's roster. Anchors loads from full session history via the
+    /// real (private to that file) anchorLoadsFromFullHistory.
+    @discardableResult
+    func seedMaintenanceFromTemplate(
+        template: ProgramTemplate,
+        totalWeeks: Int = 4,
+        startDate: Date
+    ) throws -> MesoBlock {
+        try MaintenanceProgramSeeder.seedFromNewProgram(
+            template: template,
+            totalWeeks: totalWeeks,
+            startDate: startDate,
+            context: context
+        )
+        return try mostRecentActiveMeso()
+    }
+
+    /// Seeds a fresh regular meso via the real DUPProgramReplaceService.replacePlannedProgram
+    /// entry point — confirmed via recon to be the real, single shared entry point for
+    /// seeding any regular meso in production (App/ContentView.swift and
+    /// Features/Home/HomeView.swift's handleOnboardingDismiss both route through
+    /// ProgramApplicationService.apply -> replacePlannedProgram -> DUPProgramSeeder.seed).
+    /// Archives the currently active meso and deletes any of ITS non-completed sessions
+    /// dated on/after `startDate` (mirrors the real "start a new meso" transition), then
+    /// seeds fresh.
+    ///
+    /// FIXED (previously a recon finding): replacePlannedProgram now calls
+    /// ProgramGenerator.anchorLoadsForNewMeso itself, as its final step, mirroring
+    /// MaintenanceProgramSeeder.seed's own placement — so this method anchors loads
+    /// automatically, through production code, exactly as a real meso transition would.
+    /// No separate anchoring call is needed (or should be made) by callers of this method.
+    @discardableResult
+    func seedFreshMeso(
+        startDate: Date,
+        trainingWeekdays: [Int] = [2, 5],
+        template: ProgramTemplate = FullBody2DayTemplate.template
+    ) throws -> MesoBlock {
+        try DUPProgramReplaceService.replacePlannedProgram(
+            startDate: startDate,
+            trainingWeekdays: trainingWeekdays,
+            context: context,
+            template: template
+        )
+        return try mostRecentActiveMeso()
+    }
+
+    /// Most recently created MesoBlock with status == .active. Used to find the
+    /// block MaintenanceProgramSeeder just created — it always names the block
+    /// literally "Maintenance Block", so name-based lookup isn't unique across
+    /// two maintenance transitions in the same fixture.
+    private func mostRecentActiveMeso() throws -> MesoBlock {
+        let descriptor = FetchDescriptor<MesoBlock>(
+            sortBy: [SortDescriptor(\MesoBlock.startDate, order: .reverse)]
+        )
+        let all = try context.fetch(descriptor)
+        guard let meso = all.first(where: { $0.status == .active }) else {
+            throw JourneyFixtureError.mesoNotFound
+        }
+        return meso
+    }
+
     // MARK: - Read Helpers
 
     /// All sessions in the meso, chronological order, regardless of status.

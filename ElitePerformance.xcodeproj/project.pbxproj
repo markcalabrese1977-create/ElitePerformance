@@ -11,6 +11,7 @@
 		1299BEF5D0CC4CACA24CC301 /* InvariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */; };
 		1983FD96D3E2298656699395 /* JourneyFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */; };
 		21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */; };
+		344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */; };
 		4935C5EEE6864668BB05A199 /* CoachingEngineGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */; };
 		7920EC09B73B4EB3AAF3086E /* LoadWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */; };
 		88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */; };
@@ -85,6 +86,7 @@
 		D5EC0F5B2FB8B97500C9E38C /* LoadProjectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */; };
 		D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */; };
 		F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */; };
+		F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +102,7 @@
 /* Begin PBXFileReference section */
 		01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculatorTests.swift; sourceTree = "<group>"; };
 		066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubTests.swift; sourceTree = "<group>"; };
+		0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyAssertions.swift; sourceTree = "<group>"; };
 		1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineGuardTests.swift; sourceTree = "<group>"; };
 		1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyFixture.swift; sourceTree = "<group>"; };
 		5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvariantTests.swift; sourceTree = "<group>"; };
@@ -178,6 +181,7 @@
 		D5EC0F582FB895AF00C9E38C /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProjectionService.swift; sourceTree = "<group>"; };
 		D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceProgramPickerView.swift; sourceTree = "<group>"; };
+		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -541,6 +545,8 @@
 				9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */,
 				1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */,
 				D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */,
+				0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */,
+				F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -755,6 +761,8 @@
 				88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */,
 				1983FD96D3E2298656699395 /* JourneyFixture.swift in Sources */,
 				021FF3D2910B6E203105D029 /* JourneyHarnessTests.swift in Sources */,
+				F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */,
+				344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

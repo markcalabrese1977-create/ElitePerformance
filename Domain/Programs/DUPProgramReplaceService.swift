@@ -53,5 +53,18 @@ enum DUPProgramReplaceService {
             mesoStatus: .active,
             mesoNotes: "Seeded via replacePlannedProgram on \(startDay.formatted(date: .abbreviated, time: .omitted))"
         )
+
+        // 4) Anchor loads from prior history — mirrors MaintenanceProgramSeeder.seed's
+        // own placement (anchor as the final step, immediately after the new meso's
+        // sessions are saved). DUPProgramSeeder.seed doesn't return the MesoBlock it
+        // creates, so re-fetch it as the most recently created active block — step 3
+        // above always passes mesoStatus: .active for this call, and step 1 already
+        // archived every other active block, so exactly one match is expected.
+        let newMesoDescriptor = FetchDescriptor<MesoBlock>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        if let newMeso = try context.fetch(newMesoDescriptor).first(where: { $0.status == .active }) {
+            ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: newMeso, context: context)
+        }
     }
 }
