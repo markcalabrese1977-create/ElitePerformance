@@ -25,6 +25,14 @@ final class MesoBlock {
     /// Used by CoachingEngine for phase detection.
     var totalWeeks: Int?
 
+    /// True for a maintenance block (seeded by MaintenanceProgramSeeder), false for a
+    /// regular meso. Distinguishes a maintenance block from a regular meso's own
+    /// deload week — the two previously shared no block-level marker; the only
+    /// existing signal was a fragile name match (`name.lowercased().contains("maintenance")`).
+    /// Defaults to false for migration safety — existing regular mesos and any not
+    /// explicitly marked maintenance are correctly treated as non-maintenance.
+    var isMaintenance: Bool = false
+
     /// Sessions that belong to this meso
     @Relationship(deleteRule: .cascade) var sessions: [Session] = []
 
@@ -36,7 +44,8 @@ final class MesoBlock {
         startDate: Date,
         status: MesoStatus = .draft,
         notes: String? = nil,
-        totalWeeks: Int? = nil
+        totalWeeks: Int? = nil,
+        isMaintenance: Bool = false
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -47,5 +56,6 @@ final class MesoBlock {
         self.status = status
         self.notes = notes
         self.totalWeeks = totalWeeks
+        self.isMaintenance = isMaintenance
     }
 }

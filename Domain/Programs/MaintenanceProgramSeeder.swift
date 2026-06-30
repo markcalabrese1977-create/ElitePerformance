@@ -99,7 +99,8 @@ enum MaintenanceProgramSeeder {
             startDate: startDay,
             status: .active,
             notes: "Seeded from \(sourceMeso.name) on \(startDay.formatted(date: .abbreviated, time: .omitted))",
-            totalWeeks: totalWeeks
+            totalWeeks: totalWeeks,
+            isMaintenance: true
         )
         context.insert(mesoBlock)
 
@@ -219,7 +220,8 @@ enum MaintenanceProgramSeeder {
             startDate: startDay,
             status: .active,
             notes: "Seeded from \(template.name) on \(startDay.formatted(date: .abbreviated, time: .omitted))",
-            totalWeeks: totalWeeks
+            totalWeeks: totalWeeks,
+            isMaintenance: true
         )
         context.insert(mesoBlock)
 
@@ -267,7 +269,11 @@ enum MaintenanceProgramSeeder {
         guard let allSessions = try? context.fetch(allSessionsDescriptor) else { return }
 
         let mesoSessionIDs = Set(mesoBlock.sessions.map { $0.persistentModelID })
-        let historicalSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
+        // Excludes maintenance-block sessions from the anchoring pool — see
+        // ProgramGenerator.anchorLoadsForNewMeso's identical comment.
+        let historicalSessions = allSessions.filter {
+            !mesoSessionIDs.contains($0.persistentModelID) && $0.meso?.isMaintenance != true
+        }
 
         for session in mesoBlock.sessions {
             for item in session.items {

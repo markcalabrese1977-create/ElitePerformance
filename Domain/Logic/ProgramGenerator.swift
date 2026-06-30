@@ -34,7 +34,13 @@ enum ProgramGenerator {
         guard let allSessions = try? context.fetch(allSessionsDescriptor) else { return }
 
         let mesoSessionIDs = Set(mesoBlock.sessions.map { $0.persistentModelID })
-        let historicalSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
+        // Excludes maintenance-block sessions from the anchoring pool — they're
+        // deliberately lighter (RIR 3-4, higher reps) and shouldn't drag the
+        // decay-weighted average down. Does NOT exclude a regular meso's own deload
+        // week — that's a separate, deferred issue (see roadmap).
+        let historicalSessions = allSessions.filter {
+            !mesoSessionIDs.contains($0.persistentModelID) && $0.meso?.isMaintenance != true
+        }
 
         for session in mesoBlock.sessions.sorted(by: { $0.date < $1.date }) {
             for item in session.items {

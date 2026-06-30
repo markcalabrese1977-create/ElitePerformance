@@ -161,6 +161,11 @@ final class CrossBlockContinuityTests: XCTestCase {
         let anchorIds = Set(peakX.keys)
 
         // MARK: a. Maintenance-block loads must never feed the second meso's anchor.
+        // FIXED: ProgramGenerator.anchorLoadsForNewMeso now excludes sessions whose
+        // session.meso?.isMaintenance == true from the historical pool (MesoBlock.isMaintenance,
+        // set by MaintenanceProgramSeeder.seed). Verified the with-maintenance and
+        // without-maintenance (control) anchors now match exactly (82.5 == 82.5 for every
+        // anchor exercise, both paths) — no residual maintenance-specific contamination.
         var contaminated: [String] = []
         for exerciseId in anchorIds {
             guard let withMaintenance = weekOneLoad(exerciseId, in: secondMesoX),
@@ -171,7 +176,7 @@ final class CrossBlockContinuityTests: XCTestCase {
         }
         XCTAssertTrue(
             contaminated.isEmpty,
-            "a. BUG CONFIRMED: maintenance-block sessions measurably pulled the second meso's anchor below the control (no-maintenance) anchor for: \(contaminated.joined(separator: "; ")) — ProgramGenerator.anchorLoadsForNewMeso computes a decay-weighted e1RM average (E1RMCalculator.decayWeightedE1RM, 21-day half-life) across ALL historical sessions including maintenance; maintenance sessions are both more recent than the meso's peak and deliberately lighter (RIR 3-4, higher reps), so they pull the recency-weighted average down rather than being excluded"
+            "a. maintenance-block sessions must not measurably pull the second meso's anchor below the control (no-maintenance) anchor, but did for: \(contaminated.joined(separator: "; "))"
         )
 
         // MARK: b. MesoLifecycle.activeStartDate
@@ -193,6 +198,14 @@ final class CrossBlockContinuityTests: XCTestCase {
         // that calls confirmStartNewMeso)?
 
         // MARK: c. Anchoring starts below the recorded peak, but greater than 0.
+        // The residual gap here (e.g. anchored=82.5 vs peak=102.5, measured after the
+        // maintenance-contamination fix above) is NOT a maintenance-specific issue —
+        // confirmed by the now-exact convergence in assertion (a). It's the separately
+        // deferred, larger architecture gap: anchorLoadsForNewMeso's historicalSessions
+        // pool still includes the source meso's OWN deload week undifferentiated from
+        // working weeks (no exclusion by Session.isDeloadWeek), diluting the
+        // decay-weighted average below true peak. Out of scope for this task — see
+        // recon report.
         for exerciseId in anchorIds {
             guard let peak = peakX[exerciseId],
                   let anchored = weekOneLoad(exerciseId, in: secondMesoX) else { continue }
@@ -253,11 +266,15 @@ final class CrossBlockContinuityTests: XCTestCase {
         // MARK: a. Maintenance-block loads must never feed the second meso's anchor.
         // NOTE: Path B's maintenance block anchors itself via anchorLoadsFromFullHistory
         // (not anchorLoadsForNewMeso) — but the SECOND meso after maintenance is still
-        // anchored via anchorLoadsForNewMeso, now called automatically by
+        // anchored via anchorLoadsForNewMeso, called automatically by
         // DUPProgramReplaceService.replacePlannedProgram (inside seedFreshMeso), same as
         // Path A. The contamination question is about whether THAT call picks up
         // maintenance sessions from history, which is identical regardless of which
         // function anchored the maintenance block itself.
+        // FIXED: both anchorLoadsForNewMeso and anchorLoadsFromFullHistory now exclude
+        // session.meso?.isMaintenance == true sessions from their historical pool.
+        // Verified with-maintenance and control anchors match exactly (82.5 == 82.5 for
+        // every anchor exercise).
         var contaminated: [String] = []
         for exerciseId in anchorIds {
             guard let withMaintenance = weekOneLoad(exerciseId, in: secondMesoX),
@@ -268,7 +285,7 @@ final class CrossBlockContinuityTests: XCTestCase {
         }
         XCTAssertTrue(
             contaminated.isEmpty,
-            "a. BUG CONFIRMED: maintenance-block sessions (seeded via Path B, MaintenanceProgramSeeder.seedFromNewProgram) measurably pulled the second meso's anchor below the control (no-maintenance) anchor for: \(contaminated.joined(separator: "; ")) — same root cause as Path A: ProgramGenerator.anchorLoadsForNewMeso's decay-weighted average over full history doesn't exclude maintenance sessions"
+            "a. maintenance-block sessions (seeded via Path B, MaintenanceProgramSeeder.seedFromNewProgram) must not measurably pull the second meso's anchor below the control (no-maintenance) anchor, but did for: \(contaminated.joined(separator: "; "))"
         )
 
         // MARK: b. MesoLifecycle.activeStartDate — same stub as Path A's test; see that
