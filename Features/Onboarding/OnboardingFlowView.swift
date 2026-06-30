@@ -71,7 +71,7 @@ struct OnboardingFlowView: View {
     @State private var selectedInjuryFlags: Set<InjuryFlag> = []
 
     // Page 6 — Start date picker
-    @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
+    @State private var mesoStartDate: Date = Date()
 
     private let totalPages = 6
 
