@@ -80,18 +80,15 @@ func assertJourneyInvariants(
         }
 
         // N.7 — plannedLoadsBySet.count must match targetSets.
-        // BUG CONFIRMED (open, not part of this task's scope — see PlanMemoryEngine.swift):
-        // carryForwardPlans sets `targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet`
-        // (the SOURCE item's array length), and the post-projection refill reuses that same
-        // already-copied count instead of `targetItem.targetSets`. Any wave transition that
-        // changes the prescribed set count (e.g. wave A → B: 3 → 4 sets) leaves
-        // plannedLoadsBySet undersized/oversized relative to targetSets. This check was
-        // previously vacuous in JourneyHarnessTests.swift's assertInvariants (see file doc
-        // comment above) — now that it's wired to the real target session, expect this to
-        // surface for real across wave-count transitions.
+        // FIXED: PlanMemoryEngine.carryForwardPlans now resizes the carried-forward
+        // plannedLoadsBySet to targetItem.targetSets via resizedToTargetSets (extends by
+        // repeating the last element, or truncates to the first targetCount elements)
+        // instead of leaving it at the source item's array length. Verified clean across
+        // all 14 exercises in JourneyHarnessTests Scenarios 1-3 and both
+        // CrossBlockContinuityTests paths.
         XCTAssertEqual(
             nextItem.plannedLoadsBySet.count, nextItem.targetSets,
-            "N.7 BUG CONFIRMED: plannedLoadsBySet.count (\(nextItem.plannedLoadsBySet.count)) != targetSets (\(nextItem.targetSets)) for \(completedItem.exerciseId) — PlanMemoryEngine copies the source item's set count instead of resizing to the target's targetSets across wave transitions",
+            "N.7 plannedLoadsBySet.count (\(nextItem.plannedLoadsBySet.count)) != targetSets (\(nextItem.targetSets)) for \(completedItem.exerciseId)",
             file: file, line: line
         )
 

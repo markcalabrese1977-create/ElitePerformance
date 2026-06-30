@@ -73,7 +73,15 @@ struct PlanMemoryEngine {
             // at seed time and belong to the target session's wave, not the source's.
             targetItem.suggestedLoad = sourceItem.suggestedLoad
 
-            targetItem.plannedLoadsBySet = sourceItem.plannedLoadsBySet
+            // BUG#1 fix: resize to targetItem.targetSets, not sourceItem's array length —
+            // a wave transition that changes the prescribed set count (e.g. wave A → B:
+            // 3 → 4 sets) used to leave plannedLoadsBySet undersized/oversized relative
+            // to targetSets. See resizedToTargetSets's doc comment for the extend/
+            // truncate rule.
+            targetItem.plannedLoadsBySet = resizedToTargetSets(
+                sourceItem.plannedLoadsBySet,
+                targetCount: targetItem.targetSets
+            )
 
             guard progressionEnabled else { continue }
 
@@ -172,6 +180,30 @@ struct PlanMemoryEngine {
     }
 
     // MARK: - Helpers
+
+    /// Resizes `array` to exactly `targetCount` elements.
+    /// - If `array.count < targetCount`: extends by repeating the array's LAST element
+    ///   for the additional sets — a coach naturally continues a wave's last working
+    ///   set into newly-added sets, rather than leaving them at 0 or some arbitrary
+    ///   value. Falls back to zeros if `array` is empty (nothing to repeat).
+    /// - If `array.count > targetCount`: truncates to the first `targetCount` elements.
+    ///   plannedLoadsBySet is consumed by index in set order (index 0 == set 1,
+    ///   confirmed via SessionView.swift's `let setIndex = idx + 1`), so keeping the
+    ///   first N sets and dropping the trailing ones is correct.
+    /// - If equal: returned unchanged.
+    private func resizedToTargetSets(_ array: [Double], targetCount: Int) -> [Double] {
+        guard targetCount >= 0 else { return array }
+        if array.count == targetCount {
+            return array
+        } else if array.count < targetCount {
+            guard let last = array.last else {
+                return Array(repeating: 0, count: targetCount)
+            }
+            return array + Array(repeating: last, count: targetCount - array.count)
+        } else {
+            return Array(array.prefix(targetCount))
+        }
+    }
 
     private func isPlanEffectivelyEmpty(_ item: SessionItem) -> Bool {
         let allLoadsZero = item.plannedLoadsBySet.allSatisfy { $0 == 0 }
