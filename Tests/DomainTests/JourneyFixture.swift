@@ -57,10 +57,34 @@ struct JourneyFixture {
     /// Uses DUPProgramSeeder.seed directly — avoids OnboardingResult dependency.
     /// Weekdays: Monday (2) + Thursday (5) — Calendar weekday numbering.
     ///
-    /// After seeding, writes `startingLoad` to every SessionItem's suggestedLoad
-    /// and fills plannedLoadsBySet with that value. Required because
-    /// DUPSessionMaterializer seeds suggestedLoad = 0 and plannedLoads = [0,...],
-    /// which would cause hasMeaningfulPlan() to skip carry-forward for the source item.
+    /// After seeding, writes `startingLoad` to only the FIRST scheduled occurrence
+    /// of EACH UNIQUE exerciseId (suggestedLoad + plannedLoadsBySet). Every later
+    /// occurrence of an exercise that's already been seeded once is left exactly
+    /// as DUPSessionMaterializer produced it — suggestedLoad = 0, plannedLoadsBySet
+    /// = [0,...] — so carry-forward has real empty targets to write into.
+    ///
+    /// This is deliberate, not an oversight: PlanMemoryEngine.carryForwardPlans
+    /// only ever writes into a target item when isPlanEffectivelyEmpty(target) is
+    /// true (plannedLoadsBySet all zero AND suggestedLoad == 0). If every future
+    /// session were pre-seeded with a nonzero suggestedLoad too, that guard would
+    /// be false everywhere downstream and the engine's load-writing branch would
+    /// never fire — the journey would silently test nothing beyond the seeded
+    /// baseline. (Verified empirically: with every session pre-seeded, session 2's
+    /// suggestedLoad after carry-forward was exactly the seeded 100.0, not an
+    /// engine-produced value.) Only the source item needs a nonzero starting point
+    /// — hasMeaningfulPlan(source) is satisfied by plannedRepsBySet alone, which
+    /// the materializer already fills with nonzero target reps, but a zero
+    /// suggestedLoad on the source would zero out the carry-forward's 2x cap
+    /// (min(projection, source.suggestedLoad * 2.0)).
+    ///
+    /// "First scheduled session only" is not enough for a multi-day template: a
+    /// Day B exercise doesn't appear until the program's SECOND session, so seeding
+    /// only session[0] left every Day B exercise's suggestedLoad at 0 forever — the
+    /// 2x cap against that zero baseline silently zeroes any later projection too.
+    /// (Verified empirically via Scenario 2: every Day B item's suggestedLoad
+    /// stayed exactly 0.0 across the whole journey.) Seeding the first occurrence
+    /// of every exerciseId, not just session index 0, fixes this while preserving
+    /// the isPlanEffectivelyEmpty behavior above for every subsequent occurrence.
     ///
     /// Also inserts a User record with progressionEnabled = true so the
     /// LoadProjectionService path fires during carry-forward.
@@ -88,17 +112,18 @@ struct JourneyFixture {
             throw JourneyFixtureError.mesoNotFound
         }
 
-        // Write nonzero suggestedLoad + plannedLoadsBySet to every seeded item.
-        // This satisfies hasMeaningfulPlan() on the source and gives carry-forward
-        // a meaningful load to copy and project from.
+        // Write nonzero suggestedLoad + plannedLoadsBySet to the first scheduled
+        // occurrence of each unique exerciseId only — see doc comment above.
         let sessionDescriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
         )
         let sessions = try context.fetch(sessionDescriptor)
+        var seededExerciseIds: Set<String> = []
         for session in sessions {
-            for item in session.items {
+            for item in session.items where !seededExerciseIds.contains(item.exerciseId) {
                 item.suggestedLoad = startingLoad
                 item.plannedLoadsBySet = Array(repeating: startingLoad, count: item.targetSets)
+                seededExerciseIds.insert(item.exerciseId)
             }
         }
 
@@ -118,7 +143,15 @@ struct JourneyFixture {
         guard let session = currentPlannedSession() else {
             throw JourneyFixtureError.noPlannedSession
         }
+        try logAndComplete(script, session: session)
+    }
 
+    /// Same as `logAndComplete(_:)` but completes a caller-specified session
+    /// instead of the earliest non-completed one. Lets a test "skip" a session
+    /// (leave it `.planned`, never logged) and complete a later one directly —
+    /// there is no SessionStatus.skipped case, so a skip is simulated by simply
+    /// not calling this for that session.
+    func logAndComplete(_ script: JourneySessionScript, session: Session) throws {
         for exerciseLog in script.logs {
             guard let item = self.item(exerciseLog.exerciseId, in: session) else {
                 continue
@@ -152,6 +185,14 @@ struct JourneyFixture {
     }
 
     // MARK: - Read Helpers
+
+    /// All sessions in the meso, chronological order, regardless of status.
+    func allSessionsSorted() -> [Session] {
+        let descriptor = FetchDescriptor<Session>(
+            sortBy: [SortDescriptor(\Session.date, order: .forward)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
 
     /// Earliest Session where status != .completed.
     /// Fetches all sorted by date and filters in memory — mirrors PlanMemoryEngine's approach.
