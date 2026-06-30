@@ -172,17 +172,13 @@ final class JourneyHarnessTests: XCTestCase {
         let startDate = Calendar.current.date(from: components)!
 
         let meso = try fixture.seedProgram(startDate: startDate, startingLoad: 100.0)
-        // BUG CONFIRMED: DUPProgramSeeder.seed (Domain/Programs/DUPProgramSeeder.swift)
-        // computes template.totalWeeks and passes it to DUPProgramScheduler.buildSchedule
-        // for scheduling, but never assigns it to the MesoBlock it creates
-        // (`MesoBlock(name:startDate:status:notes:)` has no totalWeeks argument) — so
-        // MesoBlock.totalWeeks stays nil for every program seeded this way. Session.mesoPhase
-        // (Domain/Models/Session.swift) falls back to .early whenever meso?.totalWeeks is
-        // nil, so isDeloadWeek is ALWAYS false for any program seeded via DUPProgramSeeder —
-        // the production deload-week code path is unreachable. Asserted non-fatally (not
-        // XCTUnwrap) so the rest of this scenario still runs and reports; see assertion (d)
-        // below, which is expected to fail for the same root cause.
-        XCTAssertNotNil(meso.totalWeeks, "BUG CONFIRMED: DUPProgramSeeder never assigns MesoBlock.totalWeeks, making Session.isDeloadWeek always false")
+        // FIXED: DUPProgramSeeder.seed (Domain/Programs/DUPProgramSeeder.swift) now passes
+        // template.totalWeeks into the MesoBlock initializer it constructs, so
+        // Session.mesoPhase / isDeloadWeek correctly reach .deload at the materializer's
+        // real deload week. (Previously MesoBlock.totalWeeks stayed nil, mesoPhase always
+        // fell back to .early, and isDeloadWeek was always false for any program seeded
+        // via DUPProgramSeeder.)
+        XCTAssertNotNil(meso.totalWeeks, "DUPProgramSeeder must assign MesoBlock.totalWeeks so Session.isDeloadWeek can ever be true")
 
         struct SessionSnapshot {
             let weekIndex: Int
@@ -309,11 +305,11 @@ final class JourneyHarnessTests: XCTestCase {
         // the wave/RIR path, not via any explicit "reduce" step in PlanMemoryEngine.)
         //
         // Uses waveRaw == "deload" (materializer-assigned, real per-session wave) rather
-        // than isDeload (session.isDeloadWeek) to locate the deload week: per the BUG
-        // CONFIRMED note above, isDeloadWeek is always false for this fixture because
-        // DUPProgramSeeder never sets MesoBlock.totalWeeks, so it cannot be used to find
-        // the week at all. waveRaw is unaffected by that bug — it comes straight from
-        // DUPSessionMaterializer's per-week template lookup.
+        // than isDeload (session.isDeloadWeek) to locate the deload week: isDeloadWeek's
+        // mesoPhase-band definition (>=90% of the block) flags weeks 9 AND 10 as deload
+        // for this 10-week template, while only week 10 is actually wave == .deload at
+        // the materializer level (week 9 is wave .c, peak intensity). waveRaw pinpoints
+        // the one week PlanMemoryEngine itself treats as deload.
 
         if let deloadSnapshot = snapshots.last(where: { $0.waveRaw == WaveType.deload.rawValue }),
            let priorWorkingSnapshot = snapshots.last(where: { $0.waveRaw != WaveType.deload.rawValue && $0.weekIndex < deloadSnapshot.weekIndex }) {

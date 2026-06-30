@@ -50,7 +50,8 @@ enum DUPProgramSeeder {
             name: blockName,
             startDate: startDay,
             status: mesoStatus,
-            notes: mesoNotes
+            notes: mesoNotes,
+            totalWeeks: template.totalWeeks
         )
         context.insert(mesoBlock)
 
