@@ -35,7 +35,22 @@ struct TodayTabView: View {
     @State private var collisionMessage = ""
 
     private var activeBlockSessions: [Session] {
-        sessions.filter { $0.meso?.status == .active }
+        let todayStart = Calendar.current.startOfDay(for: Date())
+
+        let activeSessions = sessions.filter { $0.meso?.status == .active }
+        // Carry-over: non-completed sessions still on the most recently archived
+        // block, dated from today up to (but not including) the new meso's start.
+        // Surfaces prior-block sessions in Today/Upcoming until the new program
+        // begins, while leaving them attached to their archived block so their
+        // original labels and week structure stay correct in History.
+        let activeMesoStartDate = activeSessions.compactMap { $0.meso?.startDate }.min() ?? Date()
+        let carryOverSessions = sessions.filter {
+            $0.meso?.status == .archived &&
+            $0.status != .completed &&
+            $0.date >= todayStart &&
+            $0.date < activeMesoStartDate
+        }
+        return (activeSessions + carryOverSessions).sorted { $0.date < $1.date }
     }
 
     private var visibleSessions: [Session] {

@@ -2864,12 +2864,16 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
         XCTAssertEqual(meso.status, .archived,
             "the replaced meso block must be archived after the switch")
 
-        // Pre-start sessions must be re-attached to the NEW (active) meso block —
-        // not orphaned to the archived old one — so they remain visible in
-        // Today/Upcoming after the program switch.
-        XCTAssertEqual(sessionJun30.meso?.status, .active,
-            "Jun 30 session must be attached to the new active meso, not the archived one")
-        XCTAssertEqual(sessionJul1.meso?.status, .active,
-            "Jul 1 session must be attached to the new active meso, not the archived one")
+        // Pre-start sessions must stay attached to their ORIGINAL (now archived)
+        // block so their labels and week structure remain correct in History.
+        // Today/Upcoming surfaces them via the carry-over query, not re-parenting.
+        XCTAssertEqual(sessionJun30.meso?.status, .archived,
+            "Jun 30 session must remain on the archived old meso, not the new one")
+        XCTAssertEqual(sessionJun30.meso?.persistentModelID, meso.persistentModelID,
+            "Jun 30 session must still point at the original meso block")
+        XCTAssertEqual(sessionJul1.meso?.status, .archived,
+            "Jul 1 session must remain on the archived old meso, not the new one")
+        XCTAssertEqual(sessionJul1.meso?.persistentModelID, meso.persistentModelID,
+            "Jul 1 session must still point at the original meso block")
     }
 }

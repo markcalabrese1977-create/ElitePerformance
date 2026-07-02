@@ -16,20 +16,6 @@ enum DUPProgramReplaceService {
     ) throws {
         let startDay = calendar.startOfDay(for: startDate)
 
-        // 0) Pre-flight: identify sessions dated before startDay that belong to the
-        //    currently-active block. Captured before archiving so meso.status == .active
-        //    is still a valid filter. These sessions survive step 2 (deletion only targets
-        //    date >= startDay) but would otherwise be orphaned to the archived block and
-        //    disappear from Today/Upcoming. Re-attached to the new block in step 4.
-        let prefetchDescriptor = FetchDescriptor<Session>()
-        let allCurrentSessions = try context.fetch(prefetchDescriptor)
-        let sessionsToReparent = allCurrentSessions.filter { session in
-            let sessionDay = calendar.startOfDay(for: session.date)
-            return sessionDay < startDay
-                && session.status != .completed
-                && session.meso?.status == .active
-        }
-
         // 1) Archive any currently active meso blocks
         let mesoDescriptor = FetchDescriptor<MesoBlock>()
         let existingBlocks = try context.fetch(mesoDescriptor)
@@ -78,15 +64,9 @@ enum DUPProgramReplaceService {
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         )
         if let newMeso = try context.fetch(newMesoDescriptor).first(where: { $0.status == .active }) {
-            // Re-attach pre-start sessions to the new meso so they remain visible
-            // in Today/Upcoming rather than being orphaned to the archived old block.
-            // anchorLoadsForNewMeso skips these (suggestedLoad != 0) so no conflict.
-            for session in sessionsToReparent {
-                session.meso = newMeso
-            }
             ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: newMeso, context: context)
         } else {
-            print("⚠️ replacePlannedProgram: no active meso found after seeding; pre-start sessions remain on archived block")
+            print("⚠️ replacePlannedProgram: no active meso found after seeding; loads not anchored")
         }
     }
 }
