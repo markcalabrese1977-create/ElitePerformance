@@ -125,7 +125,34 @@ struct PlanMemoryEngine {
                     count: targetItem.plannedLoadsBySet.count
                 )
             }
-            
+
+            // Phase 0.4 — CoachingEngine is the authoritative load layer.
+            // recommend() reads the SOURCE item's actuals; when it returns a
+            // non-nil nextSuggestedLoad it overwrites project()'s value (holds
+            // included). When it returns nil (pain, no baseline; deload is
+            // already handled by the deload continue above), project()'s value
+            // persists as a conservative floor. The value is written raw —
+            // recommend() self-caps at baseLoad * 2.0, so no second clamp.
+            let consecutiveCleanCount = LoadProjectionService.consecutiveCleanCount(
+                exerciseId: sourceItem.exerciseId,
+                waveRaw: sourceItem.waveRaw,
+                repMin: sourceItem.repMin ?? sourceItem.targetReps,
+                allSessions: allSessions,
+                referenceDate: session.date
+            )
+            if let recommendation = CoachingEngine.recommend(
+                for: sourceItem,
+                minLoadIncrement: loadIncrement,
+                mesoPhase: session.mesoPhase,
+                consecutiveCleanCount: consecutiveCleanCount
+            ), let recommendedLoad = recommendation.nextSuggestedLoad {
+                targetItem.suggestedLoad = recommendedLoad
+                targetItem.plannedLoadsBySet = Array(
+                    repeating: recommendedLoad,
+                    count: targetItem.plannedLoadsBySet.count
+                )
+            }
+
             // Pain carry-forward
             let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
                 $0 == SetFeedback.pain.rawValue

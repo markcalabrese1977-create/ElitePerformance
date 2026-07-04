@@ -325,7 +325,8 @@ struct CoachingEngine {
                 let step = loadStep(for: baseLoad)
                 return nextLoad(from: baseLoad, step: step) ?? baseLoad
             }()
-            let nextLoad = min(suggested, loadSanityCap)
+            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
+            let nextLoad = min(stepped, loadSanityCap)
             let pumpNote: String = {
                 switch avgPump {
                 case .good: return " Pump was good — this lift is responding well."
@@ -386,7 +387,8 @@ struct CoachingEngine {
                 }
             }()
 
-            let nextLoad = min(suggested, loadSanityCap)
+            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
+            let nextLoad = min(stepped, loadSanityCap)
             let msg: String
             if plannedWorkingSetCount >= 4 {
                 msg = "Clean execution across the working sets at the target difficulty. Next session: \(String(format: "%.1f", nextLoad)). Volume beyond the primary sets is supplemental — don't let it drive the progression call.\(pumpNote)"
@@ -405,7 +407,8 @@ struct CoachingEngine {
                 let step = loadStep(for: baseLoad)
                 return nextLoad(from: baseLoad, step: step) ?? baseLoad
             }()
-            let nextLoad = min(suggested, loadSanityCap)
+            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
+            let nextLoad = min(stepped, loadSanityCap)
             let msg = "Working sets hit the rep target and you extended with a drop set. Next session: \(String(format: "%.1f", nextLoad))."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }
@@ -418,14 +421,18 @@ struct CoachingEngine {
         }()
 
         if hitRepTarget && nearTargetRIR {
-            let msg: String
             if consecutiveCleanCount >= 1 {
-                let nextLoad = String(format: "%.1f", (baseLoad + (minLoadIncrement ?? 2.5)))
-                msg = "On target again — two clean sessions confirmed. Load steps up to \(nextLoad) next session."
+                // Computed increase — round to the increment (before the cap), then
+                // use the SAME value in both the message and the payload so they agree.
+                let suggested = baseLoad + (minLoadIncrement ?? 2.5)
+                let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
+                let nextLoadValue = min(stepped, loadSanityCap)
+                let msg = "On target again — two clean sessions confirmed. Load steps up to \(String(format: "%.1f", nextLoadValue)) next session."
+                return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoadValue)
             } else {
-                msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session — one more clean session earns the increase."
+                let msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session — one more clean session earns the increase."
+                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
             }
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
         // 5.5) Extra reserve — actual RIR well above target, reps hit, no fatigue → increase.
@@ -439,7 +446,8 @@ struct CoachingEngine {
                 let step = loadStep(for: baseLoad)
                 return nextLoad(from: baseLoad, step: step) ?? baseLoad
             }()
-            let nextLoad = min(suggested, loadSanityCap)
+            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
+            let nextLoad = min(stepped, loadSanityCap)
             let msg = "Extra reserve detected — load increase suggested. Next session: \(String(format: "%.1f", nextLoad))."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
         }

@@ -151,7 +151,9 @@ final class LoadWriteTests: XCTestCase {
 
         PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
 
-        XCTAssertEqual(nearFutureItem.suggestedLoad, 100, "nearest future session gets the carry-forward")
+        // Phase 0.4: CoachingEngine is the authoritative load layer — a clean
+        // session at the rep target progresses 100 -> 102.5 (was plain carry-forward of 100).
+        XCTAssertEqual(nearFutureItem.suggestedLoad, 102.5, "nearest future session gets the progressed load")
         XCTAssertEqual(farFutureItem.suggestedLoad, 0, "a second, farther-out future session is not also written to")
     }
 
