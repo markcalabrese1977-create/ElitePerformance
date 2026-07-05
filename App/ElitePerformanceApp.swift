@@ -48,6 +48,7 @@ struct ElitePerformanceApp: App {
             SessionDayLabelBackfill.runIfNeeded(in: context)
             CustomExerciseStoreMigration.runIfNeeded(in: context)
             CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
+            MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
