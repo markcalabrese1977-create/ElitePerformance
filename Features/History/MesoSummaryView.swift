@@ -27,6 +27,17 @@ struct MesoSummaryView: View {
     @State private var showProgramPicker: Bool = false
     @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
 
+    // Extend maintenance block (mid-block action)
+    @State private var showExtendSheet: Bool = false
+    @State private var additionalWeeks: Int = 2
+    @State private var extendConfirmation: String? = nil
+    @State private var showExtendError: Bool = false
+    @State private var extendErrorMessage: String = ""
+
+    private var canExtendMaintenance: Bool {
+        meso.isMaintenance && meso.status == .active
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -37,6 +48,9 @@ struct MesoSummaryView: View {
                                             statsRow(analysis)
                                             volumeRampChart(analysis)
                                             exerciseSection(analysis)
+                                            if canExtendMaintenance {
+                                                extendBlockSection
+                                            }
                                             nextBlockSection(analysis)
                                         }
                                         .padding()
@@ -75,6 +89,14 @@ struct MesoSummaryView: View {
                     onNextBlock(.maintenanceBlock)
                     dismiss()
                 }
+            }
+            .sheet(isPresented: $showExtendSheet) {
+                extendSheet
+            }
+            .alert("Couldn't extend block", isPresented: $showExtendError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(extendErrorMessage)
             }
         }
     }
@@ -128,6 +150,136 @@ struct MesoSummaryView: View {
                 print("ERROR MaintenanceProgramSeeder: \(error)")
             }
         }
+
+    // MARK: - Extend maintenance block
+
+    /// Last currently-seeded session date on the active block (the day we
+    /// extend from).
+    private var currentEndDate: Date? {
+        meso.sessions.max(by: { $0.date < $1.date })?.date
+    }
+
+    /// Approximate end date after extending by `additionalWeeks` weeks — for
+    /// display only. Sessions run on a weekly cadence, so the last extension
+    /// session lands ~`additionalWeeks` weeks after the current end.
+    private func projectedEndDate(afterAdding weeks: Int) -> Date? {
+        guard let current = currentEndDate else { return nil }
+        return Calendar.current.date(byAdding: .weekOfYear, value: weeks, to: current)
+    }
+
+    private static let extendDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private var extendBlockSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Extend this block")
+                .font(.subheadline.bold())
+
+            Text("Add more weeks of the same structure at the same loads and reduced volume. Existing sessions are untouched.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let confirmation = extendConfirmation {
+                Label(confirmation, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            nextBlockButton(
+                title: "Extend Maintenance Block",
+                subtitle: extendButtonSubtitle,
+                icon: "calendar.badge.plus",
+                color: .teal
+            ) {
+                extendConfirmation = nil
+                showExtendSheet = true
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+                .shadow(radius: 2, y: 1)
+        )
+    }
+
+    private var extendButtonSubtitle: String {
+        if let end = currentEndDate {
+            return "Currently ends \(Self.extendDateFormatter.string(from: end))."
+        }
+        return "Add 1–4 more weeks."
+    }
+
+    private var extendSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Additional weeks")
+                        .font(.headline)
+
+                    Picker("Additional weeks", selection: $additionalWeeks) {
+                        ForEach(1...4, id: \.self) { n in
+                            Text("\(n)").tag(n)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    if let end = currentEndDate {
+                        Text("Current end date: \(Self.extendDateFormatter.string(from: end))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let newEnd = projectedEndDate(afterAdding: additionalWeeks) {
+                        Text("New end date: ~\(Self.extendDateFormatter.string(from: newEnd))")
+                            .font(.subheadline.bold())
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    performExtend()
+                } label: {
+                    Text("Extend by \(additionalWeeks) week\(additionalWeeks == 1 ? "" : "s")")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .navigationTitle("Extend Block")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showExtendSheet = false }
+                }
+            }
+        }
+    }
+
+    private func performExtend() {
+        do {
+            try MaintenanceProgramSeeder.extend(
+                block: meso,
+                additionalWeeks: additionalWeeks,
+                context: context
+            )
+            showExtendSheet = false
+            extendConfirmation = "Added \(additionalWeeks) week\(additionalWeeks == 1 ? "" : "s"). Block now runs through ~\(projectedEndDate(afterAdding: 0).map { Self.extendDateFormatter.string(from: $0) } ?? "the new end date")."
+            buildAnalysis()
+        } catch {
+            extendErrorMessage = error.localizedDescription
+            showExtendSheet = false
+            showExtendError = true
+        }
+    }
 
     // MARK: - Verdict header
 

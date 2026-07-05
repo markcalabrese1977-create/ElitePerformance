@@ -912,6 +912,102 @@ final class MaintenanceBlockSeedingTests: XCTestCase {
         let mesoCountAfter = try context.fetch(FetchDescriptor<MesoBlock>()).count
         XCTAssertEqual(mesoCountAfter, mesoCountBefore + 1, "seeding must create exactly one new MesoBlock and nothing else")
     }
+
+    // MARK: - Path C: extend()
+
+    /// Seeds an active maintenance block (1 day/week, `totalWeeks` weeks) via
+    /// Path A and returns it. weekIndex runs 1...totalWeeks.
+    private func makeActiveMaintenanceBlock(in context: ModelContext, totalWeeks: Int = 4) throws -> MesoBlock {
+        let sourceMeso = makeSimpleSourceMeso(in: context)
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 4], totalWeeks: totalWeeks, startDate: Date(), context: context)
+        return try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+    }
+
+    func test_extendMaintenanceBlock_appendsSessionsWithCorrectWeekIndex() throws {
+        let context = try makeContext()
+        let block = try makeActiveMaintenanceBlock(in: context) // 4 weeks, 1 day/week
+
+        XCTAssertEqual(Set(block.sessions.compactMap { $0.weekInMeso }), [1, 2, 3, 4])
+
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 2, context: context)
+
+        let weekIndicesAfter = block.sessions.compactMap { $0.weekInMeso }.sorted()
+        XCTAssertEqual(weekIndicesAfter, [1, 2, 3, 4, 5, 6], "extension must append weeks 5 & 6 with no duplicated earlier weeks")
+        XCTAssertEqual(block.sessions.count, 6, "1 day/week × 6 weeks = 6 sessions total")
+        XCTAssertEqual(block.totalWeeks, 6, "totalWeeks must become 4 + 2")
+    }
+
+    func test_extendMaintenanceBlock_doesNotArchiveOrDeleteExistingSessions() throws {
+        let context = try makeContext()
+        let block = try makeActiveMaintenanceBlock(in: context)
+
+        // Partially complete two existing sessions before extending.
+        let sortedBefore = block.sessions.sorted { $0.date < $1.date }
+        let completedIDs: [PersistentIdentifier] = Array(sortedBefore.prefix(2)).map { s in
+            s.status = .completed
+            return s.persistentModelID
+        }
+        try context.save()
+        let sessionCountBefore = block.sessions.count
+
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 2, context: context)
+
+        let allSessions = try context.fetch(FetchDescriptor<Session>())
+        for id in completedIDs {
+            XCTAssertTrue(allSessions.contains { $0.persistentModelID == id }, "extend must not delete existing (completed) sessions")
+        }
+        XCTAssertEqual(block.status, .active, "extend must not archive the block")
+        XCTAssertEqual(block.sessions.count, sessionCountBefore + 2, "extend must ADD sessions, never delete")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<MesoBlock>()).filter { $0.isMaintenance }.count, 1, "extend must not create a new maintenance block")
+    }
+
+    func test_extendMaintenanceBlock_loadsMatchMaintenancePrescription() throws {
+        let context = try makeContext()
+        let block = try makeActiveMaintenanceBlock(in: context)
+
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 2, context: context)
+
+        let extendedSessions = block.sessions.filter { ($0.weekInMeso ?? 0) > 4 }
+        XCTAssertFalse(extendedSessions.isEmpty, "extension must have produced new sessions")
+        for session in extendedSessions {
+            for item in session.items {
+                XCTAssertEqual(item.waveRaw, "deload", "extended items must carry the deload maintenance wave")
+                XCTAssertEqual(item.targetSets, 2)
+                XCTAssertEqual(item.targetRIRMin, 3)
+                XCTAssertEqual(item.targetRIRMax, 4)
+                let repMin = try XCTUnwrap(item.repMin)
+                let repMax = try XCTUnwrap(item.repMax)
+                XCTAssertGreaterThanOrEqual(item.targetReps, repMin)
+                XCTAssertLessThanOrEqual(item.targetReps, repMax)
+            }
+        }
+    }
+
+    func test_extendMaintenanceBlock_doesNotReanchor() throws {
+        let context = try makeContext()
+        let block = try makeActiveMaintenanceBlock(in: context)
+
+        // Give the block's existing sessions concrete loads, as if logged.
+        for session in block.sessions {
+            for item in session.items {
+                item.suggestedLoad = 135
+            }
+        }
+        try context.save()
+
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 2, context: context)
+
+        // Extended items come straight from applyMaintenancePrescription
+        // (suggestedLoad 0.0). extend does NOT run any load-anchoring pass, so
+        // they are never recalculated from history — proving no re-anchor.
+        let extendedItems = block.sessions
+            .filter { ($0.weekInMeso ?? 0) > 4 }
+            .flatMap { $0.items }
+        XCTAssertFalse(extendedItems.isEmpty)
+        for item in extendedItems {
+            XCTAssertEqual(item.suggestedLoad, 0.0, accuracy: 0.0001, "extend must not re-anchor; extended items keep the raw maintenance prescription (0), not a recalculated anchor")
+        }
+    }
 }
 
 // Pinned from source recon (Domain/Programs/PPL3WeekTemplate.swift,

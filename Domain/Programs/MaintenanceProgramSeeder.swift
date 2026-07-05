@@ -258,6 +258,131 @@ enum MaintenanceProgramSeeder {
         anchorLoadsFromFullHistory(mesoBlock: mesoBlock, context: context)
     }
 
+    // MARK: - Path C: Extend an Active Maintenance Block
+
+    /// Appends `additionalWeeks` more weeks of the SAME structure onto an
+    /// existing, in-progress maintenance block, starting the day AFTER the last
+    /// currently-seeded session.
+    ///
+    /// Unlike `seed` / `seedFromNewProgram`, this MUTATES the existing block in
+    /// place: it does NOT archive any block, delete any sessions, create a new
+    /// `MesoBlock`, or re-anchor loads. New sessions reuse the block's own
+    /// roster (most recent session per day label) and the standard maintenance
+    /// prescription, continuing `weekIndex` from the block's current maximum.
+    static func extend(
+        block: MesoBlock,
+        additionalWeeks: Int,
+        context: ModelContext,
+        calendar: Calendar = .current
+    ) throws {
+        guard additionalWeeks > 0 else { return }
+
+        // 1) Last seeded session — the anchor we extend from.
+        guard let lastSession = block.sessions.max(by: { $0.date < $1.date }) else {
+            print("MaintenanceProgramSeeder.extend: block has no sessions, nothing to extend.")
+            return
+        }
+
+        // 2) Highest weekIndex already present on the block.
+        let currentMaxWeekIndex = block.sessions.compactMap { $0.weekInMeso }.max() ?? 0
+
+        // 3) Recover ordered day slots + roster per day label from the block's
+        //    existing sessions (same pattern as seed()): most recent session
+        //    per label so we inherit the latest exercise-swap state.
+        let sourceSessions = block.sessions.sorted { $0.date < $1.date }
+
+        var seenDayLabels: [String] = []
+        var seenSet = Set<String>()
+        for session in sourceSessions {
+            let label = session.dayLabel ?? "Day \(session.programIndex)"
+            if !seenSet.contains(label) {
+                seenSet.insert(label)
+                seenDayLabels.append(label)
+            }
+        }
+
+        let daysPerWeek = seenDayLabels.count
+        guard daysPerWeek > 0 else {
+            print("MaintenanceProgramSeeder.extend: no day slots recovered, aborting.")
+            return
+        }
+
+        var dayRosters: [String: [(exerciseId: String, name: String?, order: Int)]] = [:]
+        for label in seenDayLabels {
+            let matchingSessions = sourceSessions.filter {
+                ($0.dayLabel ?? "Day \($0.programIndex)") == label
+            }
+            if let latest = matchingSessions.last {
+                let roster = latest.items
+                    .sorted { $0.order < $1.order }
+                    .map { (exerciseId: $0.exerciseId, name: $0.exerciseNameSnapshot, order: $0.order) }
+                dayRosters[label] = roster
+            }
+        }
+
+        // 4) Infer training weekdays: MODE weekday per day label (mirrors
+        //    MesoSummaryView.seedMaintenanceBlock — the mode avoids absorbing
+        //    one-off skip/reorder anomalies that a union would bake in).
+        var weekdayCountsByLabel: [String: [Int: Int]] = [:]
+        for session in sourceSessions {
+            let label = session.dayLabel ?? "Day \(session.programIndex)"
+            let weekday = calendar.component(.weekday, from: session.date)
+            weekdayCountsByLabel[label, default: [:]][weekday, default: 0] += 1
+        }
+        let inferredWeekdays = weekdayCountsByLabel.values
+            .compactMap { counts in counts.max(by: { $0.value < $1.value })?.key }
+            .reduce(into: Set<Int>()) { $0.insert($1) }
+            .sorted()
+        let effectiveWeekdays = inferredWeekdays.isEmpty
+            ? defaultWeekdays(for: daysPerWeek)
+            : inferredWeekdays
+
+        // 5) Extension starts the day AFTER the last seeded session.
+        let extensionStart = calendar.date(byAdding: .day, value: 1, to: lastSession.date) ?? lastSession.date
+
+        // 6) Build the new session dates.
+        let totalSessions = daysPerWeek * additionalWeeks
+        let sessionDates = buildSessionDates(
+            calendar: calendar,
+            today: calendar.startOfDay(for: extensionStart),
+            weekdays: effectiveWeekdays,
+            totalSessions: totalSessions
+        )
+
+        // 7) Append planned sessions onto the EXISTING block, continuing
+        //    weekIndex from currentMaxWeekIndex + 1. Same deload-wave
+        //    maintenance prescription as the original seed.
+        for weekOffset in 0..<additionalWeeks {
+            for (dayIndex, dayLabel) in seenDayLabels.enumerated() {
+                let globalIndex = weekOffset * daysPerWeek + dayIndex
+                guard globalIndex < sessionDates.count else { continue }
+
+                let date = sessionDates[globalIndex]
+                let roster = dayRosters[dayLabel] ?? []
+                let items: [SessionItem] = applyMaintenancePrescription(to: roster)
+
+                let session = Session(
+                    date: date,
+                    status: .planned,
+                    readinessStars: 0,
+                    sessionNotes: "\(dayLabel) · Maintenance",
+                    weekIndex: currentMaxWeekIndex + weekOffset + 1,
+                    dayLabel: dayLabel,
+                    items: items
+                )
+                session.meso = block
+                session.programIndex = dayIndex + 1
+                context.insert(session)
+            }
+        }
+
+        // 8) Extend the block's declared length. No re-anchoring — extension
+        //    sessions inherit the block's existing loads via the prescription.
+        block.totalWeeks = (block.totalWeeks ?? currentMaxWeekIndex) + additionalWeeks
+
+        try context.save()
+    }
+
     /// Searches the user's entire session history (across all mesos) for the
     /// best/most-recent e1RM per exercise, anchoring each maintenance item's
     /// suggestedLoad accordingly. Exercises with no prior history start at 0,
