@@ -265,6 +265,8 @@ private struct HistoryDayDetailView: View {
     }
     
     private var exerciseDetails: [HistoryExerciseDetail] {
+        let bodyWeight = try? context.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
+
         // If we can reconstruct from the original Session, do it (gives per-set loads).
         if let session = sourceSession {
             let vm = SessionScreenViewModel(session: session)
@@ -308,6 +310,8 @@ private struct HistoryDayDetailView: View {
                         let displayLoad: Double = {
                             if actualLoad > 0 { return actualLoad }
                             if plannedLoad > 0 { return plannedLoad }
+                            let eff = E1RMCalculator.effectiveLoad(actualLoad: 0, exerciseId: uiEx.exerciseId, bodyWeight: bodyWeight)
+                            if eff > 0 { return eff }
                             return 0
                         }()
 

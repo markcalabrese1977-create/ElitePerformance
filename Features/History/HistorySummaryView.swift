@@ -61,7 +61,8 @@ struct HistorySummaryView: View {
     }
 
     private var rawExerciseSummaries: [ExerciseSummary] {
-        HistorySummaryBuilder.build(from: filteredCompletedSessions)
+        let bodyWeight = try? modelContext.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
+        return HistorySummaryBuilder.build(from: filteredCompletedSessions, bodyWeight: bodyWeight)
     }
 
     private var exerciseSummaries: [ExerciseSummary] {
@@ -421,7 +422,7 @@ struct ExerciseSummary: Identifiable {
 // MARK: - Builder
 
 enum HistorySummaryBuilder {
-    static func build(from sessions: [Session]) -> [ExerciseSummary] {
+    static func build(from sessions: [Session], bodyWeight: Double?) -> [ExerciseSummary] {
         let catalogById: [String: CatalogExercise] = Dictionary(
             uniqueKeysWithValues: ExerciseCatalog.all.map { ($0.id, $0) }
         )
@@ -509,13 +510,18 @@ enum HistorySummaryBuilder {
                 for idx in 0..<setCount {
                     let reps = item.actualReps[idx]
                     let load = item.actualLoads[idx]
+                    let effLoad = E1RMCalculator.effectiveLoad(
+                        actualLoad: load,
+                        exerciseId: exerciseId,
+                        bodyWeight: bodyWeight
+                    )
 
-                    guard reps > 0, load > 0 else { continue }
+                    guard reps > 0, effLoad > 0 else { continue }
 
                     didRecordAnySet = true
 
-                    let volume = Double(reps) * load
-                    let e1rm = estimateE1RM(weight: load, reps: reps)
+                    let volume = Double(reps) * effLoad
+                    let e1rm = estimateE1RM(weight: effLoad, reps: reps)
 
                     bucket.totalSets += 1
                     bucket.totalReps += reps
