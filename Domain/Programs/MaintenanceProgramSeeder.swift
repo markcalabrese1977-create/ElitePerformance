@@ -312,7 +312,11 @@ enum MaintenanceProgramSeeder {
             let matchingSessions = sourceSessions.filter {
                 ($0.dayLabel ?? "Day \($0.programIndex)") == label
             }
-            if let latest = matchingSessions.last {
+            // Prefer the latest COMPLETED session so a roster/exercise-swap the
+            // user made on a performed session wins over an untouched future
+            // planned session (which still carries the original seed roster).
+            let completedSessions = matchingSessions.filter { $0.completedAt != nil }
+            if let latest = (completedSessions.last ?? matchingSessions.last) {
                 let roster = latest.items
                     .sorted { $0.order < $1.order }
                     .map { (exerciseId: $0.exerciseId, name: $0.exerciseNameSnapshot, order: $0.order) }
@@ -329,13 +333,36 @@ enum MaintenanceProgramSeeder {
             let weekday = calendar.component(.weekday, from: session.date)
             weekdayCountsByLabel[label, default: [:]][weekday, default: 0] += 1
         }
-        let inferredWeekdays = weekdayCountsByLabel.values
-            .compactMap { counts in counts.max(by: { $0.value < $1.value })?.key }
-            .reduce(into: Set<Int>()) { $0.insert($1) }
+        // Ordered dedup: walk labels in first-appearance order and take each
+        // label's MODE weekday, skipping a weekday already claimed by an earlier
+        // label. This is deterministic (unlike reducing dictionary .values into a
+        // Set) and keeps weekday selection tied to label order.
+        var claimedModeWeekdays = Set<Int>()
+        let inferredWeekdays = seenDayLabels
+            .compactMap { label -> Int? in
+                guard let counts = weekdayCountsByLabel[label],
+                      let mode = counts.max(by: { $0.value < $1.value })?.key,
+                      !claimedModeWeekdays.contains(mode) else { return nil }
+                claimedModeWeekdays.insert(mode)
+                return mode
+            }
             .sorted()
-        let effectiveWeekdays = inferredWeekdays.isEmpty
+        var effectiveWeekdays = inferredWeekdays.isEmpty
             ? defaultWeekdays(for: daysPerWeek)
             : inferredWeekdays
+
+        // Guarantee exactly daysPerWeek weekdays — fill any collision gaps with
+        // unused weekdays. Without this, two labels sharing a mode weekday leave
+        // effectiveWeekdays.count < daysPerWeek, so buildSessionDates spreads a
+        // week's sessions across more calendar weeks than the weekIndex loop
+        // (which assumes daysPerWeek dates per week) expects.
+        if effectiveWeekdays.count < daysPerWeek {
+            let allWeekdays = Array(1...7)
+            let unused = allWeekdays.filter { !effectiveWeekdays.contains($0) }
+            let needed = daysPerWeek - effectiveWeekdays.count
+            effectiveWeekdays += Array(unused.prefix(needed))
+            effectiveWeekdays.sort()
+        }
 
         // 5) Extension starts the day AFTER the last seeded session.
         let extensionStart = calendar.date(byAdding: .day, value: 1, to: lastSession.date) ?? lastSession.date
@@ -379,6 +406,36 @@ enum MaintenanceProgramSeeder {
         // 8) Extend the block's declared length. No re-anchoring — extension
         //    sessions inherit the block's existing loads via the prescription.
         block.totalWeeks = (block.totalWeeks ?? currentMaxWeekIndex) + additionalWeeks
+
+        try context.save()
+    }
+
+    // MARK: - Path C Repair: Re-seed a Bad Extension
+
+    /// One-shot repair for a maintenance block whose extension was seeded by the
+    /// PRE-FIX `extend()` (wrong week numbers / collapsed days). Removes the
+    /// not-yet-performed extension sessions (weekInMeso > originalWeeks) and
+    /// re-seeds them with the fixed `extend()`. Completed sessions are preserved.
+    static func repairExtension(
+        block: MesoBlock,
+        originalWeeks: Int,
+        additionalWeeks: Int,
+        context: ModelContext
+    ) throws {
+        let badSessions = block.sessions.filter {
+            ($0.weekInMeso ?? 0) > originalWeeks && $0.status != .completed
+        }
+        for session in badSessions {
+            context.delete(session)
+        }
+        try context.save()
+
+        // Reset to the pre-extension length so extend() computes the new
+        // totalWeeks as originalWeeks + additionalWeeks, rather than stacking
+        // on top of the already-inflated value from the bad extension.
+        block.totalWeeks = originalWeeks
+
+        try extend(block: block, additionalWeeks: additionalWeeks, context: context)
 
         try context.save()
     }

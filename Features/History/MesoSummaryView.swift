@@ -34,6 +34,15 @@ struct MesoSummaryView: View {
     @State private var showExtendError: Bool = false
     @State private var extendErrorMessage: String = ""
 
+    // Repair a mis-seeded extension (manually revealed via "Something look wrong?")
+    @State private var showRepairOption: Bool = false
+    @State private var showRepairSheet: Bool = false
+    @State private var repairOriginalWeeks: Int = 4
+    @State private var repairAdditionalWeeks: Int = 2
+    @State private var repairConfirmation: String? = nil
+    @State private var showRepairError: Bool = false
+    @State private var repairErrorMessage: String = ""
+
     private var canExtendMaintenance: Bool {
         meso.isMaintenance && meso.status == .active
     }
@@ -93,10 +102,18 @@ struct MesoSummaryView: View {
             .sheet(isPresented: $showExtendSheet) {
                 extendSheet
             }
+            .sheet(isPresented: $showRepairSheet) {
+                repairSheet
+            }
             .alert("Couldn't extend block", isPresented: $showExtendError) {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(extendErrorMessage)
+            }
+            .alert("Couldn't fix extension", isPresented: $showRepairError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(repairErrorMessage)
             }
         }
     }
@@ -200,6 +217,30 @@ struct MesoSummaryView: View {
                 extendConfirmation = nil
                 showExtendSheet = true
             }
+
+            if let repairConfirmation = repairConfirmation {
+                Label(repairConfirmation, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if showRepairOption {
+                Button {
+                    repairConfirmation = nil
+                    showRepairSheet = true
+                } label: {
+                    Label("Fix Extension", systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.orange)
+                }
+            } else {
+                Button("Something look wrong?") {
+                    showRepairOption = true
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .background(
@@ -278,6 +319,77 @@ struct MesoSummaryView: View {
             extendErrorMessage = error.localizedDescription
             showExtendSheet = false
             showExtendError = true
+        }
+    }
+
+    private var repairSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("If your extended sessions show wrong week numbers or missing days, this will remove and re-seed them correctly.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Original block length")
+                        .font(.headline)
+                    Picker("Original block length", selection: $repairOriginalWeeks) {
+                        ForEach(1...8, id: \.self) { n in
+                            Text("\(n) week\(n == 1 ? "" : "s")").tag(n)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Extended by")
+                        .font(.headline)
+                    Picker("Extended by", selection: $repairAdditionalWeeks) {
+                        ForEach(1...4, id: \.self) { n in
+                            Text("\(n) week\(n == 1 ? "" : "s")").tag(n)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Spacer()
+
+                Button {
+                    performRepair()
+                } label: {
+                    Text("Fix Extension")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
+            .padding()
+            .navigationTitle("Fix Maintenance Extension")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showRepairSheet = false }
+                }
+            }
+        }
+    }
+
+    private func performRepair() {
+        do {
+            try MaintenanceProgramSeeder.repairExtension(
+                block: meso,
+                originalWeeks: repairOriginalWeeks,
+                additionalWeeks: repairAdditionalWeeks,
+                context: context
+            )
+            showRepairSheet = false
+            showRepairOption = false
+            repairConfirmation = "Re-seeded \(repairAdditionalWeeks) week\(repairAdditionalWeeks == 1 ? "" : "s") of extension sessions correctly."
+            buildAnalysis()
+        } catch {
+            repairErrorMessage = error.localizedDescription
+            showRepairSheet = false
+            showRepairError = true
         }
     }
 

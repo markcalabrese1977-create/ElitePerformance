@@ -1008,6 +1008,68 @@ final class MaintenanceBlockSeedingTests: XCTestCase {
             XCTAssertEqual(item.suggestedLoad, 0.0, accuracy: 0.0001, "extend must not re-anchor; extended items keep the raw maintenance prescription (0), not a recalculated anchor")
         }
     }
+
+    func test_extendMaintenanceBlock_rosterPrefersCompletedSessions() throws {
+        let context = try makeContext()
+        // 2-week, 1-day/week "Push" block; every session's roster is bench_press.
+        let block = try makeActiveMaintenanceBlock(in: context, totalWeeks: 2)
+
+        // Complete the earliest session AND simulate an exercise swap on it —
+        // change its item off the seed-time id to a different valid id.
+        let sortedSessions = block.sessions.sorted { $0.date < $1.date }
+        let completed = try XCTUnwrap(sortedSessions.first)
+        completed.status = .completed
+        completed.completedAt = Date()
+        let swappedId = "incline_dumbbell_press"
+        for item in completed.items { item.exerciseId = swappedId }
+        try context.save()
+
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 1, context: context)
+
+        let extendedSessions = block.sessions.filter { ($0.weekInMeso ?? 0) > 2 }
+        XCTAssertFalse(extendedSessions.isEmpty, "extension must have produced new sessions")
+        for session in extendedSessions {
+            let ids = session.items.map { $0.exerciseId }
+            XCTAssertTrue(
+                ids.contains(swappedId),
+                "FIX 1: extension roster must come from the completed (swapped) session, carrying \(swappedId)"
+            )
+            XCTAssertFalse(
+                ids.contains("bench_press"),
+                "FIX 1: extension must NOT inherit the seed-time roster (bench_press) from an untouched planned session"
+            )
+        }
+    }
+
+    func test_extendMaintenanceBlock_multiDayBlockPreservesAllDays() throws {
+        let context = try makeContext()
+
+        // Source meso with TWO distinct day labels (Day A, Day B).
+        let sourceMeso = MesoBlock(name: "Prior Meso", startDate: cal.date(byAdding: .day, value: -60, to: Date())!, status: .archived, totalWeeks: 8)
+        context.insert(sourceMeso)
+        let dayAItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        let dayA = Session(date: cal.date(byAdding: .day, value: -10, to: Date())!, status: .completed, weekIndex: 8, dayLabel: "Day A", items: [dayAItem])
+        dayA.meso = sourceMeso
+        dayA.programIndex = 1
+        let dayBItem = SessionItem(order: 1, exerciseId: "seated_cable_row", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 120)
+        let dayB = Session(date: cal.date(byAdding: .day, value: -8, to: Date())!, status: .completed, weekIndex: 8, dayLabel: "Day B", items: [dayBItem])
+        dayB.meso = sourceMeso
+        dayB.programIndex = 2
+        context.insert(dayA)
+        context.insert(dayB)
+        try context.save()
+
+        try MaintenanceProgramSeeder.seed(from: sourceMeso, trainingWeekdays: [2, 5], totalWeeks: 2, startDate: Date(), context: context)
+        let block = try XCTUnwrap(try context.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == "Maintenance Block" })
+
+        let maxWeekBefore = block.sessions.compactMap { $0.weekInMeso }.max() ?? 0
+        try MaintenanceProgramSeeder.extend(block: block, additionalWeeks: 1, context: context)
+
+        let newSessions = block.sessions.filter { ($0.weekInMeso ?? 0) > maxWeekBefore }
+        XCTAssertEqual(newSessions.count, 2, "FIX 2: a 2-day block must add exactly 2 extension sessions (one per day label), not collapse to 1")
+        XCTAssertEqual(Set(newSessions.map { $0.date }).count, 2, "FIX 2: the 2 new sessions must have distinct dates")
+        XCTAssertEqual(Set(newSessions.compactMap { $0.dayLabel }).count, 2, "FIX 2: both day labels must be represented in the extension")
+    }
 }
 
 // Pinned from source recon (Domain/Programs/PPL3WeekTemplate.swift,
