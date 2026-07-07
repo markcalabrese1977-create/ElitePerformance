@@ -291,9 +291,14 @@ enum MaintenanceProgramSeeder {
         //    per label so we inherit the latest exercise-swap state.
         let sourceSessions = block.sessions.sorted { $0.date < $1.date }
 
+        // Day slots come from the MOST RECENT week only (weekInMeso ==
+        // currentMaxWeekIndex). Walking all block sessions would union every
+        // label ever used across the block's lifetime — inflating daysPerWeek
+        // when labels drifted mid-block (e.g. a program swap). Roster recovery
+        // below still scans all sessions per label to prefer the latest completed.
         var seenDayLabels: [String] = []
         var seenSet = Set<String>()
-        for session in sourceSessions {
+        for session in sourceSessions where session.weekInMeso == currentMaxWeekIndex {
             let label = session.dayLabel ?? "Day \(session.programIndex)"
             if !seenSet.contains(label) {
                 seenSet.insert(label)
