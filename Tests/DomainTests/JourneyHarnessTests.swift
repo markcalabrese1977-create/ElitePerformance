@@ -212,11 +212,11 @@ final class JourneyHarnessTests: XCTestCase {
         if let benchTemplate = FullBody2DayTemplate.dayA.exerciseTemplates.first(where: { $0.exerciseId == benchId }) {
             for snapshot in snapshots {
                 guard let waveRaw = snapshot.waveRaw, let wave = WaveType(rawValue: waveRaw) else { continue }
-                guard let expectedSets = benchTemplate.prescription(for: wave)?.setMin else { continue }
+                let expectedSets = benchTemplate.sets(forWeek: snapshot.weekIndex, wave: wave)
                 guard let actualSets = snapshot.targetSetsByExercise[benchId] else { continue }
                 XCTAssertEqual(
                     actualSets, expectedSets,
-                    "b. week \(snapshot.weekIndex) targetSets for bench (wave \(waveRaw)) should match the seeded template's setMin"
+                    "b. week \(snapshot.weekIndex) targetSets for bench (wave \(waveRaw)) should match the seeded template's setsByWeek ramp value"
                 )
             }
         } else {

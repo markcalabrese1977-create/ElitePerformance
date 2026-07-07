@@ -63,7 +63,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_a_incline_db",
@@ -76,7 +77,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_a_fly",
@@ -89,7 +91,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_a_lateral",
@@ -102,7 +105,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_a_pushdown",
@@ -115,7 +119,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -139,7 +144,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_a_row",
@@ -152,7 +158,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_a_db_row",
@@ -165,7 +172,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_a_rear_delt",
@@ -178,7 +186,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_a_curl",
@@ -191,7 +200,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_a_hammer",
@@ -204,7 +214,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -228,7 +239,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_rdl",
@@ -241,7 +253,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_leg_extension",
@@ -254,7 +267,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_leg_curl",
@@ -267,7 +281,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_hip_thrust",
@@ -280,7 +295,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_calves",
@@ -293,7 +309,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_crunch",
@@ -306,7 +323,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
             )
         ]
     )
@@ -330,7 +348,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_decline",
@@ -343,7 +362,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_fly",
@@ -356,7 +376,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_lateral",
@@ -369,7 +390,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_overhead_tricep",
@@ -382,7 +404,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -406,7 +429,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_b_barbell_row",
@@ -419,7 +443,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_b_chest_supported_row",
@@ -432,7 +457,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_b_rear_delt",
@@ -445,7 +471,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_b_hammer",
@@ -458,7 +485,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_pull_b_preacher",
@@ -471,7 +499,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -495,7 +524,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_sumo_deadlift",
@@ -508,7 +538,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 4,  repMax: 6,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_bulgarian_split_squat",
@@ -521,7 +552,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_seated_leg_curl",
@@ -534,7 +566,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_back_extension",
@@ -547,7 +580,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_calves",
@@ -560,7 +594,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_b_hanging_knee_raise",
@@ -573,7 +608,8 @@ enum PPL6DayTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
             )
         ]
     )

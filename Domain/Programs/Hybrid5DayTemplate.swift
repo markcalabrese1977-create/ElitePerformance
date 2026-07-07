@@ -49,7 +49,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ua_row",
@@ -62,7 +63,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ua_incline",
@@ -75,7 +77,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ua_pulldown",
@@ -88,7 +91,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ua_tricep",
@@ -101,7 +105,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ua_curl",
@@ -114,7 +119,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -138,7 +144,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_la_rdl",
@@ -151,7 +158,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_la_leg_extension",
@@ -164,7 +172,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_la_leg_curl",
@@ -177,7 +186,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_la_calves",
@@ -190,7 +200,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -214,7 +225,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_db_row",
@@ -227,7 +239,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_fly",
@@ -240,7 +253,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_lateral",
@@ -253,7 +267,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_rear_delt",
@@ -266,7 +281,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_curl",
@@ -279,7 +295,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_ub_oh_tricep",
@@ -292,7 +309,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -316,7 +334,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_lb_leg_press",
@@ -329,7 +348,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_lb_leg_curl",
@@ -342,7 +362,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_lb_kickback",
@@ -355,7 +376,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_lb_calves",
@@ -368,7 +390,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -394,7 +417,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_lateral",
@@ -407,7 +431,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_rear_delt",
@@ -420,7 +445,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_curl",
@@ -433,7 +459,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_tricep",
@@ -446,7 +473,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_hip_thrust",
@@ -459,7 +487,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "h5_pump_crunch",
@@ -472,7 +501,8 @@ enum Hybrid5DayTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
             )
         ]
     )

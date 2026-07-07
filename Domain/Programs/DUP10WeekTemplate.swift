@@ -49,7 +49,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 6, repMax: 8, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d1_incline_db",
@@ -62,7 +63,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d1_fly",
@@ -85,7 +87,8 @@ enum DUP10WeekTemplate {
                         intensifierNotes: "Drop set on final set only."
                     ),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d1_pushdown",
@@ -98,7 +101,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d1_oh_rope",
@@ -111,7 +115,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             )
         ]
     )
@@ -135,7 +140,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d2_cable_row",
@@ -158,7 +164,8 @@ enum DUP10WeekTemplate {
                         intensifierNotes: "Rest-pause on final set only."
                     ),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d2_db_row",
@@ -171,7 +178,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d2_sup_pron",
@@ -184,7 +192,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d2_hammer",
@@ -197,7 +206,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             )
         ]
     )
@@ -221,7 +231,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [2, 2, 2, 2, 3, 3, 2, 3, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d3_leg_press",
@@ -234,7 +245,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d3_leg_extension",
@@ -257,7 +269,8 @@ enum DUP10WeekTemplate {
                         intensifierNotes: "Drop set on final set only."
                     ),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d3_leg_curl",
@@ -270,7 +283,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d3_calf",
@@ -283,7 +297,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d3_kickback",
@@ -296,7 +311,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip unless clearly fresh."),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 0, 2, 2, 0, 2, 2, 0, 0]
             )
         ]
     )
@@ -320,7 +336,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d4_fly",
@@ -343,7 +360,8 @@ enum DUP10WeekTemplate {
                         intensifierNotes: "Drop set on final set only."
                     ),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d4_cable_curl",
@@ -356,7 +374,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d4_hammer",
@@ -369,7 +388,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d4_pushdown",
@@ -382,7 +402,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d4_oh_rope",
@@ -395,7 +416,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 0, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1, intensifier: .customNoteOnly, intensifierNotes: "Skip or do 2 light sets only."),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 0, 2, 2, 0, 2, 2, 0, 0]
             )
         ]
     )
@@ -419,7 +441,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2, intensifier: .squeezePauseLast, intensifierNotes: "Use a 1-second squeeze."),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d5_leg_curl",
@@ -432,7 +455,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d5_pull_through",
@@ -445,7 +469,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d5_rope_crunch",
@@ -458,7 +483,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d5_knee_raise",
@@ -471,7 +497,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 0, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1, intensifier: .customNoteOnly, intensifierNotes: "Do or skip depending on fatigue."),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 0, 2, 2, 0, 2, 2, 0, 0]
             )
         ]
     )
@@ -495,7 +522,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 5, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d6_arnold",
@@ -508,7 +536,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d6_lateral",
@@ -521,7 +550,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d6_sup_pron",
@@ -534,7 +564,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d6_oh_rope",
@@ -547,7 +578,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "d6_rear_delt",
@@ -560,7 +592,8 @@ enum DUP10WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 0, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4, intensifier: .customNoteOnly, intensifierNotes: "Optional during deload.")
-                ]
+                ],
+                setsByWeek: [2, 3, 3, 2, 3, 3, 2, 3, 3, 0]
             )
         ]
     )

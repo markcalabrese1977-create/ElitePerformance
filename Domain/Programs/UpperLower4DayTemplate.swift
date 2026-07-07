@@ -51,7 +51,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ua_row",
@@ -64,7 +65,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ua_incline_db",
@@ -77,7 +79,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ua_pulldown",
@@ -90,7 +93,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ua_tricep",
@@ -103,7 +107,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ua_curl",
@@ -116,7 +121,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -140,7 +146,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_la_rdl",
@@ -153,7 +160,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_la_leg_extension",
@@ -166,7 +174,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_la_leg_curl",
@@ -179,7 +188,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_la_calves",
@@ -192,7 +202,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -216,7 +227,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_db_row",
@@ -229,7 +241,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_fly",
@@ -242,7 +255,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_lateral",
@@ -255,7 +269,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_rear_delt",
@@ -268,7 +283,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_curl",
@@ -281,7 +297,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_ub_oh_tricep",
@@ -294,7 +311,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
         ]
     )
@@ -318,7 +336,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_lb_leg_press",
@@ -331,7 +350,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_lb_leg_curl",
@@ -344,7 +364,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_lb_kickback",
@@ -357,7 +378,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_lb_calves",
@@ -370,7 +392,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
-                ]
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ul_lb_crunch",
@@ -383,7 +406,8 @@ enum UpperLower4DayTemplate {
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
-                ]
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
             )
         ]
     )
