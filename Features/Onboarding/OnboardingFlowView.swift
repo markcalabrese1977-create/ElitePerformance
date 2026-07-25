@@ -48,7 +48,7 @@ struct OnboardingResult: Codable {
 struct OnboardingFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let onComplete: (OnboardingResult) -> Void
+    let onComplete: (OnboardingResult, ExerciseOverrideMap) -> Void
 
     @State private var pageIndex: Int = 0
 
@@ -72,6 +72,10 @@ struct OnboardingFlowView: View {
 
     // Page 6 — Start date picker
     @State private var mesoStartDate: Date = Date()
+
+    // Page 6 — Per-exercise customization
+    @State private var exerciseOverrides: ExerciseOverrideMap = [:]
+    @State private var customizingExercise: (dayId: String, exerciseId: String)? = nil
 
     private let totalPages = 6
 
@@ -504,9 +508,9 @@ struct OnboardingFlowView: View {
                     Text("Week 1 structure")
                         .font(.subheadline.bold())
 
-                    VStack(spacing: 6) {
+                    VStack(spacing: 12) {
                         ForEach(template.dayTemplates.sorted { $0.dayNumber < $1.dayNumber }, id: \.id) { day in
-                            HStack {
+                            VStack(alignment: .leading, spacing: 6) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(day.title)
                                         .font(.subheadline)
@@ -515,10 +519,10 @@ struct OnboardingFlowView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                                Spacer()
-                                Text("\(day.exerciseTemplates.filter { $0.priority != .optional }.count) exercises")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+
+                                ForEach(day.exerciseTemplates.filter { $0.priority != .optional }, id: \.id) { exercise in
+                                    exerciseRow(day: day, exercise: exercise, template: template)
+                                }
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -530,7 +534,7 @@ struct OnboardingFlowView: View {
                     }
                 }
 
-                Text("You can swap any exercise at any time. Your schedule and loads are yours to adjust.")
+                Text("Tap an exercise to customize its reps, RIR, and sets before your program starts.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -551,6 +555,96 @@ struct OnboardingFlowView: View {
 
                 Spacer()
             }
+            .sheet(isPresented: Binding(
+                get: { customizingExercise != nil },
+                set: { isPresented in
+                    if !isPresented { customizingExercise = nil }
+                }
+            )) {
+                if let target = customizingExercise,
+                   let dayTemplate = template.dayTemplates.first(where: { $0.id == target.dayId }),
+                   let exerciseTemplate = dayTemplate.exerciseTemplates.first(where: { $0.exerciseId == target.exerciseId }) {
+                    ExerciseCustomizationSheet(
+                        exerciseId: target.exerciseId,
+                        exerciseTemplate: exerciseTemplate,
+                        template: template,
+                        existingOverride: exerciseOverrides[target.exerciseId],
+                        onApply: { newOverride in
+                            exerciseOverrides[target.exerciseId] = newOverride
+                        },
+                        onReset: {
+                            exerciseOverrides.removeValue(forKey: target.exerciseId)
+                        }
+                    )
+                }
+            }
+        }
+
+        private func exerciseRow(day: ProgramDayTemplate, exercise: ProgramExerciseTemplate, template: ProgramTemplate) -> some View {
+            let override = exerciseOverrides[exercise.exerciseId]
+
+            return HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(ExerciseCatalog.displayName(for: exercise.exerciseId))
+                            .font(.footnote)
+                            .fontWeight(.medium)
+
+                        if override != nil {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.teal)
+                        }
+                    }
+
+                    Text(waveSummaryText(for: exercise, override: override, template: template))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                } label: {
+                    Image(systemName: "pencil.circle")
+                        .font(.body)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        private func waveSummaryText(
+            for exercise: ProgramExerciseTemplate,
+            override: ExerciseWaveOverride?,
+            template: ProgramTemplate
+        ) -> String {
+            [WaveType.a, .b, .c].compactMap { wave -> String? in
+                guard let basePrescription = exercise.prescription(for: wave) else { return nil }
+                let weekNumber = template.weekRules.first(where: { $0.wave == wave })?.weekNumber ?? 1
+
+                let repMin: Int
+                let repMax: Int
+                let rir: Int
+                if let waveOverride = override?.wavePrescriptions?[wave] {
+                    repMin = waveOverride.repMin
+                    repMax = waveOverride.repMax
+                    rir = waveOverride.targetRIR
+                } else {
+                    repMin = basePrescription.repMin
+                    repMax = basePrescription.repMax
+                    rir = basePrescription.targetRIRMax
+                }
+
+                let sets: Int
+                if let overriddenSets = override?.setsByWeek, weekNumber - 1 < overriddenSets.count {
+                    sets = overriddenSets[weekNumber - 1]
+                } else {
+                    sets = exercise.sets(forWeek: weekNumber, wave: wave)
+                }
+
+                return "\(wave.displayName): \(sets)×\(repMin)-\(repMax) @\(rir)RIR"
+            }.joined(separator: "  ")
         }
 
         private func experienceToProgramLevel(_ exp: TrainingExperience) -> ProgramExperienceLevel {
@@ -683,7 +777,7 @@ struct OnboardingFlowView: View {
             startDate: mesoStartDate
         )
 
-        onComplete(result)
+        onComplete(result, exerciseOverrides)
         dismiss()
     }
 }

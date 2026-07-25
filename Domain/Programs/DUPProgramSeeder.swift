@@ -20,7 +20,8 @@ enum DUPProgramSeeder {
         calendar: Calendar = .current,
         mesoName: String? = nil,
         mesoStatus: MesoStatus = .draft,
-        mesoNotes: String? = nil
+        mesoNotes: String? = nil,
+        overrides: ExerciseOverrideMap? = nil
     ) throws {
         let normalizedWeekdays = Array(Set(trainingWeekdays)).sorted()
 
@@ -45,6 +46,8 @@ enum DUPProgramSeeder {
             calendar: calendar
         )
 
+        let effectiveTemplate = overrides.map { applying(overrides: $0, to: template) } ?? template
+
         let blockName = mesoName ?? template.name
         let mesoBlock = MesoBlock(
             name: blockName,
@@ -59,7 +62,7 @@ enum DUPProgramSeeder {
 
         for scheduled in scheduledDays {
             let session = try DUPSessionMaterializer.makeSession(
-                template: template,
+                template: effectiveTemplate,
                 weekNumber: scheduled.weekNumber,
                 dayNumber: scheduled.dayNumber,
                 date: scheduled.date
@@ -73,6 +76,73 @@ enum DUPProgramSeeder {
         }
 
         try context.save()
-        
+
+    }
+
+    /// Patches `template` with per-exercise, per-wave overrides. WaveType.deload is
+    /// never touched, regardless of what an override supplies for it — deload always
+    /// stays at the template's own default.
+    static func applying(
+        overrides: ExerciseOverrideMap,
+        to template: ProgramTemplate
+    ) -> ProgramTemplate {
+        let patchedDays = template.dayTemplates.map { day -> ProgramDayTemplate in
+            let patchedExercises = day.exerciseTemplates.map { exercise -> ProgramExerciseTemplate in
+                guard let override = overrides[exercise.exerciseId] else {
+                    return exercise
+                }
+
+                var patchedPrescriptions = exercise.prescriptions
+                if let waveOverrides = override.wavePrescriptions {
+                    patchedPrescriptions = exercise.prescriptions.map { prescription -> WavePrescription in
+                        guard prescription.wave != .deload,
+                              let waveOverride = waveOverrides[prescription.wave] else {
+                            return prescription
+                        }
+
+                        return WavePrescription(
+                            wave: prescription.wave,
+                            setMin: prescription.setMin,
+                            setMax: prescription.setMax,
+                            repMin: waveOverride.repMin,
+                            repMax: waveOverride.repMax,
+                            targetRIRMin: waveOverride.targetRIR,
+                            targetRIRMax: waveOverride.targetRIR,
+                            intensifier: prescription.intensifier,
+                            intensifierNotes: prescription.intensifierNotes
+                        )
+                    }
+                }
+
+                let patchedSetsByWeek = override.setsByWeek ?? exercise.setsByWeek
+
+                return ProgramExerciseTemplate(
+                    id: exercise.id,
+                    order: exercise.order,
+                    exerciseId: exercise.exerciseId,
+                    priority: exercise.priority,
+                    notes: exercise.notes,
+                    prescriptions: patchedPrescriptions,
+                    setsByWeek: patchedSetsByWeek
+                )
+            }
+
+            return ProgramDayTemplate(
+                id: day.id,
+                dayNumber: day.dayNumber,
+                title: day.title,
+                role: day.role,
+                exerciseTemplates: patchedExercises
+            )
+        }
+
+        return ProgramTemplate(
+            id: template.id,
+            name: template.name,
+            totalWeeks: template.totalWeeks,
+            trainingDaysPerWeek: template.trainingDaysPerWeek,
+            weekRules: template.weekRules,
+            dayTemplates: patchedDays
+        )
     }
 }

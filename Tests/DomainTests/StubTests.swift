@@ -3035,3 +3035,112 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
             "Jul 1 session must still point at the original meso block")
     }
 }
+
+final class ExerciseWaveOverrideTests: XCTestCase {
+
+    // Reused across tests: fb2_a_bench on FullBody2DayTemplate.dayA, whose
+    // template-default prescriptions are:
+    //   A: repMin 10, repMax 12, RIR 3
+    //   B: repMin 8,  repMax 10, RIR 2
+    //   C: repMin 6,  repMax 8,  RIR 1-2 (min 1, max 2)
+    //   deload: repMin 10, repMax 12, RIR 4
+    private let benchExerciseId = ExerciseCatalog.benchPress.id
+
+    private func patchedBenchExercise(from patched: ProgramTemplate) -> ProgramExerciseTemplate? {
+        patched.dayTemplates
+            .first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates
+            .first { $0.exerciseId == benchExerciseId }
+    }
+
+    func test_exerciseOverride_appliesRepRangeOverrideToCorrectExercise() {
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(
+                wavePrescriptions: [.a: WavePrescriptionOverride(repMin: 5, repMax: 7, targetRIR: 1)],
+                setsByWeek: nil
+            )
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
+
+        let waveA = try! XCTUnwrap(bench.prescription(for: .a))
+        XCTAssertEqual(waveA.repMin, 5)
+        XCTAssertEqual(waveA.repMax, 7)
+        XCTAssertEqual(waveA.targetRIRMin, 1)
+        XCTAssertEqual(waveA.targetRIRMax, 1)
+
+        let waveB = try! XCTUnwrap(bench.prescription(for: .b))
+        XCTAssertEqual(waveB.repMin, 8)
+        XCTAssertEqual(waveB.repMax, 10)
+        XCTAssertEqual(waveB.targetRIRMin, 2)
+        XCTAssertEqual(waveB.targetRIRMax, 2)
+
+        let waveC = try! XCTUnwrap(bench.prescription(for: .c))
+        XCTAssertEqual(waveC.repMin, 6)
+        XCTAssertEqual(waveC.repMax, 8)
+        XCTAssertEqual(waveC.targetRIRMin, 1)
+        XCTAssertEqual(waveC.targetRIRMax, 2)
+
+        let deload = try! XCTUnwrap(bench.prescription(for: .deload))
+        XCTAssertEqual(deload.repMin, 10)
+        XCTAssertEqual(deload.repMax, 12)
+        XCTAssertEqual(deload.targetRIRMin, 4)
+        XCTAssertEqual(deload.targetRIRMax, 4)
+    }
+
+    func test_exerciseOverride_neverTouchesDeload() {
+        let originalDeload = try! XCTUnwrap(
+            FullBody2DayTemplate.dayA.exerciseTemplates
+                .first { $0.exerciseId == benchExerciseId }?
+                .prescription(for: .deload)
+        )
+
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(
+                wavePrescriptions: [
+                    .a: WavePrescriptionOverride(repMin: 1, repMax: 1, targetRIR: 0),
+                    .deload: WavePrescriptionOverride(repMin: 99, repMax: 99, targetRIR: 5)
+                ],
+                setsByWeek: nil
+            )
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
+        let patchedDeload = try! XCTUnwrap(bench.prescription(for: .deload))
+
+        XCTAssertEqual(patchedDeload.repMin, originalDeload.repMin,
+            "an override's .deload entry must never reach the patched template")
+        XCTAssertEqual(patchedDeload.repMax, originalDeload.repMax)
+        XCTAssertEqual(patchedDeload.targetRIRMin, originalDeload.targetRIRMin)
+        XCTAssertEqual(patchedDeload.targetRIRMax, originalDeload.targetRIRMax)
+    }
+
+    func test_exerciseOverride_nilOverrideProducesIdenticalTemplate() {
+        let template = FullBody2DayTemplate.template
+        let patched = DUPProgramSeeder.applying(overrides: [:], to: template)
+
+        XCTAssertEqual(patched.dayTemplates.count, template.dayTemplates.count)
+
+        for (originalDay, patchedDay) in zip(template.dayTemplates, patched.dayTemplates) {
+            XCTAssertEqual(originalDay.id, patchedDay.id)
+            XCTAssertEqual(originalDay.exerciseTemplates.count, patchedDay.exerciseTemplates.count)
+
+            for (originalExercise, patchedExercise) in zip(originalDay.exerciseTemplates, patchedDay.exerciseTemplates) {
+                XCTAssertEqual(originalExercise.exerciseId, patchedExercise.exerciseId)
+                XCTAssertEqual(originalExercise.setsByWeek, patchedExercise.setsByWeek)
+                XCTAssertEqual(originalExercise.prescriptions.count, patchedExercise.prescriptions.count)
+
+                for wave in WaveType.allCases {
+                    let originalPrescription = originalExercise.prescription(for: wave)
+                    let patchedPrescription = patchedExercise.prescription(for: wave)
+                    XCTAssertEqual(originalPrescription?.repMin, patchedPrescription?.repMin)
+                    XCTAssertEqual(originalPrescription?.repMax, patchedPrescription?.repMax)
+                    XCTAssertEqual(originalPrescription?.targetRIRMin, patchedPrescription?.targetRIRMin)
+                    XCTAssertEqual(originalPrescription?.targetRIRMax, patchedPrescription?.targetRIRMax)
+                }
+            }
+        }
+    }
+}

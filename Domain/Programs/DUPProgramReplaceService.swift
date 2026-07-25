@@ -12,7 +12,8 @@ enum DUPProgramReplaceService {
         trainingWeekdays: [Int],
         context: ModelContext,
         template: ProgramTemplate = DUP10WeekTemplate.template,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        overrides: ExerciseOverrideMap? = nil
     ) throws {
         let startDay = calendar.startOfDay(for: startDate)
 
@@ -51,7 +52,8 @@ enum DUPProgramReplaceService {
             calendar: calendar,
             mesoName: template.name,
             mesoStatus: .active,
-            mesoNotes: "Seeded via replacePlannedProgram on \(startDay.formatted(date: .abbreviated, time: .omitted))"
+            mesoNotes: "Seeded via replacePlannedProgram on \(startDay.formatted(date: .abbreviated, time: .omitted))",
+            overrides: overrides
         )
 
         // 4) Anchor loads from prior history — mirrors MaintenanceProgramSeeder.seed's

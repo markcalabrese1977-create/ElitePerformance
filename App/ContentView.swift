@@ -13,11 +13,12 @@ struct ContentView: View {
         MainTabView()
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
-                    OnboardingFlowView { result in
+                    OnboardingFlowView { result, overrides in
                         ProgramApplicationService.apply(
                             result,
                             context: modelContext,
-                            startDate: result.startDate
+                            startDate: result.startDate,
+                            overrides: overrides
                         )
                     }
                     .navigationTitle("Welcome")

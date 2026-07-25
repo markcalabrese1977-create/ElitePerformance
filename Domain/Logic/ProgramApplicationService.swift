@@ -7,7 +7,8 @@ enum ProgramApplicationService {
     static func apply(
         _ result: OnboardingResult,
         context: ModelContext,
-        startDate: Date = Date()
+        startDate: Date = Date(),
+        overrides: ExerciseOverrideMap? = nil
     ) {
         let weekdays = normalizedWeekdays(from: result)
         let template = selectTemplate(goal: result.goal, daysPerWeek: weekdays.count)
@@ -17,7 +18,8 @@ enum ProgramApplicationService {
                 startDate: startDate,
                 trainingWeekdays: weekdays,
                 context: context,
-                template: template
+                template: template,
+                overrides: overrides
             )
         } catch {
             print("ERROR ProgramApplicationService.apply – seeding failed: \(error)")

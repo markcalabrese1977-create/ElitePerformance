@@ -20,6 +20,7 @@ struct HomeView: View {
 
     // Deferred replace/apply after onboarding dismisses
     @State private var pendingOnboardingResult: OnboardingResult?
+    @State private var pendingExerciseOverrides: ExerciseOverrideMap = [:]
 
     private var activeMeso: MesoBlock? {
         mesoBlocks.first { $0.status == .active }
@@ -49,14 +50,16 @@ struct HomeView: View {
                 }
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView { result in
+                        OnboardingFlowView { result, overrides in
                             pendingOnboardingResult = result
+                            pendingExerciseOverrides = overrides
                         }
                         .navigationTitle("Change Program")
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("Cancel") {
                                     pendingOnboardingResult = nil
+                                    pendingExerciseOverrides = [:]
                                     showingChangeProgram = false
                                 }
                             }
@@ -115,12 +118,15 @@ struct HomeView: View {
     private func handleOnboardingDismiss() {
         guard let result = pendingOnboardingResult else { return }
         pendingOnboardingResult = nil
+        let overrides = pendingExerciseOverrides
+        pendingExerciseOverrides = [:]
 
         DispatchQueue.main.async {
             ProgramApplicationService.apply(
                 result,
                 context: modelContext,
-                startDate: result.startDate
+                startDate: result.startDate,
+                overrides: overrides
             )
         }
     }

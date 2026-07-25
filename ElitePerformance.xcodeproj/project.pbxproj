@@ -60,6 +60,7 @@
 		D5BE29402F99842C00DB9F04 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BE293F2F99842A00DB9F04 /* CoachingEngineTests.swift */; };
 		D5BE29422F99844A00DB9F04 /* CoachingMessageSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BE29412F99844800DB9F04 /* CoachingMessageSeamTests.swift */; };
 		D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */; };
+		E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */; };
 		D5BEBEF72ED1ECDA0035FE70 /* ProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */; };
 		D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BEBEF92ED207A40035FE70 /* ContentView.swift */; };
 		D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */; };
@@ -154,6 +155,7 @@
 		D5BE293F2F99842A00DB9F04 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		D5BE29412F99844800DB9F04 /* CoachingMessageSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingMessageSeamTests.swift; sourceTree = "<group>"; };
 		D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
+		53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseCustomizationSheet.swift; sourceTree = "<group>"; };
 		D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPickerView.swift; sourceTree = "<group>"; };
 		D5BEBEF92ED207A40035FE70 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D5C446512ED7CC0400D7BE41 /* SessionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistory.swift; sourceTree = "<group>"; };
@@ -463,6 +465,7 @@
 			isa = PBXGroup;
 			children = (
 				D5BEBEF42ED1EC970035FE70 /* OnboardingFlowView.swift */,
+				53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -711,6 +714,7 @@
 				D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */,
 				D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
+				E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* (null) in Sources */,
 				D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */,
@@ -879,7 +883,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -904,7 +908,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -931,7 +935,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -956,7 +960,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.markcalabrese.ElitePerformance;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
