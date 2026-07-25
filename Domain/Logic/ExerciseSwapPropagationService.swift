@@ -39,6 +39,8 @@ struct ExerciseSwapPropagationService {
                     if ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == canonicalFrom {
                         item.exerciseId = toExerciseId
                         item.exerciseNameSnapshot = toName
+                        item.suggestedLoad = 0
+                        item.plannedLoadsBySet = Array(repeating: 0.0, count: item.plannedLoadsBySet.count)
                         didChange = true
                     }
                 }

@@ -1843,6 +1843,71 @@ final class ExerciseSwapPropagationTests: XCTestCase {
         XCTAssertEqual(targetItem.exerciseId, "machine_row", "matched by exerciseId regardless of array position")
         XCTAssertEqual(otherItem.exerciseId, "incline_dumbbell_press", "unrelated item must be untouched")
     }
+
+    // T-J.4: swap propagation zeroes suggestedLoad and plannedLoadsBySet on future
+    // planned sessions, while leaving the inherited prescription intact.
+    func test_exerciseSwapPropagation_zeroesLoadButKeepsPrescriptionOnFutureSessions() throws {
+        let context = try makeContext()
+        let meso = MesoBlock(name: "Test Meso", startDate: Date(), totalWeeks: 8)
+        context.insert(meso)
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Past completed session — must be untouched.
+        let pastItem = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185)
+        pastItem.plannedLoadsBySet = [185.0, 185.0, 185.0]
+        let pastDate = calendar.date(byAdding: .day, value: -7, to: today)!
+        let pastSession = Session(date: pastDate, status: .completed, weekIndex: 1, items: [pastItem])
+        pastSession.meso = meso
+        context.insert(pastSession)
+
+        // Future planned sessions week 2 and 3 — loads must be zeroed, prescription kept.
+        let week2Item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 190)
+        week2Item.repMin = 6; week2Item.repMax = 10
+        week2Item.targetRIRMin = 1; week2Item.targetRIRMax = 3
+        week2Item.plannedLoadsBySet = [190.0, 190.0, 190.0]
+        week2Item.plannedRepsBySet = [8, 8, 8]
+        week2Item.plannedRIRsBySet = [2, 2, 2]
+        let week2Date = calendar.date(byAdding: .day, value: 7, to: today)!
+        let week2Session = Session(date: week2Date, status: .planned, weekIndex: 2, items: [week2Item])
+        week2Session.meso = meso
+        context.insert(week2Session)
+
+        let week3Item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 195)
+        week3Item.repMin = 6; week3Item.repMax = 10
+        week3Item.plannedLoadsBySet = [195.0, 195.0, 195.0]
+        week3Item.plannedRepsBySet = [8, 8, 8]
+        week3Item.plannedRIRsBySet = [2, 2, 2]
+        let week3Date = calendar.date(byAdding: .day, value: 14, to: today)!
+        let week3Session = Session(date: week3Date, status: .planned, weekIndex: 3, items: [week3Item])
+        week3Session.meso = meso
+        context.insert(week3Session)
+
+        try context.save()
+
+        ExerciseSwapPropagationService.apply(fromExerciseId: "bench_press", toExerciseId: "machine_chest_press", in: context)
+
+        // Future sessions: exerciseId updated, loads zeroed, prescription intact.
+        XCTAssertEqual(week2Item.exerciseId, "machine_chest_press")
+        XCTAssertEqual(week2Item.suggestedLoad, 0, "suggestedLoad must be zeroed on future items")
+        XCTAssertTrue(week2Item.plannedLoadsBySet.allSatisfy { $0 == 0 }, "plannedLoadsBySet must be zeroed")
+        XCTAssertEqual(week2Item.targetReps, 8, "prescription targetReps must be preserved")
+        XCTAssertEqual(week2Item.targetSets, 3, "prescription targetSets must be preserved")
+        XCTAssertEqual(week2Item.targetRIR, 2, "prescription targetRIR must be preserved")
+        XCTAssertEqual(week2Item.repMin, 6, "prescription repMin must be preserved")
+        XCTAssertEqual(week2Item.repMax, 10, "prescription repMax must be preserved")
+        XCTAssertEqual(week2Item.plannedRepsBySet, [8, 8, 8], "plannedRepsBySet must be preserved")
+        XCTAssertEqual(week2Item.plannedRIRsBySet, [2, 2, 2], "plannedRIRsBySet must be preserved")
+
+        XCTAssertEqual(week3Item.exerciseId, "machine_chest_press")
+        XCTAssertEqual(week3Item.suggestedLoad, 0)
+        XCTAssertTrue(week3Item.plannedLoadsBySet.allSatisfy { $0 == 0 })
+
+        // Past completed session: completely untouched.
+        XCTAssertEqual(pastItem.exerciseId, "bench_press", "completed past session must not be modified")
+        XCTAssertEqual(pastItem.suggestedLoad, 185, "past session load must be untouched")
+    }
 }
 
 final class ProgramPlanPropagationTests: XCTestCase {
