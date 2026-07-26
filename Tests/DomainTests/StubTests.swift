@@ -3023,41 +3023,38 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
                              totalWeeks: 4, isMaintenance: false)
         context.insert(meso)
 
-        // Build dates at local noon — identical to how a DatePicker selection
-        // in UI would be resolved and passed to replacePlannedProgram.
+        // Use today-relative dates so Guard 1 (past-date clamp) never fires.
+        // Hardcoded calendar dates would drift into the past and trigger the clamp.
         var cal = Calendar.current
         cal.timeZone = TimeZone.current
+        let today = cal.startOfDay(for: Date())
 
-        var comps = DateComponents()
-        comps.year = 2026; comps.month = 6; comps.day = 30; comps.hour = 12
-        let jun30 = try XCTUnwrap(cal.date(from: comps), "jun30 date")
-        comps.day = 1; comps.month = 7
-        let jul1 = try XCTUnwrap(cal.date(from: comps), "jul1 date")
-        comps.day = 3
-        let jul3Start = try XCTUnwrap(cal.date(from: comps), "jul3 date")
+        let day2 = cal.date(byAdding: .day, value: 2, to: today)!   // before start
+        let day4 = cal.date(byAdding: .day, value: 4, to: today)!   // before start
+        let day6 = cal.date(byAdding: .day, value: 6, to: today)!   // chosen start date
 
-        let sessionJun30 = Session(date: jun30, status: .planned, weekIndex: 5, items: [])
-        let sessionJul1  = Session(date: jul1,  status: .planned, weekIndex: 5, items: [])
-        let sessionJul3  = Session(date: jul3Start, status: .planned, weekIndex: 5, items: [])
-        sessionJun30.meso = meso
-        sessionJul1.meso  = meso
-        sessionJul3.meso  = meso
-        context.insert(sessionJun30)
-        context.insert(sessionJul1)
-        context.insert(sessionJul3)
+        let sessionDay2 = Session(date: day2, status: .planned, weekIndex: 5, items: [])
+        let sessionDay4 = Session(date: day4, status: .planned, weekIndex: 5, items: [])
+        let sessionDay6 = Session(date: day6, status: .planned, weekIndex: 5, items: [])
+        sessionDay2.meso = meso
+        sessionDay4.meso = meso
+        sessionDay6.meso = meso
+        context.insert(sessionDay2)
+        context.insert(sessionDay4)
+        context.insert(sessionDay6)
         try context.save()
 
         // Capture IDs before the call so we can find the same objects afterward.
-        let idJun30 = sessionJun30.persistentModelID
-        let idJul1  = sessionJul1.persistentModelID
-        let idJul3  = sessionJul3.persistentModelID
+        let idDay2 = sessionDay2.persistentModelID
+        let idDay4 = sessionDay4.persistentModelID
+        let idDay6 = sessionDay6.persistentModelID
 
-        // Call the real production function with July 3 as the chosen start date.
+        // Call the real production function with day6 as the chosen start date.
         // FullBody2DayTemplate (2 days/week) is the simplest valid template —
         // replacePlannedProgram requires trainingWeekdays.count == trainingDaysPerWeek
         // or DUPProgramSeeder.seed will throw.
         try DUPProgramReplaceService.replacePlannedProgram(
-            startDate: jul3Start,
+            startDate: day6,
             trainingWeekdays: [2, 5],
             context: context,
             template: FullBody2DayTemplate.template,
@@ -3069,19 +3066,20 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
 
         // Sessions BEFORE the start date must survive — the filter only deletes
         // sessions where sessionDay >= startDay.
-        XCTAssertTrue(allIDs.contains(idJun30),
-            "Jun 30 session (2 days before start) must be preserved by the date filter")
-        XCTAssertTrue(allIDs.contains(idJul1),
-            "Jul 1 session (2 days before start) must be preserved by the date filter")
+        XCTAssertTrue(allIDs.contains(idDay2),
+            "session 2 days before start must be preserved by the date filter")
+        XCTAssertTrue(allIDs.contains(idDay4),
+            "session 4 days before start must be preserved by the date filter")
 
-        // Session ON the start date must be deleted (sessionDay >= startDay is true).
-        XCTAssertFalse(allIDs.contains(idJul3),
-            "Jul 3 session (on the start date) must be deleted and replaced by the new program")
+        // Session ON the start date must be deleted (sessionDay >= startDay is true),
+        // provided it is not a maintenance session (Guard 2 does not apply here).
+        XCTAssertFalse(allIDs.contains(idDay6),
+            "non-maintenance session on the start date must be deleted and replaced")
 
-        // Sanity: the new program must have seeded sessions starting from Jul 3.
+        // Sanity: the new program must have seeded sessions starting from day6.
         XCTAssertGreaterThan(
-            allSessions.filter { $0.date >= jul3Start }.count, 0,
-            "new program sessions starting from Jul 3 must exist after seeding")
+            allSessions.filter { $0.date >= day6 }.count, 0,
+            "new program sessions starting from day6 must exist after seeding")
 
         // The old meso block must now be archived.
         XCTAssertEqual(meso.status, .archived,
@@ -3090,14 +3088,112 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
         // Pre-start sessions must stay attached to their ORIGINAL (now archived)
         // block so their labels and week structure remain correct in History.
         // Today/Upcoming surfaces them via the carry-over query, not re-parenting.
-        XCTAssertEqual(sessionJun30.meso?.status, .archived,
-            "Jun 30 session must remain on the archived old meso, not the new one")
-        XCTAssertEqual(sessionJun30.meso?.persistentModelID, meso.persistentModelID,
-            "Jun 30 session must still point at the original meso block")
-        XCTAssertEqual(sessionJul1.meso?.status, .archived,
-            "Jul 1 session must remain on the archived old meso, not the new one")
-        XCTAssertEqual(sessionJul1.meso?.persistentModelID, meso.persistentModelID,
-            "Jul 1 session must still point at the original meso block")
+        XCTAssertEqual(sessionDay2.meso?.status, .archived,
+            "day2 session must remain on the archived old meso, not the new one")
+        XCTAssertEqual(sessionDay2.meso?.persistentModelID, meso.persistentModelID,
+            "day2 session must still point at the original meso block")
+        XCTAssertEqual(sessionDay4.meso?.status, .archived,
+            "day4 session must remain on the archived old meso, not the new one")
+        XCTAssertEqual(sessionDay4.meso?.persistentModelID, meso.persistentModelID,
+            "day4 session must still point at the original meso block")
+    }
+
+    // T-Z.2: Regression for the maintenance-data deletion bug.
+    // Root cause: a DatePicker view-identity churn in OnboardingFlowView discarded
+    // writes to mesoStartDate, so replacePlannedProgram received today instead of
+    // the user's chosen future date and deleted the entire in-progress maintenance block.
+    // Stronger invariant (Guard 2): ALL maintenance sessions survive — including those
+    // ON or AFTER startDate — because they ride the archived maintenance block, not the
+    // new hypertrophy block.
+    func test_replacePlannedProgram_futureStartDate_preservesMaintenanceSessionsBeforeIt() throws {
+        let context = try makeContext()
+        context.insert(User(units: .lb, progressionEnabled: true))
+
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        let today = cal.startOfDay(for: Date())
+
+        let day5  = cal.date(byAdding: .day, value: 5,  to: today)!
+        let day8  = cal.date(byAdding: .day, value: 8,  to: today)!
+        let day10 = cal.date(byAdding: .day, value: 10, to: today)!
+        let day12 = cal.date(byAdding: .day, value: 12, to: today)!
+
+        let maintenanceMeso = MesoBlock(
+            name: "Maintenance Block",
+            startDate: today,
+            status: .active,
+            totalWeeks: 4,
+            isMaintenance: true
+        )
+        context.insert(maintenanceMeso)
+
+        let s5  = Session(date: day5,  status: .planned, weekIndex: 1, items: [])
+        let s8  = Session(date: day8,  status: .planned, weekIndex: 2, items: [])
+        let s10 = Session(date: day10, status: .planned, weekIndex: 2, items: [])
+        let s12 = Session(date: day12, status: .planned, weekIndex: 3, items: [])
+        s5.meso  = maintenanceMeso
+        s8.meso  = maintenanceMeso
+        s10.meso = maintenanceMeso
+        s12.meso = maintenanceMeso
+        context.insert(s5);  context.insert(s8)
+        context.insert(s10); context.insert(s12)
+        try context.save()
+
+        let id5  = s5.persistentModelID
+        let id8  = s8.persistentModelID
+        let id10 = s10.persistentModelID
+        let id12 = s12.persistentModelID
+
+        try DUPProgramReplaceService.replacePlannedProgram(
+            startDate: day10,
+            trainingWeekdays: [2, 5],
+            context: context,
+            template: FullBody2DayTemplate.template,
+            calendar: cal
+        )
+
+        let allIDs = Set(try context.fetch(FetchDescriptor<Session>()).map { $0.persistentModelID })
+
+        // ALL four maintenance sessions must survive — Guard 2 exempts isMaintenance
+        // sessions from hard-deletion regardless of whether they fall before or after startDate.
+        XCTAssertTrue(allIDs.contains(id5),
+            "maintenance session 5 days out must be preserved (before start)")
+        XCTAssertTrue(allIDs.contains(id8),
+            "maintenance session 8 days out must be preserved (before start)")
+        XCTAssertTrue(allIDs.contains(id10),
+            "maintenance session ON the start date must be preserved (Guard 2)")
+        XCTAssertTrue(allIDs.contains(id12),
+            "maintenance session after start date must be preserved (Guard 2)")
+
+        XCTAssertEqual(maintenanceMeso.status, .archived,
+            "the replaced maintenance meso must be archived")
+
+        // New hypertrophy meso sessions must all start on or after day10.
+        let newSessions = try context.fetch(FetchDescriptor<Session>())
+            .filter { $0.meso?.isMaintenance != true }
+        XCTAssertFalse(newSessions.isEmpty, "replacement meso must seed at least one session")
+        for s in newSessions {
+            XCTAssertGreaterThanOrEqual(cal.startOfDay(for: s.date), day10,
+                "new meso session dated \(s.date) is before the chosen start date")
+        }
+
+        // Post-start maintenance sessions (id10, id12) are inert-but-present.
+        // They exist in the store on the ARCHIVED maintenance block, which means:
+        //   - Program view excludes them (meso?.status == .active gate fails).
+        //   - Carry-over filter excludes them (date < activeMesoStartDate = day10 fails).
+        // Confirm they are on the archived block and outside the carry-over window.
+        let allSessionsAfter = try context.fetch(FetchDescriptor<Session>())
+        for postStartID in [id10, id12] {
+            let s = allSessionsAfter.first { $0.persistentModelID == postStartID }
+            XCTAssertNotNil(s, "post-start maintenance session must still exist in store")
+            XCTAssertEqual(s?.meso?.status, .archived,
+                "post-start maintenance session must belong to the archived block, not the active one")
+            // date < day10 must be false — that's what excludes it from carry-over.
+            if let sDate = s.map({ cal.startOfDay(for: $0.date) }) {
+                XCTAssertFalse(sDate < day10,
+                    "post-start maintenance session at \(sDate) satisfies date < activeMesoStartDate and would leak into carry-over")
+            }
+        }
     }
 }
 

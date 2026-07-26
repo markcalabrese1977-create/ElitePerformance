@@ -72,6 +72,7 @@ struct OnboardingFlowView: View {
 
     // Page 6 — Start date picker
     @State private var mesoStartDate: Date = Date()
+    @State private var showStartDatePicker = false
 
     // Page 6 — Per-exercise overrides, add, and delete
     @State private var previewOverrides: PreviewOverrides = .empty
@@ -561,19 +562,24 @@ struct OnboardingFlowView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Start date picker
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Start date")
-                        .font(.subheadline.bold())
-                    DatePicker(
-                        "Start date",
-                        selection: $mesoStartDate,
-                        in: MesoLifecycle.mesoStartDateRange,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
+                // Start date — opens a date picker in its own sheet context.
+                Button {
+                    showStartDatePicker = true
+                } label: {
+                    HStack {
+                        Text("Start date")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(mesoStartDate, format: .dateTime.month().day().year())
+                            .font(.subheadline)
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color(.systemGray6))
+                            .clipShape(Capsule())
+                    }
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
             }
@@ -740,6 +746,23 @@ struct OnboardingFlowView: View {
                         }
                     )
                 }
+            }
+            .sheet(isPresented: $showStartDatePicker) {
+                NavigationStack {
+                    VStack {
+                        DatePicker("Start date", selection: $mesoStartDate, in: Date()..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .padding()
+                        Spacer()
+                    }
+                    .navigationTitle("Start date")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showStartDatePicker = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
             }
         }
 

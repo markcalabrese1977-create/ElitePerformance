@@ -15,7 +15,13 @@ enum DUPProgramReplaceService {
         calendar: Calendar = .current,
         overrides: PreviewOverrides? = nil
     ) throws {
-        let startDay = calendar.startOfDay(for: startDate)
+        // Guard 1: clamp a past startDate to today to prevent over-deletion.
+        var startDay = calendar.startOfDay(for: startDate)
+        let todayStart = calendar.startOfDay(for: Date())
+        if startDay < todayStart {
+            print("⚠️ replacePlannedProgram: startDate \(startDay) is in the past — clamping to today.")
+            startDay = todayStart
+        }
 
         // 1) Archive any currently active meso blocks
         let mesoDescriptor = FetchDescriptor<MesoBlock>()
@@ -32,9 +38,13 @@ enum DUPProgramReplaceService {
 
         let allSessions = try context.fetch(sessionDescriptor)
 
+        // Guard 2: never hard-delete maintenance sessions — they ride their archived
+        // maintenance block and must remain visible in the carry-over filter.
         let sessionsToDelete = allSessions.filter { session in
             let sessionDay = calendar.startOfDay(for: session.date)
-            return sessionDay >= startDay && session.status != .completed
+            return sessionDay >= startDay
+                && session.status != .completed
+                && session.meso?.isMaintenance != true
         }
 
         for session in sessionsToDelete {
