@@ -13,6 +13,9 @@ struct ExerciseCustomizationSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var drafts: [WaveType: WaveDraft] = [:]
+    // Tracks whether an explicit button (Apply/Cancel/Reset) already handled the close.
+    // onDisappear commits only when this is still false — i.e. an interactive swipe-dismiss.
+    @State private var didCommitOrCancel = false
 
     private struct WaveDraft {
         var repMin: Int
@@ -62,10 +65,14 @@ struct ExerciseCustomizationSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        didCommitOrCancel = true
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
+                        didCommitOrCancel = true
                         onApply(buildOverride())
                         dismiss()
                     }
@@ -73,6 +80,7 @@ struct ExerciseCustomizationSheet: View {
                 if existingOverride != nil {
                     ToolbarItem(placement: .bottomBar) {
                         Button("Reset to default", role: .destructive) {
+                            didCommitOrCancel = true
                             onReset()
                             dismiss()
                         }
@@ -80,6 +88,10 @@ struct ExerciseCustomizationSheet: View {
                 }
             }
             .onAppear { loadDrafts() }
+            .onDisappear {
+                guard !didCommitOrCancel, !drafts.isEmpty else { return }
+                onApply(buildOverride())
+            }
         }
     }
 
