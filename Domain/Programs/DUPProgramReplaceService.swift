@@ -13,7 +13,7 @@ enum DUPProgramReplaceService {
         context: ModelContext,
         template: ProgramTemplate = DUP10WeekTemplate.template,
         calendar: Calendar = .current,
-        overrides: ExerciseOverrideMap? = nil
+        overrides: PreviewOverrides? = nil
     ) throws {
         let startDay = calendar.startOfDay(for: startDate)
 

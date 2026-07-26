@@ -20,7 +20,7 @@ struct HomeView: View {
 
     // Deferred replace/apply after onboarding dismisses
     @State private var pendingOnboardingResult: OnboardingResult?
-    @State private var pendingExerciseOverrides: ExerciseOverrideMap = [:]
+    @State private var pendingExerciseOverrides: PreviewOverrides = .empty
 
     private var activeMeso: MesoBlock? {
         mesoBlocks.first { $0.status == .active }
@@ -59,7 +59,7 @@ struct HomeView: View {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("Cancel") {
                                     pendingOnboardingResult = nil
-                                    pendingExerciseOverrides = [:]
+                                    pendingExerciseOverrides = .empty
                                     showingChangeProgram = false
                                 }
                             }
@@ -119,7 +119,7 @@ struct HomeView: View {
         guard let result = pendingOnboardingResult else { return }
         pendingOnboardingResult = nil
         let overrides = pendingExerciseOverrides
-        pendingExerciseOverrides = [:]
+        pendingExerciseOverrides = .empty
 
         DispatchQueue.main.async {
             ProgramApplicationService.apply(

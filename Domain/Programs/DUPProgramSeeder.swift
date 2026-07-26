@@ -21,7 +21,7 @@ enum DUPProgramSeeder {
         mesoName: String? = nil,
         mesoStatus: MesoStatus = .draft,
         mesoNotes: String? = nil,
-        overrides: ExerciseOverrideMap? = nil
+        overrides: PreviewOverrides? = nil
     ) throws {
         let normalizedWeekdays = Array(Set(trainingWeekdays)).sorted()
 
@@ -79,25 +79,33 @@ enum DUPProgramSeeder {
 
     }
 
-    /// Patches `template` with per-exercise, per-wave overrides. WaveType.deload is
-    /// never touched, regardless of what an override supplies for it — deload always
-    /// stays at the template's own default.
+    /// Patches `template` with per-exercise overrides and net-new additions.
+    ///
+    /// The three-step order is non-negotiable:
+    ///   1. Filter: remove any exercise whose slot has `isDeleted == true`.
+    ///   2. Transform: apply swap (`substituteExerciseId`) and prescription
+    ///      overrides to the surviving slots. Deload is never touched.
+    ///   3. Append: add net-new exercises from `addedByDay`, ordered after all
+    ///      survivors using a stable per-day order index.
     static func applying(
-        overrides: ExerciseOverrideMap,
+        overrides: PreviewOverrides,
         to template: ProgramTemplate
     ) -> ProgramTemplate {
         let patchedDays = template.dayTemplates.map { day -> ProgramDayTemplate in
-            let patchedExercises = day.exerciseTemplates.map { exercise -> ProgramExerciseTemplate in
-                guard let override = overrides[exercise.exerciseId] else {
+
+            // Step 1: filter deleted slots
+            let survivors = day.exerciseTemplates.filter {
+                overrides.slotOverrides[$0.exerciseId]?.isDeleted != true
+            }
+
+            // Step 2: transform surviving slots (swap + customize)
+            let transformed: [ProgramExerciseTemplate] = survivors.map { exercise -> ProgramExerciseTemplate in
+                guard let override = overrides.slotOverrides[exercise.exerciseId] else {
                     return exercise
                 }
 
-                // Step 1: swap exerciseId if a substitute is specified. Prescription
-                // fields are inherited from the original slot — only the identity changes.
                 let effectiveExerciseId = override.substituteExerciseId ?? exercise.exerciseId
 
-                // Step 2: apply wave prescription overrides on top of the (possibly
-                // substituted) slot. Deload is never overridden.
                 var patchedPrescriptions = exercise.prescriptions
                 if let waveOverrides = override.wavePrescriptions {
                     patchedPrescriptions = exercise.prescriptions.map { prescription -> WavePrescription in
@@ -133,12 +141,26 @@ enum DUPProgramSeeder {
                 )
             }
 
+            // Step 3: append net-new exercises
+            let baseOrder = transformed.map(\.order).max() ?? 0
+            let additions = (overrides.addedByDay[day.id] ?? []).enumerated().map { idx, added -> ProgramExerciseTemplate in
+                ProgramExerciseTemplate(
+                    id: added.id,
+                    order: baseOrder + 10 * (idx + 1),
+                    exerciseId: added.exerciseId,
+                    priority: added.priority,
+                    notes: nil,
+                    prescriptions: buildPrescriptions(from: added),
+                    setsByWeek: added.setsByWeek
+                )
+            }
+
             return ProgramDayTemplate(
                 id: day.id,
                 dayNumber: day.dayNumber,
                 title: day.title,
                 role: day.role,
-                exerciseTemplates: patchedExercises
+                exerciseTemplates: transformed + additions
             )
         }
 
@@ -150,5 +172,35 @@ enum DUPProgramSeeder {
             weekRules: template.weekRules,
             dayTemplates: patchedDays
         )
+    }
+
+    /// Builds [WavePrescription] for a net-new added exercise using the
+    /// user's customized wave overrides (or the standard accessory defaults).
+    /// Deload is always fixed at the standard accessory defaults.
+    private static func buildPrescriptions(from added: AddedExercise) -> [WavePrescription] {
+        let editableWaves: [WaveType] = [.a, .b, .c]
+        var prescriptions: [WavePrescription] = editableWaves.map { wave -> WavePrescription in
+            let override = added.wavePrescriptions[wave]
+                ?? AddedExercise.defaultWavePrescriptions[wave]!
+            return WavePrescription(
+                wave: wave,
+                setMin: 3,
+                setMax: 3,
+                repMin: override.repMin,
+                repMax: override.repMax,
+                targetRIRMin: override.targetRIR,
+                targetRIRMax: override.targetRIR
+            )
+        }
+        prescriptions.append(WavePrescription(
+            wave: .deload,
+            setMin: 2,
+            setMax: 2,
+            repMin: 10,
+            repMax: 15,
+            targetRIRMin: 4,
+            targetRIRMax: 4
+        ))
+        return prescriptions
     }
 }

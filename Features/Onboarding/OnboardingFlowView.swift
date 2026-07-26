@@ -48,7 +48,7 @@ struct OnboardingResult: Codable {
 struct OnboardingFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let onComplete: (OnboardingResult, ExerciseOverrideMap) -> Void
+    let onComplete: (OnboardingResult, PreviewOverrides) -> Void
 
     @State private var pageIndex: Int = 0
 
@@ -73,10 +73,17 @@ struct OnboardingFlowView: View {
     // Page 6 — Start date picker
     @State private var mesoStartDate: Date = Date()
 
-    // Page 6 — Per-exercise customization and preview swap
-    @State private var exerciseOverrides: ExerciseOverrideMap = [:]
+    // Page 6 — Per-exercise overrides, add, and delete
+    @State private var previewOverrides: PreviewOverrides = .empty
     @State private var customizingExercise: (dayId: String, exerciseId: String)? = nil
     @State private var swappingExercise: (dayId: String, exerciseId: String)? = nil
+    @State private var addingToDayId: String? = nil
+    // Staged during picker selection; promoted to pendingNewExercise in picker's onDismiss,
+    // which fires only after the picker animation fully completes — eliminating the
+    // asyncAfter overlap that caused onDisappear flicker on the customize sheet.
+    @State private var pendingAdd: (dayId: String, exercise: AddedExercise)? = nil
+    @State private var pendingNewExercise: (dayId: String, exercise: AddedExercise)? = nil
+    @State private var customizingAddedExercise: (dayId: String, instanceId: String)? = nil
 
     private let totalPages = 6
 
@@ -524,6 +531,20 @@ struct OnboardingFlowView: View {
                                 ForEach(day.exerciseTemplates.filter { $0.priority != .optional }, id: \.id) { exercise in
                                     exerciseRow(day: day, exercise: exercise, template: template)
                                 }
+
+                                ForEach(previewOverrides.addedByDay[day.id] ?? []) { added in
+                                    addedExerciseRow(dayId: day.id, added: added)
+                                }
+
+                                Button {
+                                    addingToDayId = day.id
+                                } label: {
+                                    Label("Add Exercise", systemImage: "plus.circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 2)
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -569,20 +590,20 @@ struct OnboardingFlowView: View {
                         exerciseId: target.exerciseId,
                         exerciseTemplate: exerciseTemplate,
                         template: template,
-                        existingOverride: exerciseOverrides[target.exerciseId],
+                        existingOverride: previewOverrides.slotOverrides[target.exerciseId],
                         onApply: { newOverride in
-                            let existing = exerciseOverrides[target.exerciseId] ?? ExerciseWaveOverride()
-                            exerciseOverrides[target.exerciseId] = existing.applyingPrescription(
+                            let existing = previewOverrides.slotOverrides[target.exerciseId] ?? ExerciseWaveOverride()
+                            previewOverrides.slotOverrides[target.exerciseId] = existing.applyingPrescription(
                                 wavePrescriptions: newOverride.wavePrescriptions,
                                 setsByWeek: newOverride.setsByWeek
                             )
                         },
                         onReset: {
-                            if let existing = exerciseOverrides[target.exerciseId],
+                            if let existing = previewOverrides.slotOverrides[target.exerciseId],
                                existing.substituteExerciseId != nil {
-                                exerciseOverrides[target.exerciseId] = existing.prescriptionCleared
+                                previewOverrides.slotOverrides[target.exerciseId] = existing.prescriptionCleared
                             } else {
-                                exerciseOverrides.removeValue(forKey: target.exerciseId)
+                                previewOverrides.slotOverrides.removeValue(forKey: target.exerciseId)
                             }
                         }
                     )
@@ -595,13 +616,13 @@ struct OnboardingFlowView: View {
                 }
             )) {
                 if let target = swappingExercise {
-                    let displayId = exerciseOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
+                    let displayId = previewOverrides.slotOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
                     ProgramExerciseSwapSheet(
                         currentExerciseId: displayId,
                         currentExerciseName: ExerciseCatalog.displayName(for: displayId),
                         onSelect: { catalogExercise in
-                            let existing = exerciseOverrides[target.exerciseId] ?? ExerciseWaveOverride()
-                            exerciseOverrides[target.exerciseId] = existing.applyingSubstitute(catalogExercise.id)
+                            let existing = previewOverrides.slotOverrides[target.exerciseId] ?? ExerciseWaveOverride()
+                            previewOverrides.slotOverrides[target.exerciseId] = existing.applyingSubstitute(catalogExercise.id)
                             swappingExercise = nil
                         },
                         onCancel: {
@@ -610,13 +631,124 @@ struct OnboardingFlowView: View {
                     )
                 }
             }
+            // Catalog picker for net-new add flow.
+            // onSelect stages the new exercise in pendingAdd; onDismiss promotes it to
+            // pendingNewExercise only after the picker's dismissal animation has completed,
+            // preventing the transient present/dismiss flicker that caused onApply to fire
+            // multiple times.
+            .sheet(isPresented: Binding(
+                get: { addingToDayId != nil },
+                set: { if !$0 { addingToDayId = nil } }
+            ), onDismiss: {
+                if let staged = pendingAdd {
+                    pendingAdd = nil
+                    pendingNewExercise = staged
+                }
+            }) {
+                if let dayId = addingToDayId {
+                    ProgramExerciseSwapSheet(
+                        currentExerciseId: "",
+                        currentExerciseName: "Add Exercise",
+                        onSelect: { catalogExercise in
+                            pendingAdd = (
+                                dayId: dayId,
+                                exercise: AddedExercise(
+                                    id: UUID().uuidString,
+                                    exerciseId: catalogExercise.id,
+                                    priority: .standard,
+                                    wavePrescriptions: AddedExercise.defaultWavePrescriptions,
+                                    setsByWeek: AddedExercise.defaultSetsByWeek
+                                )
+                            )
+                            addingToDayId = nil
+                        },
+                        onCancel: {
+                            pendingAdd = nil
+                            addingToDayId = nil
+                        }
+                    )
+                }
+            }
+            // Customize sheet that opens immediately after picking a new exercise
+            .sheet(isPresented: Binding(
+                get: { pendingNewExercise != nil },
+                set: { if !$0 { pendingNewExercise = nil } }
+            )) {
+                if let pending = pendingNewExercise {
+                    let synth = syntheticTemplate(for: pending.exercise.exerciseId)
+                    ExerciseCustomizationSheet(
+                        exerciseId: pending.exercise.exerciseId,
+                        exerciseTemplate: synth,
+                        template: template,
+                        existingOverride: nil,
+                        onApply: { newOverride in
+                            let committed = AddedExercise(
+                                id: pending.exercise.id,
+                                exerciseId: pending.exercise.exerciseId,
+                                priority: .standard,
+                                wavePrescriptions: newOverride.wavePrescriptions ?? AddedExercise.defaultWavePrescriptions,
+                                setsByWeek: newOverride.setsByWeek ?? AddedExercise.defaultSetsByWeek
+                            )
+                            previewOverrides.addExercise(committed, toDay: pending.dayId)
+                        },
+                        onReset: { }
+                    )
+                }
+            }
+            // Customize sheet for editing an existing added exercise
+            .sheet(isPresented: Binding(
+                get: { customizingAddedExercise != nil },
+                set: { if !$0 { customizingAddedExercise = nil } }
+            )) {
+                if let target = customizingAddedExercise,
+                   let added = previewOverrides.addedByDay[target.dayId]?.first(where: { $0.id == target.instanceId }) {
+                    let synth = syntheticTemplate(for: added.exerciseId)
+                    let existingAsOverride = ExerciseWaveOverride(
+                        wavePrescriptions: added.wavePrescriptions,
+                        setsByWeek: added.setsByWeek
+                    )
+                    ExerciseCustomizationSheet(
+                        exerciseId: added.exerciseId,
+                        exerciseTemplate: synth,
+                        template: template,
+                        existingOverride: existingAsOverride,
+                        onApply: { newOverride in
+                            let updated = AddedExercise(
+                                id: added.id,
+                                exerciseId: added.exerciseId,
+                                priority: added.priority,
+                                wavePrescriptions: newOverride.wavePrescriptions ?? AddedExercise.defaultWavePrescriptions,
+                                setsByWeek: newOverride.setsByWeek ?? AddedExercise.defaultSetsByWeek
+                            )
+                            if var exercises = previewOverrides.addedByDay[target.dayId] {
+                                exercises = exercises.map { $0.id == added.id ? updated : $0 }
+                                previewOverrides.addedByDay[target.dayId] = exercises
+                            }
+                        },
+                        onReset: {
+                            let reset = AddedExercise(
+                                id: added.id,
+                                exerciseId: added.exerciseId,
+                                priority: added.priority,
+                                wavePrescriptions: AddedExercise.defaultWavePrescriptions,
+                                setsByWeek: AddedExercise.defaultSetsByWeek
+                            )
+                            if var exercises = previewOverrides.addedByDay[target.dayId] {
+                                exercises = exercises.map { $0.id == added.id ? reset : $0 }
+                                previewOverrides.addedByDay[target.dayId] = exercises
+                            }
+                        }
+                    )
+                }
+            }
         }
 
         private func exerciseRow(day: ProgramDayTemplate, exercise: ProgramExerciseTemplate, template: ProgramTemplate) -> some View {
-            let override = exerciseOverrides[exercise.exerciseId]
+            let override = previewOverrides.slotOverrides[exercise.exerciseId]
+            let isDeleted = override?.isDeleted == true
             let effectiveId = override?.substituteExerciseId ?? exercise.exerciseId
-            let isSwapped = override?.substituteExerciseId != nil
-            let isCustomized = override?.wavePrescriptions != nil || override?.setsByWeek != nil
+            let isSwapped = !isDeleted && override?.substituteExerciseId != nil
+            let isCustomized = !isDeleted && (override?.wavePrescriptions != nil || override?.setsByWeek != nil)
 
             return HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -624,6 +756,7 @@ struct OnboardingFlowView: View {
                         Text(ExerciseCatalog.displayName(for: effectiveId))
                             .font(.footnote)
                             .fontWeight(.medium)
+                            .strikethrough(isDeleted)
 
                         if isSwapped {
                             Image(systemName: "arrow.left.arrow.right.circle.fill")
@@ -637,7 +770,66 @@ struct OnboardingFlowView: View {
                         }
                     }
 
-                    Text(waveSummaryText(for: exercise, override: override, template: template))
+                    Text(waveSummaryText(for: exercise, override: isDeleted ? nil : override, template: template))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .opacity(isDeleted ? 0.4 : 1.0)
+
+                Spacer()
+
+                if isDeleted {
+                    Button("Undo") {
+                        let existing = previewOverrides.slotOverrides[exercise.exerciseId]!
+                        previewOverrides.slotOverrides[exercise.exerciseId] = existing.unmarkedDeleted
+                    }
+                    .font(.footnote)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                } else {
+                    HStack(spacing: 8) {
+                        Button {
+                            swappingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                        } label: {
+                            Image(systemName: "arrow.left.arrow.right.circle")
+                                .font(.body)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                        } label: {
+                            Image(systemName: "pencil.circle")
+                                .font(.body)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            let existing = previewOverrides.slotOverrides[exercise.exerciseId] ?? ExerciseWaveOverride()
+                            previewOverrides.slotOverrides[exercise.exerciseId] = existing.markedDeleted
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.body)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                    }
+                }
+            }
+        }
+
+        private func addedExerciseRow(dayId: String, added: AddedExercise) -> some View {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(ExerciseCatalog.displayName(for: added.exerciseId))
+                            .font(.footnote)
+                            .fontWeight(.medium)
+                        Image(systemName: "plus.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                    Text(addedWaveSummary(added))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -646,22 +838,50 @@ struct OnboardingFlowView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        swappingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
-                    } label: {
-                        Image(systemName: "arrow.left.arrow.right.circle")
-                            .font(.body)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                        customizingAddedExercise = (dayId: dayId, instanceId: added.id)
                     } label: {
                         Image(systemName: "pencil.circle")
                             .font(.body)
                     }
                     .buttonStyle(.plain)
+
+                    Button {
+                        if var exercises = previewOverrides.addedByDay[dayId] {
+                            exercises.removeAll { $0.id == added.id }
+                            previewOverrides.addedByDay[dayId] = exercises.isEmpty ? nil : exercises
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.body)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red)
                 }
             }
+        }
+
+        private func addedWaveSummary(_ added: AddedExercise) -> String {
+            [WaveType.a, .b, .c].compactMap { wave -> String? in
+                guard let p = added.wavePrescriptions[wave] else { return nil }
+                return "\(wave.displayName): \(p.repMin)-\(p.repMax) @\(p.targetRIR)RIR"
+            }.joined(separator: "  ")
+        }
+
+        private func syntheticTemplate(for exerciseId: String) -> ProgramExerciseTemplate {
+            ProgramExerciseTemplate(
+                id: UUID().uuidString,
+                order: 0,
+                exerciseId: exerciseId,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    WavePrescription(wave: .a, setMin: 3, setMax: 3, repMin: 8, repMax: 12, targetRIRMin: 3, targetRIRMax: 3),
+                    WavePrescription(wave: .b, setMin: 3, setMax: 3, repMin: 8, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    WavePrescription(wave: .c, setMin: 3, setMax: 3, repMin: 6, repMax: 10, targetRIRMin: 1, targetRIRMax: 1),
+                    WavePrescription(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
+                ],
+                setsByWeek: AddedExercise.defaultSetsByWeek
+            )
         }
 
         private func waveSummaryText(
@@ -827,7 +1047,7 @@ struct OnboardingFlowView: View {
             startDate: mesoStartDate
         )
 
-        onComplete(result, exerciseOverrides)
+        onComplete(result, previewOverrides)
         dismiss()
     }
 }

@@ -3126,7 +3126,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             )
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
 
         let waveA = try! XCTUnwrap(bench.prescription(for: .a))
@@ -3171,7 +3171,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             )
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
         let patchedDeload = try! XCTUnwrap(bench.prescription(for: .deload))
 
@@ -3184,7 +3184,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
 
     func test_exerciseOverride_nilOverrideProducesIdenticalTemplate() {
         let template = FullBody2DayTemplate.template
-        let patched = DUPProgramSeeder.applying(overrides: [:], to: template)
+        let patched = DUPProgramSeeder.applying(overrides: .empty, to: template)
 
         XCTAssertEqual(patched.dayTemplates.count, template.dayTemplates.count)
 
@@ -3225,7 +3225,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             benchExerciseId: ExerciseWaveOverride(substituteExerciseId: substituteId)
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: originalTemplate)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: originalTemplate)
         let swapped = try! XCTUnwrap(
             patched.dayTemplates
                 .first { $0.id == "fb2_day_a" }?
@@ -3258,7 +3258,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             )
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let swapped = try! XCTUnwrap(
             patched.dayTemplates
                 .first { $0.id == "fb2_day_a" }?
@@ -3309,7 +3309,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             benchExerciseId: ExerciseWaveOverride(substituteExerciseId: substituteId)
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let swapped = patched.dayTemplates
             .first { $0.id == "fb2_day_a" }?
             .exerciseTemplates
@@ -3331,7 +3331,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             )
         ]
 
-        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: overrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
 
         XCTAssertEqual(bench.exerciseId, benchExerciseId, "exerciseId must be unchanged when substituteExerciseId is nil")
@@ -3371,7 +3371,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             "wavePrescriptions must be present after customize merge")
 
         // Assert applying() produces Y with the customized wave A prescription.
-        let patched = DUPProgramSeeder.applying(overrides: exerciseOverrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: exerciseOverrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let swapped = patched.dayTemplates
             .first { $0.id == "fb2_day_a" }?
             .exerciseTemplates
@@ -3414,7 +3414,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             "wavePrescriptions must survive the swap write")
 
         // Assert applying() produces Y with the customized wave B prescription.
-        let patched = DUPProgramSeeder.applying(overrides: exerciseOverrides, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: exerciseOverrides, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let swapped = patched.dayTemplates
             .first { $0.id == "fb2_day_a" }?
             .exerciseTemplates
@@ -3498,11 +3498,167 @@ final class ExerciseWaveOverrideTests: XCTestCase {
         XCTAssertNil(entry?.setsByWeek, "setsByWeek must be cleared by reset")
 
         // Verify applying() still sees the swapped exercise.
-        let patched = DUPProgramSeeder.applying(overrides: map, to: FullBody2DayTemplate.template)
+        let patched = DUPProgramSeeder.applying(overrides: PreviewOverrides(slotOverrides: map, addedByDay: [:]), to: FullBody2DayTemplate.template)
         let swapped = patched.dayTemplates
             .first { $0.id == "fb2_day_a" }?
             .exerciseTemplates
             .first { $0.exerciseId == substituteId }
         XCTAssertNotNil(swapped, "swapped exercise must still appear in seeded template after reset")
+    }
+
+    // T-Delete.1: marking a slot isDeleted filters it from the patched template.
+    func test_delete_templateExercise_isFilteredFromPatchedTemplate() {
+        let overrides = PreviewOverrides(
+            slotOverrides: [benchExerciseId: ExerciseWaveOverride(isDeleted: true)],
+            addedByDay: [:]
+        )
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let dayA = patched.dayTemplates.first { $0.id == "fb2_day_a" }
+        XCTAssertNil(dayA?.exerciseTemplates.first { $0.exerciseId == benchExerciseId },
+            "deleted exercise must be absent from patched template")
+    }
+
+    // T-Delete.2: unmarking a deleted exercise restores it.
+    func test_undo_delete_exerciseReturns() {
+        let markedEntry = ExerciseWaveOverride(isDeleted: true)
+        let unmarked = markedEntry.unmarkedDeleted
+        let overrides = PreviewOverrides(
+            slotOverrides: [benchExerciseId: unmarked],
+            addedByDay: [:]
+        )
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let dayA = patched.dayTemplates.first { $0.id == "fb2_day_a" }
+        XCTAssertNotNil(dayA?.exerciseTemplates.first { $0.exerciseId == benchExerciseId },
+            "undeleted exercise must reappear in patched template")
+    }
+
+    // T-Add.1: a net-new exercise appended via addedByDay shows up after survivors.
+    func test_add_netNewExercise_appendsAfterSurvivors() {
+        let addedId = UUID().uuidString
+        let added = AddedExercise(
+            id: addedId,
+            exerciseId: ExerciseCatalog.dumbbellPress.id,
+            priority: .standard,
+            wavePrescriptions: AddedExercise.defaultWavePrescriptions,
+            setsByWeek: AddedExercise.defaultSetsByWeek
+        )
+        let overrides = PreviewOverrides(slotOverrides: [:], addedByDay: ["fb2_day_a": [added]])
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let dayA = patched.dayTemplates.first { $0.id == "fb2_day_a" }
+        let found = dayA?.exerciseTemplates.first { $0.id == addedId }
+        XCTAssertNotNil(found, "added exercise must appear in patched day")
+        XCTAssertEqual(found?.exerciseId, ExerciseCatalog.dumbbellPress.id)
+        let survivorOrders = dayA?.exerciseTemplates.filter { $0.id != addedId }.map(\.order) ?? []
+        XCTAssertGreaterThan(found!.order, survivorOrders.max() ?? 0,
+            "added exercise order must be after all survivors")
+    }
+
+    // T-Add.2: the same catalog exercise can be added twice; both instances are present.
+    func test_add_duplicateCatalogId_bothInstances_present() {
+        let id1 = UUID().uuidString
+        let id2 = UUID().uuidString
+        let catalogId = ExerciseCatalog.dumbbellPress.id
+        let additions = [
+            AddedExercise(id: id1, exerciseId: catalogId, priority: .standard,
+                          wavePrescriptions: AddedExercise.defaultWavePrescriptions, setsByWeek: AddedExercise.defaultSetsByWeek),
+            AddedExercise(id: id2, exerciseId: catalogId, priority: .standard,
+                          wavePrescriptions: AddedExercise.defaultWavePrescriptions, setsByWeek: AddedExercise.defaultSetsByWeek)
+        ]
+        let overrides = PreviewOverrides(slotOverrides: [:], addedByDay: ["fb2_day_a": additions])
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let dayA = patched.dayTemplates.first { $0.id == "fb2_day_a" }
+        let found = dayA?.exerciseTemplates.filter { $0.exerciseId == catalogId }
+        XCTAssertEqual(found?.count, 2, "both instances of the same catalog exercise must appear")
+        XCTAssertNotEqual(found?[0].id, found?[1].id, "instances must have distinct ids")
+    }
+
+    // T-Add.3: custom wave prescriptions on an added exercise are applied by buildPrescriptions.
+    func test_add_customize_overridesDefaultPrescription() {
+        let addedId = UUID().uuidString
+        let customWaves: [WaveType: WavePrescriptionOverride] = [
+            .a: WavePrescriptionOverride(repMin: 3, repMax: 5, targetRIR: 0),
+            .b: WavePrescriptionOverride(repMin: 4, repMax: 6, targetRIR: 1),
+            .c: WavePrescriptionOverride(repMin: 5, repMax: 7, targetRIR: 0)
+        ]
+        let added = AddedExercise(
+            id: addedId,
+            exerciseId: ExerciseCatalog.dumbbellPress.id,
+            priority: .standard,
+            wavePrescriptions: customWaves,
+            setsByWeek: AddedExercise.defaultSetsByWeek
+        )
+        let overrides = PreviewOverrides(slotOverrides: [:], addedByDay: ["fb2_day_a": [added]])
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let found = patched.dayTemplates.first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates.first { $0.id == addedId }
+        let waveA = try! XCTUnwrap(found?.prescription(for: .a))
+        XCTAssertEqual(waveA.repMin, 3, "custom repMin must apply to added exercise")
+        XCTAssertEqual(waveA.repMax, 5)
+        XCTAssertEqual(waveA.targetRIRMin, 0)
+        let deload = try! XCTUnwrap(found?.prescription(for: .deload))
+        XCTAssertEqual(deload.repMin, 10, "deload always uses fixed defaults on added exercises")
+        XCTAssertEqual(deload.repMax, 15)
+        XCTAssertEqual(deload.targetRIRMin, 4)
+    }
+
+    // T-Add.4: deleting a template exercise AND adding a net-new on the same day both take effect.
+    func test_delete_thenAdd_sameDay_bothChangesApply() {
+        let addedId = UUID().uuidString
+        let added = AddedExercise(
+            id: addedId,
+            exerciseId: ExerciseCatalog.dumbbellPress.id,
+            priority: .standard,
+            wavePrescriptions: AddedExercise.defaultWavePrescriptions,
+            setsByWeek: AddedExercise.defaultSetsByWeek
+        )
+        let overrides = PreviewOverrides(
+            slotOverrides: [benchExerciseId: ExerciseWaveOverride(isDeleted: true)],
+            addedByDay: ["fb2_day_a": [added]]
+        )
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let dayA = patched.dayTemplates.first { $0.id == "fb2_day_a" }
+        XCTAssertNil(dayA?.exerciseTemplates.first { $0.exerciseId == benchExerciseId },
+            "deleted bench must be absent")
+        XCTAssertNotNil(dayA?.exerciseTemplates.first { $0.id == addedId },
+            "added dumbbell press must be present")
+    }
+
+    // T-Compat.1: PreviewOverrides.empty produces an identical template — backward compat.
+    func test_empty_previewOverrides_producesIdenticalTemplate() {
+        let template = FullBody2DayTemplate.template
+        let patched = DUPProgramSeeder.applying(overrides: .empty, to: template)
+        XCTAssertEqual(patched.dayTemplates.count, template.dayTemplates.count)
+        for (orig, patch) in zip(template.dayTemplates, patched.dayTemplates) {
+            XCTAssertEqual(orig.id, patch.id)
+            XCTAssertEqual(orig.exerciseTemplates.count, patch.exerciseTemplates.count,
+                "exercise count must be unchanged with empty overrides")
+            for (oe, pe) in zip(orig.exerciseTemplates, patch.exerciseTemplates) {
+                XCTAssertEqual(oe.exerciseId, pe.exerciseId)
+                XCTAssertEqual(oe.setsByWeek, pe.setsByWeek)
+            }
+        }
+    }
+
+    // T-Add.Idempotent: addExercise(_:toDay:) called N times with the same instance id
+    // appends exactly once — reproduces the device 3x-add bug at the unit level.
+    func test_add_onApplyFiredMultipleTimes_appendsOnlyOnce() {
+        let dayId = "fb2_day_a"
+        let instanceId = UUID().uuidString
+        let exercise = AddedExercise(
+            id: instanceId,
+            exerciseId: ExerciseCatalog.dumbbellPress.id,
+            priority: .standard,
+            wavePrescriptions: AddedExercise.defaultWavePrescriptions,
+            setsByWeek: AddedExercise.defaultSetsByWeek
+        )
+
+        var overrides = PreviewOverrides.empty
+        overrides.addExercise(exercise, toDay: dayId)
+        overrides.addExercise(exercise, toDay: dayId)
+        overrides.addExercise(exercise, toDay: dayId)
+
+        XCTAssertEqual(overrides.addedByDay[dayId]?.count, 1,
+            "addExercise must be idempotent: 3 calls with the same instance id must produce exactly 1 entry")
+        XCTAssertEqual(overrides.addedByDay[dayId]?.first?.id, instanceId)
     }
 }

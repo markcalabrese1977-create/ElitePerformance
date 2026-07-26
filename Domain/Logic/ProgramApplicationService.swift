@@ -8,7 +8,7 @@ enum ProgramApplicationService {
         _ result: OnboardingResult,
         context: ModelContext,
         startDate: Date = Date(),
-        overrides: ExerciseOverrideMap? = nil
+        overrides: PreviewOverrides? = nil
     ) {
         let weekdays = normalizedWeekdays(from: result)
         let template = selectTemplate(goal: result.goal, daysPerWeek: weekdays.count)
