@@ -73,9 +73,10 @@ struct OnboardingFlowView: View {
     // Page 6 — Start date picker
     @State private var mesoStartDate: Date = Date()
 
-    // Page 6 — Per-exercise customization
+    // Page 6 — Per-exercise customization and preview swap
     @State private var exerciseOverrides: ExerciseOverrideMap = [:]
     @State private var customizingExercise: (dayId: String, exerciseId: String)? = nil
+    @State private var swappingExercise: (dayId: String, exerciseId: String)? = nil
 
     private let totalPages = 6
 
@@ -570,10 +571,41 @@ struct OnboardingFlowView: View {
                         template: template,
                         existingOverride: exerciseOverrides[target.exerciseId],
                         onApply: { newOverride in
-                            exerciseOverrides[target.exerciseId] = newOverride
+                            let existing = exerciseOverrides[target.exerciseId] ?? ExerciseWaveOverride()
+                            exerciseOverrides[target.exerciseId] = existing.applyingPrescription(
+                                wavePrescriptions: newOverride.wavePrescriptions,
+                                setsByWeek: newOverride.setsByWeek
+                            )
                         },
                         onReset: {
-                            exerciseOverrides.removeValue(forKey: target.exerciseId)
+                            if let existing = exerciseOverrides[target.exerciseId],
+                               existing.substituteExerciseId != nil {
+                                exerciseOverrides[target.exerciseId] = existing.prescriptionCleared
+                            } else {
+                                exerciseOverrides.removeValue(forKey: target.exerciseId)
+                            }
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { swappingExercise != nil },
+                set: { isPresented in
+                    if !isPresented { swappingExercise = nil }
+                }
+            )) {
+                if let target = swappingExercise {
+                    let displayId = exerciseOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
+                    ProgramExerciseSwapSheet(
+                        currentExerciseId: displayId,
+                        currentExerciseName: ExerciseCatalog.displayName(for: displayId),
+                        onSelect: { catalogExercise in
+                            let existing = exerciseOverrides[target.exerciseId] ?? ExerciseWaveOverride()
+                            exerciseOverrides[target.exerciseId] = existing.applyingSubstitute(catalogExercise.id)
+                            swappingExercise = nil
+                        },
+                        onCancel: {
+                            swappingExercise = nil
                         }
                     )
                 }
@@ -582,15 +614,23 @@ struct OnboardingFlowView: View {
 
         private func exerciseRow(day: ProgramDayTemplate, exercise: ProgramExerciseTemplate, template: ProgramTemplate) -> some View {
             let override = exerciseOverrides[exercise.exerciseId]
+            let effectiveId = override?.substituteExerciseId ?? exercise.exerciseId
+            let isSwapped = override?.substituteExerciseId != nil
+            let isCustomized = override?.wavePrescriptions != nil || override?.setsByWeek != nil
 
             return HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(ExerciseCatalog.displayName(for: exercise.exerciseId))
+                        Text(ExerciseCatalog.displayName(for: effectiveId))
                             .font(.footnote)
                             .fontWeight(.medium)
 
-                        if override != nil {
+                        if isSwapped {
+                            Image(systemName: "arrow.left.arrow.right.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        if isCustomized {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.teal)
@@ -604,13 +644,23 @@ struct OnboardingFlowView: View {
 
                 Spacer()
 
-                Button {
-                    customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
-                } label: {
-                    Image(systemName: "pencil.circle")
-                        .font(.body)
+                HStack(spacing: 8) {
+                    Button {
+                        swappingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                    } label: {
+                        Image(systemName: "arrow.left.arrow.right.circle")
+                            .font(.body)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                    } label: {
+                        Image(systemName: "pencil.circle")
+                            .font(.body)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
 

@@ -3208,4 +3208,301 @@ final class ExerciseWaveOverrideTests: XCTestCase {
             }
         }
     }
+
+    // T-PreviewSwap.1: substituteExerciseId swaps only the exerciseId;
+    // all prescription fields are inherited from the original slot unchanged.
+    func test_previewSwap_substitutesExerciseIdAndKeepsPrescription() {
+        let originalTemplate = FullBody2DayTemplate.template
+        let originalBench = try! XCTUnwrap(
+            originalTemplate.dayTemplates
+                .first { $0.id == "fb2_day_a" }?
+                .exerciseTemplates
+                .first { $0.exerciseId == benchExerciseId }
+        )
+
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(substituteExerciseId: substituteId)
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: originalTemplate)
+        let swapped = try! XCTUnwrap(
+            patched.dayTemplates
+                .first { $0.id == "fb2_day_a" }?
+                .exerciseTemplates
+                .first { $0.exerciseId == substituteId }
+        )
+
+        XCTAssertEqual(swapped.exerciseId, substituteId, "exerciseId must be the substitute")
+
+        // Prescription fully inherited from the original slot.
+        for wave in WaveType.allCases {
+            let orig = originalBench.prescription(for: wave)
+            let got  = swapped.prescription(for: wave)
+            XCTAssertEqual(orig?.repMin,      got?.repMin,      "repMin inherited for \(wave)")
+            XCTAssertEqual(orig?.repMax,      got?.repMax,      "repMax inherited for \(wave)")
+            XCTAssertEqual(orig?.targetRIRMin, got?.targetRIRMin, "targetRIRMin inherited for \(wave)")
+            XCTAssertEqual(orig?.targetRIRMax, got?.targetRIRMax, "targetRIRMax inherited for \(wave)")
+        }
+        XCTAssertEqual(swapped.setsByWeek, originalBench.setsByWeek, "setsByWeek inherited")
+    }
+
+    // T-PreviewSwap.2: substituteExerciseId + wavePrescriptions both apply —
+    // the slot gets the new id AND the overridden wave rep range.
+    func test_previewSwap_thenCustomize_bothApply() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(
+                substituteExerciseId: substituteId,
+                wavePrescriptions: [.a: WavePrescriptionOverride(repMin: 4, repMax: 6, targetRIR: 0)]
+            )
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let swapped = try! XCTUnwrap(
+            patched.dayTemplates
+                .first { $0.id == "fb2_day_a" }?
+                .exerciseTemplates
+                .first { $0.exerciseId == substituteId }
+        )
+
+        XCTAssertEqual(swapped.exerciseId, substituteId)
+
+        // Wave A is overridden.
+        let waveA = try! XCTUnwrap(swapped.prescription(for: .a))
+        XCTAssertEqual(waveA.repMin, 4)
+        XCTAssertEqual(waveA.repMax, 6)
+        XCTAssertEqual(waveA.targetRIRMin, 0)
+
+        // Wave B is inherited (template default for bench: 8–10 @RIR 2).
+        let waveB = try! XCTUnwrap(swapped.prescription(for: .b))
+        let origWaveB = try! XCTUnwrap(
+            FullBody2DayTemplate.template.dayTemplates
+                .first { $0.id == "fb2_day_a" }?
+                .exerciseTemplates
+                .first { $0.exerciseId == benchExerciseId }?
+                .prescription(for: .b)
+        )
+        XCTAssertEqual(waveB.repMin, origWaveB.repMin, "wave B repMin must be inherited")
+        XCTAssertEqual(waveB.repMax, origWaveB.repMax, "wave B repMax must be inherited")
+
+        // Deload never overridden.
+        let deload = try! XCTUnwrap(swapped.prescription(for: .deload))
+        let origDeload = try! XCTUnwrap(
+            FullBody2DayTemplate.template.dayTemplates
+                .first { $0.id == "fb2_day_a" }?
+                .exerciseTemplates
+                .first { $0.exerciseId == benchExerciseId }?
+                .prescription(for: .deload)
+        )
+        XCTAssertEqual(deload.repMin, origDeload.repMin, "deload must never be overridden")
+    }
+
+    // T-PreviewSwap.3.5: swapping an .anchor exercise preserves its priority and
+    // setsByWeek ramp — explicit guard for Phase 2.2 set-ramp inheritance.
+    func test_previewSwap_inheritsAnchorPriorityAndSetsRamp() {
+        // bench_press in fb2_day_a is .anchor with ramp [3,4,4,4,4,5,4,5,5,2].
+        let anchorRamp = [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(substituteExerciseId: substituteId)
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let swapped = patched.dayTemplates
+            .first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates
+            .first { $0.exerciseId == substituteId }
+
+        XCTAssertNotNil(swapped, "swapped exercise must be found by substituteId")
+        XCTAssertEqual(swapped?.exerciseId, substituteId)
+        XCTAssertEqual(swapped?.priority, .anchor, "anchor priority must be inherited after swap")
+        XCTAssertEqual(swapped?.setsByWeek, anchorRamp, "setsByWeek ramp must be inherited after swap")
+    }
+
+    // T-PreviewSwap.3: nil substituteExerciseId leaves exerciseId unchanged —
+    // confirms backward compat with prescription-only overrides.
+    func test_previewSwap_nilSubstitute_keepsOriginalExercise() {
+        let overrides: ExerciseOverrideMap = [
+            benchExerciseId: ExerciseWaveOverride(
+                substituteExerciseId: nil,
+                wavePrescriptions: [.a: WavePrescriptionOverride(repMin: 3, repMax: 5, targetRIR: 0)]
+            )
+        ]
+
+        let patched = DUPProgramSeeder.applying(overrides: overrides, to: FullBody2DayTemplate.template)
+        let bench = try! XCTUnwrap(patchedBenchExercise(from: patched))
+
+        XCTAssertEqual(bench.exerciseId, benchExerciseId, "exerciseId must be unchanged when substituteExerciseId is nil")
+
+        let waveA = try! XCTUnwrap(bench.prescription(for: .a))
+        XCTAssertEqual(waveA.repMin, 3, "wave A prescription override must still apply")
+        XCTAssertEqual(waveA.repMax, 5)
+    }
+
+    // T-MergeMap.1: swap THEN customize — the fixed onApply merge must preserve substituteExerciseId.
+    // Simulates the exact data-layer sequence the UI executes.
+    func test_overrideMap_swapThenCustomize_preservesBothFields() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let newWavePrescriptions: [WaveType: WavePrescriptionOverride] = [
+            .a: WavePrescriptionOverride(repMin: 4, repMax: 6, targetRIR: 0)
+        ]
+
+        // Step 1 — simulate swap write.
+        var exerciseOverrides: ExerciseOverrideMap = [:]
+        exerciseOverrides[benchExerciseId] = ExerciseWaveOverride(
+            substituteExerciseId: substituteId
+        )
+
+        // Step 2 — simulate fixed onApply merge (reads existing, preserves substituteExerciseId).
+        let existingAfterSwap = exerciseOverrides[benchExerciseId]
+        exerciseOverrides[benchExerciseId] = ExerciseWaveOverride(
+            substituteExerciseId: existingAfterSwap?.substituteExerciseId,
+            wavePrescriptions: newWavePrescriptions,
+            setsByWeek: existingAfterSwap?.setsByWeek
+        )
+
+        // Assert map has both fields.
+        let finalEntry = exerciseOverrides[benchExerciseId]
+        XCTAssertEqual(finalEntry?.substituteExerciseId, substituteId,
+            "substituteExerciseId must survive the customize merge")
+        XCTAssertNotNil(finalEntry?.wavePrescriptions,
+            "wavePrescriptions must be present after customize merge")
+
+        // Assert applying() produces Y with the customized wave A prescription.
+        let patched = DUPProgramSeeder.applying(overrides: exerciseOverrides, to: FullBody2DayTemplate.template)
+        let swapped = patched.dayTemplates
+            .first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates
+            .first { $0.exerciseId == substituteId }
+
+        XCTAssertNotNil(swapped, "exercise must be found by substituteId after applying()")
+        let waveA = swapped.flatMap { $0.prescription(for: .a) }
+        XCTAssertEqual(waveA?.repMin, 4, "customized repMin must apply on top of swapped exercise")
+        XCTAssertEqual(waveA?.repMax, 6, "customized repMax must apply on top of swapped exercise")
+    }
+
+    // T-MergeMap.2: customize THEN swap — the swap write must preserve wavePrescriptions/setsByWeek.
+    func test_overrideMap_customizeThenSwap_preservesBothFields() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let newWavePrescriptions: [WaveType: WavePrescriptionOverride] = [
+            .b: WavePrescriptionOverride(repMin: 5, repMax: 7, targetRIR: 1)
+        ]
+
+        // Step 1 — simulate customize write (no merge needed first time, no existing entry).
+        var exerciseOverrides: ExerciseOverrideMap = [:]
+        exerciseOverrides[benchExerciseId] = ExerciseWaveOverride(
+            substituteExerciseId: nil,
+            wavePrescriptions: newWavePrescriptions,
+            setsByWeek: nil
+        )
+
+        // Step 2 — simulate swap write (reads existing, preserves wavePrescriptions/setsByWeek).
+        let existingAfterCustomize = exerciseOverrides[benchExerciseId]
+        exerciseOverrides[benchExerciseId] = ExerciseWaveOverride(
+            substituteExerciseId: substituteId,
+            wavePrescriptions: existingAfterCustomize?.wavePrescriptions,
+            setsByWeek: existingAfterCustomize?.setsByWeek
+        )
+
+        // Assert map has both fields.
+        let finalEntry = exerciseOverrides[benchExerciseId]
+        XCTAssertEqual(finalEntry?.substituteExerciseId, substituteId,
+            "substituteExerciseId must be set after swap")
+        XCTAssertNotNil(finalEntry?.wavePrescriptions,
+            "wavePrescriptions must survive the swap write")
+
+        // Assert applying() produces Y with the customized wave B prescription.
+        let patched = DUPProgramSeeder.applying(overrides: exerciseOverrides, to: FullBody2DayTemplate.template)
+        let swapped = patched.dayTemplates
+            .first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates
+            .first { $0.exerciseId == substituteId }
+
+        XCTAssertNotNil(swapped, "exercise must be found by substituteId after applying()")
+        let waveB = swapped.flatMap { $0.prescription(for: .b) }
+        XCTAssertEqual(waveB?.repMin, 5, "customized repMin must apply on top of swapped exercise")
+        XCTAssertEqual(waveB?.repMax, 7, "customized repMax must apply on top of swapped exercise")
+    }
+
+    // T-Helper.1: applyingSubstitute preserves prescription fields; applyingPrescription preserves substituteExerciseId.
+    func test_overrideMap_sequentialWrites_swapThenCustomize_bothSurvive() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let waveOverrides: [WaveType: WavePrescriptionOverride] = [
+            .a: WavePrescriptionOverride(repMin: 3, repMax: 5, targetRIR: 0)
+        ]
+        var map: ExerciseOverrideMap = [:]
+
+        // Swap write via helper.
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingSubstitute(substituteId)
+
+        // Customize write via helper.
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingPrescription(
+            wavePrescriptions: waveOverrides, setsByWeek: nil
+        )
+
+        let entry = map[benchExerciseId]
+        XCTAssertEqual(entry?.substituteExerciseId, substituteId, "swap must survive customize helper write")
+        XCTAssertNotNil(entry?.wavePrescriptions, "customization must be present")
+    }
+
+    // T-Helper.2: applyingPrescription followed by applyingSubstitute — both fields survive.
+    func test_overrideMap_sequentialWrites_customizeThenSwap_bothSurvive() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let waveOverrides: [WaveType: WavePrescriptionOverride] = [
+            .b: WavePrescriptionOverride(repMin: 6, repMax: 8, targetRIR: 1)
+        ]
+        var map: ExerciseOverrideMap = [:]
+
+        // Customize write via helper.
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingPrescription(
+            wavePrescriptions: waveOverrides, setsByWeek: nil
+        )
+
+        // Swap write via helper.
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingSubstitute(substituteId)
+
+        let entry = map[benchExerciseId]
+        XCTAssertEqual(entry?.substituteExerciseId, substituteId, "substitute must be set after swap helper write")
+        XCTAssertNotNil(entry?.wavePrescriptions, "customization must survive swap helper write")
+    }
+
+    // T-Helper.3: prescriptionCleared preserves substituteExerciseId — reproduces the onReset device bug.
+    // Before the fix: onReset called removeValue, wiping the swap.
+    // After the fix: onReset calls prescriptionCleared, keeping substituteExerciseId.
+    func test_overrideMap_resetPreservesSwap() {
+        let substituteId = ExerciseCatalog.dumbbellPress.id
+        let waveOverrides: [WaveType: WavePrescriptionOverride] = [
+            .a: WavePrescriptionOverride(repMin: 4, repMax: 6, targetRIR: 0)
+        ]
+        var map: ExerciseOverrideMap = [:]
+
+        // Swap then customize.
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingSubstitute(substituteId)
+        map[benchExerciseId] = (map[benchExerciseId] ?? ExerciseWaveOverride()).applyingPrescription(
+            wavePrescriptions: waveOverrides, setsByWeek: nil
+        )
+
+        // Simulate the fixed onReset: preserve swap, clear prescription.
+        if let existing = map[benchExerciseId], existing.substituteExerciseId != nil {
+            map[benchExerciseId] = existing.prescriptionCleared
+        } else {
+            map.removeValue(forKey: benchExerciseId)
+        }
+
+        let entry = map[benchExerciseId]
+        XCTAssertNotNil(entry, "entry must remain in map after reset (swap still active)")
+        XCTAssertEqual(entry?.substituteExerciseId, substituteId, "substituteExerciseId must survive reset")
+        XCTAssertNil(entry?.wavePrescriptions, "wavePrescriptions must be cleared by reset")
+        XCTAssertNil(entry?.setsByWeek, "setsByWeek must be cleared by reset")
+
+        // Verify applying() still sees the swapped exercise.
+        let patched = DUPProgramSeeder.applying(overrides: map, to: FullBody2DayTemplate.template)
+        let swapped = patched.dayTemplates
+            .first { $0.id == "fb2_day_a" }?
+            .exerciseTemplates
+            .first { $0.exerciseId == substituteId }
+        XCTAssertNotNil(swapped, "swapped exercise must still appear in seeded template after reset")
+    }
 }

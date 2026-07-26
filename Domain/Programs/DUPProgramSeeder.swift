@@ -92,6 +92,12 @@ enum DUPProgramSeeder {
                     return exercise
                 }
 
+                // Step 1: swap exerciseId if a substitute is specified. Prescription
+                // fields are inherited from the original slot — only the identity changes.
+                let effectiveExerciseId = override.substituteExerciseId ?? exercise.exerciseId
+
+                // Step 2: apply wave prescription overrides on top of the (possibly
+                // substituted) slot. Deload is never overridden.
                 var patchedPrescriptions = exercise.prescriptions
                 if let waveOverrides = override.wavePrescriptions {
                     patchedPrescriptions = exercise.prescriptions.map { prescription -> WavePrescription in
@@ -119,7 +125,7 @@ enum DUPProgramSeeder {
                 return ProgramExerciseTemplate(
                     id: exercise.id,
                     order: exercise.order,
-                    exerciseId: exercise.exerciseId,
+                    exerciseId: effectiveExerciseId,
                     priority: exercise.priority,
                     notes: exercise.notes,
                     prescriptions: patchedPrescriptions,

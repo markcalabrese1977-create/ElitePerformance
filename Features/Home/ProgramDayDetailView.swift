@@ -851,7 +851,7 @@ private struct SwapTarget: Identifiable {
 /// Shows "recommended" (same primary muscle group) first, then all others.
 /// Intentionally separate from SessionView's ExerciseSwapSheet, which is
 /// private and typed to that screen's UISessionExercise view-model.
-private struct ProgramExerciseSwapSheet: View {
+struct ProgramExerciseSwapSheet: View {
     let currentExerciseId: String
     let currentExerciseName: String
     let onSelect: (CatalogExercise) -> Void
