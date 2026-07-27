@@ -2382,7 +2382,7 @@ final class SectionKReferenceTests: XCTestCase {
 final class MechanicalLoadAppGroupTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
-        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self, SessionHistory.self, SessionHistoryExercise.self])
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
@@ -2394,14 +2394,14 @@ final class MechanicalLoadAppGroupTests: XCTestCase {
         return formatter.string(from: date)
     }
 
-    // T-L.1: App Group write/read parity.
+    // T-L.1: App Group set/read parity.
     //
-    // MechanicalLoadSharedStore.write(score:for:)/.read(for:) are not
+    // MechanicalLoadSharedStore.set(total:for:)/.read(for:) are not
     // injectable — sharedDefaults is a private computed property that
     // always resolves UserDefaults(suiteName: appGroupID)
     // (Domain/MechanicalLoadSharedStore.swift:11,14-16), with no parameter
     // to substitute a test-scoped suite. Per the SCOPE LIMIT fallback: this
-    // calls the real write function directly (appGroupID is a public
+    // calls the real set function directly (appGroupID is a public
     // constant) and verifies both the round trip through the service's own
     // read() AND, independently, by opening
     // UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)
@@ -2425,50 +2425,79 @@ final class MechanicalLoadAppGroupTests: XCTestCase {
         }
 
         let score = 4321.0
-        MechanicalLoadSharedStore.write(score: score, for: testDate)
+        MechanicalLoadSharedStore.set(total: score, for: testDate)
 
-        XCTAssertEqual(MechanicalLoadSharedStore.read(for: testDate), score, "read() must return what write() just wrote, for the same date")
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: testDate), score,
+            "read() must return what set() just assigned, for the same date")
 
-        guard let directDefaults = UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID) else {
-            // read()/write() already confirmed to agree with each other
-            // above; this branch only covers the deeper, independent
-            // key-format check, which needs direct UserDefaults access this
-            // test environment may not grant.
-            return
+        if let directDefaults = UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID) {
+            XCTAssertEqual(directDefaults.double(forKey: expectedKey), score,
+                "key format must be exactly \"mechanicalLoad.YYYY-MM-DD\"")
         }
-        XCTAssertEqual(directDefaults.double(forKey: expectedKey), score, "key format must be exactly \"mechanicalLoad.YYYY-MM-DD\" — pinned from MechanicalLoadSharedStore.swift's doc comment and keyPrefix/dateKey(for:)")
+
+        // set() assigns (never accumulates) and clears the key at zero.
+        MechanicalLoadSharedStore.set(total: 0, for: testDate)
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: testDate), 0,
+            "set(total: 0) must remove the key, not leave a stale value")
     }
 
-    // T-L.1 (continued): the score written equals
-    // MechanicalLoadHealthKitService.calculateMechanicalLoad(from:), and the
-    // date used is session.completedAt ?? session.date
-    // (MechanicalLoadHealthKitService.writeAfterSession,
-    // Domain/MechanicalLoadHealthKitService.swift:31) — not always
-    // session.date alone.
-    func test_L1_writtenValueMatchesCalculatedMechanicalLoadForTheSession() throws {
+    // T-L.1 (continued): the App Group day-total is the sum of that day's
+    // SessionHistory.mechanicalLoad values, produced by the real
+    // MechanicalLoadProjector.projectDay path — not a reimplementation.
+    func test_L1_projectDaySumsSessionHistoryIntoAppGroup() throws {
         let context = try makeContext()
-        let item = SessionItem(
-            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 185,
-            actualReps: [8], actualLoads: [185]
+
+        var comps = DateComponents(); comps.year = 2099; comps.month = 4; comps.day = 2
+        let day = Calendar.current.date(from: comps)!
+        let key = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: day)
+        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: key) }
+
+        // Two sessions completed the same day → totals add.
+        let h1 = SessionHistory(
+            date: day, weekIndex: 1, title: "A", subtitle: "",
+            totalExercises: 1, totalSets: 1, totalVolume: 100,
+            sessionId: UUID(), dayLabelSnapshot: nil, mechanicalLoad: 1200,
+            mesoBlockId: nil, mesoBlockNameSnapshot: nil, exercises: []
         )
-        let completedAt = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
-        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item], completedAt: completedAt)
-        context.insert(session)
+        let h2 = SessionHistory(
+            date: day, weekIndex: 1, title: "B", subtitle: "",
+            totalExercises: 1, totalSets: 1, totalVolume: 100,
+            sessionId: UUID(), dayLabelSnapshot: nil, mechanicalLoad: 800,
+            mesoBlockId: nil, mesoBlockNameSnapshot: nil, exercises: []
+        )
+        context.insert(h1); context.insert(h2)
         try context.save()
 
-        let expectedScore = MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session)
-        XCTAssertGreaterThan(expectedScore, 0, "fixture must produce a real, non-zero mechanical load to be a meaningful test")
+        MechanicalLoadProjector.projectDay(day, in: context)
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: day), 2000,
+            "day-total must equal the sum of same-day SessionHistory.mechanicalLoad")
+    }
 
-        let expectedKey = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: completedAt)
-        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: expectedKey) }
+    // T-L.1 (regression): projecting the same day repeatedly is idempotent —
+    // the old += accumulate produced 2x on re-entry; the projection must not.
+    func test_L1_projectDayIsIdempotent_noDoubling() throws {
+        let context = try makeContext()
 
-        // Mirrors writeAfterSession's own completedAt ?? date key date
-        // directly, rather than awaiting the real detached Task inside
-        // SessionScreenViewModel.persistCompletion, which isn't reliably
-        // observable synchronously from a test.
-        MechanicalLoadSharedStore.write(score: expectedScore, for: session.completedAt ?? session.date)
+        var comps = DateComponents(); comps.year = 2099; comps.month = 4; comps.day = 3
+        let day = Calendar.current.date(from: comps)!
+        let key = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: day)
+        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: key) }
 
-        XCTAssertEqual(MechanicalLoadSharedStore.read(for: completedAt), expectedScore)
+        let h = SessionHistory(
+            date: day, weekIndex: 1, title: "A", subtitle: "",
+            totalExercises: 1, totalSets: 1, totalVolume: 100,
+            sessionId: UUID(), dayLabelSnapshot: nil, mechanicalLoad: 32438,
+            mesoBlockId: nil, mesoBlockNameSnapshot: nil, exercises: []
+        )
+        context.insert(h)
+        try context.save()
+
+        MechanicalLoadProjector.projectDay(day, in: context)
+        MechanicalLoadProjector.projectDay(day, in: context)
+        MechanicalLoadProjector.projectDay(day, in: context)
+
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: day), 32438,
+            "three projections must equal one — no accumulation")
     }
 
     // T-L.2: App Group unavailable — graceful degrade, no crash.
@@ -2493,50 +2522,65 @@ final class MechanicalLoadAppGroupTests: XCTestCase {
 
     func test_L2_writeAndReadNeverCrashRegardlessOfAppGroupAvailability() {
         // No injection point exists to force sharedDefaults to nil for this
-        // call specifically, but write/read must be safe to call under any
-        // circumstance — this confirms they don't throw/crash/hang.
-        MechanicalLoadSharedStore.write(score: 100, for: Date())
+        // call specifically, but set/read/clearAll must be safe to call under
+        // any circumstance — this confirms they don't throw/crash/hang.
+        MechanicalLoadSharedStore.set(total: 100, for: Date())
         _ = MechanicalLoadSharedStore.read(for: Date())
         _ = MechanicalLoadSharedStore.readRange(from: Date(), to: Date())
+        MechanicalLoadSharedStore.clearAll()
         XCTAssertTrue(true) // reaching this line at all is the assertion
     }
 
-    // T-L.3: custom HKQuantityType path is not used by the real write flow.
-    //
-    // CORRECTED PREMISE: the string
-    // "com.calabrese.eliteperformance.mechanicalLoad" is NOT fully gone
-    // from production source — it's still declared as
-    // MechanicalLoadHealthKitService.quantityTypeIdentifier
-    // (Domain/MechanicalLoadHealthKitService.swift:15), used by two
-    // `private` functions, requestWriteAuthorizationIfNeeded() and
-    // writeSample(score:date:). But neither is called from anywhere —
-    // writeAfterSession(_:), the only public entry point, goes straight to
-    // MechanicalLoadSharedStore.write(score:for:) (the shared-UserDefaults
-    // approach), with an explicit comment confirming why: "Custom
-    // HKQuantityType identifiers are not supported for third-party apps
-    // without special entitlements." So the literal "no reference anywhere
-    // in source" claim is false; the accurate claim is "the active write
-    // path never reaches the custom-quantity-type code" — dead code, not a
-    // live bug. See OPEN Q16 in TestOpenQuestions.swift.
-    func test_L3_activeWritePathNeverUsesUnsupportedCustomQuantityType() async throws {
+    // T-L.3: deleted — the dead HK scaffolding (quantityTypeIdentifier,
+    // requestWriteAuthorizationIfNeeded, writeSample, MechanicalLoadError)
+    // has been removed from MechanicalLoadHealthKitService.swift. The live
+    // projection path (MechanicalLoadProjector) never touches HealthKit;
+    // that structural fact is now proven by T-L.1/T-L.1(regression) above,
+    // which exercise the full production path end-to-end. See OPEN Q16
+    // (RESOLVED) in TestOpenQuestions.swift.
+
+    // T-L.4: recovery migration recomputes a nil SessionHistory.mechanicalLoad
+    // from the matching Session and projects it to the App Group.
+    func test_L4_recoveryMigrationRepopulatesAndProjects() throws {
         let context = try makeContext()
-        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 185, actualReps: [8], actualLoads: [185])
-        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item])
+
+        // Reset the completion gate so the migration runs.
+        UserDefaults.standard.removeObject(forKey: MechanicalLoadRecoveryMigration.completionKey)
+
+        var comps = DateComponents(); comps.year = 2099; comps.month = 4; comps.day = 5
+        let day = Calendar.current.date(from: comps)!
+        let key = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: day)
+        defer {
+            UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: key)
+            UserDefaults.standard.removeObject(forKey: MechanicalLoadRecoveryMigration.completionKey)
+        }
+
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1,
+            targetRIR: 2, suggestedLoad: 185, actualReps: [8], actualLoads: [185]
+        )
+        let session = Session(date: day, status: .completed, weekIndex: 1, items: [item], completedAt: day)
         context.insert(session)
+
+        let expected = MechanicalLoadHealthKitService.calculateMechanicalLoad(from: session)
+        XCTAssertGreaterThan(expected, 0)
+
+        let history = SessionHistory(
+            date: day, weekIndex: 1, title: "A", subtitle: "",
+            totalExercises: 1, totalSets: 1, totalVolume: 185,
+            sessionId: nil,               // nil → forces date+weekIndex match path
+            dayLabelSnapshot: nil, mechanicalLoad: nil,   // ← the loss to recover
+            mesoBlockId: nil, mesoBlockNameSnapshot: nil, exercises: []
+        )
+        context.insert(history)
         try context.save()
 
-        let key = MechanicalLoadSharedStore.keyPrefix + expectedDateKey(for: session.completedAt ?? session.date)
-        defer { UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID)?.removeObject(forKey: key) }
+        MechanicalLoadRecoveryMigration.runIfNeeded(in: context)
 
-        // writeAfterSession is the only public entry point production code
-        // calls (Features/Session/SessionView.swift:2268). Calling it here
-        // must not throw/crash even though the custom-quantity-type path
-        // (which would need an unsupported HKQuantityType and would throw
-        // MechanicalLoadError.unsupportedQuantityType if reached) exists
-        // unused in the same file — proving it's truly unreachable from the
-        // real flow, not just absent from a naive string search.
-        await MechanicalLoadHealthKitService.writeAfterSession(session)
-        // Reaching here without throwing/crashing is the assertion.
+        XCTAssertEqual(history.mechanicalLoad, expected,
+            "recovery must repopulate mechanicalLoad from the matching Session")
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: day), expected,
+            "recovery must rebuild the App Group projection")
     }
 }
 

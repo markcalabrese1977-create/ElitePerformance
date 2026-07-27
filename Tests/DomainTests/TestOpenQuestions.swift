@@ -382,29 +382,14 @@
 //   it's no longer a separate failure mode — the dedicated BUG CONFIRMED
 //   test that isolated it is now redundant and was removed.
 
-// OPEN Q16 (NEW): the unsupported custom HKQuantityType path is dead code,
-//   not removed code — string + two private functions still exist, unused.
-//   Discovered while building T-L.3. The task's premise was that the old
-//   custom-HKQuantityType write path had been fully removed from source.
-//   That's not quite right: MechanicalLoadHealthKitService.swift:15 still
-//   declares `quantityTypeIdentifier = "com.calabrese.eliteperformance
-//   .mechanicalLoad"`, and two `private` functions
-//   (requestWriteAuthorizationIfNeeded(), writeSample(score:date:)) still
-//   reference it. Neither function has a single call site anywhere in the
-//   codebase — the real, only public entry point, writeAfterSession(_:),
-//   goes straight to MechanicalLoadSharedStore.write(score:for:) (shared
-//   App Group UserDefaults), with its own comment explaining why: custom
-//   HKQuantityType identifiers aren't supported for third-party apps
-//   without special entitlements. So the string and the two functions are
-//   harmless, unreachable leftovers from an earlier, abandoned approach —
-//   not a live bug, not a security/crash risk, just dead code that a naive
-//   "grep for the string" check would flag incorrectly. Tested as the
-//   structural fact it is in MechanicalLoadAppGroupTests
-//   .test_L3_activeWritePathNeverUsesUnsupportedCustomQuantityType
-//   (StubTests.swift): the real write path is exercised end-to-end and
-//   confirmed never to throw the custom-quantity-type error path. Same
-//   class of finding as OPEN Q13 (ProgramCatalog.recommend) — dead,
-//   unreferenced code discovered while testing a "this was removed" claim.
+// OPEN Q16 (RESOLVED): the dead HK scaffolding (quantityTypeIdentifier,
+//   requestWriteAuthorizationIfNeeded, writeSample, MechanicalLoadError)
+//   has been fully deleted from MechanicalLoadHealthKitService.swift. The
+//   live write path is MechanicalLoadProjector, which never touches HealthKit.
+//   T-L.3 (which called the now-deleted writeAfterSession) was deleted;
+//   the structural guarantee is now proven by T-L.1 / T-L.1(regression)
+//   in MechanicalLoadAppGroupTests (StubTests.swift), which exercise the
+//   full projection path end-to-end without HealthKit involvement.
 
 // OPEN Q17 (NEW): CoachingEngine.recommend cannot tell a genuine 0-rep
 //   total-failure set apart from a not-yet-logged one — both withhold a

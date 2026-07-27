@@ -3,7 +3,7 @@ import Foundation
 import SwiftData
 
 enum MechanicalLoadRecoveryMigration {
-    private static let completionKey = "mechanicalLoadRecovery.v1.completed"
+    static let completionKey = "mechanicalLoadRecovery.v1.completed"
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {

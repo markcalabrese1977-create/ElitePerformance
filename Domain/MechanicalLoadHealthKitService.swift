@@ -1,21 +1,15 @@
 // Domain/MechanicalLoadHealthKitService.swift
 import Foundation
-import HealthKit
-import SwiftData
 
-/// Calculates mechanical load from a completed session and writes it to HealthKit
-/// as a custom quantity type. HealthDashboard reads this value without needing
-/// access to ElitePerformance's internal data model.
+/// Calculates mechanical load from a completed session.
 ///
 /// Formula: Σ (load × reps × relative_intensity) per set
 /// where relative_intensity = actualLoad / e1RM
 /// This weights sets closer to failure more heavily than pure volume load.
+///
+/// The result is projected to the App Group via MechanicalLoadProjector;
+/// HealthDashboard reads it from shared UserDefaults, not HealthKit.
 enum MechanicalLoadHealthKitService {
-
-    static let quantityTypeIdentifier = "com.calabrese.eliteperformance.mechanicalLoad"
-    private static let store = HKHealthStore()
-
-    // MARK: - Calculation
 
     static func calculateMechanicalLoad(from session: Session) -> Double {
         var total = 0.0
@@ -39,39 +33,4 @@ enum MechanicalLoadHealthKitService {
 
         return total.rounded()
     }
-
-    // MARK: - HealthKit Write
-
-    private static func requestWriteAuthorizationIfNeeded() async throws {
-        guard let quantityType = HKObjectType.quantityType(
-            forIdentifier: HKQuantityTypeIdentifier(rawValue: quantityTypeIdentifier)
-        ) else {
-            throw MechanicalLoadError.unsupportedQuantityType
-        }
-        try await store.requestAuthorization(toShare: [quantityType], read: [])
-    }
-
-    private static func writeSample(score: Double, date: Date) async throws {
-        guard let quantityType = HKQuantityType.quantityType(
-            forIdentifier: HKQuantityTypeIdentifier(rawValue: quantityTypeIdentifier)
-        ) else {
-            throw MechanicalLoadError.unsupportedQuantityType
-        }
-
-        let quantity = HKQuantity(unit: .count(), doubleValue: score)
-        let sample = HKQuantitySample(
-            type: quantityType,
-            quantity: quantity,
-            start: date,
-            end: date
-        )
-
-        try await store.save(sample)
-    }
-}
-
-// MARK: - Errors
-
-enum MechanicalLoadError: Error {
-    case unsupportedQuantityType
 }
