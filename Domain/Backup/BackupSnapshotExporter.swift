@@ -186,7 +186,12 @@ enum BackupSnapshotExporter {
                             reps: exercise.reps,
                             volume: exercise.volume
                         )
-                    }
+                    },
+                    mechanicalLoad: history.mechanicalLoad,
+                    sessionId: history.sessionId,
+                    dayLabelSnapshot: history.dayLabelSnapshot,
+                    mesoBlockId: history.mesoBlockId,
+                    mesoBlockNameSnapshot: history.mesoBlockNameSnapshot
                 )
             },
             exerciseNotes: exerciseNotes.map { note in

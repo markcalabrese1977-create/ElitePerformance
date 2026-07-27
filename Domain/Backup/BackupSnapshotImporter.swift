@@ -208,8 +208,11 @@ enum BackupSnapshotImporter {
                 totalExercises: historyDTO.totalExercises,
                 totalSets: historyDTO.totalSets,
                 totalVolume: historyDTO.totalVolume,
-                mesoBlockId: nil,
-                mesoBlockNameSnapshot: nil,
+                sessionId: historyDTO.sessionId,
+                dayLabelSnapshot: historyDTO.dayLabelSnapshot,
+                mechanicalLoad: historyDTO.mechanicalLoad,
+                mesoBlockId: historyDTO.mesoBlockId,
+                mesoBlockNameSnapshot: historyDTO.mesoBlockNameSnapshot,
                 exercises: exercises
             )
 

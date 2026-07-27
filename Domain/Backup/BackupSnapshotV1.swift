@@ -188,6 +188,13 @@ struct SessionHistoryBackupDTO: Codable {
     let totalSets: Int
     let totalVolume: Double
     let exercises: [SessionHistoryExerciseBackupDTO]
+
+    // Added: previously dropped on round-trip.
+    let mechanicalLoad: Double?
+    let sessionId: UUID?
+    let dayLabelSnapshot: String?
+    let mesoBlockId: UUID?
+    let mesoBlockNameSnapshot: String?
 }
 
 struct SessionHistoryExerciseBackupDTO: Codable {
