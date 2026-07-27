@@ -2261,10 +2261,8 @@ final class SessionScreenViewModel: ObservableObject {
             await HealthKitWorkoutSummarySyncService
                 .syncForCompletedSession(session, in: context)
         }
-        // ✅ Write mechanical load score to HealthKit for HealthDashboard.
-        Task { @MainActor in
-            await MechanicalLoadHealthKitService.writeAfterSession(session)
-        }
+        // ✅ Project mechanical load for HealthDashboard (idempotent day-total).
+        MechanicalLoadProjector.projectDay(session.completedAt ?? session.date, in: context)
     }
 } // ← closes SessionScreenViewModel
 

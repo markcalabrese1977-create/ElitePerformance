@@ -15,23 +15,6 @@ enum MechanicalLoadHealthKitService {
     static let quantityTypeIdentifier = "com.calabrese.eliteperformance.mechanicalLoad"
     private static let store = HKHealthStore()
 
-    // MARK: - Public API
-
-    @MainActor
-    static func writeAfterSession(_ session: Session) async {
-        let score = calculateMechanicalLoad(from: session)
-        guard score > 0 else {
-            print("ℹ️ MechanicalLoad: score is 0, skipping write")
-            return
-        }
-
-        // Write to shared App Group so HealthDashboard can read it.
-        // Custom HKQuantityType identifiers are not supported for third-party
-        // apps without special entitlements, so we use shared UserDefaults instead.
-        let date = session.completedAt ?? session.date
-        MechanicalLoadSharedStore.write(score: score, for: date)
-    }
-
     // MARK: - Calculation
 
     static func calculateMechanicalLoad(from session: Session) -> Double {
