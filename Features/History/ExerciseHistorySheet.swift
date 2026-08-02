@@ -365,6 +365,7 @@ struct ExerciseHistorySheet: View {
             var descriptor = FetchDescriptor<Session>()
             descriptor.sortBy = [SortDescriptor(\Session.date, order: .reverse)]
             let sessions = try context.fetch(descriptor)
+            let bodyWeight = try? context.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
             var built: [ExerciseHistoryEntry] = []
             let targetExerciseId = ExerciseCatalog.resolvedExerciseId(
                 rawId: exerciseId,
@@ -413,10 +414,15 @@ struct ExerciseHistorySheet: View {
                     let reps = set.actualReps ?? 0
                     guard reps > 0 else { continue }
                     let load = set.actualLoad ?? 0
+                    let effLoad = E1RMCalculator.effectiveLoad(
+                        actualLoad: load,
+                        exerciseId: targetExerciseId,
+                        bodyWeight: bodyWeight
+                    )
                     let rir = set.actualRIR ?? set.plannedRIR
                     executedSetCount += 1
                     repsTotal += reps
-                    volumeTotal += load * Double(reps)
+                    volumeTotal += effLoad * Double(reps)
                     if load > 0 {
                         let e1 = estimate1RM(load: load, reps: reps)
                         bestE1RM = max(bestE1RM ?? 0, e1)

@@ -1557,6 +1557,7 @@ final class SessionScreenViewModel: ObservableObject {
 
         let newSet = UISessionSet(
             index: nextIndex,
+            exerciseId: exercise.exerciseId,
             plannedLoad: plannedLoad,
             plannedReps: plannedReps,
             plannedRIR: plannedRIR,
@@ -1749,6 +1750,7 @@ final class SessionScreenViewModel: ObservableObject {
         let uiSets: [UISessionSet] = (1...4).map { idx in
             UISessionSet(
                 index: idx,
+                exerciseId: catalogExercise.id,
                 plannedLoad: (idx <= defaultSets) ? defaultLoad : 0,
                 plannedReps: defaultReps,
                 plannedRIR: defaultRIR,
@@ -2410,6 +2412,7 @@ extension SessionScreenViewModel {
                 uiSets.append(
                                     UISessionSet(
                                         index: setIndex,
+                                        exerciseId: item.exerciseId,
                                         plannedLoad: plannedLoad,
                                         plannedReps: plannedReps,
                                         plannedRIR: plannedRIR,
@@ -2677,6 +2680,7 @@ struct UISessionSet: Identifiable {
     
     init(
         index: Int,
+        exerciseId: String,
         plannedLoad: Double,
         plannedReps: Int,
         plannedRIR: Int?,
@@ -2715,6 +2719,10 @@ struct UISessionSet: Identifiable {
         
         if let actualLoad {
             self.actualLoadText = String(format: "%.1f", actualLoad)
+        } else if ExerciseCatalog.isBodyweight(exerciseId: exerciseId) {
+            // BW: no external load entered = bodyweight-only. Store 0 so effectiveLoad() returns bodyweight at read time.
+            // LANDMINE: weighted-BW (belt plate) support, when built, must seed the added-weight value here instead of 0.
+            self.actualLoadText = "0"
         } else {
             self.actualLoadText = planLoadString
         }
@@ -3071,10 +3079,10 @@ struct UISessionSet: Identifiable {
             )
             
             let benchSets = [
-                UISessionSet(index: 1, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-                UISessionSet(index: 2, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-                UISessionSet(index: 3, plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
-                UISessionSet(index: 4, plannedLoad: 185, plannedReps: 8, plannedRIR: 1)
+                UISessionSet(index: 1, exerciseId: "bench", plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 2, exerciseId: "bench", plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 3, exerciseId: "bench", plannedLoad: 185, plannedReps: 8, plannedRIR: 2),
+                UISessionSet(index: 4, exerciseId: "bench", plannedLoad: 185, plannedReps: 8, plannedRIR: 1)
             ]
             
             let bench = UISessionExercise(
