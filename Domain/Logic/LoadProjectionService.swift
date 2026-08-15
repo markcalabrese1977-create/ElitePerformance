@@ -143,6 +143,22 @@ enum LoadProjectionService {
         // this before calling project(), but this protects every other caller too.
         if currentWaveRaw?.lowercased() == "deload" { return nil }
 
+        // FIX B — Bodyweight exercises get NO numeric load suggestion. Their sets are
+        // logged with actualLoad == 0, which makes both sub-paths below misfire:
+        //  (a) the e1RM builder substitutes bodyWeight for the missing load (treating
+        //      bodyweight as if it were external plate), and
+        //  (b) the same-wave path reads a phantom from plannedLoadsBySet/suggestedLoad
+        //      and steps it every "clean" session (isCleanSession skips RIR when
+        //      actualLoads == 0, so BW sessions always count as clean).
+        // Returning nil keeps suggestedLoad/plannedLoadsBySet at 0 so the plan pill
+        // renders "BW". Mirrors CoachingEngine.recommend, which already returns nil for
+        // BW (its working-set filter requires load > 0). Uses the customExercises-aware
+        // overload — as the same-wave fallback at line ~261 does — so custom BW
+        // exercises are covered too. Loaded exercises are unaffected.
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
+            return nil
+        }
+
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         let today = Calendar.current.startOfDay(for: referenceDate)
         let effectiveTargetReps = targetReps > 0 ? targetReps : (repMin + repMax) / 2

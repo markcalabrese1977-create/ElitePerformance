@@ -1527,7 +1527,13 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
         exercises[exerciseIdx].sets[setIdx].usedDropSet = false
         exercises[exerciseIdx].sets[setIdx].dropSets = []
-        exercises[exerciseIdx].sets[setIdx].actualLoadText = exercises[exerciseIdx].sets[setIdx].plannedLoad == 0
+        // FIX B — pre-fill the actual-load field from the plan when re-editing a set.
+        // The existing plannedLoad == 0 branch already yields "0" for a clean BW plan,
+        // but that's incidental. Key on isBodyweight so a stray nonzero plannedLoad can
+        // never pre-fill (and, if confirmed, re-pollute actuals) on a BW exercise —
+        // mirrors the Cut 0 init logic. Loaded exercises keep the plan-copy behavior.
+        let isBodyweight = ExerciseCatalog.isBodyweight(exerciseId: exercises[exerciseIdx].exerciseId)
+        exercises[exerciseIdx].sets[setIdx].actualLoadText = (isBodyweight || exercises[exerciseIdx].sets[setIdx].plannedLoad == 0)
             ? "0"
             : String(format: "%.1f", exercises[exerciseIdx].sets[setIdx].plannedLoad)
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
@@ -1889,7 +1895,13 @@ final class SessionScreenViewModel: ObservableObject {
 
             if let firstSet = uiExercise.sets.first {
                 item.targetReps = firstSet.plannedReps
-                item.suggestedLoad = firstSet.plannedLoad
+                // FIX B — Bodyweight exercises never store a numeric suggested load.
+                // Re-stamping firstSet.plannedLoad unconditionally is what re-seeded the
+                // phantom on every save (open reads suggestedLoad → plannedLoad, save
+                // writes it back). For BW, force 0 so the plan pill stays "BW".
+                item.suggestedLoad = ExerciseCatalog.isBodyweight(exerciseId: uiExercise.exerciseId)
+                    ? 0
+                    : firstSet.plannedLoad
                 if let plannedRIR = firstSet.plannedRIR {
                     item.targetRIR = plannedRIR
                 }

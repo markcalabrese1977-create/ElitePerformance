@@ -68,20 +68,34 @@ struct PlanMemoryEngine {
 
             guard isPlanEffectivelyEmpty(targetItem) else { continue }
 
+            // FIX B — Bodyweight exercises never carry a numeric load forward. After the
+            // one-time migration their suggestedLoad/plannedLoadsBySet are already 0, but
+            // this guard makes sure a stray nonzero phantom (from any pre-fix path) can't
+            // be propagated. project() also returns nil for BW, so the progression block
+            // below is inert for them either way. Uses the customExercises-aware overload
+            // (customExercises fetched at the top of this function). Loaded exercises are
+            // unaffected.
+            let isBodyweight = ExerciseCatalog.isBodyweight(
+                exerciseId: sourceItem.exerciseId,
+                customExercises: customExercises
+            )
+
             // Carry forward load only — never overwrite prescription fields.
             // targetReps, targetRIR, repMin, repMax are set by the materializer
             // at seed time and belong to the target session's wave, not the source's.
-            targetItem.suggestedLoad = sourceItem.suggestedLoad
+            targetItem.suggestedLoad = isBodyweight ? 0 : sourceItem.suggestedLoad
 
             // BUG#1 fix: resize to targetItem.targetSets, not sourceItem's array length —
             // a wave transition that changes the prescribed set count (e.g. wave A → B:
             // 3 → 4 sets) used to leave plannedLoadsBySet undersized/oversized relative
             // to targetSets. See resizedToTargetSets's doc comment for the extend/
             // truncate rule.
-            targetItem.plannedLoadsBySet = resizedToTargetSets(
-                sourceItem.plannedLoadsBySet,
-                targetCount: targetItem.targetSets
-            )
+            targetItem.plannedLoadsBySet = isBodyweight
+                ? Array(repeating: 0, count: targetItem.targetSets)
+                : resizedToTargetSets(
+                    sourceItem.plannedLoadsBySet,
+                    targetCount: targetItem.targetSets
+                )
 
             guard progressionEnabled else { continue }
 
