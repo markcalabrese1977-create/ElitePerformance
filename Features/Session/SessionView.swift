@@ -1628,13 +1628,17 @@ final class SessionScreenViewModel: ObservableObject {
 
         exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(exercise.prescriptionDetailLine.replacingOccurrences(of: "Week \(exercise.weekIndex) · ", with: ""))"
         exercise.coachMessage = ""
+        exercise.prescriptionNotes = nil
+        exercise.intensifierNotes = nil
 
         exercises[index] = exercise
-        
+
         // Write back to SwiftData immediately using old ID to find the right item
             if let item = session.items.first(where: { $0.exerciseId == oldExerciseId }) {
                 item.exerciseId = catalogExercise.id
                 item.exerciseNameSnapshot = catalogExercise.name
+                item.prescriptionNotes = nil
+                item.intensifierNotes = nil
             }
     }
 

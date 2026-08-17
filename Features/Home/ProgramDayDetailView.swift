@@ -333,7 +333,7 @@ struct ProgramDayDetailView: View {
 
     private func autoGeneratePerSetPlan(for item: SessionItem, overwriteLoadsFromSuggested: Bool) {
         let isMaintenance = item.waveRaw?.lowercased() == "deload" &&
-                    (item.prescriptionNotes?.lowercased().contains("maintenance") == true)
+                    session.meso?.isMaintenance == true
                 let setCount = isMaintenance ? item.targetSets : max(4, item.targetSets)
 
         func ensureIntArray(_ array: inout [Int]) {
@@ -603,6 +603,8 @@ struct ProgramDayDetailView: View {
         item.actualReps = Array(repeating: 0, count: item.actualReps.count)
         item.actualRIRs = Array(repeating: 0, count: item.actualRIRs.count)
         item.coachNote = nil
+        item.prescriptionNotes = nil
+        item.intensifierNotes = nil
 
         if propagateChangesToFutureSessions {
             ExerciseSwapPropagationService.apply(

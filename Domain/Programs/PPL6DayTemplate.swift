@@ -194,7 +194,7 @@ enum PPL6DayTemplate {
                 order: 5,
                 exerciseId: ExerciseCatalog.ezBarCurl.id,
                 priority: .standard,
-                notes: "Bicep compound curl.",
+                notes: "Bicep isolation.",
                 prescriptions: [
                     .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
