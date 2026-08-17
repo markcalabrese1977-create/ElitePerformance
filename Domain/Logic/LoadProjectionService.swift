@@ -391,4 +391,50 @@ enum LoadProjectionService {
 
         return Set(recent.map { $0.persistentModelID })
     }
+
+    // MARK: - Last-known-load scan
+
+    /// Two-pass session scan returning the most recent known load for an exercise.
+    /// Pass 1 prefers same-wave sessions; Pass 2 falls back to any session.
+    /// Returns 0 when no history exists — caller leaves suggestedLoad at 0.
+    ///
+    /// BW guard: bodyweight exercises always return 0, preventing a swap from
+    /// re-manufacturing the phantom loads eliminated by Fix B. Uses the
+    /// customExercises-aware isBodyweight overload so custom BW exercises are covered.
+    static func lastKnownLoad(
+        for exerciseId: String,
+        currentSession: Session,
+        context: ModelContext,
+        customExercises: [CustomExercise] = []
+    ) -> Double {
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
+            return 0
+        }
+        let descriptor = FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .reverse)])
+        guard let sessions = try? context.fetch(descriptor) else { return 0 }
+        let currentWave = currentSession.items.compactMap { $0.waveRaw }.first?.lowercased()
+        // Pass 1 — same wave type only
+        if let wave = currentWave, !wave.isEmpty {
+            for s in sessions {
+                guard s.persistentModelID != currentSession.persistentModelID else { continue }
+                let sessionWave = s.items.compactMap { $0.waveRaw }.first?.lowercased()
+                guard sessionWave == wave else { continue }
+                if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
+                    let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
+                    if lastActual > 0 { return lastActual }
+                    if match.suggestedLoad > 0 { return match.suggestedLoad }
+                }
+            }
+        }
+        // Pass 2 — fallback: any session
+        for s in sessions {
+            guard s.persistentModelID != currentSession.persistentModelID else { continue }
+            if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
+                let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
+                if lastActual > 0 { return lastActual }
+                if match.suggestedLoad > 0 { return match.suggestedLoad }
+            }
+        }
+        return 0
+    }
 }

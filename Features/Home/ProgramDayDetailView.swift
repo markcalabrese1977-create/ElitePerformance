@@ -606,6 +606,19 @@ struct ProgramDayDetailView: View {
         item.prescriptionNotes = nil
         item.intensifierNotes = nil
 
+        // Re-seed load from history so coaching resolves on the swapped exercise.
+        // BW guard is inside lastKnownLoad — bodyweight exercises return 0, preventing
+        // re-manufacture of phantom loads Fix B eliminated.
+        let recentLoad = LoadProjectionService.lastKnownLoad(
+            for: catalogExercise.id,
+            currentSession: session,
+            context: modelContext
+        )
+        if recentLoad > 0 {
+            item.suggestedLoad = recentLoad
+            item.plannedLoadsBySet = Array(repeating: recentLoad, count: item.plannedLoadsBySet.count)
+        }
+
         if propagateChangesToFutureSessions {
             ExerciseSwapPropagationService.apply(
                 fromExerciseId: fromExerciseId,

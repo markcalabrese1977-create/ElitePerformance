@@ -336,7 +336,7 @@ struct SessionView: View {
                     let toId = catalogExercise.id
                     let toName = catalogExercise.name
 
-                    viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise)
+                    viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise, context: modelContext)
                     viewModel.persist(using: modelContext)
                     activeSheet = nil
 
@@ -1598,7 +1598,7 @@ final class SessionScreenViewModel: ObservableObject {
     
     // MARK: - Swap Logic
 
-    func swapExercise(at index: Int, with catalogExercise: CatalogExercise) {
+    func swapExercise(at index: Int, with catalogExercise: CatalogExercise, context: ModelContext) {
         guard exercises.indices.contains(index) else { return }
         
         let oldExerciseId = exercises[index].exerciseId  // capture before mutation
@@ -1631,6 +1631,22 @@ final class SessionScreenViewModel: ObservableObject {
         exercise.prescriptionNotes = nil
         exercise.intensifierNotes = nil
 
+        // Re-seed load from history so Guard 2 (suggestedLoad <= 0) doesn't block
+        // coaching after a swap. BW guard lives inside lastKnownLoad — swapping in a
+        // bodyweight exercise cannot re-manufacture the phantom Fix B eliminated.
+        // persist() propagates these values to item.suggestedLoad and item.plannedLoadsBySet.
+        let recentLoad = LoadProjectionService.lastKnownLoad(
+            for: catalogExercise.id,
+            currentSession: session,
+            context: context
+        )
+        if recentLoad > 0 {
+            for i in exercise.sets.indices {
+                exercise.sets[i].plannedLoad = recentLoad
+                exercise.sets[i].plannedLoadText = formatLoad(recentLoad)
+            }
+        }
+
         exercises[index] = exercise
 
         // Write back to SwiftData immediately using old ID to find the right item
@@ -1655,42 +1671,11 @@ final class SessionScreenViewModel: ObservableObject {
         let defaultSets = 3
         let defaultRIR = 2
         let defaultReps = catalogExercise.isCompound ? 10 : 12
-        // Look up last known load for this exercise
-        let descriptor = FetchDescriptor<Session>(
-            sortBy: [SortDescriptor(\Session.date, order: .reverse)]
+        let defaultLoad = LoadProjectionService.lastKnownLoad(
+            for: catalogExercise.id,
+            currentSession: session,
+            context: context
         )
-        let recentLoad: Double = {
-                    guard let sessions = try? context.fetch(descriptor) else { return 0 }
-
-                    // Derive current wave from existing session items
-                    let currentWave = session.items.compactMap { $0.waveRaw }.first?.lowercased()
-
-                    // Pass 1 — same wave type only
-                    if let wave = currentWave, !wave.isEmpty {
-                        for s in sessions {
-                            guard s.persistentModelID != session.persistentModelID else { continue }
-                            let sessionWave = s.items.compactMap { $0.waveRaw }.first?.lowercased()
-                            guard sessionWave == wave else { continue }
-                            if let match = s.items.first(where: { $0.exerciseId == catalogExercise.id }) {
-                                let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
-                                if lastActual > 0 { return lastActual }
-                                if match.suggestedLoad > 0 { return match.suggestedLoad }
-                            }
-                        }
-                    }
-
-                    // Pass 2 — fallback: any session (original behavior)
-                    for s in sessions {
-                        guard s.persistentModelID != session.persistentModelID else { continue }
-                        if let match = s.items.first(where: { $0.exerciseId == catalogExercise.id }) {
-                            let lastActual = match.actualLoads.filter { $0 > 0 }.last ?? 0
-                            if lastActual > 0 { return lastActual }
-                            if match.suggestedLoad > 0 { return match.suggestedLoad }
-                        }
-                    }
-                    return 0
-                }()
-        let defaultLoad: Double = recentLoad
 
         // Maintenance sessions need the deload-style prescription so the coaching
         // engine recognizes the new item as a maintenance exercise (CoachingEngine
