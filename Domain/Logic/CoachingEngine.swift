@@ -158,32 +158,9 @@ struct CoachingEngine {
             minRIR = primaryRIRs.min()
         }
 
-        let rpFlags = item.usedRestPauseFlags
-        var primaryRP: [Bool] = []
-        if !rpFlags.isEmpty {
-            for idx in primaryIndices where idx < rpFlags.count {
-                primaryRP.append(rpFlags[idx])
-            }
-        }
-        let restPauseCount = primaryRP.filter { $0 }.count
-
-        // Drop set detection
-        let lastPrimaryIdx = primaryIndices.last ?? 0
-        let dropPatternForLastSet: String = {
-            if lastPrimaryIdx < item.dropSetPatternsBySet.count {
-                return item.dropSetPatternsBySet[lastPrimaryIdx]
-            }
-            return ""
-        }()
-        let lastSetHadGoodDropSet: Bool = {
-            guard !dropPatternForLastSet.isEmpty else { return false }
-            let firstDrop = dropPatternForLastSet.split(separator: ",").first.map(String.init) ?? ""
-            let parts = firstDrop.split(separator: "x")
-            if parts.count == 2, let dropReps = Int(parts[1]) {
-                return dropReps >= max(1, targetReps / 2)
-            }
-            return !firstDrop.isEmpty
-        }()
+        // Rest-pause is intentionally NOT computed as a gate here (Cut 3 decision):
+        // a rest-pause session is legitimate technique and is eligible to bump.
+        // Drop-set "quality" detection likewise removed — it gated the old 3.6 rung.
 
         // Pump awareness — average pump rating across primary sets
         let avgPump: PumpRating = {
@@ -223,14 +200,49 @@ struct CoachingEngine {
             }
         }()
 
-        // MARK: - Decision Pipeline
+        // MARK: - Unified Load Policy (Cut 3)
+        //
+        // One stated policy replacing the former 13-rung cascade
+        // (A/B/C/D/E/4/F/3.5/3.6/5/5.5/G). CoachingEngine is the authority and now
+        // consumes project()'s data (e1rmFloorLoad, Cut 1). Trigger is double
+        // progression: ALL primary working sets hit repMax at target RIR. Balanced
+        // default → one qualifying session earns the bump (coaching-style tuning is
+        // Cut 6; consecutiveCleanCount is intentionally not consulted here).
+        //
+        // Ordering note: deload (RULE 2), no-baseline / no-data (RULE 2/3) and pain
+        // (RULE 1a) already returned above as leading preconditions — hold-vs-bump
+        // cannot be assessed without a baseline load on a non-deload wave. The
+        // remaining safety gates run here, all before any bump can be reached.
 
-        // 0) Downshift / Re-baseline detection
-        // If load dropped ≥10% from first to last working set (no drop set), reset baseline.
+        // RULE 1b — Safety: soreness/disruption fatigue → hold [was path F / guard :87]
+        if hasFatigueFlag {
+            let flags = (0..<min(count, item.setFeedbackBySet.count)).map { item.setFeedbackBySet[$0] }
+            let hasSoreness = flags.contains(SetFeedback.soreness.rawValue)
+            let hasDisruption = flags.contains(SetFeedback.disruption.rawValue)
+            let msg: String
+            if hasSoreness && hasDisruption {
+                msg = "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase."
+            } else if hasSoreness {
+                msg = "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression."
+            } else {
+                msg = "Disruption was flagged this session. This wasn't a reliable performance indicator — hold this load and reassess next session."
+            }
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // RULE 1c — Safety: failure + big rep crash (minRIR ≤ 0 AND repDrop ≥ 3) → hold [was path C]
+        if let minRIR = minRIR, minRIR <= 0, repDrop >= 3 {
+            let msg = "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // RULE 1d — Safety: intra-session load drop ≥10% (opened above the repeatable
+        // baseline) → re-baseline to the minimum working load [was path A].
+        // Rest-pause is no longer a factor; a dropped LAST set that is a drop-set is
+        // still excluded (that's programmed volume, not a failed opener).
         let lastWorkingIdx = workingIndices.last ?? 0
         let lastSetHadDropSet = lastWorkingIdx < item.dropSetPatternsBySet.count &&
             !item.dropSetPatternsBySet[lastWorkingIdx].isEmpty
-
         let workingLoads = workingIndices.map { loads[$0] }
         if !lastSetHadDropSet,
            workingIndices.count >= 2,
@@ -238,234 +250,125 @@ struct CoachingEngine {
            let minLoad = workingLoads.min(),
            maxLoad > 0,
            minLoad > 0 {
-
             let dropPercent = (maxLoad - minLoad) / maxLoad
             let firstLoad = loads[workingIndices.first!]
             let lastLoad = loads[workingIndices.last!]
-
-            if dropPercent >= 0.10,
-               firstLoad == maxLoad,
-               lastLoad == minLoad,
-               minLoad < maxLoad {
-
+            if dropPercent >= 0.10, firstLoad == maxLoad, lastLoad == minLoad, minLoad < maxLoad {
                 let msg = "Load dropped from \(Int(maxLoad)) to \(Int(minLoad)) across your working sets — you opened above your repeatable baseline. Next session starts at \(Int(minLoad)). Build from there."
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: minLoad)
             }
         }
 
-        // Stage-aware gating — session must have all planned sets logged before a real call
+        // RULE 3 — Incomplete: not all planned working sets logged yet → hold with
+        // the stage-gate message; nothing to decide [was path B].
         let completedGrowthSetCount = primaryIndices.count
         let completedWorkingSetCount = workingIndices.count
-
         if completedGrowthSetCount < growthSetTarget || completedWorkingSetCount < plannedWorkingSetCount {
             let remaining = plannedWorkingSetCount - completedWorkingSetCount
-
             if completedGrowthSetCount == 1 {
                 let currentLoadText = String(format: "%.1f", baseLoad)
                 let currentReps = primaryReps[0]
-
                 if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
                     let msg = "Set 1 at \(currentLoadText) × \(currentReps) is already harder than the target RIR. Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
                 }
-
                 if currentReps < plannedBottomReps {
                     let msg = "Set 1 came in short of the rep target. Stay at this load — if reps stay low across sets, the load needs to come down next session."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
                 }
-
-                // On target after 1 set — nothing useful to say yet
                 return nil
             }
-
-            // 2+ sets logged but session incomplete — terse, no decision
             let msg = "\(completedWorkingSetCount) sets in. Finish the session."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // From here on, all planned sets are logged — real recommendation territory
-
-        // 1) Failure + big rep crash → hold
-        if let minRIR = minRIR,
-           minRIR <= 0,
-           repDrop >= 3 {
-            let msg = "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-        }
-
-        // 2) Under target reps → fix reps first
-        if bestReps < plannedBottomReps {
-            if lastSetHadGoodDropSet {
-                let msg = "Working sets came in below the planned reps. The drop set kept volume in, but the working sets need to hit the target range before adding load. Hold here."
-                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-            }
-            let msg = "Your best \(primaryWorkPhrase) came in below the planned range (\(plannedBottomReps)–\(plannedTopReps) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-        }
-
-        // 3) Harder than planned (RIR or rest-pause)
-        let rirTooLow: Bool = {
-            guard let avgRIR = avgRIR else { return false }
-            return avgRIR < Double(targetRIR) - 0.5
-        }()
-
-        let lotsOfRestPause = restPauseCount >= 2
-
-        if rirTooLow || lotsOfRestPause {
-            var reasons: [String] = []
-            if rirTooLow { reasons.append("RIR below target") }
-            if lotsOfRestPause { reasons.append("rest-pause required to finish sets") }
-            let reasonText = reasons.joined(separator: ", ")
-            let msg = "This was harder than the target — \(reasonText). Hold this load. Execution needs to be cleaner before adding weight."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-        }
-
-        // 4) Clearly over-performing — evaluated BEFORE 3.5
-        // Absurd reps must not misfire the "clean execution" path.
-        // Fatigue flag overrides even over-performance — a compromised session isn't reliable.
-        let comfortablyOverReps = bestReps >= plannedTopReps + 2
-        let notToFailure = (minRIR ?? targetRIR) > 0 && restPauseCount == 0
-
-        if comfortablyOverReps && notToFailure {
-            if hasFatigueFlag {
-                let msg = "Reps exceeded the target range, but fatigue was flagged this session. This isn't a reliable indicator — hold this load and reassess next session."
-                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-            }
-            let suggested: Double = {
-                if let decision = progressionDecision, decision.action == .increaseLoad {
-                    return min(decision.nextLoad, loadSanityCap)
-                }
-                let step = loadStep(for: baseLoad)
-                return nextLoad(from: baseLoad, step: step) ?? baseLoad
-            }()
-            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-            let nextLoad = min(stepped, loadSanityCap)
-            let pumpNote: String = {
-                switch avgPump {
-                case .good: return " Pump was good — this lift is responding well."
-                case .excellent: return " Pump was excellent — strong stimulus confirmed."
-                case .poor: return " Pump was poor — consider whether load, technique, or fatigue affected stimulus."
-                default: return ""
-                }
-            }()
-            let msg = "Reps came in well above the target range with room to spare. Next session: \(String(format: "%.1f", nextLoad)).\(pumpNote)"
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
-        }
-
-        // Fatigue flag override — soreness/disruption holds load regardless of rep performance
-        if hasFatigueFlag {
-            let msg: String = {
-                let flags = (0..<min(count, item.setFeedbackBySet.count))
-                    .map { item.setFeedbackBySet[$0] }
-                let hasSoreness = flags.contains(SetFeedback.soreness.rawValue)
-                let hasDisruption = flags.contains(SetFeedback.disruption.rawValue)
-                if hasSoreness && hasDisruption {
-                    return "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase."
-                } else if hasSoreness {
-                    return "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression."
-                } else {
-                    return "Disruption was flagged this session. This wasn't a reliable performance indicator — hold this load and reassess next session."
-                }
-            }()
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
-        }
-
-        // Shared conditions for 3.5 and 3.6
-        let allPrimaryAtTop =
-            primaryReps.count >= growthSetTarget &&
-            primaryReps.allSatisfy { $0 >= plannedBottomReps } &&
-            bestReps >= plannedTopReps
-
-        let rirOnTargetForIncrease: Bool = {
+        // From here: safe + complete. Compute the policy signals.
+        let repMax = plannedTopReps
+        let repMin = plannedBottomReps
+        // RIR on target (existing definition; nil avgRIR treated as on-target).
+        let rirOnTarget: Bool = {
             guard let avgRIR = avgRIR else { return true }
             return abs(avgRIR - Double(targetRIR)) <= 0.5
         }()
+        // Double-progression trigger (decision B): EVERY primary working set at/above
+        // the top of the range — not the best set. Uses the warmup-culled primary sets.
+        let allSetsAtTop = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax }
+        // Over-performed: every primary set two or more reps beyond the top.
+        let overPerformed = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax + 2 }
 
-        // 3.5) Hit planned reps cleanly, no rest-pause → increase candidate
-        if allPrimaryAtTop && rirOnTargetForIncrease && restPauseCount == 0 {
-            let suggested: Double = {
-                if let decision = progressionDecision, decision.action == .increaseLoad {
-                    return min(decision.nextLoad, loadSanityCap)
-                }
-                let step = loadStep(for: baseLoad)
-                return nextLoad(from: baseLoad, step: step) ?? baseLoad
-            }()
-
-            let pumpNote: String = {
-                switch avgPump {
-                case .good: return " Pump was good — this lift is responding well."
-                case .excellent: return " Pump was excellent — strong stimulus confirmed."
-                case .poor: return " Pump was poor — consider whether load, technique, or fatigue affected stimulus."
-                default: return ""
-                }
-            }()
-
-            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-            let nextLoad = min(stepped, loadSanityCap)
-            let msg: String
-            if plannedWorkingSetCount >= 4 {
-                msg = "Clean execution across the working sets at the target difficulty. Next session: \(String(format: "%.1f", nextLoad)). Volume beyond the primary sets is supplemental — don't let it drive the progression call.\(pumpNote)"
+        // Bump sizing — floor-aware. Increment bump is ProgressionEngine-sized when
+        // available, else the min-load-increment step (RULE: minLoadIncrement respected).
+        // The e1rm floor (Cut 1) overrides when it exceeds baseLoad + one increment.
+        // Every bump is 2×-capped (RULE 6).
+        let effectiveIncrement = (minLoadIncrement ?? loadStep(for: baseLoad))
+        func incrementBump() -> Double {
+            let suggested: Double
+            if let decision = progressionDecision, decision.action == .increaseLoad {
+                suggested = min(decision.nextLoad, loadSanityCap)
             } else {
-                msg = "Clean execution across the working sets at the target difficulty. Next session: \(String(format: "%.1f", nextLoad)).\(pumpNote)"
-            }
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
-        }
-
-        // 3.6) Hit planned reps + drop set finisher → increase
-        if allPrimaryAtTop && rirOnTargetForIncrease && lastSetHadGoodDropSet {
-            let suggested: Double = {
-                if let decision = progressionDecision, decision.action == .increaseLoad {
-                    return min(decision.nextLoad, loadSanityCap)
-                }
                 let step = loadStep(for: baseLoad)
-                return nextLoad(from: baseLoad, step: step) ?? baseLoad
-            }()
+                suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
+            }
             let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-            let nextLoad = min(stepped, loadSanityCap)
-            let msg = "Working sets hit the rep target and you extended with a drop set. Next session: \(String(format: "%.1f", nextLoad))."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
+            return min(stepped, loadSanityCap)
         }
-
-        // 5) On target reps at roughly target difficulty → repeat
-        let hitRepTarget = bestReps >= plannedBottomReps
-        let nearTargetRIR: Bool = {
-            guard let avgRIR = avgRIR else { return true }
-            return abs(avgRIR - Double(targetRIR)) <= 0.5
+        func floorAwareBump() -> Double {
+            let inc = incrementBump()
+            if let floor = e1rmFloorLoad, floor > baseLoad + effectiveIncrement {
+                let roundedFloor = E1RMCalculator.rounded(floor, increment: minLoadIncrement ?? 2.5)
+                return min(roundedFloor, loadSanityCap) // RULE 6: 2× cap
+            }
+            return inc
+        }
+        let pumpNote: String = {
+            switch avgPump {
+            case .good: return " Pump was good — this lift is responding well."
+            case .excellent: return " Pump was excellent — strong stimulus confirmed."
+            case .poor: return " Pump was poor — consider whether load, technique, or fatigue affected stimulus."
+            default: return ""
+            }
         }()
 
-        if hitRepTarget && nearTargetRIR {
-            if consecutiveCleanCount >= 1 {
-                // Computed increase — round to the increment (before the cap), then
-                // use the SAME value in both the message and the payload so they agree.
-                let suggested = baseLoad + (minLoadIncrement ?? 2.5)
-                let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-                let nextLoadValue = min(stepped, loadSanityCap)
-                let msg = "On target again — two clean sessions confirmed. Load steps up to \(String(format: "%.1f", nextLoadValue)) next session."
-                return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoadValue)
-            } else {
-                let msg = "On target at the planned difficulty. \(String(format: "%.1f", baseLoad)) again next session — one more clean session earns the increase."
-                return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        // RULE 4 — Under the bottom of the range: best set below repMin → hold; ≥2
+        // badly-missed primary sets → reduce 5% [was path D + project fatigue cut].
+        if bestReps < repMin {
+            let badMisses = primaryReps.filter { $0 < (repMin - 1) }.count
+            if badMisses >= 2 {
+                let reduced = E1RMCalculator.rounded(baseLoad * 0.95, increment: minLoadIncrement ?? 2.5)
+                let msg = "Reps came in well under the bottom of the range across multiple sets. Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
+                return CoachingRecommendation(message: msg, nextSuggestedLoad: reduced)
             }
+            let msg = "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
-        // 5.5) Extra reserve — actual RIR well above target, reps hit, no fatigue → increase.
-        // Mirrors LoadProjectionService.project's hadExtraReserve: avgRIR > targetRIR + 0.5
-        // is a stronger signal to increase than hitting target exactly.
-        if let avgRIR, avgRIR > Double(targetRIR) + 0.5, bestReps >= plannedBottomReps, !hasFatigueFlag {
-            let suggested: Double = {
-                if let decision = progressionDecision, decision.action == .increaseLoad {
-                    return min(decision.nextLoad, loadSanityCap)
-                }
-                let step = loadStep(for: baseLoad)
-                return nextLoad(from: baseLoad, step: step) ?? baseLoad
-            }()
-            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-            let nextLoad = min(stepped, loadSanityCap)
-            let msg = "Extra reserve detected — load increase suggested. Next session: \(String(format: "%.1f", nextLoad))."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: nextLoad)
+        // RULE 5 — Progression (double progression). Reached only when safe, complete,
+        // and at least at the bottom of the range.
+
+        // 5a) Over-performed: all sets ≥ repMax+2 at target RIR → bump (floor-aware) [was path 4]
+        if overPerformed && rirOnTarget {
+            let target = floorAwareBump()
+            let msg = "Reps came in well above the top of your range with room to spare. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
 
-        // 6) Catch-all
+        // 5b) ALL primary sets at the top at target RIR → increase earned (floor-aware).
+        //     The core double-progression bump [replaces paths 3.5 / 5.5].
+        if allSetsAtTop && rirOnTarget {
+            let target = floorAwareBump()
+            let msg = "Every working set hit the top of your range at the target difficulty — increase earned. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
+        }
+
+        // 5c) Clean but not yet at the top: in range and on-target RIR, but not every
+        //     set at repMax → HOLD and climb reps toward the top next session. This is
+        //     the key behavior change — partial progress no longer bumps [was path 5].
+        if bestReps >= repMin && rirOnTarget {
+            let msg = "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // 5d) Not clean (in range but off-target RIR) → hold [was catch-all G]
         let msg = "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up."
         return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
     }
