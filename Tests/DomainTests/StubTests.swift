@@ -1386,7 +1386,7 @@ final class BodyweightMechanicsTests: XCTestCase {
     // does not render SwiftUI, so the actual on-screen Text is not exercised
     // here.
     func test_H3_plannedDescriptionShowsBWForBodyweightZeroLoadNotZeroPointZero() {
-        let bwSet = UISessionSet(index: 0, plannedLoad: 0, plannedReps: 8, plannedRIR: 2)
+        let bwSet = UISessionSet(index: 0, exerciseId: "bench", plannedLoad: 0, plannedReps: 8, plannedRIR: 2)
         let repRange = RepRange(min: 8, max: 8)
 
         let bwText = bwSet.plannedDescription(with: repRange, isBodyweight: true)
@@ -2207,6 +2207,7 @@ final class BackupRestoreImportTests: XCTestCase {
         let itemDTO = SessionItemBackupDTO(
             id: UUID(), createdAt: Date(), updatedAt: Date(),
             order: 1, exerciseId: "bench_press",
+            exerciseNameSnapshot: "Bench Press",
             targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
             waveRaw: "accumulation", priorityRaw: "standard",
             setMin: 3, setMax: 4, repMin: 6, repMax: 10, targetRIRMin: 1, targetRIRMax: 3,
@@ -2224,7 +2225,7 @@ final class BackupRestoreImportTests: XCTestCase {
         let sessionDTO = SessionBackupDTO(
             id: UUID(), createdAt: Date(), updatedAt: Date(), mesoBlockId: nil,
             date: Date(), statusRaw: "completed", completedAt: Date(),
-            readinessStars: 4, sessionNotes: "Felt good",
+            readinessStars: 4, readinessRaw: "normal", sessionNotes: "Felt good",
             weekInMeso: 1, dayLabel: "Push Day", programIndex: 1,
             hkWorkoutUUID: nil, hkWorkoutStart: nil, hkWorkoutEnd: nil,
             hkDuration: 0, hkActiveCalories: 0, hkTotalCalories: 0,
@@ -2239,7 +2240,8 @@ final class BackupRestoreImportTests: XCTestCase {
             version: 1, exportedAt: Date(),
             appState: nil, userProfile: profileDTO,
             mesoBlocks: [], sessions: [sessionDTO], sessionHistory: [], exerciseNotes: [],
-            customExercises: [customExerciseDTO]
+            customExercises: [customExerciseDTO],
+            user: nil
         )
 
         let encoder = JSONEncoder()
@@ -2268,6 +2270,107 @@ final class BackupRestoreImportTests: XCTestCase {
         XCTAssertEqual(item.setFeedbackBySet, ["none", "none", "pain"])
         XCTAssertEqual(item.pumpRatingsBySet, [2, 3, 4])
         XCTAssertEqual(item.dropSetPatternsBySet, ["", "", "100x8"])
+    }
+
+    // T-K.4: backup-completeness fix. The 5 newly-added optional keys
+    // (MesoBlock.totalWeeks/isMaintenance, SessionItem.exerciseNameSnapshot,
+    // Session.readinessRaw, top-level User) must (a) round-trip when present and
+    // (b) decode as nil when ABSENT — simulating the user's pre-existing backup
+    // that predates these keys. JSONEncoder omits nil optionals, so encoding a
+    // snapshot with these fields nil produces JSON with the keys physically
+    // missing — byte-equivalent to an old file for those keys.
+    func test_backupCompletenessFields_roundTripAndOldFileCompat() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        func makeItem(nameSnapshot: String?) -> SessionItemBackupDTO {
+            SessionItemBackupDTO(
+                id: UUID(), createdAt: Date(), updatedAt: Date(),
+                order: 1, exerciseId: "bench_press",
+                exerciseNameSnapshot: nameSnapshot,
+                targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                waveRaw: "a", priorityRaw: "standard",
+                setMin: 3, setMax: 4, repMin: 6, repMax: 10, targetRIRMin: 1, targetRIRMax: 3,
+                intensifierRaw: "none", intensifierNotes: nil, prescriptionNotes: nil,
+                plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+                actualReps: [8, 8, 8], actualLoads: [185, 185, 185], actualRIRs: [2, 2, 2],
+                usedRestPauseFlags: [false, false, false], restPausePatternsBySet: ["", "", ""],
+                dropSetPatternsBySet: ["", "", ""],
+                setFeedbackBySet: nil, pumpRatingsBySet: nil,
+                isCompleted: true, isPR: false,
+                coachNote: nil, loadOverrideReasonRaw: nil, nextSuggestedLoad: nil,
+                logs: []
+            )
+        }
+
+        func makeSession(readinessRaw: String?, item: SessionItemBackupDTO) -> SessionBackupDTO {
+            SessionBackupDTO(
+                id: UUID(), createdAt: Date(), updatedAt: Date(), mesoBlockId: nil,
+                date: Date(), statusRaw: "completed", completedAt: Date(),
+                readinessStars: 3, readinessRaw: readinessRaw, sessionNotes: nil,
+                weekInMeso: 2, dayLabel: "Upper A", programIndex: 1,
+                hkWorkoutUUID: nil, hkWorkoutStart: nil, hkWorkoutEnd: nil,
+                hkDuration: 0, hkActiveCalories: 0, hkTotalCalories: 0,
+                hkAvgHeartRate: 0, hkMaxHeartRate: 0,
+                hkZone1Seconds: 0, hkZone2Seconds: 0, hkZone3Seconds: 0, hkZone4Seconds: 0, hkZone5Seconds: 0,
+                hkHeartRateSeriesBPM: [], hkHeartRateSeriesStepSeconds: 0,
+                hkPostWorkoutHeartRateBPM: [], hkPostWorkoutHeartRateStepSeconds: 0,
+                items: [item]
+            )
+        }
+
+        func makeMeso(totalWeeks: Int?, isMaintenance: Bool?) -> MesoBlockBackupDTO {
+            MesoBlockBackupDTO(
+                id: UUID(), createdAt: Date(), updatedAt: Date(),
+                name: "Block", startDate: Date(), statusRaw: "active", notes: nil,
+                totalWeeks: totalWeeks, isMaintenance: isMaintenance
+            )
+        }
+
+        // (a) Present → round-trips.
+        let full = BackupSnapshotV1(
+            version: 1, exportedAt: Date(),
+            appState: nil, userProfile: nil,
+            mesoBlocks: [makeMeso(totalWeeks: 10, isMaintenance: true)],
+            sessions: [makeSession(readinessRaw: "great", item: makeItem(nameSnapshot: "Bench Press"))],
+            sessionHistory: [], exerciseNotes: [], customExercises: [],
+            user: UserBackupDTO(createdAt: Date(), unitsRaw: "kg", coachVoiceRaw: "casual", progressionEnabled: false)
+        )
+        let fullData = try encoder.encode(full)
+        let fullDecoded = try decoder.decode(BackupSnapshotV1.self, from: fullData)
+        XCTAssertEqual(fullDecoded.mesoBlocks.first?.totalWeeks, 10)
+        XCTAssertEqual(fullDecoded.mesoBlocks.first?.isMaintenance, true)
+        XCTAssertEqual(fullDecoded.sessions.first?.readinessRaw, "great")
+        XCTAssertEqual(fullDecoded.sessions.first?.items.first?.exerciseNameSnapshot, "Bench Press")
+        XCTAssertEqual(fullDecoded.user?.unitsRaw, "kg")
+        XCTAssertEqual(fullDecoded.user?.progressionEnabled, false)
+
+        // (b) Absent (old backup) → keys omitted, decode succeeds with nil.
+        let old = BackupSnapshotV1(
+            version: 1, exportedAt: Date(),
+            appState: nil, userProfile: nil,
+            mesoBlocks: [makeMeso(totalWeeks: nil, isMaintenance: nil)],
+            sessions: [makeSession(readinessRaw: nil, item: makeItem(nameSnapshot: nil))],
+            sessionHistory: [], exerciseNotes: [], customExercises: [],
+            user: nil
+        )
+        let oldData = try encoder.encode(old)
+        let oldJSON = try XCTUnwrap(String(data: oldData, encoding: .utf8))
+        // Confirm the new keys are physically absent (simulating the pre-existing file).
+        XCTAssertFalse(oldJSON.contains("\"totalWeeks\""))
+        XCTAssertFalse(oldJSON.contains("\"isMaintenance\""))
+        XCTAssertFalse(oldJSON.contains("\"readinessRaw\""))
+        XCTAssertFalse(oldJSON.contains("\"exerciseNameSnapshot\""))
+        XCTAssertFalse(oldJSON.contains("\"user\""))
+        // Decode must not throw, and the missing keys become nil.
+        let oldDecoded = try decoder.decode(BackupSnapshotV1.self, from: oldData)
+        XCTAssertNil(oldDecoded.mesoBlocks.first?.totalWeeks)
+        XCTAssertNil(oldDecoded.mesoBlocks.first?.isMaintenance)
+        XCTAssertNil(oldDecoded.sessions.first?.readinessRaw)
+        XCTAssertNil(oldDecoded.sessions.first?.items.first?.exerciseNameSnapshot)
+        XCTAssertNil(oldDecoded.user)
     }
 
     // T-K.3: old backup (predates setFeedbackBySet, pumpRatingsBySet,

@@ -11,6 +11,19 @@ struct BackupSnapshotV1: Codable {
     let sessionHistory: [SessionHistoryBackupDTO]
     let exerciseNotes: [ExerciseNoteBackupDTO]
     let customExercises: [CustomExerciseBackupDTO]
+
+    // Added (backup-completeness fix). Optional so OLD backup files that predate
+    // this key still decode: synthesized Codable maps an absent key to nil.
+    let user: UserBackupDTO?
+}
+
+// MARK: - User
+
+struct UserBackupDTO: Codable {
+    let createdAt: Date?
+    let unitsRaw: String?
+    let coachVoiceRaw: String?
+    let progressionEnabled: Bool?
 }
 
 // MARK: - UserProfile
@@ -61,6 +74,10 @@ struct MesoBlockBackupDTO: Codable {
     let startDate: Date
     let statusRaw: String
     let notes: String?
+
+    // Added (backup-completeness fix). Optional so OLD backups decode with nil.
+    let totalWeeks: Int?
+    let isMaintenance: Bool?
 }
 
 // MARK: - Session
@@ -77,6 +94,8 @@ struct SessionBackupDTO: Codable {
     let completedAt: Date?
 
     let readinessStars: Int
+    // Added (backup-completeness fix). Optional so OLD backups decode with nil.
+    let readinessRaw: String?
     let sessionNotes: String?
 
     let weekInMeso: Int?
@@ -116,6 +135,8 @@ struct SessionItemBackupDTO: Codable {
 
     let order: Int
     let exerciseId: String
+    // Added (backup-completeness fix). Optional so OLD backups decode with nil.
+    let exerciseNameSnapshot: String?
 
     let targetReps: Int
     let targetSets: Int

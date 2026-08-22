@@ -36,6 +36,8 @@ enum BackupSnapshotExporter {
 
         let userProfile = try modelContext.fetch(FetchDescriptor<UserProfile>()).first
 
+        let user = try modelContext.fetch(FetchDescriptor<User>()).first
+
         let snapshot = BackupSnapshotV1(
             version: 1,
             exportedAt: Date(),
@@ -78,7 +80,9 @@ enum BackupSnapshotExporter {
                     name: block.name,
                     startDate: block.startDate,
                     statusRaw: block.status.rawValue,
-                    notes: block.notes
+                    notes: block.notes,
+                    totalWeeks: block.totalWeeks,
+                    isMaintenance: block.isMaintenance
                 )
             },
             sessions: sessions.map { session in
@@ -91,6 +95,7 @@ enum BackupSnapshotExporter {
                     statusRaw: session.status.rawValue,
                     completedAt: session.completedAt,
                     readinessStars: session.readinessStars,
+                    readinessRaw: session.readinessRaw,
                     sessionNotes: session.sessionNotes,
                     weekInMeso: session.weekInMeso,
                     dayLabel: session.dayLabel, programIndex: session.programIndex,
@@ -120,6 +125,7 @@ enum BackupSnapshotExporter {
                                 updatedAt: item.updatedAt,
                                 order: item.order,
                                 exerciseId: item.exerciseId,
+                                exerciseNameSnapshot: item.exerciseNameSnapshot,
                                 targetReps: item.targetReps,
                                 targetSets: item.targetSets,
                                 targetRIR: item.targetRIR,
@@ -211,6 +217,14 @@ enum BackupSnapshotExporter {
                     isCompound: ex.isCompound,
                     createdAt: ex.createdAt,
                     isBodyweight: ex.isBodyweight
+                )
+            },
+            user: user.map {
+                UserBackupDTO(
+                    createdAt: $0.createdAt,
+                    unitsRaw: $0.unitsRaw,
+                    coachVoiceRaw: $0.coachVoiceRaw,
+                    progressionEnabled: $0.progressionEnabled
                 )
             }
         )

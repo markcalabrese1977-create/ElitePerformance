@@ -70,7 +70,12 @@ enum BackupSnapshotImporter {
                 name: dto.name,
                 startDate: dto.startDate,
                 status: status,
-                notes: dto.notes
+                notes: dto.notes,
+                // Restored from backup. Old backups predate these keys → dto values
+                // are nil: totalWeeks stays nil (the model's own default), and
+                // isMaintenance falls back to false (the model's default).
+                totalWeeks: dto.totalWeeks,
+                isMaintenance: dto.isMaintenance ?? false
             )
 
             modelContext.insert(block)
@@ -115,6 +120,11 @@ enum BackupSnapshotImporter {
                 hkPostWorkoutHeartRateStepSeconds: sessionDTO.hkPostWorkoutHeartRateStepSeconds
             )
 
+            // Restored from backup. Session has no readiness init param, so set it
+            // directly. Old backups predate this key → nil falls back to "normal"
+            // (the model's own default for readinessRaw).
+            session.readinessRaw = sessionDTO.readinessRaw ?? "normal"
+
             if let mesoBlockId = sessionDTO.mesoBlockId,
                let meso = mesoById[mesoBlockId] {
                 session.meso = meso
@@ -147,6 +157,7 @@ enum BackupSnapshotImporter {
                     updatedAt: itemDTO.updatedAt,
                     order: itemDTO.order,
                     exerciseId: itemDTO.exerciseId,
+                    exerciseNameSnapshot: itemDTO.exerciseNameSnapshot,
                     targetReps: itemDTO.targetReps,
                     targetSets: itemDTO.targetSets,
                     targetRIR: itemDTO.targetRIR,
@@ -242,6 +253,27 @@ enum BackupSnapshotImporter {
                 isBodyweight: dto.isBodyweight ?? false
             )
             modelContext.insert(custom)
+        }
+
+        // MARK: - User
+        // User is deliberately NOT part of the wipe-first step
+        // (clearExistingBackupManagedData does not delete User). We overwrite it
+        // in place only when the backup actually carries a user record. Old
+        // backups (missing the `user` key → dto == nil) leave the existing or
+        // default User untouched, so we never blank out progressionEnabled/units.
+        if let userDTO = snapshot.user {
+            let existingUser = try modelContext.fetch(FetchDescriptor<User>()).first
+            let targetUser: User
+            if let existingUser {
+                targetUser = existingUser
+            } else {
+                targetUser = User(units: .lb, progressionEnabled: true)
+                modelContext.insert(targetUser)
+            }
+            if let createdAt = userDTO.createdAt { targetUser.createdAt = createdAt }
+            if let unitsRaw = userDTO.unitsRaw { targetUser.unitsRaw = unitsRaw }
+            if let coachVoiceRaw = userDTO.coachVoiceRaw { targetUser.coachVoiceRaw = coachVoiceRaw }
+            if let progressionEnabled = userDTO.progressionEnabled { targetUser.progressionEnabled = progressionEnabled }
         }
 
         try modelContext.save()
