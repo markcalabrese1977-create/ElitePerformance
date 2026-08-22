@@ -23,6 +23,25 @@ struct LoadProjection {
     let basis: LoadProjectionBasis
     /// Number of consecutive clean same-wave sessions detected. Used by coaching message.
     let consecutiveCleanCount: Int
+
+    // MARK: - Data-provider surface (CUT 1, additive)
+    //
+    // project() computes these internally to DECIDE suggestedLoad, then discarded
+    // them. They are surfaced here so a future single-authority CoachingEngine can
+    // consume project() as a pure data provider without re-deriving them. Purely
+    // additive: `suggestedLoad`/`basis`/`consecutiveCleanCount` are unchanged, and
+    // no consumer reads these yet. Optional because not every return path computes
+    // every field (e.g. the no-lastLoad exits run before `lastLoad` is resolved).
+    /// e1RM-derived load floor at the target reps/RIR (rounded). May be 0 when no
+    /// usable e1RM history exists. In scope at every non-nil return.
+    let e1rmFloorLoad: Double?
+    /// RIR-weighted peak e1RM within the current meso (no decay). May be 0.
+    let peakE1RM: Double?
+    /// Decay-weighted e1RM baseline across prior mesos. May be 0.
+    let crossMesoE1RM: Double?
+    /// Last same-wave working load used as the same-wave progression base. Nil on
+    /// the early exits that return before a valid last load is resolved.
+    let lastLoad: Double?
 }
 
 // MARK: - Service
@@ -260,7 +279,15 @@ enum LoadProjectionService {
                   ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
               }) else {
             if e1rmFloorLoad > 0 {
-                return LoadProjection(suggestedLoad: e1rmFloorLoad, basis: e1rmBasis, consecutiveCleanCount: 0)
+                return LoadProjection(
+                    suggestedLoad: e1rmFloorLoad,
+                    basis: e1rmBasis,
+                    consecutiveCleanCount: 0,
+                    e1rmFloorLoad: e1rmFloorLoad,
+                    peakE1RM: currentMesoPeakE1RM,
+                    crossMesoE1RM: crossMesoE1RM,
+                    lastLoad: nil // no candidate session → lastLoad not yet resolved
+                )
             }
             return nil
         }
@@ -281,7 +308,15 @@ enum LoadProjectionService {
         }()
         guard lastLoad > 0 else {
             if e1rmFloorLoad > 0 {
-                return LoadProjection(suggestedLoad: e1rmFloorLoad, basis: e1rmBasis, consecutiveCleanCount: 0)
+                return LoadProjection(
+                    suggestedLoad: e1rmFloorLoad,
+                    basis: e1rmBasis,
+                    consecutiveCleanCount: 0,
+                    e1rmFloorLoad: e1rmFloorLoad,
+                    peakE1RM: currentMesoPeakE1RM,
+                    crossMesoE1RM: crossMesoE1RM,
+                    lastLoad: nil // guard failed: lastLoad <= 0, no valid base load
+                )
             }
             return nil
         }
@@ -352,7 +387,11 @@ enum LoadProjectionService {
             return LoadProjection(
                 suggestedLoad: e1rmFloorLoad,
                 basis: e1rmBasis,
-                consecutiveCleanCount: consecutiveClean
+                consecutiveCleanCount: consecutiveClean,
+                e1rmFloorLoad: e1rmFloorLoad,
+                peakE1RM: currentMesoPeakE1RM,
+                crossMesoE1RM: crossMesoE1RM,
+                lastLoad: lastLoad
             )
         }
 
@@ -360,7 +399,11 @@ enum LoadProjectionService {
             return LoadProjection(
                 suggestedLoad: sameWaveLoad,
                 basis: sameWaveBasis,
-                consecutiveCleanCount: consecutiveClean
+                consecutiveCleanCount: consecutiveClean,
+                e1rmFloorLoad: e1rmFloorLoad,
+                peakE1RM: currentMesoPeakE1RM,
+                crossMesoE1RM: crossMesoE1RM,
+                lastLoad: lastLoad
             )
         }
 
