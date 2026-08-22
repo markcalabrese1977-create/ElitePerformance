@@ -158,7 +158,13 @@ struct PlanMemoryEngine {
                 for: sourceItem,
                 minLoadIncrement: loadIncrement,
                 mesoPhase: session.mesoPhase,
-                consecutiveCleanCount: consecutiveCleanCount
+                consecutiveCleanCount: consecutiveCleanCount,
+                // CUT 2 (input-only): hand project()'s already-computed data to
+                // CoachingEngine. Not consumed by any decision yet — plumbing for
+                // the single-authority cut. `projection` is nil-safe here.
+                e1rmFloorLoad: projection?.e1rmFloorLoad,
+                peakE1RM: projection?.peakE1RM,
+                lastKnownLoad: projection?.lastLoad
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
                 targetItem.suggestedLoad = recommendedLoad
                 targetItem.plannedLoadsBySet = Array(

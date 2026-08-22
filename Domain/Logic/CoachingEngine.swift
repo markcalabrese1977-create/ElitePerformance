@@ -21,7 +21,20 @@ struct CoachingRecommendation {
 
 struct CoachingEngine {
 
-    static func recommend(for item: SessionItem, minLoadIncrement: Double? = nil, mesoPhase: MesoPhase = .early, consecutiveCleanCount: Int = 0) -> CoachingRecommendation? {
+    // CUT 2 (input-only): project()'s data fields are plumbed in as optional
+    // parameters so a future cut can let CoachingEngine consume project() as its
+    // data provider. They are NOT read by any cascade path in this cut — recommend()
+    // returns exactly the same message/nextSuggestedLoad it would without them.
+    // Optional with nil defaults so every existing caller compiles unchanged.
+    static func recommend(
+        for item: SessionItem,
+        minLoadIncrement: Double? = nil,
+        mesoPhase: MesoPhase = .early,
+        consecutiveCleanCount: Int = 0,
+        e1rmFloorLoad: Double? = nil,
+        peakE1RM: Double? = nil,
+        lastKnownLoad: Double? = nil
+    ) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
 
