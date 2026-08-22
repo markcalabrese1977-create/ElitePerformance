@@ -1101,7 +1101,7 @@ private struct ProgramExercisePlanRow: View {
 
         let repsText: String = {
             if let min = item.repMin, let max = item.repMax {
-                return min == max ? "\(min) reps" : "\(min)–\(max) reps"
+                return min == max ? "\(min) reps" : "\(min)–\(max) · goal \(max) reps"
             } else {
                 return "\(item.targetReps) reps"
             }

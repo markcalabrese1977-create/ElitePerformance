@@ -595,10 +595,14 @@ private struct SessionExerciseCardView: View {
         let muscleText = parts.indices.contains(1) ? parts[1] : nil
         let setsText = "\(exercise.targetSets) sets"
 
-        let plannedReps = exercise.sets.first(where: { $0.index == 1 })?.plannedReps
-            ?? exercise.sets.first?.plannedReps
-            ?? 10
-        let repsText = "\(plannedReps) reps"
+        // Key on the wave-correct rep range (repMin/repMax), not plannedReps/targetReps
+        // which can be stale from a prior wave's carry-forward. Flag the top as the goal.
+        let repsText: String
+        if repRange.min != repRange.max {
+            repsText = "\(repRange.min)–\(repRange.max) reps · goal \(repRange.max)"
+        } else {
+            repsText = "\(repRange.min) reps"
+        }
 
         let rirText: String = {
             if let rir = exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
@@ -2765,10 +2769,11 @@ struct UISessionSet: Identifiable {
             loadText = String(format: "%.1f", plannedLoad)
         }
         
-        // Show range if min and max differ, otherwise show single target
+        // Show range with the top flagged as the goal when min and max differ,
+        // otherwise show the single target (no range to climb → no "· goal").
         let repsText: String
         if repRange.min != repRange.max {
-            repsText = "\(repRange.min)–\(repRange.max)"
+            repsText = "\(repRange.min)–\(repRange.max) · goal \(repRange.max)"
         } else {
             repsText = "\(plannedReps)"
         }
