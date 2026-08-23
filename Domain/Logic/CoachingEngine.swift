@@ -118,19 +118,10 @@ struct CoachingEngine {
         // Guard 6 — Sanity cap: never suggest more than 2x the previous load
         let loadSanityCap = baseLoad * 2.0
 
-        // 2.4 — ProgressionEngine decision for cluster-aware progression
-        let progressionDecision: ProgressionDecision? = {
-            guard let cluster = ExerciseCatalog.cluster(for: item.exerciseId) else { return nil }
-            let config = ChestArmsLowBackMesoProfile.config(for: cluster)
-            let snapshots = item.toSetSnapshots()
-            guard !snapshots.isEmpty else { return nil }
-            return ProgressionEngine.suggestNext(
-                history: snapshots,
-                currentSets: item.targetSets,
-                config: config,
-                phase: mesoPhase
-            )
-        }()
+        // (Cut 3 fix) The former ProgressionEngine `progressionDecision` sizing is no
+        // longer consulted for bumps: the cluster increment it added equals loadStep's
+        // cluster increment, and the unified bump now guarantees baseLoad + increment
+        // with the e1rm floor raising it. Removed to avoid a dead computation.
 
         let plannedTopReps = item.repMax ?? item.plannedRepsBySet.max() ?? item.targetReps
         let plannedBottomReps = item.repMin ?? item.plannedRepsBySet.min() ?? item.targetReps
@@ -173,11 +164,6 @@ struct CoachingEngine {
             let avg = ratings.map { $0.rawValue }.reduce(0, +) / ratings.count
             return PumpRating(rawValue: avg) ?? .none
         }()
-
-        func nextLoad(from base: Double, step: Double) -> Double? {
-            guard base > 0 else { return nil }
-            return max(0, base + step)
-        }
 
         func loadStep(for base: Double) -> Double {
             if let increment = minLoadIncrement, increment > 0 {
@@ -296,29 +282,29 @@ struct CoachingEngine {
         // Over-performed: every primary set two or more reps beyond the top.
         let overPerformed = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax + 2 }
 
-        // Bump sizing — floor-aware. Increment bump is ProgressionEngine-sized when
-        // available, else the min-load-increment step (RULE: minLoadIncrement respected).
-        // The e1rm floor (Cut 1) overrides when it exceeds baseLoad + one increment.
-        // Every bump is 2×-capped (RULE 6).
-        let effectiveIncrement = (minLoadIncrement ?? loadStep(for: baseLoad))
-        func incrementBump() -> Double {
-            let suggested: Double
-            if let decision = progressionDecision, decision.action == .increaseLoad {
-                suggested = min(decision.nextLoad, loadSanityCap)
-            } else {
-                let step = loadStep(for: baseLoad)
-                suggested = nextLoad(from: baseLoad, step: step) ?? baseLoad
-            }
-            let stepped = E1RMCalculator.rounded(suggested, increment: minLoadIncrement ?? 2.5)
-            return min(stepped, loadSanityCap)
-        }
-        func floorAwareBump() -> Double {
-            let inc = incrementBump()
-            if let floor = e1rmFloorLoad, floor > baseLoad + effectiveIncrement {
-                let roundedFloor = E1RMCalculator.rounded(floor, increment: minLoadIncrement ?? 2.5)
-                return min(roundedFloor, loadSanityCap) // RULE 6: 2× cap
-            }
-            return inc
+        // Bump sizing — a qualifying bump ALWAYS raises by at least one increment.
+        // The e1rm floor (Cut 1) may only RAISE the bump above baseLoad + increment,
+        // never reduce it below (fixes the Farmer-Carry no-move bug, where a floor
+        // ≤ baseLoad collapsed the "increase earned" bump to no increase). 2×-capped.
+        //
+        // Increment resolution guarantees a NONZERO increment on a qualifying bump:
+        // prefer the user's minLoadIncrement; else the cluster/loadStep increment;
+        // else a base-scaled default. Some clusters (lowBackStability) carry a 0.0
+        // primaryLoadIncrement, so loadStep can be 0 — the base-scaled fallback below
+        // ensures the load still moves when a bump is earned.
+        let bumpIncrement: Double = {
+            if let m = minLoadIncrement, m > 0 { return m }
+            let step = loadStep(for: baseLoad)
+            if step > 0 { return step }
+            if baseLoad >= 200 { return 5.0 }
+            if baseLoad >= 100 { return 2.5 }
+            return 2.5
+        }()
+        func qualifyingBump() -> Double {
+            let incrementedLoad = baseLoad + bumpIncrement                       // guaranteed minimum raise
+            let roundedFloor = e1rmFloorLoad.map { E1RMCalculator.rounded($0, increment: bumpIncrement) }
+            let bumpTarget = max(incrementedLoad, roundedFloor ?? incrementedLoad) // floor can only raise
+            return min(bumpTarget, baseLoad * 2.0)                                // RULE 6: 2× cap preserved
         }
         let pumpNote: String = {
             switch avgPump {
@@ -347,7 +333,7 @@ struct CoachingEngine {
 
         // 5a) Over-performed: all sets ≥ repMax+2 at target RIR → bump (floor-aware) [was path 4]
         if overPerformed && rirOnTarget {
-            let target = floorAwareBump()
+            let target = qualifyingBump()
             let msg = "Reps came in well above the top of your range with room to spare. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
@@ -355,7 +341,7 @@ struct CoachingEngine {
         // 5b) ALL primary sets at the top at target RIR → increase earned (floor-aware).
         //     The core double-progression bump [replaces paths 3.5 / 5.5].
         if allSetsAtTop && rirOnTarget {
-            let target = floorAwareBump()
+            let target = qualifyingBump()
             let msg = "Every working set hit the top of your range at the target difficulty — increase earned. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
