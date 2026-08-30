@@ -52,6 +52,7 @@ struct ElitePerformanceApp: App {
             MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
+            Week6UpperBCleanupMigration.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
