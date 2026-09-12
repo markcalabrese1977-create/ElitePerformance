@@ -1796,9 +1796,17 @@ final class SessionScreenViewModel: ObservableObject {
         }
 
         let calendar = Calendar.current
-        let weekday = calendar.component(.weekday, from: session.date)
         let sourceDate = calendar.startOfDay(for: session.date)
         let sourceOrder = sourceItem.order
+        // Day-type identity, not calendar weekday — a session's weekday can shift
+        // (e.g. the "Rest today" push) without its day type changing, and weekday
+        // is not a reliable stand-in for day type once that happens.
+        let sourceDayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !sourceDayLabel.isEmpty else {
+            print("⚠️ propagateAddedExerciseForward: source session has no dayLabel to match on.")
+            return
+        }
 
         let descriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\.date, order: .forward)]
@@ -1811,7 +1819,7 @@ final class SessionScreenViewModel: ObservableObject {
                 guard other.id != session.id else { return false }
                 guard other.status == .planned else { return false }
                 guard calendar.startOfDay(for: other.date) > sourceDate else { return false }
-                guard calendar.component(.weekday, from: other.date) == weekday else { return false }
+                guard other.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) == sourceDayLabel else { return false }
 
                 if let lhs = session.meso?.persistentModelID, let rhs = other.meso?.persistentModelID {
                     return lhs == rhs

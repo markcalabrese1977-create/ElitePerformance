@@ -723,14 +723,23 @@ struct ProgramDayDetailView: View {
 
     // MARK: - Apply to Block
 
-    /// Apply the current day's PLAN to other sessions in the same block that share the same weekday.
+    /// Apply the current day's PLAN to other sessions in the same block that share the same day type.
     ///
     /// Copies PLAN fields only (sets / reps / RIR / suggested load / per-set plan / DUP prescription metadata)
     /// and does NOT touch logged Actuals.
     private func applyPlanChangesToBlock() {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let weekday = calendar.component(.weekday, from: session.date) // 1=Sun...7=Sat
+        // Day-type identity, not calendar weekday — a session's weekday can shift
+        // (e.g. the "Rest today" push) without its day type changing, and weekday
+        // is not a reliable stand-in for day type once that happens.
+        let sourceDayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !sourceDayLabel.isEmpty else {
+            print("ℹ️ applyPlanChangesToBlock: source session has no dayLabel to match on.")
+            presentFeedback("Can’t apply changes: this session has no day type set.")
+            return
+        }
 
         let descriptor = FetchDescriptor<Session>(
             predicate: #Predicate { s in
@@ -745,12 +754,12 @@ struct ProgramDayDetailView: View {
             let targets = futureSessions.filter { other in
                 other.id != session.id &&
                 other.status == .planned &&
-                calendar.component(.weekday, from: other.date) == weekday
+                other.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) == sourceDayLabel
             }
 
             guard !targets.isEmpty else {
                 print("ℹ️ No future planned sessions matched for applyPlanChangesToBlock.")
-                presentFeedback("No future planned sessions matched this weekday.")
+                presentFeedback("No future planned sessions matched this day type.")
                 return
             }
 
