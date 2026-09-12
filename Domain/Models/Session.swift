@@ -227,6 +227,16 @@ final class SessionItem {
     var plannedLoadsBySet: [Double] = []
     var plannedRIRsBySet: [Int] = []
 
+    /// True once the user has manually edited this session's plan (per-set load/
+    /// reps/RIR or the default steppers) in the Program tab. Auto writes
+    /// (materializer, anchor, carry-forward, coaching bump) leave it false.
+    /// Carry-forward's bump write-back overwrites only unedited (false) future
+    /// plans, so a user's manual edit is never clobbered. Defaults false, so
+    /// existing auto-seeded sessions are eligible for the first post-fix bump.
+    /// Additive Bool-with-default → SwiftData lightweight migration, no schema
+    /// version bump needed (same pattern as MesoBlock.isMaintenance).
+    var planEdited: Bool = false
+
     // Simple inline logging (what you’re using now)
     var actualReps: [Int] = []
     var actualLoads: [Double] = []

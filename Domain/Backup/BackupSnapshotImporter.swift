@@ -191,6 +191,10 @@ enum BackupSnapshotImporter {
                     nextSuggestedLoad: itemDTO.nextSuggestedLoad,
                     loadOverrideReasonRaw: itemDTO.loadOverrideReasonRaw
                 )
+                // SessionItem's init has no planEdited param; set it directly.
+                // Old backups predate the key → nil falls back to false (the
+                // model default), keeping restored auto plans bump-eligible.
+                item.planEdited = itemDTO.planEdited ?? false
 
                 modelContext.insert(item)
                 session.items.append(item)

@@ -1366,16 +1366,53 @@ final class SessionScreenViewModel: ObservableObject {
                         ? set.dropSets.map { $0.serialized }.joined(separator: ",")
                         : ""
 
+                    // Size the bump with the SAME inputs the write-back path
+                    // (PlanMemoryEngine) uses, so the "increase earned → X" message
+                    // equals the value written to the next session's plan. Previously
+                    // this call omitted minLoadIncrement (falling to a base-scaled +5)
+                    // and the project() data, while the write-back passed the profile's
+                    // step (e.g. 2.5) + e1rm floor — two paths, two numbers.
+                    let allSessionsForRec = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+                    let recProfile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+                    let recLoadIncrement = recProfile?.minLoadIncrement ?? 2.5
+                    let recCustomExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
                     let cleanCount = LoadProjectionService.consecutiveCleanCount(
                         exerciseId: matchingItem.exerciseId,
                         waveRaw: matchingItem.waveRaw,
                         repMin: matchingItem.repMin ?? matchingItem.targetReps,
-                        allSessions: (try? context.fetch(FetchDescriptor<Session>())) ?? []
+                        allSessions: allSessionsForRec
+                    )
+                    // Project the SAME next session the write-back writes to, so the
+                    // message's floor/peak/lastKnownLoad come from the TARGET wave —
+                    // identical to PlanMemoryEngine's write. Falls back to the current
+                    // item when no future session is materialized (the write-back
+                    // no-ops then too, so there is nothing to disagree with).
+                    let recTargetItem = PlanMemoryEngine.nextTargetItem(
+                        for: matchingItem,
+                        after: session,
+                        in: allSessionsForRec
+                    ) ?? matchingItem
+                    let recProjection = LoadProjectionService.project(
+                        exerciseId: recTargetItem.exerciseId,
+                        targetReps: recTargetItem.targetReps,
+                        targetRIR: recTargetItem.targetRIR,
+                        repMin: recTargetItem.repMin ?? recTargetItem.targetReps,
+                        repMax: recTargetItem.repMax ?? recTargetItem.targetReps,
+                        currentWaveRaw: recTargetItem.waveRaw,
+                        allSessions: allSessionsForRec,
+                        activeMesoSessionIDs: LoadProjectionService.activeMesoSessionIDs(from: context),
+                        loadIncrement: recLoadIncrement,
+                        bodyWeight: recProfile?.bodyWeight,
+                        customExercises: recCustomExercises
                     )
                     if let recommendation = CoachingEngine.recommend(
                         for: matchingItem,
+                        minLoadIncrement: recLoadIncrement,
                         mesoPhase: session.mesoPhase,
-                        consecutiveCleanCount: cleanCount
+                        consecutiveCleanCount: cleanCount,
+                        e1rmFloorLoad: recProjection?.e1rmFloorLoad,
+                        peakE1RM: recProjection?.peakE1RM,
+                        lastKnownLoad: recProjection?.lastLoad
                     ) {
                         exercise.coachMessage = recommendation.message
                     } else {

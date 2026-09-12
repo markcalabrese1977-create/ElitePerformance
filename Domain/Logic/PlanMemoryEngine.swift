@@ -58,15 +58,33 @@ struct PlanMemoryEngine {
         for sourceItem in session.items {
             guard hasMeaningfulPlan(sourceItem) else { continue }
 
-            guard let nextSession = futureSessions.first(where: { future in
-                future.items.contains(where: { $0.exerciseId == sourceItem.exerciseId })
-            }) else { continue }
+            guard let targetItem = Self.nextTargetItem(
+                for: sourceItem,
+                after: session,
+                in: allSessions
+            ) else { continue }
 
-            guard let targetItem = nextSession.items.first(where: {
-                $0.exerciseId == sourceItem.exerciseId
-            }) else { continue }
-
-            guard isPlanEffectivelyEmpty(targetItem) else { continue }
+            // Already-materialized future plan (not empty): the seed path below only
+            // fills empty plans, so an earned bump would never reach an anchored/
+            // carried future session (the Cut-3 write-back gap). Instead propagate the
+            // bump directly onto the stored plan — but only when the user has NOT
+            // manually edited it (planEdited == false) and only for a real increase
+            // (hold/nil/BW/deload never write). Immediate-next occurrence scope: this
+            // loop already targets the first future session containing the exercise.
+            if !isPlanEffectivelyEmpty(targetItem) {
+                propagateEarnedBumpToMaterializedItem(
+                    sourceItem: sourceItem,
+                    targetItem: targetItem,
+                    session: session,
+                    allSessions: allSessions,
+                    activeMesoIDs: activeMesoIDs,
+                    loadIncrement: loadIncrement,
+                    bodyWeight: bodyWeight,
+                    customExercises: customExercises,
+                    progressionEnabled: progressionEnabled
+                )
+                continue
+            }
 
             // FIX B — Bodyweight exercises never carry a numeric load forward. After the
             // one-time migration their suggestedLoad/plannedLoadsBySet are already 0, but
@@ -224,6 +242,122 @@ struct PlanMemoryEngine {
                             }
                         }
         }
+    }
+
+    // MARK: - Canonical target resolution
+
+    /// The immediate-next materialized session item this exercise's bump carries
+    /// into: the first session chronologically AFTER `session` that contains the
+    /// same `exerciseId` (raw match, mirroring carry-forward's own equality), and
+    /// that session's matching item.
+    ///
+    /// SINGLE SOURCE OF TRUTH for "the next session this exercise's bump targets."
+    /// carry-forward uses it to pick the write target; the SessionView message path
+    /// uses it to `project()` the SAME target session's wave, so the floor/peak the
+    /// message shows are identical to the ones the write-back applies (message ==
+    /// stored value in all cases). Returns nil when no future session is
+    /// materialized for this exercise — in which case the write-back no-ops too.
+    static func nextTargetItem(
+        for sourceItem: SessionItem,
+        after session: Session,
+        in sessions: [Session]
+    ) -> SessionItem? {
+        // Canonical exerciseId matching (never raw) — mirrors the hardened coaching
+        // path (LoadProjectionService, lastKnownLoad). Raw `==` misses/mismatches
+        // when a swap or custom exercise sits between source and target sessions
+        // (the D5-class risk). canonicalExerciseId is a pure String->String resolver,
+        // so no customExercises context is needed here.
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: sourceItem.exerciseId)
+        let ordered = sessions.sorted { $0.date < $1.date }
+        guard let currentIndex = ordered.firstIndex(where: {
+            $0.persistentModelID == session.persistentModelID
+        }) else { return nil }
+        let future = ordered.suffix(from: currentIndex + 1)
+        guard let nextSession = future.first(where: { future in
+            future.items.contains(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+            })
+        }) else { return nil }
+        return nextSession.items.first(where: {
+            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+        })
+    }
+
+    // MARK: - Write-back to already-materialized future sessions (Cut 3)
+
+    /// Writes an EARNED bump onto an already-materialized next-occurrence plan.
+    ///
+    /// Only fires when:
+    /// - progression is enabled,
+    /// - the target plan was NOT user-edited (`planEdited == false`) — a manual
+    ///   edit is preserved, never clobbered,
+    /// - the target is not a deload/bodyweight item (those never take a numeric bump),
+    /// - and `recommend` returns a real INCREASE over the target's current load
+    ///   (hold / decrease / nil do not write, so BW/deload/first-session no-op).
+    ///
+    /// The value is written raw — `CoachingEngine.recommend` self-caps at
+    /// baseLoad * 2.0, mirroring the empty-seed path. `planEdited` stays false
+    /// (this is an auto write). Scope is the immediate next occurrence only.
+    private func propagateEarnedBumpToMaterializedItem(
+        sourceItem: SessionItem,
+        targetItem: SessionItem,
+        session: Session,
+        allSessions: [Session],
+        activeMesoIDs: Set<PersistentIdentifier>,
+        loadIncrement: Double,
+        bodyWeight: Double?,
+        customExercises: [CustomExercise],
+        progressionEnabled: Bool
+    ) {
+        guard progressionEnabled else { return }
+        guard !targetItem.planEdited else { return }                       // preserve user edit
+        guard targetItem.waveRaw?.lowercased() != "deload" else { return } // deload holds
+        if ExerciseCatalog.isBodyweight(exerciseId: targetItem.exerciseId, customExercises: customExercises) {
+            return                                                          // BW never takes a numeric bump
+        }
+
+        let projection = LoadProjectionService.project(
+            exerciseId: targetItem.exerciseId,
+            targetReps: targetItem.targetReps,
+            targetRIR: targetItem.targetRIR,
+            repMin: targetItem.repMin ?? targetItem.targetReps,
+            repMax: targetItem.repMax ?? targetItem.targetReps,
+            currentWaveRaw: targetItem.waveRaw,
+            allSessions: allSessions,
+            activeMesoSessionIDs: activeMesoIDs,
+            loadIncrement: loadIncrement,
+            bodyWeight: bodyWeight,
+            customExercises: customExercises
+        )
+
+        let consecutiveCleanCount = LoadProjectionService.consecutiveCleanCount(
+            exerciseId: sourceItem.exerciseId,
+            waveRaw: sourceItem.waveRaw,
+            repMin: sourceItem.repMin ?? sourceItem.targetReps,
+            allSessions: allSessions,
+            referenceDate: session.date
+        )
+
+        guard let recommendation = CoachingEngine.recommend(
+            for: sourceItem,
+            minLoadIncrement: loadIncrement,
+            mesoPhase: session.mesoPhase,
+            consecutiveCleanCount: consecutiveCleanCount,
+            e1rmFloorLoad: projection?.e1rmFloorLoad,
+            peakE1RM: projection?.peakE1RM,
+            lastKnownLoad: projection?.lastLoad
+        ), let recommendedLoad = recommendation.nextSuggestedLoad else { return }
+
+        // Only an ACTUAL increase propagates. Hold (== current) or decrease is left
+        // untouched, so the already-materialized plan is never lowered.
+        guard recommendedLoad > targetItem.suggestedLoad else { return }
+
+        targetItem.suggestedLoad = recommendedLoad
+        targetItem.plannedLoadsBySet = Array(
+            repeating: recommendedLoad,
+            count: max(targetItem.plannedLoadsBySet.count, targetItem.targetSets)
+        )
+        // planEdited intentionally left false — this is an automatic write.
     }
 
     // MARK: - Helpers

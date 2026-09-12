@@ -1136,7 +1136,7 @@ private struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: $item.targetSets, in: 1...6) {
+                Stepper(value: Binding(get: { item.targetSets }, set: { item.targetSets = $0; item.planEdited = true }), in: 1...6) {
                     Text("\(item.targetSets)")
                         .font(.body)
                         .monospacedDigit()
@@ -1153,7 +1153,7 @@ private struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: $item.targetReps, in: 4...30, step: 1) {
+                Stepper(value: Binding(get: { item.targetReps }, set: { item.targetReps = $0; item.planEdited = true }), in: 4...30, step: 1) {
                     Text("\(item.targetReps)")
                         .font(.body)
                         .monospacedDigit()
@@ -1170,7 +1170,7 @@ private struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: $item.targetRIR, in: 0...5) {
+                Stepper(value: Binding(get: { item.targetRIR }, set: { item.targetRIR = $0; item.planEdited = true }), in: 0...5) {
                     Text("\(item.targetRIR)")
                         .font(.body)
                         .monospacedDigit()
@@ -1425,6 +1425,7 @@ private struct ProgramExercisePlanRow: View {
                 }
 
                 item.plannedLoadsBySet[index] = doubleValue
+                item.planEdited = true   // user manually set a load — protect from auto write-back
                 save()
             }
         )
@@ -1445,6 +1446,7 @@ private struct ProgramExercisePlanRow: View {
                 }
 
                 item.plannedRepsBySet[index] = newValue
+                item.planEdited = true   // user manually set reps — protect from auto write-back
                 save()
             }
         )
@@ -1467,6 +1469,7 @@ private struct ProgramExercisePlanRow: View {
                 }
 
                 item.plannedRIRsBySet[index] = newValue
+                item.planEdited = true   // user manually set RIR — protect from auto write-back
                 save()
             }
         )

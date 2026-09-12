@@ -2219,6 +2219,7 @@ final class BackupRestoreImportTests: XCTestCase {
             setFeedbackBySet: ["none", "none", "pain"], pumpRatingsBySet: [2, 3, 4],
             isCompleted: true, isPR: false,
             coachNote: "Great set", loadOverrideReasonRaw: nil, nextSuggestedLoad: 190,
+            planEdited: true,
             logs: []
         )
 
@@ -2285,7 +2286,7 @@ final class BackupRestoreImportTests: XCTestCase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        func makeItem(nameSnapshot: String?) -> SessionItemBackupDTO {
+        func makeItem(nameSnapshot: String?, planEdited: Bool? = nil) -> SessionItemBackupDTO {
             SessionItemBackupDTO(
                 id: UUID(), createdAt: Date(), updatedAt: Date(),
                 order: 1, exerciseId: "bench_press",
@@ -2301,6 +2302,7 @@ final class BackupRestoreImportTests: XCTestCase {
                 setFeedbackBySet: nil, pumpRatingsBySet: nil,
                 isCompleted: true, isPR: false,
                 coachNote: nil, loadOverrideReasonRaw: nil, nextSuggestedLoad: nil,
+                planEdited: planEdited,
                 logs: []
             )
         }
@@ -2334,7 +2336,7 @@ final class BackupRestoreImportTests: XCTestCase {
             version: 1, exportedAt: Date(),
             appState: nil, userProfile: nil,
             mesoBlocks: [makeMeso(totalWeeks: 10, isMaintenance: true)],
-            sessions: [makeSession(readinessRaw: "great", item: makeItem(nameSnapshot: "Bench Press"))],
+            sessions: [makeSession(readinessRaw: "great", item: makeItem(nameSnapshot: "Bench Press", planEdited: true))],
             sessionHistory: [], exerciseNotes: [], customExercises: [],
             user: UserBackupDTO(createdAt: Date(), unitsRaw: "kg", coachVoiceRaw: "casual", progressionEnabled: false)
         )
@@ -2346,6 +2348,7 @@ final class BackupRestoreImportTests: XCTestCase {
         XCTAssertEqual(fullDecoded.sessions.first?.items.first?.exerciseNameSnapshot, "Bench Press")
         XCTAssertEqual(fullDecoded.user?.unitsRaw, "kg")
         XCTAssertEqual(fullDecoded.user?.progressionEnabled, false)
+        XCTAssertEqual(fullDecoded.sessions.first?.items.first?.planEdited, true)
 
         // (b) Absent (old backup) → keys omitted, decode succeeds with nil.
         let old = BackupSnapshotV1(
@@ -2364,12 +2367,14 @@ final class BackupRestoreImportTests: XCTestCase {
         XCTAssertFalse(oldJSON.contains("\"readinessRaw\""))
         XCTAssertFalse(oldJSON.contains("\"exerciseNameSnapshot\""))
         XCTAssertFalse(oldJSON.contains("\"user\""))
+        XCTAssertFalse(oldJSON.contains("\"planEdited\""))
         // Decode must not throw, and the missing keys become nil.
         let oldDecoded = try decoder.decode(BackupSnapshotV1.self, from: oldData)
         XCTAssertNil(oldDecoded.mesoBlocks.first?.totalWeeks)
         XCTAssertNil(oldDecoded.mesoBlocks.first?.isMaintenance)
         XCTAssertNil(oldDecoded.sessions.first?.readinessRaw)
         XCTAssertNil(oldDecoded.sessions.first?.items.first?.exerciseNameSnapshot)
+        XCTAssertNil(oldDecoded.sessions.first?.items.first?.planEdited)
         XCTAssertNil(oldDecoded.user)
     }
 

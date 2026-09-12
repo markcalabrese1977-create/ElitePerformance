@@ -179,6 +179,9 @@ struct SessionItemBackupDTO: Codable {
     let loadOverrideReasonRaw: String?
     let nextSuggestedLoad: Double?
 
+    // Added (Cut 3 write-back). Optional so OLD backups decode with nil → false.
+    let planEdited: Bool?
+
     let logs: [SetLogBackupDTO]
 }
 
