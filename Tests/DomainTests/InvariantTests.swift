@@ -499,3 +499,74 @@ final class InvariantTests: XCTestCase {
         XCTAssertEqual(futureItem.plannedLoadsBySet, [102.5, 102.5, 102.5])
     }
 }
+
+// MARK: - Template structural tripwires
+
+/// Guards a structural assumption that the onboarding customization pipeline
+/// silently depends on, rather than any runtime behavior.
+///
+/// `PreviewOverrides.slotOverrides` is `[String: ExerciseWaveOverride]` keyed by
+/// the template `exerciseId` ALONE (Domain/Programs/ExerciseWaveOverride.swift),
+/// and `DUPProgramSeeder.applying(overrides:to:)` maps that one dictionary over
+/// every day template. The onboarding preview captures a `dayId` alongside the
+/// exerciseId when opening the swap and customize sheets
+/// (Features/Onboarding/OnboardingFlowView.swift) but never uses it as part of
+/// the key.
+///
+/// That is only safe while no exerciseId appears on two different days of the
+/// same template — which is true of all six templates today, and is what this
+/// test pins.
+final class TemplateSlotKeyInvariantTests: XCTestCase {
+
+    private var allTemplates: [ProgramTemplate] {
+        [
+            DUP10WeekTemplate.template,
+            PPL6DayTemplate.template,
+            Hybrid5DayTemplate.template,
+            UpperLower4DayTemplate.template,
+            PPL3WeekTemplate.template,
+            FullBody2DayTemplate.template
+        ]
+    }
+
+    func test_noExerciseIdAppearsOnMoreThanOneDay_inAnyTemplate() {
+        for template in allTemplates {
+            // exerciseId -> the day titles it appears on
+            var daysByExerciseId: [String: [String]] = [:]
+            for day in template.dayTemplates {
+                for exercise in day.exerciseTemplates {
+                    daysByExerciseId[exercise.exerciseId, default: []].append(day.title)
+                }
+            }
+
+            let duplicates = daysByExerciseId
+                .filter { $0.value.count > 1 }
+                .sorted { $0.key < $1.key }
+
+            guard !duplicates.isEmpty else { continue }
+
+            let detail = duplicates
+                .map { "'\($0.key)' on [\($0.value.joined(separator: ", "))]" }
+                .joined(separator: "; ")
+
+            XCTFail("""
+                Template '\(template.name)' repeats \(duplicates.count) exerciseId(s) across days: \(detail).
+
+                PreviewOverrides.slotOverrides is keyed by exerciseId ALONE, and
+                DUPProgramSeeder.applying() maps that single dictionary over every
+                day template. So with this duplicate, one customization — or one
+                swap, or one delete — made on a single day in the onboarding
+                preview will silently apply to EVERY day that shares the id.
+
+                THE FIX IS THE KEY, NOT THE TEMPLATE. Do not resolve this by
+                removing the duplicate exercise: repeating a lift across days is
+                legitimate programming. Change slotOverrides to be keyed by
+                (dayId, exerciseId). OnboardingFlowView already captures the dayId
+                at every mutation site (customizingExercise, swappingExercise, and
+                the delete/undo buttons) and currently discards it; applying() has
+                the day in scope as it maps. Update both together, plus
+                PreviewOverrides.slotOverrides' type.
+                """)
+        }
+    }
+}
