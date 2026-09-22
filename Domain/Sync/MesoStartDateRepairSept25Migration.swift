@@ -30,7 +30,7 @@ enum MesoStartDateRepairSept25Migration {
     /// While true, the migration runs every Phase 1 check and prints the full
     /// before/after table, but writes nothing and never sets the completion flag.
     /// Flip to false to arm the real write.
-    static let dryRun = true
+    static let dryRun = false
 
     /// The day the active meso is being re-dated to start on.
     /// Exposed so the App layer can anchor meso labeling to the same day.
