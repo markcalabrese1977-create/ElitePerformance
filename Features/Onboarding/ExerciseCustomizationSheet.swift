@@ -13,11 +13,15 @@ struct ExerciseCustomizationSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var drafts: [WaveType: WaveDraft] = [:]
+    // Snapshot of `drafts` as loadDrafts() produced it. The swipe-dismiss
+    // auto-commit compares against this so merely opening an exercise and
+    // swiping away doesn't write an override (which would flag it "customized").
+    @State private var loadedDrafts: [WaveType: WaveDraft] = [:]
     // Tracks whether an explicit button (Apply/Cancel/Reset) already handled the close.
     // onDisappear commits only when this is still false — i.e. an interactive swipe-dismiss.
     @State private var didCommitOrCancel = false
 
-    private struct WaveDraft {
+    private struct WaveDraft: Equatable {
         var repMin: Int
         var repMax: Int
         var rir: Int
@@ -89,13 +93,19 @@ struct ExerciseCustomizationSheet: View {
             }
             .onAppear { loadDrafts() }
             .onDisappear {
-                guard !didCommitOrCancel, !drafts.isEmpty else { return }
+                guard !didCommitOrCancel, !drafts.isEmpty, drafts != loadedDrafts else { return }
                 onApply(buildOverride())
             }
         }
     }
 
     private func loadDrafts() {
+        // SwiftUI can reuse this view's @State across successive presentations
+        // from the same .sheet position. Without this reset, the guard stays
+        // armed after the first Apply/Cancel and every later swipe-dismiss
+        // silently discards the user's edits.
+        didCommitOrCancel = false
+
         for wave in editableWaves {
             let weekNumber = template.weekRules.first(where: { $0.wave == wave })?.weekNumber ?? 1
             let prescription = exerciseTemplate.prescription(for: wave)
@@ -114,6 +124,8 @@ struct ExerciseCustomizationSheet: View {
 
             drafts[wave] = WaveDraft(repMin: repMin, repMax: repMax, rir: rir, sets: sets)
         }
+
+        loadedDrafts = drafts
     }
 
     private func buildOverride() -> ExerciseWaveOverride {

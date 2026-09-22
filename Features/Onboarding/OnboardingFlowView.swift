@@ -613,9 +613,14 @@ struct OnboardingFlowView: View {
             )) {
                 if let target = customizingExercise,
                    let dayTemplate = template.dayTemplates.first(where: { $0.id == target.dayId }),
+                   // Slot lookup stays on the ORIGINAL exerciseId: a swap replaces
+                   // the exercise but keeps the slot's prescriptions (see
+                   // DUPProgramSeeder.applying), so the original slot is the correct
+                   // baseline to edit against. Only the title follows the swap.
                    let exerciseTemplate = dayTemplate.exerciseTemplates.first(where: { $0.exerciseId == target.exerciseId }) {
+                    let titleExerciseId = previewOverrides.slotOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
                     ExerciseCustomizationSheet(
-                        exerciseId: target.exerciseId,
+                        exerciseId: titleExerciseId,
                         exerciseTemplate: exerciseTemplate,
                         template: template,
                         existingOverride: previewOverrides.slotOverrides[target.exerciseId],
