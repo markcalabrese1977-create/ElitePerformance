@@ -53,6 +53,13 @@ struct ElitePerformanceApp: App {
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
             Week6UpperBCleanupMigration.runIfNeeded(in: context)
+
+            // Domain-layer repair returns true only when it actually wrote. The
+            // App-layer labeling step lives here so Domain/Sync never references
+            // MesoLifecycle / MesoLabel.
+            if MesoStartDateRepairSept25Migration.runIfNeeded(in: context) {
+                MesoLifecycle.confirmStartNewMeso(on: MesoStartDateRepairSept25Migration.targetStartDate)
+            }
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
