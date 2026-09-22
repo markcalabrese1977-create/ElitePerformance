@@ -22,6 +22,11 @@ struct HomeView: View {
     @State private var pendingOnboardingResult: OnboardingResult?
     @State private var pendingExerciseOverrides: PreviewOverrides = .empty
 
+    // Start date seeded into the onboarding flow. Set from the meso-summary
+    // picker when arriving via "Start new hypertrophy meso"; reset to today
+    // when the user opens Change Program directly from the toolbar.
+    @State private var pendingMesoStartDate: Date = Date()
+
     private var activeMeso: MesoBlock? {
         mesoBlocks.first { $0.status == .active }
     }
@@ -35,6 +40,7 @@ struct HomeView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
+                            pendingMesoStartDate = Date()
                             showingChangeProgram = true
                         } label: {
                             HStack(spacing: 6) {
@@ -50,7 +56,7 @@ struct HomeView: View {
                 }
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView { result, overrides in
+                        OnboardingFlowView(initialStartDate: pendingMesoStartDate) { result, overrides in
                             pendingOnboardingResult = result
                             pendingExerciseOverrides = overrides
                         }
@@ -96,10 +102,11 @@ struct HomeView: View {
 
     private func handleNextBlockChoice(_ choice: NextBlockChoice) {
         switch choice {
-        case .newHypertrophyMeso:
-            // Re-run the existing onboarding → program apply flow
-            // For now, show the change program sheet so user can configure
-            // In a future iteration this will auto-seed from UserProfile
+        case .newHypertrophyMeso(let startDate):
+            // Re-run the existing onboarding → program apply flow, carrying the
+            // start date the user picked on the meso summary so the onboarding
+            // picker opens on it instead of silently resetting to today.
+            pendingMesoStartDate = startDate
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 showingChangeProgram = true
             }

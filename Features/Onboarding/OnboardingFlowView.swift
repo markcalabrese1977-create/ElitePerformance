@@ -70,8 +70,9 @@ struct OnboardingFlowView: View {
     // Page 5 — Joint limitations
     @State private var selectedInjuryFlags: Set<InjuryFlag> = []
 
-    // Page 6 — Start date picker
-    @State private var mesoStartDate: Date = Date()
+    // Page 6 — Start date picker. Seeded by init(initialStartDate:) so a date
+    // chosen upstream (meso summary) survives into this flow.
+    @State private var mesoStartDate: Date
     @State private var showStartDatePicker = false
 
     // Page 6 — Per-exercise overrides, add, and delete
@@ -87,6 +88,27 @@ struct OnboardingFlowView: View {
     @State private var customizingAddedExercise: (dayId: String, instanceId: String)? = nil
 
     private let totalPages = 6
+
+    /// - Parameters:
+    ///   - initialStartDate: date to pre-load into the meso start date picker.
+    ///     Normalized to the start of its day and floored at today, because the
+    ///     picker's own lower bound is today — a carried-in date that has gone
+    ///     stale must not open the flow below the range it can select from.
+    ///     Defaults to today, which is what first-run onboarding wants.
+    ///   - onComplete: receives the finished result and the preview overrides.
+    init(
+        initialStartDate: Date = Date(),
+        onComplete: @escaping (OnboardingResult, PreviewOverrides) -> Void
+    ) {
+        self.onComplete = onComplete
+        let calendar = Calendar.current
+        _mesoStartDate = State(
+            initialValue: max(
+                calendar.startOfDay(for: initialStartDate),
+                calendar.startOfDay(for: Date())
+            )
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -750,7 +772,7 @@ struct OnboardingFlowView: View {
             .sheet(isPresented: $showStartDatePicker) {
                 NavigationStack {
                     VStack {
-                        DatePicker("Start date", selection: $mesoStartDate, in: Date()..., displayedComponents: .date)
+                        DatePicker("Start date", selection: $mesoStartDate, in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
                             .datePickerStyle(.graphical)
                             .padding()
                         Spacer()

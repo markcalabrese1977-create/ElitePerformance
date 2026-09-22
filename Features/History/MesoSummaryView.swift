@@ -6,7 +6,9 @@ import Charts
 // MARK: - Next Block Choice
 
 enum NextBlockChoice {
-    case newHypertrophyMeso
+    /// Carries the start date chosen on the meso-summary picker so the
+    /// downstream onboarding flow seeds from it instead of defaulting to today.
+    case newHypertrophyMeso(startDate: Date)
     case maintenanceBlock
     case custom
 }
@@ -676,7 +678,7 @@ struct MesoSummaryView: View {
                     icon: "arrow.up.forward.circle",
                     color: .blue
                 ) {
-                    onNextBlock(.newHypertrophyMeso)
+                    onNextBlock(.newHypertrophyMeso(startDate: mesoStartDate))
                     dismiss()
                 }
 
