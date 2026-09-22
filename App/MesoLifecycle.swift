@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 enum MesoLifecycle {
 
@@ -94,5 +95,46 @@ enum MesoLifecycle {
     static func snoozePromptUntilTomorrow() {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) ?? Date()
         UserDefaults.standard.set(tomorrow.timeIntervalSince1970, forKey: promptSnoozeEpochKey)
+    }
+}
+
+
+/// App-layer seam between program seeding (Domain) and meso labeling (App).
+///
+/// The Domain seeders deliberately know nothing about MesoLifecycle or
+/// MesoLabel — they only write SwiftData. Something still has to move the
+/// labeling anchor when a new regular meso is seeded, or W/D labels keep
+/// counting from the previous block's start date. Both maintenance seeding
+/// sites already do this at their call site; this type is the same step for
+/// the two hypertrophy-seeding sites, in one place instead of two.
+enum MesoSeedingCoordinator {
+
+    /// Seeds the program described by `result`, then anchors meso labeling to
+    /// the day the seeder actually used.
+    ///
+    /// The start day is resolved through the seeder's own
+    /// `effectiveStartDay(for:)` rather than re-derived here, so the anchor can
+    /// never disagree with the block's real start — including when a past date
+    /// is clamped forward to today.
+    static func applyOnboardingResult(
+        _ result: OnboardingResult,
+        context: ModelContext,
+        overrides: PreviewOverrides? = nil
+    ) {
+        let startDay = DUPProgramReplaceService.effectiveStartDay(for: result.startDate)
+
+        ProgramApplicationService.apply(
+            result,
+            context: context,
+            startDate: startDay,
+            overrides: overrides
+        )
+
+        MesoLifecycle.confirmStartNewMeso(on: startDay)
+        // Mirror the anchor into the syncable AppState, matching what both
+        // maintenance seeding sites do. Without this, ContentView's launch-time
+        // restoreUserDefaultsFromAppStateIfAvailable writes the stale AppState
+        // value back over the anchor we just set.
+        AppStateBridge.setActiveMesoStartDate(startDay, in: context)
     }
 }

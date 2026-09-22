@@ -14,10 +14,9 @@ struct ContentView: View {
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
                     OnboardingFlowView { result, overrides in
-                        ProgramApplicationService.apply(
+                        MesoSeedingCoordinator.applyOnboardingResult(
                             result,
                             context: modelContext,
-                            startDate: result.startDate,
                             overrides: overrides
                         )
                     }

@@ -129,10 +129,9 @@ struct HomeView: View {
         pendingExerciseOverrides = .empty
 
         DispatchQueue.main.async {
-            ProgramApplicationService.apply(
+            MesoSeedingCoordinator.applyOnboardingResult(
                 result,
                 context: modelContext,
-                startDate: result.startDate,
                 overrides: overrides
             )
         }

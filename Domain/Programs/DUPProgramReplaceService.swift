@@ -2,6 +2,17 @@ import Foundation
 import SwiftData
 
 enum DUPProgramReplaceService {
+    /// The day this service will actually seed from, for a requested start date:
+    /// normalized to the start of its day, then clamped forward to today because
+    /// a past start would over-delete planned history.
+    ///
+    /// Exposed so callers can ask what the seeder will do without re-deriving it.
+    /// The meso labeling anchor in particular must land on exactly this day, or
+    /// W/D labels count from a different date than the block actually starts.
+    static func effectiveStartDay(for startDate: Date, calendar: Calendar = .current) -> Date {
+        max(calendar.startOfDay(for: startDate), calendar.startOfDay(for: Date()))
+    }
+
     /// Replaces all non-completed sessions on or after the chosen start date
     /// with a freshly seeded DUP block.
     ///
@@ -16,11 +27,9 @@ enum DUPProgramReplaceService {
         overrides: PreviewOverrides? = nil
     ) throws {
         // Guard 1: clamp a past startDate to today to prevent over-deletion.
-        var startDay = calendar.startOfDay(for: startDate)
-        let todayStart = calendar.startOfDay(for: Date())
-        if startDay < todayStart {
-            print("⚠️ replacePlannedProgram: startDate \(startDay) is in the past — clamping to today.")
-            startDay = todayStart
+        let startDay = effectiveStartDay(for: startDate, calendar: calendar)
+        if startDay != calendar.startOfDay(for: startDate) {
+            print("⚠️ replacePlannedProgram: startDate \(calendar.startOfDay(for: startDate)) is in the past — clamping to today.")
         }
 
         // 1) Archive any currently active meso blocks
