@@ -14,9 +14,9 @@ import SwiftData
 /// No item construction, no load writes, no order changes — only
 /// `intensifierRaw`, `intensifierNotes` and `prescriptionNotes` are touched.
 ///
-/// Items are matched by dayLabel + canonical exerciseId. Four of the user's
-/// exercises are custom records whose UUIDs are not knowable from source, so a
-/// rule may also carry an exact `exerciseNameSnapshot` match — see `ExerciseKey`.
+/// Items are matched by dayLabel + canonical exerciseId throughout, including
+/// the three custom exercises, whose `custom_<uuid>` ids are confirmed from the
+/// user's exported backup.
 enum MesoIntensifierAndNotesRepair {
 
     // MARK: - Mode
@@ -31,37 +31,26 @@ enum MesoIntensifierAndNotesRepair {
 
     // MARK: - Exercise matching
 
-    /// How a rule identifies its item.
+    /// How a rule identifies its item: canonical exerciseId, always.
     ///
-    /// `.id` is the canonical-exerciseId match asked for. `.name` exists because
-    /// "Smith Machine Hip Thrust" and "Single Arm Pulldown (Kneeling)" are custom
-    /// exercises whose `custom_<uuid>` ids live only in the user's store — they
-    /// cannot be written down here, so those rules match on the durable
-    /// `exerciseNameSnapshot` instead. A rule matches if ANY of its keys match.
+    /// The custom exercises' `custom_<uuid>` ids are confirmed from the user's
+    /// exported backup (one id each across all 60 sessions of the active meso),
+    /// so the earlier name-snapshot fallback is gone — every rule matches on id.
+    /// A rule matches if ANY of its keys match.
     private enum ExerciseKey {
         case id(String)
-        case name(String)
 
         func matches(_ item: SessionItem) -> Bool {
             switch self {
             case let .id(value):
                 return ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                     == ExerciseCatalog.canonicalExerciseId(for: value)
-            case let .name(value):
-                let wanted = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                let snapshot = (item.exerciseNameSnapshot ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if snapshot == wanted { return true }
-                return ExerciseCatalog.displayName(for: item.exerciseId)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased() == wanted
             }
         }
 
         var describe: String {
             switch self {
-            case let .id(value):   return "id:\(value)"
-            case let .name(value): return "name:\"\(value)\""
+            case let .id(value): return "id:\(value)"
             }
         }
     }
@@ -99,7 +88,7 @@ enum MesoIntensifierAndNotesRepair {
             NoteRule("Bench Press", [.id("bench_press")], benchBackOff,
                      waveOverrides: [.b: benchTopSet, .c: benchTopSet]),
             NoteRule("Smith Incline Bench Press",
-                     [.id("custom_a45d8c4e-fc18-45a2-a224-8c89eebad7c8"), .name("Smith Incline Bench Press")],
+                     [.id("custom_a45d8c4e-fc18-45a2-a224-8c89eebad7c8")],
                      "Scapular-plane, shortened ROM."),
             NoteRule("Cable Tricep Rope Pushdown", [.id("cable_tricep_rope_pushdown")], rehabPushdown)
         ],
@@ -120,12 +109,12 @@ enum MesoIntensifierAndNotesRepair {
         "Legs B": [
             NoteRule("Leg Extension", [.id("leg_extension")], legExtensionNote),
             NoteRule("Smith Machine Hip Thrust",
-                     [.name("Smith Machine Hip Thrust"), .id("machine_hip_thrust")],
+                     [.id("custom_7f4ffc44-7aea-449f-87d9-41e76f2f3361")],
                      "Gated: back 0–1/10, no spasm. Not cleared → skip, leg curl to 4 sets. Neutral-spine lockout."),
             NoteRule("Romanian Deadlift", [.id("romanian_deadlift")], "Hard cap 300 lb. Belt on.")
         ],
         "Pull B": [
-            NoteRule("Single Arm Pulldown (Kneeling)", [.name("Single Arm Pulldown (Kneeling)")],
+            NoteRule("Single Arm Pulldown (Kneeling)", [.id("custom_fdd7dfeb-24ba-4795-b00b-0d89e1a52005")],
                      "Track left arm independently."),
             NoteRule("Barbell Row", [.id("barbell_row")], "Chest-supported. Spine-unloaded."),
             NoteRule("Hammer Curl", [.id("hammer_curl")], hammerCurlNote)
