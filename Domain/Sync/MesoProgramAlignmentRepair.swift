@@ -38,7 +38,7 @@ enum MesoProgramAlignmentRepair {
 
     /// While true: runs every gate, builds every change and prints the full plan,
     /// but writes nothing and never sets the completion flag.
-    static let dryRun = true
+    static let dryRun = false
 
     private static let completionKey = "mesoProgramAlignmentRepair.v1.completed"
 
@@ -112,6 +112,14 @@ enum MesoProgramAlignmentRepair {
         case remove(exerciseId: String)
         /// Set prescriptionNotes on the given waves' items.
         case notes(exerciseId: String, waves: Set<WaveType>, text: String)
+
+        /// True for ops that renumber `order` on the day's other items.
+        var movesOrders: Bool {
+            switch self {
+            case .add, .remove: return true
+            case .prescription, .swap, .notes: return false
+            }
+        }
     }
 
     private struct DayPlan {
@@ -341,6 +349,12 @@ enum MesoProgramAlignmentRepair {
                 report.append("   weeks 4–10 summary: \(laterWeekCounts["changed"]!) changed, \(laterWeekCounts["added"]!) added, \(laterWeekCounts["removed"]!) removed")
             } else {
                 report.append("   no item changes on this day (rename only)")
+            }
+
+            // Full roster with order values for any day whose ops move orders, so
+            // insert/remove renumbering can be eyeballed for ties.
+            if dayPlan.ops.contains(where: \.movesOrders) {
+                report.append(contentsOf: rosterReport(dayPlan: dayPlan, byWeek: byWeek, weeks: [1, 10]))
             }
             report.append("")
         }
@@ -586,6 +600,103 @@ enum MesoProgramAlignmentRepair {
             exercises: [plan]
         )
         return DUPSessionMaterializer.makeSessionItems(from: day)[0]
+    }
+
+    // MARK: - Roster reporting
+
+    /// Full roster with order values for the given weeks, so insert/remove
+    /// renumbering can be checked for ties.
+    ///
+    /// In write mode the ops have already been applied, so the live items are
+    /// read directly. In dry run nothing was written, so the roster is PROJECTED
+    /// by replaying the same three order-affecting rules the apply path uses —
+    /// the line is labelled accordingly.
+    private static func rosterReport(
+        dayPlan: DayPlan,
+        byWeek: [Int: Session],
+        weeks: [Int]
+    ) -> [String] {
+        var lines = ["   roster after change (order:exerciseId)\(dryRun ? " — PROJECTED, nothing written" : "")"]
+
+        for week in weeks {
+            guard let session = byWeek[week] else { continue }
+            let roster = dryRun
+                ? projectedRoster(session: session, ops: dayPlan.ops, week: week)
+                : session.items.sorted { $0.order < $1.order }
+                    .map { (order: $0.order, id: ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId)) }
+
+            let rendered = roster.map { "\($0.order):\($0.id)" }.joined(separator: "  ")
+            lines.append("     w\(week) (wave \(waveFor(week).displayName)): \(rendered)")
+
+            let orders = roster.map(\.order)
+            let ties = Set(orders.filter { value in orders.filter { $0 == value }.count > 1 }).sorted()
+            if ties.isEmpty {
+                lines.append("       orders \(orders.min() ?? 0)...\(orders.max() ?? 0), \(orders.count) items, no ties ✓")
+            } else {
+                lines.append("       ⚠️ ORDER TIE at \(ties.map(String.init).joined(separator: ", ")) — insert/remove renumbering did not separate these")
+            }
+        }
+
+        return lines
+    }
+
+    /// Replays the order-affecting rules of `apply(op:...)` against a value copy,
+    /// including its week-10 guard (an add whose deload prescription cannot be
+    /// resolved is skipped in week 10, exactly as the apply path skips it).
+    private static func projectedRoster(
+        session: Session,
+        ops: [Op],
+        week: Int
+    ) -> [(order: Int, id: String)] {
+        var roster = session.items
+            .sorted { $0.order < $1.order }
+            .map { (order: $0.order, id: ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId)) }
+
+        let wave = waveFor(week)
+
+        for op in ops {
+            switch op {
+            case let .swap(from, to, _, _):
+                let canonicalFrom = ExerciseCatalog.canonicalExerciseId(for: from)
+                if let idx = roster.firstIndex(where: { $0.id == canonicalFrom }) {
+                    roster[idx].id = ExerciseCatalog.canonicalExerciseId(for: to)
+                }
+
+            case let .remove(exerciseId):
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+                if let idx = roster.firstIndex(where: { $0.id == canonical }) {
+                    let removedOrder = roster[idx].order
+                    roster.remove(at: idx)
+                    for i in roster.indices where roster[i].order > removedOrder {
+                        roster[i].order -= 1
+                    }
+                }
+
+            case let .add(exerciseId, before, byWave, deloadTemplateId):
+                let willAdd: Bool
+                if week < 10 {
+                    willAdd = byWave[wave] != nil
+                } else if let deloadTemplateId {
+                    willAdd = templateDeloadPrescription(for: deloadTemplateId) != nil
+                } else {
+                    willAdd = false
+                }
+                guard willAdd else { continue }
+
+                let canonicalBefore = ExerciseCatalog.canonicalExerciseId(for: before)
+                guard let anchor = roster.first(where: { $0.id == canonicalBefore }) else { continue }
+                let insertOrder = anchor.order
+                for i in roster.indices where roster[i].order >= insertOrder {
+                    roster[i].order += 1
+                }
+                roster.append((order: insertOrder, id: ExerciseCatalog.canonicalExerciseId(for: exerciseId)))
+
+            case .prescription, .notes:
+                continue
+            }
+        }
+
+        return roster.sorted { $0.order < $1.order }
     }
 
     // MARK: - Lookups
