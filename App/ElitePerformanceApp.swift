@@ -57,6 +57,8 @@ struct ElitePerformanceApp: App {
             // READ-ONLY. Writes nothing and has no completion flag, so it re-runs
             // every launch until it is deleted.
             MesoCustomizationDiagnostic.run(in: context)
+
+            MesoProgramAlignmentRepair.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {

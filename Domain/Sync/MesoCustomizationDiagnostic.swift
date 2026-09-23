@@ -124,14 +124,24 @@ enum MesoCustomizationDiagnostic {
 
         var lines: [String] = ["", "── \(day.title)  (day \(day.dayNumber))"]
 
+        // Accept the post-repair label too: MesoProgramAlignmentRepair renames
+        // these days, and this diagnostic must keep resolving them afterwards.
+        let acceptedLabels = Set([day.title] + MesoProgramAlignmentRepair.dayRenames
+            .filter { $0.old == day.title }
+            .map(\.new))
+
         let daySessions = meso.sessions
-            .filter { ($0.dayLabel ?? "") == day.title }
+            .filter { acceptedLabels.contains($0.dayLabel ?? "") }
             .sorted { $0.weekIndex < $1.weekIndex }
 
         guard !daySessions.isEmpty else {
-            lines.append("   AMBIGUOUS — no sessions carry dayLabel '\(day.title)'. Cannot align.")
+            lines.append("   AMBIGUOUS — no sessions carry any of \(acceptedLabels.sorted()). Cannot align.")
             print(lines.joined(separator: "\n"))
             return []
+        }
+
+        if let current = daySessions.first?.dayLabel, current != day.title {
+            lines[1] += "  [labelled '\(current)']"
         }
 
         // weekIndex -> session. A repeated week makes the whole day ambiguous.
