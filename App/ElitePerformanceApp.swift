@@ -53,13 +53,6 @@ struct ElitePerformanceApp: App {
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
             Week6UpperBCleanupMigration.runIfNeeded(in: context)
-
-            // READ-ONLY. Writes nothing and has no completion flag, so it re-runs
-            // every launch until it is deleted.
-            MesoCustomizationDiagnostic.run(in: context)
-
-            MesoProgramAlignmentRepair.runIfNeeded(in: context)
-            MesoIntensifierAndNotesRepair.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
