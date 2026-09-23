@@ -59,6 +59,7 @@ struct ElitePerformanceApp: App {
             MesoCustomizationDiagnostic.run(in: context)
 
             MesoProgramAlignmentRepair.runIfNeeded(in: context)
+            MesoIntensifierAndNotesRepair.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
