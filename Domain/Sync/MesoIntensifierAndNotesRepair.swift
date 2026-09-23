@@ -23,7 +23,7 @@ enum MesoIntensifierAndNotesRepair {
 
     /// While true: runs every gate, prints the full plan, writes nothing and
     /// never sets the completion flag.
-    static let dryRun = true
+    static let dryRun = false
 
     private static let completionKey = "mesoIntensifierAndNotesRepair.v1.completed"
 
