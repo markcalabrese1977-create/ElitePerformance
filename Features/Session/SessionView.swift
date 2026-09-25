@@ -1387,11 +1387,17 @@ final class SessionScreenViewModel: ObservableObject {
                     // identical to PlanMemoryEngine's write. Falls back to the current
                     // item when no future session is materialized (the write-back
                     // no-ops then too, so there is nothing to disagree with).
-                    let recTargetItem = PlanMemoryEngine.nextTargetItem(
+                    let recResolvedTarget = PlanMemoryEngine.nextTargetItem(
                         for: matchingItem,
                         after: session,
                         in: allSessionsForRec
-                    ) ?? matchingItem
+                    )
+                    let recTargetItem = recResolvedTarget ?? matchingItem
+                    // Tell CoachingEngine whether a target actually exists, so the
+                    // message can name the week the load lands in — and say nothing
+                    // numeric when this is the last session of its wave in the block.
+                    let recCarryForwardTarget: CoachingEngine.CarryForwardTarget =
+                        recResolvedTarget == nil ? .endOfChain : .exists
                     let recProjection = LoadProjectionService.project(
                         exerciseId: recTargetItem.exerciseId,
                         targetReps: recTargetItem.targetReps,
@@ -1412,7 +1418,8 @@ final class SessionScreenViewModel: ObservableObject {
                         consecutiveCleanCount: cleanCount,
                         e1rmFloorLoad: recProjection?.e1rmFloorLoad,
                         peakE1RM: recProjection?.peakE1RM,
-                        lastKnownLoad: recProjection?.lastLoad
+                        lastKnownLoad: recProjection?.lastLoad,
+                        carryForwardTarget: recCarryForwardTarget
                     ) {
                         exercise.coachMessage = recommendation.message
                     } else {

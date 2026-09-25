@@ -26,6 +26,51 @@ struct CoachingEngine {
     // data provider. They are NOT read by any cascade path in this cut — recommend()
     // returns exactly the same message/nextSuggestedLoad it would without them.
     // Optional with nil defaults so every existing caller compiles unchanged.
+    /// Where this exercise's result will actually land, as resolved by the CALLER.
+    ///
+    /// PlanMemoryEngine.nextTargetItem owns the targeting rule (same block, same
+    /// dayLabel, same wave); duplicating it here would create a second source of
+    /// truth that can drift from the one that does the writing. So the caller tells
+    /// us only whether a target exists — the wave LETTER we read off the item itself.
+    enum CarryForwardTarget {
+        /// A materialized target exists, so a number may be promised.
+        case exists
+        /// No later same-letter, same-day session remains in this block. The load is
+        /// still returned in `nextSuggestedLoad`, but nothing in this block will
+        /// receive it, so the message must not promise it.
+        case endOfChain
+        /// Caller did not resolve a target. Phrased exactly like `.exists` — the
+        /// wave letter comes from the item, so a waved item still reads "Next Week
+        /// A" and a wave-less one still reads "Next session". Only the end-of-chain
+        /// case needs the caller to speak up, because only that case is invisible
+        /// from the item alone.
+        case unresolved
+    }
+
+    /// The phrase naming the session a promised load lands in, or nil when no number
+    /// may be promised at all.
+    ///
+    /// Wave letters are a WEEK property, so "Next Week A" is the honest description:
+    /// under per-letter anchoring the load lands three weeks out in a 3-wave rotation,
+    /// not in the literal next session. Wave-less items are not in a rotation and keep
+    /// the original wording.
+    private static func landingPhrase(
+        for item: SessionItem,
+        target: CarryForwardTarget
+    ) -> String? {
+        if case .endOfChain = target { return nil }
+        guard let wave = item.waveRaw?.lowercased(), !wave.isEmpty else {
+            return "Next session"
+        }
+        // A deload source never reaches the promise sites below (RULE 2 returns
+        // first), so no deload spelling is needed here.
+        return "Next Week \(wave.uppercased())"
+    }
+
+    /// What to say instead of a number when the chain has ended.
+    private static let carriesForwardClause =
+        "That carries into your next block."
+
     static func recommend(
         for item: SessionItem,
         minLoadIncrement: Double? = nil,
@@ -33,7 +78,8 @@ struct CoachingEngine {
         consecutiveCleanCount: Int = 0,
         e1rmFloorLoad: Double? = nil,
         peakE1RM: Double? = nil,
-        lastKnownLoad: Double? = nil
+        lastKnownLoad: Double? = nil,
+        carryForwardTarget: CarryForwardTarget = .unresolved
     ) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
@@ -240,7 +286,15 @@ struct CoachingEngine {
             let firstLoad = loads[workingIndices.first!]
             let lastLoad = loads[workingIndices.last!]
             if dropPercent >= 0.10, firstLoad == maxLoad, lastLoad == minLoad, minLoad < maxLoad {
-                let msg = "Load dropped from \(Int(maxLoad)) to \(Int(minLoad)) across your working sets — you opened above your repeatable baseline. Next session starts at \(Int(minLoad)). Build from there."
+                // The from/to numbers describe what just happened and always stay;
+                // only the forward-looking number is gated on a target existing.
+                let observed = "Load dropped from \(Int(maxLoad)) to \(Int(minLoad)) across your working sets — you opened above your repeatable baseline."
+                let msg: String
+                if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+                    msg = "\(observed) \(landing) starts at \(Int(minLoad)). Build from there."
+                } else {
+                    msg = "\(observed) \(carriesForwardClause)"
+                }
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: minLoad)
             }
         }
@@ -334,7 +388,13 @@ struct CoachingEngine {
         // 5a) Over-performed: all sets ≥ repMax+2 at target RIR → bump (floor-aware) [was path 4]
         if overPerformed && rirOnTarget {
             let target = qualifyingBump()
-            let msg = "Reps came in well above the top of your range with room to spare. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
+            let lead = "Reps came in well above the top of your range with room to spare."
+            let msg: String
+            if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+                msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
+            } else {
+                msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+            }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
 
@@ -342,7 +402,13 @@ struct CoachingEngine {
         //     The core double-progression bump [replaces paths 3.5 / 5.5].
         if allSetsAtTop && rirOnTarget {
             let target = qualifyingBump()
-            let msg = "Every working set hit the top of your range at the target difficulty — increase earned. Next session: \(String(format: "%.1f", target)).\(pumpNote)"
+            let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
+            let msg: String
+            if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+                msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
+            } else {
+                msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+            }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
 

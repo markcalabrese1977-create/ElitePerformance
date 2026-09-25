@@ -182,7 +182,11 @@ struct PlanMemoryEngine {
                 // the single-authority cut. `projection` is nil-safe here.
                 e1rmFloorLoad: projection?.e1rmFloorLoad,
                 peakE1RM: projection?.peakE1RM,
-                lastKnownLoad: projection?.lastLoad
+                lastKnownLoad: projection?.lastLoad,
+                // A targetItem exists by construction here (guarded above), so the
+                // message may name it. Only nextSuggestedLoad is consumed below —
+                // this keeps the message correct for any future caller of it.
+                carryForwardTarget: .exists
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
                 targetItem.suggestedLoad = recommendedLoad
                 targetItem.plannedLoadsBySet = Array(
@@ -388,7 +392,8 @@ struct PlanMemoryEngine {
             consecutiveCleanCount: consecutiveCleanCount,
             e1rmFloorLoad: projection?.e1rmFloorLoad,
             peakE1RM: projection?.peakE1RM,
-            lastKnownLoad: projection?.lastLoad
+            lastKnownLoad: projection?.lastLoad,
+            carryForwardTarget: .exists   // targetItem is non-nil by construction
         ), let recommendedLoad = recommendation.nextSuggestedLoad else { return }
 
         // Only an ACTUAL increase propagates. Hold (== current) or decrease is left
