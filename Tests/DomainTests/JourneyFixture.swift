@@ -58,10 +58,17 @@ struct JourneyFixture {
     /// Weekdays: Monday (2) + Thursday (5) — Calendar weekday numbering.
     ///
     /// After seeding, writes `startingLoad` to only the FIRST scheduled occurrence
-    /// of EACH UNIQUE exerciseId (suggestedLoad + plannedLoadsBySet). Every later
-    /// occurrence of an exercise that's already been seeded once is left exactly
-    /// as DUPSessionMaterializer produced it — suggestedLoad = 0, plannedLoadsBySet
-    /// = [0,...] — so carry-forward has real empty targets to write into.
+    /// of EACH LETTER CHAIN — (exerciseId, dayLabel, wave) — via suggestedLoad +
+    /// plannedLoadsBySet. Every later occurrence in a chain that's already been
+    /// seeded once is left exactly as DUPSessionMaterializer produced it —
+    /// suggestedLoad = 0, plannedLoadsBySet = [0,...] — so carry-forward has real
+    /// empty targets to write into.
+    ///
+    /// The chain key was originally exerciseId alone. That predates per-letter
+    /// anchoring: PlanMemoryEngine.nextTargetItem now carries week 1's A result into
+    /// week 4's A on the same day slot, so an exerciseId-keyed baseline would leave
+    /// every B- and C-wave occurrence permanently at zero with nothing targeting
+    /// them. See the seeding loop below for the full rationale.
     ///
     /// This is deliberate, not an oversight: PlanMemoryEngine.carryForwardPlans
     /// only ever writes into a target item when isPlanEffectivelyEmpty(target) is
@@ -113,17 +120,87 @@ struct JourneyFixture {
         }
 
         // Write nonzero suggestedLoad + plannedLoadsBySet to the first scheduled
-        // occurrence of each unique exerciseId only — see doc comment above.
+        // occurrence of each LETTER CHAIN — see doc comment above.
+        //
+        // A chain is (exerciseId, dayLabel, wave): PlanMemoryEngine.nextTargetItem
+        // anchors per letter, so week 1's A-wave result targets week 4's A-wave
+        // session on the SAME day slot, not the next session that happens to contain
+        // the exercise. Keying this set by exerciseId alone (the original rule, which
+        // predates per-letter anchoring) baselines only the first A-wave occurrence
+        // and leaves every B- and C-wave occurrence at the materializer's zeros
+        // forever — nothing ever targets them, so the scenarios would log 0 lb
+        // sessions and the invariant checker would report a ZEROED storm that is a
+        // fixture artifact, not engine behavior.
+        //
+        // Per-chain keying preserves this helper's actual intent unchanged — the
+        // FIRST occurrence in each chain gets a baseline, every LATER occurrence
+        // stays empty so carry-forward has a real empty target to write into — and
+        // it matches production, where ProgramGenerator.anchorLoadsForNewMeso
+        // anchors every item in the block at seed time.
+        //
+        // The seeded VALUE is prescription-aware, mirroring the production anchor
+        // (ProgramGenerator.anchorLoadsForNewMeso): a notional per-exercise e1RM is
+        // derived once from `startingLoad` against that exercise's FIRST prescription
+        // (week 1, wave A), then every chain's baseline is projected back out of that
+        // e1RM at its OWN targetReps/targetRIR via E1RMCalculator — the same inverse-
+        // Epley + RIR formula production uses.
+        //
+        // A flat `startingLoad` on every chain (the earlier rule) made the deload
+        // week's baseline identical to wave A's, which is not what production does:
+        // deload prescriptions carry a higher RIR and so anchor LOWER. Since
+        // carry-forward no longer writes into deload items at all (nothing precedes
+        // them in their own letter chain), seed-time anchoring is now the only thing
+        // that sets a deload load, and the fixture has to model it to test it.
+        //
+        // Wave A's week-1 baseline round-trips back to exactly `startingLoad`, so
+        // this is a no-op for the wave-A chain every existing expectation is written
+        // against; only the B / C / deload chains change.
         let sessionDescriptor = FetchDescriptor<Session>(
             sortBy: [SortDescriptor(\Session.date, order: .forward)]
         )
         let sessions = try context.fetch(sessionDescriptor)
-        var seededExerciseIds: Set<String> = []
+
+        // Pass 1 — notional e1RM per exercise, inverted from `startingLoad` at that
+        // exercise's first-seen prescription. Sessions are date-ordered, so that is
+        // week 1 == wave A.
+        var notionalE1RMByExercise: [String: Double] = [:]
         for session in sessions {
-            for item in session.items where !seededExerciseIds.contains(item.exerciseId) {
-                item.suggestedLoad = startingLoad
-                item.plannedLoadsBySet = Array(repeating: startingLoad, count: item.targetSets)
-                seededExerciseIds.insert(item.exerciseId)
+            for item in session.items where notionalE1RMByExercise[item.exerciseId] == nil {
+                let reps = item.targetReps > 0 ? item.targetReps : 10
+                let rirFactor = 1.0 - (Double(item.targetRIR) * 0.025)
+                guard rirFactor > 0 else { continue }
+                notionalE1RMByExercise[item.exerciseId] =
+                    startingLoad * (1.0 + Double(reps) / 30.0) / rirFactor
+            }
+        }
+
+        // Pass 2 — baseline the first occurrence of each chain at its own prescription.
+        var seededChains: Set<String> = []
+        for session in sessions {
+            for item in session.items {
+                let chainKey = [
+                    item.exerciseId,
+                    session.dayLabel ?? "",
+                    item.waveRaw?.lowercased() ?? ""
+                ].joined(separator: "|")
+                guard !seededChains.contains(chainKey) else { continue }
+                seededChains.insert(chainKey)
+
+                let anchored: Double = {
+                    guard let e1rm = notionalE1RMByExercise[item.exerciseId], e1rm > 0 else {
+                        return startingLoad
+                    }
+                    let raw = E1RMCalculator.load(
+                        for: e1rm,
+                        reps: item.targetReps > 0 ? item.targetReps : 10,
+                        targetRIR: item.targetRIR
+                    )
+                    let rounded = E1RMCalculator.rounded(raw, increment: 2.5)
+                    return rounded > 0 ? rounded : startingLoad
+                }()
+
+                item.suggestedLoad = anchored
+                item.plannedLoadsBySet = Array(repeating: anchored, count: item.targetSets)
             }
         }
 

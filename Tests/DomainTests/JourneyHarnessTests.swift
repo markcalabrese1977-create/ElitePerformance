@@ -66,29 +66,44 @@ final class JourneyHarnessTests: XCTestCase {
 
         try fixture.logAndComplete(script)
 
-        // After completing session 1, the carry-forward engine should have written
-        // nonzero suggestedLoad to the next session's matching exercises.
-        let nextSession = try XCTUnwrap(fixture.nextPlannedSession(), "Expected a second planned session")
-        XCTAssertFalse(nextSession.items.isEmpty, "Next session should have exercises")
+        // After completing week 1 Day A (wave A), the carry-forward engine should have
+        // written to that exercise's next SAME-LETTER, SAME-DAY session.
+        //
+        // This assertion used to read fixture.nextPlannedSession() — week 2 Day A,
+        // the wave-B session. That encoded chronological targeting, which
+        // PlanMemoryEngine.nextTargetItem no longer does: a week-1 A result anchors
+        // week 4's A, never the B or C weeks in between. Sessions alternate Day A /
+        // Day B, so week 4 Day A is index 6.
+        let allSessions = fixture.allSessionsSorted()
+        let weekFourDayA = allSessions[6]
+        XCTAssertFalse(weekFourDayA.items.isEmpty, "Target session should have exercises")
+        XCTAssertEqual(
+            weekFourDayA.items.first?.waveRaw?.lowercased(), "a",
+            "week 4 must be the second A wave — otherwise this index is wrong, not the engine"
+        )
+        XCTAssertEqual(
+            weekFourDayA.dayLabel, firstSession.dayLabel,
+            "week 4's target must sit in the same day slot as the completed session"
+        )
 
         // Assert on bench press specifically (anchor lift in Day A)
         let benchId = ExerciseCatalog.benchPress.id
-        let nextBench = try XCTUnwrap(
-            fixture.item(benchId, in: nextSession),
-            "Next session should contain bench press"
+        let targetBench = try XCTUnwrap(
+            fixture.item(benchId, in: weekFourDayA),
+            "Week 4 Day A should contain bench press"
         )
 
         XCTAssertGreaterThan(
-            nextBench.suggestedLoad, 0,
-            "carry-forward must write a nonzero suggestedLoad to the next bench press item"
+            targetBench.suggestedLoad, 0,
+            "carry-forward must write a nonzero suggestedLoad to the next same-letter bench press item"
         )
         XCTAssertFalse(
-            nextBench.plannedLoadsBySet.isEmpty,
-            "carry-forward must populate plannedLoadsBySet on the next bench press item"
+            targetBench.plannedLoadsBySet.isEmpty,
+            "carry-forward must populate plannedLoadsBySet on the target bench press item"
         )
         XCTAssertTrue(
-            nextBench.plannedLoadsBySet.allSatisfy { $0 > 0 },
-            "every planned load in the next session should be nonzero after carry-forward"
+            targetBench.plannedLoadsBySet.allSatisfy { $0 > 0 },
+            "every planned load in the target session should be nonzero after carry-forward"
         )
     }
 
@@ -122,10 +137,26 @@ final class JourneyHarnessTests: XCTestCase {
         // via DUPProgramSeeder.)
         XCTAssertNotNil(meso.totalWeeks, "DUPProgramSeeder must assign MesoBlock.totalWeeks so Session.isDeloadWeek can ever be true")
 
+        // Seed-time snapshot of every deload-wave item's plan, taken BEFORE any
+        // session is logged. Assertion (d)(ii) below compares against this to show
+        // carry-forward never touches a deload item. Keyed by the item's identity,
+        // not by exerciseId, so a day-duplicated exercise can't alias.
+        let deloadItemsAtSeedTime: [(item: SessionItem, suggested: Double, planned: [Double])] =
+            fixture.allSessionsSorted().flatMap { session in
+                session.items
+                    .filter { $0.waveRaw?.lowercased() == WaveType.deload.rawValue }
+                    .map { ($0, $0.suggestedLoad, $0.plannedLoadsBySet) }
+            }
+        XCTAssertFalse(
+            deloadItemsAtSeedTime.isEmpty,
+            "fixture must contain deload-wave items, or (d)(ii) proves nothing"
+        )
+
         struct SessionSnapshot {
             let weekIndex: Int
             let isDeload: Bool
             let waveRaw: String?
+            let dayLabel: String?
             var suggestedLoadByExercise: [String: Double] = [:]
             var targetSetsByExercise: [String: Int] = [:]
             var targetRIRByExercise: [String: Int] = [:]
@@ -147,7 +178,8 @@ final class JourneyHarnessTests: XCTestCase {
             var snapshot = SessionSnapshot(
                 weekIndex: session.weekIndex,
                 isDeload: isDeload,
-                waveRaw: session.items.first?.waveRaw
+                waveRaw: session.items.first?.waveRaw,
+                dayLabel: session.dayLabel
             )
             for item in session.items {
                 snapshot.suggestedLoadByExercise[item.exerciseId] = item.suggestedLoad
@@ -191,20 +223,42 @@ final class JourneyHarnessTests: XCTestCase {
         XCTAssertGreaterThan(sessionCounter, 1, "expected the full meso to produce multiple sessions")
         XCTAssertFalse(anchorExerciseIds.isEmpty, "expected at least one anchor-priority exercise")
 
-        // MARK: a. Monotonic non-decreasing suggestedLoad across working sessions
+        // MARK: a. Monotonic non-decreasing suggestedLoad WITHIN each letter chain
+        //
+        // Monotonicity only means something within a chain — (dayLabel, wave) — which
+        // is also the unit carry-forward now progresses. Comparing consecutive working
+        // sessions across waves compares different prescriptions: wave C's 6-rep load
+        // is legitimately heavier than the next week's wave-A 10-rep load, so a raw
+        // chronological sequence steps DOWN at every C -> A boundary. Real data does
+        // this too (an actual DUP block runs bench at 307.5 / 292.5 / 292.5 for
+        // A / B / C, then back to 307.5 for the second A); the flat-`startingLoad`
+        // fixture used to hide it by giving every wave the same baseline.
+        //
+        // Per-day, because a day-duplicated exercise has an independent chain per day.
 
+        var chainComparisons = 0
         for exerciseId in anchorExerciseIds {
-            let workingLoads = snapshots
-                .filter { !$0.isDeload }
-                .compactMap { $0.suggestedLoadByExercise[exerciseId] }
-            guard workingLoads.count > 1 else { continue }
-            for (prior, next) in zip(workingLoads, workingLoads.dropFirst()) {
-                XCTAssertLessThanOrEqual(
-                    prior, next,
-                    "a. suggestedLoad must be non-decreasing across working sessions for \(exerciseId): \(prior) -> \(next)"
-                )
+            let workingSnapshots = snapshots.filter { !$0.isDeload }
+            let chainKeys = Set(workingSnapshots.map { "\($0.dayLabel ?? "")|\($0.waveRaw ?? "")" })
+
+            for chainKey in chainKeys.sorted() {
+                let chainLoads = workingSnapshots
+                    .filter { "\($0.dayLabel ?? "")|\($0.waveRaw ?? "")" == chainKey }
+                    .compactMap { $0.suggestedLoadByExercise[exerciseId] }
+                guard chainLoads.count > 1 else { continue }
+                for (prior, next) in zip(chainLoads, chainLoads.dropFirst()) {
+                    chainComparisons += 1
+                    XCTAssertLessThanOrEqual(
+                        prior, next,
+                        "a. suggestedLoad must be non-decreasing within chain [\(chainKey)] for \(exerciseId): \(prior) -> \(next)"
+                    )
+                }
             }
         }
+        XCTAssertGreaterThan(
+            chainComparisons, 0,
+            "a. must actually compare at least one within-chain pair — green has to mean checked, not skipped"
+        )
 
         // MARK: b. targetSets follows the seeded per-wave ramp (read off the static template config)
 
@@ -240,10 +294,28 @@ final class JourneyHarnessTests: XCTestCase {
             }
         }
 
-        // MARK: d. Deload week load is lower than the prior working session's load
-        // for at least one anchor exercise. PlanMemoryEngine.carryForwardPlans applies
-        // a flat 60% reduction (deloadLoadReductionFactor) to suggestedLoad and
-        // plannedLoadsBySet for deload-wave targets, after the baseline copy.
+        // MARK: d. Deload-week loads come from SEED-TIME ANCHORING, not carry-forward.
+        //
+        // This assertion used to require the deload week's planned load to be lower
+        // than the PRIOR WORKING SESSION's, which was a test of
+        // PlanMemoryEngine.carryForwardPlans' flat 60% deloadLoadReductionFactor.
+        // That reduction reached the deload week only because carry-forward targeted
+        // the chronologically next session: week 9 (wave C) wrote into week 10
+        // (deload), scaled by 0.6 — a cross-wave copy of a C-wave load.
+        //
+        // PlanMemoryEngine.nextTargetItem now anchors per letter, and every template
+        // has exactly ONE deload week, so no session precedes week 10 in the deload
+        // chain and nothing writes into it. Its load is whatever seed-time anchoring
+        // produced, which is the correct source: the anchor projects each item's own
+        // prescription (higher RIR, lower volume) out of the same e1RM, so a deload
+        // item lands lighter than the same exercise's wave-A item by construction —
+        // rather than by scaling an unrelated wave's result.
+        //
+        // So (d) now checks the two properties that actually hold:
+        //   (i)  each anchor exercise's deload plan is lighter than that exercise's
+        //        wave-A plan ON THE SAME DAY SLOT (same-day, because a day-duplicated
+        //        exercise has an independent chain per day), and
+        //   (ii) carry-forward writes into no deload item at all.
         //
         // Uses waveRaw == "deload" (materializer-assigned, real per-session wave) rather
         // than isDeload (session.isDeloadWeek) to locate the deload week: isDeloadWeek's
@@ -252,20 +324,43 @@ final class JourneyHarnessTests: XCTestCase {
         // the materializer level (week 9 is wave .c, peak intensity). waveRaw pinpoints
         // the one week PlanMemoryEngine itself treats as deload.
 
-        if let deloadSnapshot = snapshots.last(where: { $0.waveRaw == WaveType.deload.rawValue }),
-           let priorWorkingSnapshot = snapshots.last(where: { $0.waveRaw != WaveType.deload.rawValue && $0.weekIndex < deloadSnapshot.weekIndex }) {
-            var anyLower = false
+        // (i) deload is lighter than the same exercise's wave A on the same day slot.
+        let deloadSnapshots = snapshots.filter { $0.waveRaw == WaveType.deload.rawValue }
+        XCTAssertFalse(deloadSnapshots.isEmpty, "d. expected at least one deload-wave session")
+
+        var deloadComparisons = 0
+        for deloadSnapshot in deloadSnapshots {
+            guard let waveASnapshot = snapshots.first(where: {
+                $0.waveRaw == WaveType.a.rawValue && $0.dayLabel == deloadSnapshot.dayLabel
+            }) else { continue }
+
             for exerciseId in anchorExerciseIds {
                 guard let deloadFirst = deloadSnapshot.plannedLoadsBySetByExercise[exerciseId]?.first,
-                      let priorFirst = priorWorkingSnapshot.plannedLoadsBySetByExercise[exerciseId]?.first else { continue }
-                if deloadFirst < priorFirst { anyLower = true }
+                      let waveAFirst = waveASnapshot.plannedLoadsBySetByExercise[exerciseId]?.first,
+                      deloadFirst > 0, waveAFirst > 0 else { continue }
+                deloadComparisons += 1
+                XCTAssertLessThan(
+                    deloadFirst, waveAFirst,
+                    "d(i). \(exerciseId) on \(deloadSnapshot.dayLabel ?? "?"): deload plan (\(deloadFirst)) must be lighter than the same day's wave-A plan (\(waveAFirst)) — seed-time anchoring projects the deload prescription's higher RIR"
+                )
             }
-            XCTAssertTrue(
-                anyLower,
-                "d. expected at least one anchor exercise's deload-week plannedLoadsBySet[0] to be lower than the prior working session's"
+        }
+        XCTAssertGreaterThan(
+            deloadComparisons, 0,
+            "d(i). must actually compare at least one anchor exercise — green here has to mean checked, not skipped"
+        )
+
+        // (ii) carry-forward never wrote into a deload item: its plan is byte-identical
+        // to what seeding produced, after the whole meso (deload week included) ran.
+        for (item, seededSuggested, seededPlanned) in deloadItemsAtSeedTime {
+            XCTAssertEqual(
+                item.suggestedLoad, seededSuggested, accuracy: 0.001,
+                "d(ii). deload item \(item.exerciseId) suggestedLoad must be untouched by carry-forward"
             )
-        } else {
-            XCTFail("d. expected both a deload snapshot and a prior working snapshot")
+            XCTAssertEqual(
+                item.plannedLoadsBySet, seededPlanned,
+                "d(ii). deload item \(item.exerciseId) plannedLoadsBySet must be untouched by carry-forward"
+            )
         }
 
         // MARK: e. The 2 extra-reserve (rir 1) sessions produced a strict increase on
@@ -369,29 +464,38 @@ final class JourneyHarnessTests: XCTestCase {
         // coachNote; other exercises in that same next session still progressed
         // normally (>= the post-skip session's own suggestedLoad).
         //
-        // Exercises only repeat every other session (Day A / Day B alternation), so
-        // "the next session" containing painExerciseId is not necessarily the literal
-        // next-by-date session — search forward for the first one that actually
-        // contains it, mirroring how PlanMemoryEngine itself locates a carry-forward
-        // target (`futureSessions.first(where: { future in future.items.contains(...) })`).
-        guard let skipPostIndex = allSessions.firstIndex(where: { $0.persistentModelID == sessionAfterSkip.persistentModelID }) else {
-            XCTFail("expected sessionAfterSkip to be findable in allSessions")
+        // "The next session" for this exercise is NOT the literal next-by-date session:
+        // Day A / Day B alternate, and carry-forward anchors per letter, so the target
+        // is the next session in the same block, same day slot, same wave — three weeks
+        // out in the A/B/C rotation.
+        //
+        // This block used to search forward for the first session containing the
+        // exerciseId, described as "mirroring how PlanMemoryEngine itself locates a
+        // carry-forward target (`futureSessions.first(where: { ... contains(...) })`)" —
+        // a verbatim transcription of the old chronological rule. Ask the engine
+        // directly instead, so this stays a mirror rather than a stale copy.
+        guard let painSourceItem = sessionAfterSkip.items.first(where: { $0.exerciseId == painExerciseId }) else {
+            XCTFail("expected the pain-flagged exercise to be present in sessionAfterSkip")
             return
         }
-        guard let sessionAfterPain = allSessions[(skipPostIndex + 1)...].first(where: { future in
-            future.items.contains(where: { $0.exerciseId == painExerciseId })
+        guard let painTargetItem = PlanMemoryEngine.nextTargetItem(
+            for: painSourceItem,
+            after: sessionAfterSkip,
+            in: allSessions
+        ) else {
+            XCTFail("expected a same-letter, same-day future session containing the pain-flagged exercise")
+            return
+        }
+        guard let sessionAfterPain = allSessions.first(where: { s in
+            s.items.contains(where: { $0.persistentModelID == painTargetItem.persistentModelID })
         }) else {
-            XCTFail("expected a future session containing the pain-flagged exercise")
+            XCTFail("expected the carry-forward target item to belong to a session")
             return
         }
 
-        if let painTargetItem = sessionAfterPain.items.first(where: { $0.exerciseId == painExerciseId }) {
-            let coachNote = painTargetItem.coachNote
-            XCTAssertNotNil(coachNote, "b. pain-flagged exercise's next session should have a non-nil coachNote")
-            XCTAssertFalse((coachNote ?? "").isEmpty, "b. pain-flagged exercise's next session coachNote should be non-empty")
-        } else {
-            XCTFail("b. expected the pain-flagged exercise to reappear in the session after sessionAfterSkip")
-        }
+        let coachNote = painTargetItem.coachNote
+        XCTAssertNotNil(coachNote, "b. pain-flagged exercise's carry-forward target should have a non-nil coachNote")
+        XCTAssertFalse((coachNote ?? "").isEmpty, "b. pain-flagged exercise's carry-forward target coachNote should be non-empty")
 
         for item in sessionAfterPain.items where item.exerciseId != painExerciseId {
             guard let priorLoad = sessionAfterSkip.items.first(where: { $0.exerciseId == item.exerciseId })?.suggestedLoad else { continue }

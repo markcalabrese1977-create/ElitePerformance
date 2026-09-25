@@ -17,16 +17,24 @@ final class JourneyCanaryTests: XCTestCase {
     /// Seeds a fresh fixture, logs the very first session cleanly, and returns the
     /// REAL carry-forward target for Day A exercises plus the full session history.
     ///
-    /// allSessions[0] = the just-completed Day A session (week 1).
-    /// allSessions[1] = the next-by-date session, Day B (week 1) — NOT the carry-forward
-    ///   target for any Day A exercise, since PlanMemoryEngine.carryForwardPlans
-    ///   searches forward for the first FUTURE session containing the SAME exerciseId,
-    ///   and Day A/Day B rosters are disjoint.
-    /// allSessions[2] = the real carry-forward target — the next Day A session
-    ///   (week 2) — every Day A item here already holds whatever
-    ///   PlanMemoryEngine.carryForwardPlans wrote when allSessions[0] completed, with
-    ///   allSessions[0] as its real "previous" (most recent prior completed session
-    ///   containing the same exerciseId).
+    /// The 2-day template alternates Day A / Day B, so allSessions is
+    /// [w1A, w1B, w2A, w2B, w3A, w3B, w4A, ...] and the wave rotates by WEEK
+    /// (A, B, C, A, ...).
+    ///
+    /// allSessions[0] = the just-completed Day A session (week 1, wave A).
+    /// allSessions[1] = Day B (week 1) — never a target for a Day A exercise; the
+    ///   two days' rosters are disjoint.
+    /// allSessions[2] = Day A of week 2 — the wave-B session. This was the target
+    ///   under chronological carry-forward, and is NOT one any more.
+    /// allSessions[6] = the real carry-forward target — Day A of week 4, the next
+    ///   session in the same block on the same day slot in the same wave (A).
+    ///   PlanMemoryEngine.nextTargetItem anchors per letter, so this is where the
+    ///   week-1 A result lands. Every Day A item here holds whatever
+    ///   carryForwardPlans wrote when allSessions[0] completed, with allSessions[0]
+    ///   as its real "previous" — and since week 1 is the only completed session,
+    ///   that is also what invariantViolations' backward search finds.
+    private static let carryForwardTargetIndex = 6   // week 4, Day A — the second A
+
     private func makeFixtureWithOneCarryForward() throws -> (target: Session, history: [Session]) {
         let fixture = try JourneyFixture.make()
         var components = DateComponents()
@@ -44,10 +52,10 @@ final class JourneyCanaryTests: XCTestCase {
         try fixture.logAndComplete(JourneySessionScript(logs: logs))
 
         let allSessions = fixture.allSessionsSorted()
-        guard allSessions.count >= 3 else {
+        guard allSessions.count > Self.carryForwardTargetIndex else {
             throw JourneyFixtureError.noPlannedSession
         }
-        return (allSessions[2], allSessions)
+        return (allSessions[Self.carryForwardTargetIndex], allSessions)
     }
 
     // MARK: - Vacuity regression

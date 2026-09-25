@@ -246,16 +246,41 @@ struct PlanMemoryEngine {
 
     // MARK: - Canonical target resolution
 
-    /// The immediate-next materialized session item this exercise's bump carries
-    /// into: the first session chronologically AFTER `session` that contains the
-    /// same `exerciseId` (raw match, mirroring carry-forward's own equality), and
-    /// that session's matching item.
+    /// The materialized session item this exercise's result carries into.
     ///
-    /// SINGLE SOURCE OF TRUTH for "the next session this exercise's bump targets."
+    /// PER-LETTER ANCHORING. A wave letter is a WEEK property here (the
+    /// materializer stamps every item in a session with the week rule's wave —
+    /// DUPSessionMaterializer.makeSession), and the user's program requires each
+    /// lift to progress per letter: week 4's A anchors from week 1's A, never
+    /// from the B or C weeks in between. So the target is the next session in the
+    /// SAME block, on the SAME day slot, in the SAME wave — three weeks out in a
+    /// 3-wave rotation, not "whatever session comes next".
+    ///
+    /// Both the day and the wave axis are required, and neither is redundant:
+    /// - Wave alone still lets Friday's A result land on Sunday's A item, because
+    ///   every day of an A week shares the letter. Several exerciseIds legitimately
+    ///   appear on two days in the same week with identical per-wave prescriptions
+    ///   (see TemplateSlotKeyInvariantTests — repeating a lift across days is
+    ///   deliberate programming, not a template defect).
+    /// - Day alone still lets an A result land on the next week's B item.
+    ///
+    /// There is deliberately NO fallback to the chronological next occurrence when
+    /// no same-letter/same-day session exists. Such a fallback reintroduces exactly
+    /// the cross-wave write this resolves, at the END of every letter's chain: the
+    /// last A week (week 7 in a 10-week block) would find no later A and fall
+    /// through to week 8's B, writing an A-wave load onto a B-wave prescription.
+    /// Returning nil there is correct — the chain has ended, and there is nothing
+    /// left in the block to anchor.
+    ///
+    /// Sessions whose items carry no wave (`waveRaw` nil or empty) are not part of
+    /// any letter rotation — non-DUP/legacy/hand-built sessions — so they keep the
+    /// original chronological behavior unchanged.
+    ///
+    /// SINGLE SOURCE OF TRUTH for "the session this exercise's result targets."
     /// carry-forward uses it to pick the write target; the SessionView message path
     /// uses it to `project()` the SAME target session's wave, so the floor/peak the
     /// message shows are identical to the ones the write-back applies (message ==
-    /// stored value in all cases). Returns nil when no future session is
+    /// stored value in all cases). Returns nil when no eligible future session is
     /// materialized for this exercise — in which case the write-back no-ops too.
     static func nextTargetItem(
         for sourceItem: SessionItem,
@@ -273,14 +298,32 @@ struct PlanMemoryEngine {
             $0.persistentModelID == session.persistentModelID
         }) else { return nil }
         let future = ordered.suffix(from: currentIndex + 1)
-        guard let nextSession = future.first(where: { future in
-            future.items.contains(where: {
+
+        func matchingItem(in candidate: Session) -> SessionItem? {
+            candidate.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
             })
-        }) else { return nil }
-        return nextSession.items.first(where: {
-            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
-        })
+        }
+
+        // No wave on the source → not in a letter rotation; legacy chronological path.
+        guard let sourceWave = sourceItem.waveRaw?.lowercased(), !sourceWave.isEmpty else {
+            return future.lazy.compactMap(matchingItem).first
+        }
+
+        // Block identity by persistent id so a nil meso matches only another nil
+        // meso — an unassigned session never anchors into a real block's rotation.
+        let sourceMesoID = session.meso?.persistentModelID
+        let sourceDayLabel = session.dayLabel
+
+        for candidate in future {
+            guard candidate.meso?.persistentModelID == sourceMesoID else { continue }
+            guard candidate.dayLabel == sourceDayLabel else { continue }
+            guard let item = matchingItem(in: candidate) else { continue }
+            // Wave read from the matched ITEM, symmetric with `sourceItem.waveRaw`.
+            guard item.waveRaw?.lowercased() == sourceWave else { continue }
+            return item
+        }
+        return nil
     }
 
     // MARK: - Write-back to already-materialized future sessions (Cut 3)
