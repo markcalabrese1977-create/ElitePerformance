@@ -57,6 +57,7 @@ struct ElitePerformanceApp: App {
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
             Week6UpperBCleanupMigration.runIfNeeded(in: context)
+            LegsAWaveRestoreMigration.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
