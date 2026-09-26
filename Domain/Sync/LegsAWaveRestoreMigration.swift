@@ -32,8 +32,8 @@ import SwiftData
 /// is retried on the next launch.
 enum LegsAWaveRestoreMigration {
 
-    /// Flip to `false` only after the dry-run log has been reviewed on-device.
-    private static let dryRun = true
+    /// Dry-run log reviewed and verified on-device 2026-09-26; now live.
+    private static let dryRun = false
 
     private static let completionKey = "legsAWaveRestoreMigration.v1.completed"
 
