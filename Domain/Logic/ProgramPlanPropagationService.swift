@@ -21,6 +21,15 @@ struct ProgramPlanPropagationService {
         from programSession: Session,
         in context: ModelContext
     ) {
+        // Wave-based blocks are never valid targets: the copy below rewrites
+        // `waveRaw` and the whole rep/RIR/set prescription, which flattens a DUP
+        // block's B and C weeks into its A week. Defence in depth — the Program
+        // tab also forces its propagation toggle off on these blocks.
+        guard !WavePrescriptionGuard.isWaveBasedBlock(programSession) else {
+            print("⛔️ applyPlanEditsForward skipped: wave-based block, plan edits stay on this session.")
+            return
+        }
+
         let today = Calendar.current.startOfDay(for: Date())
         let sourceSessionId = programSession.id
         let targetWeekday = Calendar.current.component(.weekday, from: programSession.date)

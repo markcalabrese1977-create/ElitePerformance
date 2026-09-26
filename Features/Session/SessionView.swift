@@ -1835,6 +1835,14 @@ final class SessionScreenViewModel: ObservableObject {
     }
     
     func propagateAddedExerciseForward(exerciseId: String, context: ModelContext) {
+        // The new item below is built from the source item's prescription, wave
+        // included. On a wave-based block that injects this week's wave into every
+        // other week of the day type, so the added exercise stays here only.
+        guard !WavePrescriptionGuard.isWaveBasedBlock(session) else {
+            print("⛔️ propagateAddedExerciseForward skipped: wave-based block.")
+            return
+        }
+
         guard let sourceItem = session.items.sorted(by: { $0.order < $1.order }).last(where: { $0.exerciseId == exerciseId }) else {
             return
         }

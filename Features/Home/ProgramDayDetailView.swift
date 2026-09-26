@@ -28,6 +28,24 @@ struct ProgramDayDetailView: View {
         session.items.sorted { $0.order < $1.order }
     }
 
+    /// True when this session's block undulates by wave (DUP A/B/C).
+    ///
+    /// Meso-wide propagation copies the whole prescription across sessions of the
+    /// same day type, which on a wave-based block overwrites the B and C weeks
+    /// with the A week's numbers. On such a block propagation is forced off.
+    private var isWaveBasedBlock: Bool {
+        WavePrescriptionGuard.isWaveBasedBlock(session)
+    }
+
+    /// The propagation toggle's effective value.
+    ///
+    /// Reads `false` on a wave-based block regardless of the stored `@State`, so a
+    /// value left over from a previously-viewed non-wave session can never leak a
+    /// propagating write into a DUP block.
+    private var propagatesToFutureSessions: Bool {
+        !isWaveBasedBlock && propagateChangesToFutureSessions
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -195,6 +213,22 @@ struct ProgramDayDetailView: View {
                                 }
                                 .toggleStyle(.switch)
                                 .padding(.top, 4)
+                                .disabled(isWaveBasedBlock)
+                                .onAppear {
+                                    // Render the switch in the state that actually
+                                    // applies. `propagatesToFutureSessions` already
+                                    // forces the behaviour off; this keeps the control
+                                    // from showing ON-but-greyed and implying otherwise.
+                                    if isWaveBasedBlock {
+                                        propagateChangesToFutureSessions = false
+                                    }
+                                }
+
+                                if isWaveBasedBlock {
+                                    Text("Changes apply to this session only for wave-based programs.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
             }
             .padding(.vertical, 4)
         }
@@ -492,7 +526,7 @@ struct ProgramDayDetailView: View {
 
         session.dayLabel = trimmed
 
-        if propagateChangesToFutureSessions {
+        if propagatesToFutureSessions {
             let today = Calendar.current.startOfDay(for: Date())
             let targetWeekday = Calendar.current.component(.weekday, from: session.date)
 
@@ -579,7 +613,7 @@ struct ProgramDayDetailView: View {
 
         session.items.append(newItem)
 
-        if propagateChangesToFutureSessions {
+        if propagatesToFutureSessions {
                     ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
                 }
 
@@ -619,7 +653,7 @@ struct ProgramDayDetailView: View {
             item.plannedLoadsBySet = Array(repeating: recentLoad, count: item.plannedLoadsBySet.count)
         }
 
-        if propagateChangesToFutureSessions {
+        if propagatesToFutureSessions {
             ExerciseSwapPropagationService.apply(
                 fromExerciseId: fromExerciseId,
                 toExerciseId: catalogExercise.id,
@@ -646,7 +680,7 @@ struct ProgramDayDetailView: View {
         }
 
         // ✅ NEW: propagate program edits forward into future planned sessions
-        if propagateChangesToFutureSessions {
+        if propagatesToFutureSessions {
                     ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
                 }
 
@@ -671,7 +705,7 @@ struct ProgramDayDetailView: View {
             sessionItem.order = idx + 1
         }
 
-        if propagateChangesToFutureSessions {
+        if propagatesToFutureSessions {
             ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
         }
 
@@ -728,6 +762,15 @@ struct ProgramDayDetailView: View {
     /// Copies PLAN fields only (sets / reps / RIR / suggested load / per-set plan / DUP prescription metadata)
     /// and does NOT touch logged Actuals.
     private func applyPlanChangesToBlock() {
+        // Copies the full prescription (waveRaw, rep/RIR/set ranges, per-set arrays)
+        // onto every other session of this day type — which on a wave-based block
+        // overwrites the B and C weeks with this week's wave.
+        guard !isWaveBasedBlock else {
+            print("⛔️ applyPlanChangesToBlock skipped: wave-based block.")
+            presentFeedback("Changes apply to this session only for wave-based programs.")
+            return
+        }
+
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         // Day-type identity, not calendar weekday — a session's weekday can shift
