@@ -15,8 +15,6 @@
 		3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */; };
 		4935C5EEE6864668BB05A199 /* CoachingEngineGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */; };
 		7920EC09B73B4EB3AAF3086E /* LoadWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */; };
-		D5AA00082F99900800AA0008 /* CoachMessageLandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */; };
-		D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */; };
 		88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */; };
 		D503127F2F12BE7800980F64 /* AddExerciseSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */; };
 		D51A8C0A2FAE614A00127E79 /* E1RMCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51A8C092FAE614800127E79 /* E1RMCalculator.swift */; };
@@ -55,6 +53,8 @@
 		D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58618272ECCA95F006EF818 /* ProgramCatalog.swift */; };
 		D588C08A2FE3670400B019A7 /* MechanicalLoadSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */; };
 		D588C08C2FE3670400B019A8 /* MechanicalLoadProjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */; };
+		D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */; };
+		D5AA00082F99900800AA0008 /* CoachMessageLandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */; };
 		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */; };
@@ -115,8 +115,6 @@
 		5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvariantTests.swift; sourceTree = "<group>"; };
 		9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestOpenQuestions.swift; sourceTree = "<group>"; };
 		B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadWriteTests.swift; sourceTree = "<group>"; };
-		D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessageLandingTests.swift; sourceTree = "<group>"; };
-		D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerLetterTargetSelectionTests.swift; sourceTree = "<group>"; };
 		D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyHarnessTests.swift; sourceTree = "<group>"; };
 		D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExerciseSheet.swift; sourceTree = "<group>"; };
 		D51A8C092FAE614800127E79 /* E1RMCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculator.swift; sourceTree = "<group>"; };
@@ -154,6 +152,8 @@
 		D58618272ECCA95F006EF818 /* ProgramCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramCatalog.swift; sourceTree = "<group>"; };
 		D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadSharedStore.swift; sourceTree = "<group>"; };
 		D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadProjector.swift; sourceTree = "<group>"; };
+		D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerLetterTargetSelectionTests.swift; sourceTree = "<group>"; };
+		D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessageLandingTests.swift; sourceTree = "<group>"; };
 		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift; sourceTree = "<group>"; };
@@ -558,6 +558,7 @@
 				D5E293192EC4102800034D78 /* Sources */,
 				D5E2931A2EC4102800034D78 /* Frameworks */,
 				D5E2931B2EC4102800034D78 /* Resources */,
+				D50757AF3067467600C79BFC /* Stamp Build Info */,
 			);
 			buildRules = (
 			);
@@ -659,6 +660,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D50757AF3067467600C79BFC /* Stamp Build Info */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp Build Info";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/scripts/stamp_build_info.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D5E293192EC4102800034D78 /* Sources */ = {
@@ -900,6 +923,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ElitePerformance/Info.plist;
@@ -952,6 +976,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ElitePerformance/Info.plist;
