@@ -31,7 +31,6 @@
 		D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */; };
 		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
-		D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */; };
 		D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
 		D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020A2F43D6E000908F53 /* ProgramState.swift */; };
@@ -90,6 +89,7 @@
 		D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F582FB895AF00C9E38C /* Notifications.swift */; };
 		D5EC0F5B2FB8B97500C9E38C /* LoadProjectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */; };
 		D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */; };
+		D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */; };
 		E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */; };
 		F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */; };
 		F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */; };
@@ -132,7 +132,6 @@
 		D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveAwareComparisonEngine.swift; sourceTree = "<group>"; };
 		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
-		D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavePrescriptionGuard.swift; sourceTree = "<group>"; };
 		D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramApplicationService.swift; sourceTree = "<group>"; };
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
 		D55002082F43D6A100908F53 /* MesoIndexBackfillEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoIndexBackfillEngine.swift; sourceTree = "<group>"; };
@@ -193,6 +192,7 @@
 		D5EC0F582FB895AF00C9E38C /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProjectionService.swift; sourceTree = "<group>"; };
 		D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceProgramPickerView.swift; sourceTree = "<group>"; };
+		D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavePrescriptionGuard.swift; sourceTree = "<group>"; };
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
