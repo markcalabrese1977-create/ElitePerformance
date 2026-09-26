@@ -7,6 +7,10 @@ struct ElitePerformanceApp: App {
     private let sharedModelContainer: ModelContainer
 
     init() {
+        // First line of the launch log, before any store work — so a console or
+        // device log always opens with which build produced everything below it.
+        print("ℹ️ \(BuildInfo.logLine)")
+
         let schema = Schema([
             User.self,
             ProgramState.self,

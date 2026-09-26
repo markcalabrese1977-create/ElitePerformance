@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import UIKit
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
@@ -20,6 +21,9 @@ struct SettingsView: View {
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
     @State private var showMesoGenerationAlert = false
+
+    // MARK: - About
+    @State private var didCopyBuildInfo = false
     
 
     var body: some View {
@@ -236,6 +240,46 @@ struct SettingsView: View {
                     Text("JSON backup exports app state, meso blocks, sessions, history, and notes. CSV exports completed sessions only in sets_v1 format.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            // MARK: - About
+            // Tap to copy, so a bug report can carry the exact build without the
+            // user retyping a git hash.
+            Section("About") {
+                Button {
+                    UIPasteboard.general.string = BuildInfo.description
+                    withAnimation { didCopyBuildInfo = true }
+                } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(BuildInfo.description)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 8)
+                        if didCopyBuildInfo {
+                            Label("Copied", systemImage: "checkmark")
+                                .font(.caption2)
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(.secondary)
+                                .transition(.opacity)
+                        } else {
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Build information")
+                .accessibilityValue(BuildInfo.description)
+                .accessibilityHint("Double tap to copy")
+                .onChange(of: didCopyBuildInfo) { _, copied in
+                    guard copied else { return }
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        withAnimation { didCopyBuildInfo = false }
+                    }
                 }
             }
         }
