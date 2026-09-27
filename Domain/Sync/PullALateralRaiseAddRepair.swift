@@ -31,8 +31,8 @@ import SwiftData
 /// actually succeeds, so a dry or failed run retries on the next launch.
 enum PullALateralRaiseAddRepair {
 
-    /// Flip to `false` only after the dry-run log has been reviewed on-device.
-    private static let dryRun = true
+    /// Dry-run log reviewed and verified on-device 2026-09-27; now live.
+    private static let dryRun = false
 
     private static let completionKey = "pullALateralRaiseAddRepair.v1.completed"
 
