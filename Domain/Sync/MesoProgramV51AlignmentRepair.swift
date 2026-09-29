@@ -55,8 +55,8 @@ import SwiftData
 /// so a dry or failed run retries on the next launch.
 enum MesoProgramV51AlignmentRepair {
 
-    /// Flip to `false` only after the dry-run log has been reviewed on-device.
-    private static let dryRun = true
+    /// Dry run reviewed on-device 2026-09-29: 131 writes, padded RIR tails preserved.
+    private static let dryRun = false
 
     private static let completionKey = "mesoProgramV51AlignmentRepair.v1.completed"
 
