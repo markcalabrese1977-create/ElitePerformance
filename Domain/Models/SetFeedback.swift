@@ -66,6 +66,26 @@ enum LoadOverrideReason: String, Codable, CaseIterable {
         }
     }
 
+    /// Whether this reason marks the session's load as a TEMPORARY or DELIBERATE
+    /// reduction — i.e. the load lifted today understates what the lifter can do.
+    ///
+    /// When true, a qualifying performance at that reduced load must not earn a
+    /// bump: hitting the top of the range on a fatigue-cut or deload load says
+    /// nothing about readiness to progress the real plan.
+    ///
+    ///  - jointTenderness     → true  (body signal forced the load down)
+    ///  - generalFatigue      → true  (systemic fatigue forced the load down)
+    ///  - deliberateDeload    → true  (programmed reduction; planned light day)
+    ///  - equipmentConstraint → false (the rack/dumbbell rung dictated the number,
+    ///                                 not the lifter's state — the performance at
+    ///                                 that load is a genuine reading)
+    var suppressesEarnedProgression: Bool {
+        switch self {
+        case .jointTenderness, .generalFatigue, .deliberateDeload: return true
+        case .equipmentConstraint: return false
+        }
+    }
+
     var coachNote: String {
         switch self {
         case .jointTenderness:

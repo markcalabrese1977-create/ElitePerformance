@@ -149,8 +149,34 @@ struct PlanMemoryEngine {
                 customExercises: customExercises
             )
 
+            // This is the EMPTY-TARGET SEED path: a target that already carried a
+            // plan was routed to propagateEarnedBumpToMaterializedItem above and
+            // `continue`d, so `isPlanEffectivelyEmpty(targetItem)` was true on
+            // entry. (It is NOT true here any more — the carry-forward above has
+            // already written sourceItem.suggestedLoad into targetItem, so reading
+            // targetItem.suggestedLoad at this point tells you nothing about what
+            // the target originally held.)
+            //
+            // Floor cap — the same rule as CoachingEngine.qualifyingBump. project()
+            // returns the e1RM floor AS its suggestedLoad whenever the floor wins
+            // (LoadProjectionService :386), and that floor is derived from all-time,
+            // cross-block, cross-letter history, so it can sit far above the most
+            // recent working load. On this path the projection is the only writer
+            // whenever recommend() declines to return a load — a pain flag, or no
+            // logged actuals, both of which are ordinary UNFLAGGED sessions — so an
+            // uncapped floor would seed e.g. 250 off a 180 session. Never seed above
+            // the last working load + one increment.
+            //
+            // lastLoad is nil only on project()'s early exits, where no prior
+            // working load was resolved at all — nothing to step off, nothing to cap.
             if let projection = projection, projection.suggestedLoad > 0 {
-                let finalLoad = min(projection.suggestedLoad, sourceItem.suggestedLoad * 2.0)
+                let floorCapped: Double = {
+                    guard let lastLoad = projection.lastLoad, lastLoad > 0 else {
+                        return projection.suggestedLoad
+                    }
+                    return min(projection.suggestedLoad, lastLoad + loadIncrement)
+                }()
+                let finalLoad = min(floorCapped, sourceItem.suggestedLoad * 2.0)
                 targetItem.suggestedLoad = finalLoad
                 targetItem.plannedLoadsBySet = Array(
                     repeating: finalLoad,
@@ -358,6 +384,10 @@ struct PlanMemoryEngine {
     ) {
         guard progressionEnabled else { return }
         guard !targetItem.planEdited else { return }                       // preserve user edit
+        // Flagged source: a temporarily/deliberately reduced load never earns a
+        // write-back. CoachingEngine RULE 4b already returns a nil load here, so
+        // this is belt-and-braces — it also covers any non-bump recommendation.
+        if sourceItem.loadOverrideReason?.suppressesEarnedProgression == true { return }
         guard targetItem.waveRaw?.lowercased() != "deload" else { return } // deload holds
         if ExerciseCatalog.isBodyweight(exerciseId: targetItem.exerciseId, customExercises: customExercises) {
             return                                                          // BW never takes a numeric bump

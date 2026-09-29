@@ -336,10 +336,16 @@ struct CoachingEngine {
         // Over-performed: every primary set two or more reps beyond the top.
         let overPerformed = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax + 2 }
 
-        // Bump sizing — a qualifying bump ALWAYS raises by at least one increment.
-        // The e1rm floor (Cut 1) may only RAISE the bump above baseLoad + increment,
-        // never reduce it below (fixes the Farmer-Carry no-move bug, where a floor
-        // ≤ baseLoad collapsed the "increase earned" bump to no increase). 2×-capped.
+        // Bump sizing — a qualifying bump ALWAYS raises by exactly one increment.
+        //
+        // The e1rm floor (Cut 1) may RAISE a bump up to baseLoad + increment (it
+        // still fixes the Farmer-Carry no-move bug, where a floor ≤ baseLoad
+        // collapsed the "increase earned" bump to no increase) but it may never
+        // push PAST that ceiling. The floor is derived from historical e1RM, which
+        // can sit far above what was just lifted: leg_extension at 180 with a ~225
+        // history projected a 220 "next week", a 40 kg jump off a 180 session. An
+        // earned bump is a reward for today's performance, so today's load is what
+        // it steps off — conservative by default. 2×-capped as well.
         //
         // Increment resolution guarantees a NONZERO increment on a qualifying bump:
         // prefer the user's minLoadIncrement; else the cluster/loadStep increment;
@@ -355,10 +361,10 @@ struct CoachingEngine {
             return 2.5
         }()
         func qualifyingBump() -> Double {
-            let incrementedLoad = baseLoad + bumpIncrement                       // guaranteed minimum raise
+            let ceiling = baseLoad + bumpIncrement                                // one increment, no more
             let roundedFloor = e1rmFloorLoad.map { E1RMCalculator.rounded($0, increment: bumpIncrement) }
-            let bumpTarget = max(incrementedLoad, roundedFloor ?? incrementedLoad) // floor can only raise
-            return min(bumpTarget, baseLoad * 2.0)                                // RULE 6: 2× cap preserved
+            let bumpTarget = max(ceiling, roundedFloor ?? ceiling)                // floor can only raise
+            return min(bumpTarget, ceiling, baseLoad * 2.0)                       // capped at the ceiling; RULE 6 2× cap preserved
         }
         let pumpNote: String = {
             switch avgPump {
@@ -380,6 +386,24 @@ struct CoachingEngine {
             }
             let msg = "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        }
+
+        // RULE 4b — Flagged load: the source session's load was TEMPORARILY or
+        // DELIBERATELY reduced (joint tenderness, general fatigue, programmed
+        // deload). Clearing the top of the range at that reduced load says nothing
+        // about readiness to progress the real plan, so no bump is earned and
+        // nothing is written — nextSuggestedLoad is nil so the already-planned
+        // load is left exactly as it stands. equipmentConstraint is NOT suppressed:
+        // the rack rung dictated the number, not the lifter's state.
+        //
+        // Placed after RULE 4 so a genuine under-performance at the reduced load
+        // still holds or reduces normally; only the upward paths are blocked.
+        if let overrideReason = item.loadOverrideReason,
+           overrideReason.suppressesEarnedProgression,
+           rirOnTarget,
+           allSetsAtTop || overPerformed {
+            let msg = "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase."
+            return CoachingRecommendation(message: msg, nextSuggestedLoad: nil)
         }
 
         // RULE 5 — Progression (double progression). Reached only when safe, complete,
