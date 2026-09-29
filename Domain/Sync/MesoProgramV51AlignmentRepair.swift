@@ -7,7 +7,10 @@ import SwiftData
 /// Five independent edits, applied to the single active non-maintenance block:
 ///
 ///  1. RIR changes on eight (day, exercise) pairs, weeks 1-9 (the deload week is
-///     deliberately untouched).
+///     deliberately untouched). `plannedRIRsBySet` is rewritten only across its live
+///     prefix — indices `0..<targetSets` — so an item carrying a padded tail from an
+///     earlier set-count reduction (e.g. [2, 2, 2, 0] with targetSets 3) keeps that
+///     trailing 0 instead of having it revived as a real RIR value.
 ///  2. Three exercise ADDs, built by calling `DUPSessionMaterializer.makeSessionItems`
 ///     with a synthetic single-exercise day — the same approach as
 ///     MesoProgramAlignmentRepair and PullALateralRaiseAddRepair — so `waveRaw`, the
@@ -349,12 +352,21 @@ enum MesoProgramV51AlignmentRepair {
 
                         let newRIR = change.rirMax          // materializer rule: targetRIR = targetRIRMax
                         let beforeRIRs = item.plannedRIRsBySet
-                        let afterRIRs = Array(repeating: newRIR, count: beforeRIRs.count)
+
+                        // Only the first `targetSets` entries are live sets. Some items carry a
+                        // padded tail (e.g. [2, 2, 2, 0] with targetSets 3) left behind by an
+                        // earlier set-count reduction; rewriting the whole array would revive
+                        // that trailing slot as a real RIR value. Write the live prefix and
+                        // leave the tail exactly as found.
+                        let liveCount = min(max(0, item.targetSets), beforeRIRs.count)
+                        var afterRIRs = beforeRIRs
+                        for index in 0..<liveCount { afterRIRs[index] = newRIR }
+                        let padded = beforeRIRs.count > liveCount
 
                         lines.append("      ~ \(change.exerciseId)   [step 1 · RIR]")
                         lines.append("          targetRIRMin/Max   \(opt(item.targetRIRMin))/\(opt(item.targetRIRMax)) → \(change.rirMin)/\(change.rirMax)")
                         lines.append("          targetRIR          \(item.targetRIR) → \(newRIR)")
-                        lines.append("          plannedRIRsBySet   \(beforeRIRs) → \(afterRIRs)")
+                        lines.append("          plannedRIRsBySet   \(beforeRIRs) → \(afterRIRs)\(padded ? "   [targetSets \(item.targetSets); wrote indices 0..<\(liveCount), padded tail preserved]" : "")\(afterRIRs == beforeRIRs ? "   [no-op on the array]" : "")")
 
                         writes.append {
                             item.targetRIRMin = change.rirMin
