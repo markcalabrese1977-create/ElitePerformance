@@ -198,16 +198,6 @@
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D5839A492FDF0A330074635A /* Exceptions for "ElitePerformance" folder in "ElitePerformance" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = D5E2931C2EC4102800034D78 /* ElitePerformance */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D536A6312EF4790E0036BB4E /* Components */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -251,9 +241,6 @@
 		};
 		D5E2931F2EC4102800034D78 /* ElitePerformance */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				D5839A492FDF0A330074635A /* Exceptions for "ElitePerformance" folder in "ElitePerformance" target */,
-			);
 			path = ElitePerformance;
 			sourceTree = "<group>";
 		};
@@ -935,11 +922,9 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ElitePerformance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and writes your mechanical training load to Apple Health after each session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -988,11 +973,9 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ElitePerformance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) to attach them to your session recap.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and writes your mechanical training load to Apple Health after each session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
