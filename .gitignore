@@ -24,3 +24,6 @@ fastlane/test_output
 
 # Secrets (if you ever add these)
 *.env
+
+# Backup exports (personal health data) - never commit
+ElitePerformance_Backup*.json
