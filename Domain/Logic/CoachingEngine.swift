@@ -254,9 +254,15 @@ struct CoachingEngine {
             let hasDisruption = flags.contains(SetFeedback.disruption.rawValue)
             let msg: String
             if hasSoreness && hasDisruption {
-                msg = "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase."
+                // Exempt (fixed-load) variants drop the progression language; non-exempt
+                // text is byte-identical.
+                msg = isProgressionExempt
+                    ? "Soreness and disruption were flagged this session. Hold this load and focus on quality."
+                    : "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase."
             } else if hasSoreness {
-                msg = "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression."
+                msg = isProgressionExempt
+                    ? "Soreness was flagged this session. Hold this load."
+                    : "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression."
             } else {
                 msg = "Disruption was flagged this session. This wasn't a reliable performance indicator — hold this load and reassess next session."
             }
@@ -265,7 +271,9 @@ struct CoachingEngine {
 
         // RULE 1c — Safety: failure + big rep crash (minRIR ≤ 0 AND repDrop ≥ 3) → hold [was path C]
         if let minRIR = minRIR, minRIR <= 0, repDrop >= 3 {
-            let msg = "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase."
+            let msg = isProgressionExempt
+                ? "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set."
+                : "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
@@ -291,7 +299,10 @@ struct CoachingEngine {
                 // only the forward-looking number is gated on a target existing.
                 let observed = "Load dropped from \(Int(maxLoad)) to \(Int(minLoad)) across your working sets — you opened above your repeatable baseline."
                 let msg: String
-                if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+                if isProgressionExempt {
+                    // Fixed-load: no "Next Week X starts at N" promise; observed facts only.
+                    msg = "\(observed) Load is fixed on this exercise: change it yourself when you're ready."
+                } else if let landing = landingPhrase(for: item, target: carryForwardTarget) {
                     msg = "\(observed) \(landing) starts at \(Int(minLoad)). Build from there."
                 } else {
                     msg = "\(observed) \(carriesForwardClause)"
@@ -385,7 +396,9 @@ struct CoachingEngine {
                 let msg = "Reps came in well under the bottom of the range across multiple sets. Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: reduced)
             }
-            let msg = "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
+            let msg = isProgressionExempt
+                ? "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range."
+                : "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
@@ -403,7 +416,9 @@ struct CoachingEngine {
            overrideReason.suppressesEarnedProgression,
            rirOnTarget,
            allSetsAtTop || overPerformed {
-            let msg = "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase."
+            let msg = isProgressionExempt
+                ? "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds."
+                : "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: nil)
         }
 
@@ -455,12 +470,16 @@ struct CoachingEngine {
         //     set at repMax → HOLD and climb reps toward the top next session. This is
         //     the key behavior change — partial progress no longer bumps [was path 5].
         if bestReps >= repMin && rirOnTarget {
-            let msg = "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
+            let msg = isProgressionExempt
+                ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when your elbow reads clean."
+                : "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 
         // 5d) Not clean (in range but off-target RIR) → hold [was catch-all G]
-        let msg = "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up."
+        let msg = isProgressionExempt
+            ? "Effort was off the target. Hold this load; it is fixed on this exercise, so change it yourself when you're ready."
+            : "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up."
         return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
     }
 

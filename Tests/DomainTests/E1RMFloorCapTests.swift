@@ -451,7 +451,12 @@ final class FixedLoadExemptTests: XCTestCase {
             let a = CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists)
             let b = CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
                                              isProgressionExempt: true)
-            XCTAssertEqual(a?.message, b?.message, "\(name): message must be unchanged")
+            // Behavior (the load) is always unchanged. The wording is unchanged too, except on
+            // the paths whose exempt text drops progression language on purpose.
+            let rewordedForExempt: Set<String> = ["soreness", "in range, not top", "off-target RIR"]
+            if !rewordedForExempt.contains(name) {
+                XCTAssertEqual(a?.message, b?.message, "\(name): message must be unchanged")
+            }
             XCTAssertEqual(a?.nextSuggestedLoad, b?.nextSuggestedLoad, "\(name): load must be unchanged")
         }
     }
@@ -637,4 +642,93 @@ final class FixedLoadExemptTests: XCTestCase {
         XCTAssertEqual(profile.exemptExerciseIds, ["cable_tricep_rope_pushdown"],
                        "a backup without the field restores to the default, not empty")
     }
+
+    // MARK: Coach text: exempt variants drop progression language
+
+    private func scenarios() -> [(name: String, item: SessionItem)] {
+        func base(_ reps: [Int] = [12, 12, 12]) -> SessionItem { item(pushdown, load: 50, reps: reps) }
+        var out: [(String, SessionItem)] = []
+
+        let deload = base(); deload.waveRaw = "deload"
+        out.append(("deload", deload))
+
+        out.append(("pain", { let i = base(); i.setFeedbackBySet = [SetFeedback.pain.rawValue, "", ""]; return i }()))
+        out.append(("soreness", { let i = base(); i.setFeedbackBySet = [SetFeedback.soreness.rawValue, "", ""]; return i }()))
+        out.append(("disruption", { let i = base(); i.setFeedbackBySet = [SetFeedback.disruption.rawValue, "", ""]; return i }()))
+        out.append(("soreness+disruption", { let i = base()
+            i.setFeedbackBySet = [SetFeedback.soreness.rawValue, SetFeedback.disruption.rawValue, ""]; return i }()))
+
+        out.append(("failure + rep crash", { let i = base([12, 10, 8]); i.actualRIRs = [0, 0, 0]; return i }()))
+        out.append(("intra-session load drop", { let i = base(); i.actualLoads = [50, 50, 40]; return i }()))
+
+        out.append(("incomplete: set 1 hard", { let i = base([12]); i.targetSets = 3; i.actualRIRs = [0]; return i }()))
+        out.append(("incomplete: set 1 short", { let i = base([8]); i.targetSets = 3; return i }()))
+        out.append(("incomplete: 2 sets in", { let i = base([12, 12]); i.targetSets = 3; return i }()))
+
+        out.append(("under range: hold", base([9, 9, 9])))
+        out.append(("under range: reduce", base([6, 6, 6])))
+        out.append(("flagged override at top", { let i = base()
+            i.loadOverrideReasonRaw = LoadOverrideReason.generalFatigue.rawValue; return i }()))
+        out.append(("in range, not top", base([11, 11, 11])))
+        out.append(("off-target RIR", { let i = base(); i.actualRIRs = [0, 0, 0]; return i }()))
+        out.append(("top of range (4c)", base()))
+        out.append(("over-performed (4c)", base([14, 14, 14])))
+        return out
+    }
+
+    /// For an exempt item NO coach string on ANY path promises progression or an upward
+    /// load. (The downward re-baseline/reduce messages state the lowered load that really
+    /// is written — that is not a next-load promise to go up, so it is allowed.)
+    func test_exempt_noCoachStringOnAnyPathPromisesProgression() throws {
+        let banned = ["earn", "increase", "moving up", "move up", "next week", "next time", "starts at"]
+        var checked = 0
+        for (name, i) in scenarios() {
+            guard let rec = CoachingEngine.recommend(
+                for: i, minLoadIncrement: 5, e1rmFloorLoad: 100, carryForwardTarget: .exists,
+                isProgressionExempt: true) else { continue }   // nil = no string at all
+            checked += 1
+            let lower = rec.message.lowercased()
+            for word in banned {
+                XCTAssertFalse(lower.contains(word), "\(name): exempt text contains \"\(word)\": \(rec.message)")
+            }
+            if let next = rec.nextSuggestedLoad {
+                let lifted = i.actualLoads.max() ?? 0
+                XCTAssertLessThanOrEqual(next, lifted, "\(name): exempt item must never be told an upward load")
+            }
+        }
+        XCTAssertGreaterThanOrEqual(checked, 14, "the sweep must actually exercise the paths")
+    }
+
+    func test_exempt_inRangeNotTop_usesTheSpecifiedText() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(
+            for: item(pushdown, load: 50, reps: [11, 11, 11]), minLoadIncrement: 5,
+            carryForwardTarget: .exists, isProgressionExempt: true))
+        XCTAssertEqual(rec.message,
+            "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when your elbow reads clean.")
+        XCTAssertEqual(rec.nextSuggestedLoad, 50, "behavior unchanged: still a hold")
+    }
+
+    /// Non-exempt wording is byte-identical on every path whose exempt text was reworded.
+    func test_nonExempt_reworkedPaths_textByteIdentical() throws {
+        func msg(_ i: SessionItem) throws -> String {
+            try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists)).message
+        }
+        let byName = Dictionary(uniqueKeysWithValues: scenarios().map { ($0.name, $0.item) })
+        XCTAssertEqual(try msg(byName["in range, not top"]!),
+            "On target and in range — hold 50.0. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session.")
+        XCTAssertEqual(try msg(byName["off-target RIR"]!),
+            "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up.")
+        XCTAssertEqual(try msg(byName["soreness+disruption"]!),
+            "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase.")
+        XCTAssertEqual(try msg(byName["soreness"]!),
+            "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression.")
+        XCTAssertEqual(try msg(byName["failure + rep crash"]!),
+            "You hit failure and reps fell from 12 to 8 — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase.")
+        XCTAssertEqual(try msg(byName["under range: hold"]!),
+            "Your best first 3 working sets came in below the planned range (10–12 reps). Hold this load and focus on hitting the bottom of the range before considering an increase.")
+        XCTAssertEqual(try msg(byName["flagged override at top"]!),
+            "This session was flagged as general fatigue, so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase.")
+        XCTAssertTrue(try msg(byName["intra-session load drop"]!).contains("Next Week A starts at 40. Build from there."))
+    }
 }
+
