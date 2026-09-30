@@ -453,7 +453,7 @@ final class FixedLoadExemptTests: XCTestCase {
                                              isProgressionExempt: true)
             // Behavior (the load) is always unchanged. The wording is unchanged too, except on
             // the paths whose exempt text drops progression language on purpose.
-            let rewordedForExempt: Set<String> = ["soreness", "in range, not top", "off-target RIR"]
+            let rewordedForExempt: Set<String> = ["soreness", "in range, not top", "off-target RIR", "under-target hold", "under-target reduce"]  // both [8,8,8] and [6,6,6] land on the reduce path
             if !rewordedForExempt.contains(name) {
                 XCTAssertEqual(a?.message, b?.message, "\(name): message must be unchanged")
             }
@@ -676,9 +676,8 @@ final class FixedLoadExemptTests: XCTestCase {
         return out
     }
 
-    /// For an exempt item NO coach string on ANY path promises progression or an upward
-    /// load. (The downward re-baseline/reduce messages state the lowered load that really
-    /// is written — that is not a next-load promise to go up, so it is allowed.)
+    /// For an exempt item NO coach string on ANY path promises progression or states a
+    /// next-load number (the reduce path included — see the dedicated test below).
     func test_exempt_noCoachStringOnAnyPathPromisesProgression() throws {
         let banned = ["earn", "increase", "moving up", "move up", "next week", "next time", "starts at"]
         var checked = 0
@@ -694,6 +693,17 @@ final class FixedLoadExemptTests: XCTestCase {
             if let next = rec.nextSuggestedLoad {
                 let lifted = i.actualLoads.max() ?? 0
                 XCTAssertLessThanOrEqual(next, lifted, "\(name): exempt item must never be told an upward load")
+                // No allowance for a next-load number on any path (incl. reduce): the written
+                // load never appears in the text, as "47.5" or as a bare integer.
+                // (A load that equals one actually lifted may be restated as an OBSERVED fact,
+                // e.g. "Load dropped from 50 to 40"; only a newly computed load is a next-load
+                // number.)
+                if !i.actualLoads.contains(next) {
+                    XCTAssertFalse(rec.message.contains(String(format: "%.1f", next)),
+                                   "\(name): exempt text states the next load: \(rec.message)")
+                    XCTAssertFalse(rec.message.contains(String(Int(next))),
+                                   "\(name): exempt text states the next load: \(rec.message)")
+                }
             }
         }
         XCTAssertGreaterThanOrEqual(checked, 14, "the sweep must actually exercise the paths")
@@ -730,5 +740,38 @@ final class FixedLoadExemptTests: XCTestCase {
             "This session was flagged as general fatigue, so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase.")
         XCTAssertTrue(try msg(byName["intra-session load drop"]!).contains("Next Week A starts at 40. Build from there."))
     }
-}
 
+    /// Exempt + reduce path: no load number in the text for ANY target state; "lowered" is
+    /// claimed only when a target exists to receive it. Behavior (the lowered load) is unchanged
+    /// and non-exempt text is untouched.
+    func test_exempt_reducePath_noLoadNumber_claimsOnlyWhatLands() throws {
+        let banned = ["earn", "increase", "moving up", "move up", "next week", "next time", "starts at", "next session"]
+        for target in [CoachingEngine.CarryForwardTarget.exists, .endOfChain, .unresolved] {
+            let i = item(pushdown, load: 50, reps: [6, 6, 6])
+            let rec = try XCTUnwrap(CoachingEngine.recommend(
+                for: i, minLoadIncrement: 2.5, carryForwardTarget: target, isProgressionExempt: true))
+            let lowered = try XCTUnwrap(rec.nextSuggestedLoad, "behavior unchanged: the lowered load is still returned")
+            XCTAssertLessThan(lowered, 50)
+            XCTAssertFalse(rec.message.contains(where: \.isNumber), "\(target): no number at all: \(rec.message)")
+            for word in banned {
+                XCTAssertFalse(rec.message.lowercased().contains(word), "\(target): contains \"\(word)\": \(rec.message)")
+            }
+            if case .exists = target {
+                XCTAssertEqual(rec.message,
+                    "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; the plan is lowered to rebuild in range.")
+            } else {
+                XCTAssertFalse(rec.message.lowercased().contains("lowered"), "\(target): must not claim a lowering: \(rec.message)")
+                XCTAssertEqual(rec.message,
+                    "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; change it yourself if you want to rebuild in range.")
+            }
+        }
+    }
+
+    func test_nonExempt_reduceMessage_byteIdentical() throws {
+        let i = item(pushdown, load: 50, reps: [6, 6, 6])
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 2.5, carryForwardTarget: .exists))
+        XCTAssertEqual(rec.message,
+            "Reps came in well under the bottom of the range across multiple sets. Backing the load down to 47.5 next session to rebuild in range.")
+        XCTAssertEqual(try XCTUnwrap(rec.nextSuggestedLoad), 47.5, accuracy: 0.001)
+    }
+}

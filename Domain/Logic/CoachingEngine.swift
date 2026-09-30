@@ -393,7 +393,20 @@ struct CoachingEngine {
             let badMisses = primaryReps.filter { $0 < (repMin - 1) }.count
             if badMisses >= 2 {
                 let reduced = E1RMCalculator.rounded(baseLoad * 0.95, increment: minLoadIncrement ?? 2.5)
-                let msg = "Reps came in well under the bottom of the range across multiple sets. Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
+                let msg: String
+                if isProgressionExempt {
+                    // Fixed-load: no load number anywhere, and claim only what will land.
+                    // The lowered load is still returned (and written by carry-forward)
+                    // exactly as for any exercise; only the wording depends on whether a
+                    // target exists to receive it.
+                    if case .exists = carryForwardTarget {
+                        msg = "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; the plan is lowered to rebuild in range."
+                    } else {
+                        msg = "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; change it yourself if you want to rebuild in range."
+                    }
+                } else {
+                    msg = "Reps came in well under the bottom of the range across multiple sets. Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
+                }
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: reduced)
             }
             let msg = isProgressionExempt
