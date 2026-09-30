@@ -61,6 +61,44 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "intensifierRaw", "loadOverrideReasonRaw", "title", "subtitle"
     ]
 
+    private static let migrationList: [(String, (ModelContext) -> Void)] = [
+        ("ExerciseNameSnapshotBackfill", { ExerciseNameSnapshotBackfill.runIfNeeded(in: $0) }),
+        ("ExerciseNameSnapshotRepair", { ExerciseNameSnapshotRepair.runIfNeeded(in: $0) }),
+        ("CanonicalExerciseIdMigration", { CanonicalExerciseIdMigration.runIfNeeded(in: $0) }),
+        ("CustomExerciseDedupMigration", { CustomExerciseDedupMigration.runIfNeeded(in: $0) }),
+        ("D5ExerciseIdRepairMigration", { D5ExerciseIdRepairMigration.runIfNeeded(in: $0) }),
+        ("Apr21SessionHistoryRepairMigration", { Apr21SessionHistoryRepairMigration.runIfNeeded(in: $0) }),
+        ("SessionHistoryBlockBackfill", { SessionHistoryBlockBackfill.runIfNeeded(in: $0) }),
+        ("MechanicalLoadRecoveryMigration", { MechanicalLoadRecoveryMigration.runIfNeeded(in: $0) }),
+        ("SessionDayLabelBackfill", { SessionDayLabelBackfill.runIfNeeded(in: $0) }),
+        ("CustomExerciseStoreMigration", { CustomExerciseStoreMigration.runIfNeeded(in: $0) }),
+        ("CustomExerciseUserDefaultsSyncRepair", { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
+        ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
+        ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
+        ("PrescriptionNotesClearMigration", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
+        ("Week6UpperBCleanupMigration", { Week6UpperBCleanupMigration.runIfNeeded(in: $0) })
+    ]
+
+
+    private static let flagOwner: [(String, String)] = [
+        ("ExerciseNameSnapshotBackfill", "exerciseNameSnapshotBackfill.v1.completed"),
+        ("ExerciseNameSnapshotRepair", "exerciseNameSnapshotRepair.v6.completed"),
+        ("CanonicalExerciseIdMigration", "canonicalExerciseIdMigration.v1.completed"),
+        ("CustomExerciseDedupMigration", "customExerciseDedupMigration.v1.completed"),
+        ("D5ExerciseIdRepairMigration", "d5ExerciseIdRepairMigration.v3.completed"),
+        ("Apr21SessionHistoryRepairMigration", "apr21SessionHistoryRepairMigration.v3.completed"),
+        ("SessionHistoryBlockBackfill", "sessionHistoryBlockBackfill.v1.completed"),
+        ("MechanicalLoadRecoveryMigration", "mechanicalLoadRecovery.v1.completed"),
+        ("SessionDayLabelBackfill", "sessionDayLabelBackfill.v1.completed"),
+        ("CustomExerciseStoreMigration", "customExerciseStoreMigration.v1.completed"),
+        ("CustomExerciseUserDefaultsSyncRepair", "customExerciseUserDefaultsSync.v1.completed"),
+        ("MesoBlockIsMaintenanceBackfill", "mesoBlockIsMaintenanceBackfill.v1.completed"),
+        ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
+        ("PrescriptionNotesClearMigration", "prescriptionNotesClear.v1.completed"),
+        ("Week6UpperBCleanupMigration", "week6UpperBCleanupMigration.v1.completed"),
+        ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
+    ]
+
     // MARK: - Container / defaults helpers
 
     private func makeContainer() throws -> ModelContainer {
@@ -351,23 +389,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         log("flags true on host before clearing: \(flagsBefore.count)/\(Self.completionKeys.count)")
         for k in Self.completionKeys { UserDefaults.standard.removeObject(forKey: k) }
 
-        let migrations: [(String, (ModelContext) -> Void)] = [
-            ("ExerciseNameSnapshotBackfill", { ExerciseNameSnapshotBackfill.runIfNeeded(in: $0) }),
-            ("ExerciseNameSnapshotRepair", { ExerciseNameSnapshotRepair.runIfNeeded(in: $0) }),
-            ("CanonicalExerciseIdMigration", { CanonicalExerciseIdMigration.runIfNeeded(in: $0) }),
-            ("CustomExerciseDedupMigration", { CustomExerciseDedupMigration.runIfNeeded(in: $0) }),
-            ("D5ExerciseIdRepairMigration", { D5ExerciseIdRepairMigration.runIfNeeded(in: $0) }),
-            ("Apr21SessionHistoryRepairMigration", { Apr21SessionHistoryRepairMigration.runIfNeeded(in: $0) }),
-            ("SessionHistoryBlockBackfill", { SessionHistoryBlockBackfill.runIfNeeded(in: $0) }),
-            ("MechanicalLoadRecoveryMigration", { MechanicalLoadRecoveryMigration.runIfNeeded(in: $0) }),
-            ("SessionDayLabelBackfill", { SessionDayLabelBackfill.runIfNeeded(in: $0) }),
-            ("CustomExerciseStoreMigration", { CustomExerciseStoreMigration.runIfNeeded(in: $0) }),
-            ("CustomExerciseUserDefaultsSyncRepair", { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
-            ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
-            ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
-            ("PrescriptionNotesClearMigration", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
-            ("Week6UpperBCleanupMigration", { Week6UpperBCleanupMigration.runIfNeeded(in: $0) })
-        ]
+        let migrations = Self.migrationList
         // Same context the app uses for the whole sequence.
         let migCtx = ModelContext(container)
         var prev = export1
@@ -395,6 +417,91 @@ final class BackupRoundTripHarnessTests: XCTestCase {
 
         let groupAfterMig = groupLoadKeys()
         log("group mechanicalLoad.* keys after migrations: \(groupAfterMig.count) (was \(postImportGroup.count - (postImportGroup[sentinelKey] != nil ? 1 : 0)) right after import)")
+    }
+
+    // MARK: - Realistic order: fresh install first launch -> restore -> next launch
+
+    func testFreshInstallThenRestoreOrder() throws {
+        guard let fixturePath = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !fixturePath.isEmpty else {
+            throw XCTSkip("EP_BACKUP_FIXTURE not set")
+        }
+        let fixtureURL = URL(fileURLWithPath: fixturePath)
+
+        let savedDomain = appDomainSnapshot()
+        let savedGroup = groupLoadKeys()
+        defer {
+            restoreAppDomain(savedDomain)
+            restoreGroupLoadKeys(savedGroup)
+            flushReport()
+        }
+
+        // Fresh device: no completion flags, no custom-exercise mirror/legacy keys, no meso.* keys,
+        // no App Group load keys. (All inside the snapshot/restore above.)
+        let freshClear = Self.completionKeys + [
+            "custom_exercises_v2", "custom_exercises_mark_v1", "custom_exercises_angela_v1",
+            "meso.activeStartDateEpoch", "meso.scheduledStartDateEpoch", "meso.promptSnoozeEpoch",
+            "meso.anchorDate", "meso.anchorDayNumber"
+        ]
+        for k in freshClear { UserDefaults.standard.removeObject(forKey: k) }
+        restoreGroupLoadKeys([:])
+
+        log("== REALISTIC ORDER: first launch (empty store) -> restore -> next launch ==")
+        let container = try makeContainer()
+
+        // Phase A: first launch on an empty store.
+        let ctxA = ModelContext(container)
+        for (_, run) in Self.migrationList { run(ctxA) }
+        try? ctxA.save()
+        log("")
+        log("-- FLAG TABLE after first launch on an EMPTY store (nothing to migrate) --")
+        var unsetAfterEmpty: [String] = []
+        for (owner, key) in Self.flagOwner {
+            let on = UserDefaults.standard.bool(forKey: key)
+            if !on { unsetAfterEmpty.append(owner) }
+            log("   \(on ? "SET  " : "unset") \(key)   <- \(owner)")
+        }
+        log("   set=\(Self.completionKeys.count - unsetAfterEmpty.count)/\(Self.completionKeys.count); unset (will still run after restore): \(unsetAfterEmpty)")
+        log("   custom_exercises_v2 present after empty launch: \(UserDefaults.standard.data(forKey: "custom_exercises_v2") != nil)")
+
+        // Phase B: restore the fixture.
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: fixtureURL, modelContainer: container)
+        let importOnly = try exportJSON(container)
+        log("")
+        log("-- after import: \(counts(importOnly))")
+        log("   custom_exercises_v2 present after import: \(UserDefaults.standard.data(forKey: "custom_exercises_v2") != nil)")
+
+        // Phase C: next launch — same migrations, flags as left by phase A.
+        let flagsBeforeC = Self.completionKeys.filter { UserDefaults.standard.bool(forKey: $0) }
+        var prev = importOnly
+        for (name, run) in Self.migrationList {
+            let ctx = ModelContext(container)
+            let domainBefore = appDomainSnapshot()
+            run(ctx)
+            try? ctx.save()
+            let domainAfter = appDomainSnapshot()
+            let changedKeys = Set(domainBefore.keys).union(domainAfter.keys).filter {
+                !((domainBefore[$0] as? NSObject)?.isEqual(domainAfter[$0]) ?? (domainAfter[$0] == nil))
+            }.sorted()
+            let now = try exportJSON(container)
+            let c = Collector()
+            diff(prev, now, path: "", record: nil, key: "", into: c)
+            c.entries = c.entries.filter { !$0.key.hasPrefix("valueChanged\texportedAt") }
+            if !c.entries.isEmpty || !changedKeys.isEmpty {
+                log("-- next launch: \(name): defaults keys changed=\(changedKeys)")
+                render(c, indent: "   ")
+                orderReport(prev, now, label: name)
+            }
+            prev = now
+        }
+        log("")
+        log("-- next launch, cumulative vs import-only export (exportedAt ignored):")
+        let cAll = Collector()
+        diff(importOnly, prev, path: "", record: nil, key: "", into: cAll)
+        cAll.entries = cAll.entries.filter { !$0.key.hasPrefix("valueChanged\texportedAt") }
+        render(cAll, indent: "   ")
+        orderReport(importOnly, prev, label: "cumulative")
+        log("   flags set before next launch=\(flagsBeforeC.count)/16, after=\(Self.completionKeys.filter { UserDefaults.standard.bool(forKey: $0) }.count)/16")
+        log("   group mechanicalLoad.* keys after next launch: \(groupLoadKeys().count)")
     }
 
     private static func dateKey(_ date: Date) -> String {
