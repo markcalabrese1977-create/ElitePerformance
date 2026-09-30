@@ -524,9 +524,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: fixturePath), modelContainer: container)
         let e0 = try exportJSON(container)
 
-        // 1. Default (shipped) behaviour must be a dry run.
-        XCTAssertTrue(PlannedBodyweightSnapshotRepair.dryRun, "shipped default must be dryRun = true")
-        PlannedBodyweightSnapshotRepair.runIfNeeded(in: ModelContext(container))
+        // 1. An explicit dry run must not write.
+        PlannedBodyweightSnapshotRepair.runIfNeeded(in: ModelContext(container), dryRun: true)
         let e1 = try exportJSON(container)
         let cDry = Collector()
         diff(e0, e1, path: "", record: nil, key: "", into: cDry)

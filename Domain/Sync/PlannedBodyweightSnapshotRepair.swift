@@ -24,13 +24,13 @@ import SwiftData
 /// later build can retry). One atomic save; the completion flag is set only after it
 /// succeeds.
 ///
-/// dryRun is ON: the repair logs exactly what it would write, writes nothing and never
-/// sets the flag. Flip `dryRun` to false only after the dry-run log has been reviewed.
+/// dryRun is OFF (verified on device as a dry run first): the repair writes, saves once, and
+/// sets the flag only after the save succeeds. Set `dryRun` to true to get the log only.
 enum PlannedBodyweightSnapshotRepair {
     static let completionKey = "plannedBodyweightSnapshotRepair.v1.completed"
 
-    /// Ship as a dry run. Flip to false after reviewing the log.
-    static let dryRun = true
+    /// Dry run verified on device (9 items, 14 snapshots, no aborts); live.
+    static let dryRun = false
 
     private static let expectedBodyweightCount = 9
     private static let expectedSnapshotCount = 14
