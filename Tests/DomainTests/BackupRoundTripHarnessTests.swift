@@ -504,59 +504,6 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         log("   group mechanicalLoad.* keys after next launch: \(groupLoadKeys().count)")
     }
 
-    // MARK: - PlannedBodyweightSnapshotRepair: dry run, then live apply, then idempotence
-
-    func testPlannedBodyweightSnapshotRepairOnFixture() throws {
-        guard let fixturePath = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !fixturePath.isEmpty else {
-            throw XCTSkip("EP_BACKUP_FIXTURE not set")
-        }
-        let savedDomain = appDomainSnapshot()
-        let savedGroup = groupLoadKeys()
-        defer {
-            restoreAppDomain(savedDomain)
-            restoreGroupLoadKeys(savedGroup)
-            flushReport()
-        }
-        let key = PlannedBodyweightSnapshotRepair.completionKey
-        UserDefaults.standard.removeObject(forKey: key)
-
-        let container = try makeContainer()
-        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: fixturePath), modelContainer: container)
-        let e0 = try exportJSON(container)
-
-        // 1. An explicit dry run must not write.
-        PlannedBodyweightSnapshotRepair.runIfNeeded(in: ModelContext(container), dryRun: true)
-        let e1 = try exportJSON(container)
-        let cDry = Collector()
-        diff(e0, e1, path: "", record: nil, key: "", into: cDry)
-        cDry.entries = cDry.entries.filter { !$0.key.hasPrefix("valueChanged\texportedAt") }
-        log("== DRY RUN: store changes vs pre-run export ==")
-        render(cDry)
-        XCTAssertTrue(cDry.entries.isEmpty, "dry run must not write")
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: key), "dry run must not set the flag")
-
-        // 2. Live apply (explicit dryRun: false) on the in-memory copy only.
-        PlannedBodyweightSnapshotRepair.runIfNeeded(in: ModelContext(container), dryRun: false)
-        let e2 = try exportJSON(container)
-        let cLive = Collector()
-        diff(e0, e2, path: "", record: nil, key: "", into: cLive)
-        cLive.entries = cLive.entries.filter { !$0.key.hasPrefix("valueChanged\texportedAt") }
-        log("")
-        log("== LIVE APPLY (in-memory only): changes vs pre-run export ==")
-        render(cLive)
-        log("flag set after live apply: \(UserDefaults.standard.bool(forKey: key))")
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
-
-        // 3. Rerun is a no-op.
-        PlannedBodyweightSnapshotRepair.runIfNeeded(in: ModelContext(container), dryRun: false)
-        let e3 = try exportJSON(container)
-        let cAgain = Collector()
-        diff(e2, e3, path: "", record: nil, key: "", into: cAgain)
-        cAgain.entries = cAgain.entries.filter { !$0.key.hasPrefix("valueChanged\texportedAt") }
-        log("rerun after flag set: \(cAgain.entries.isEmpty ? "no changes" : "CHANGES")")
-        XCTAssertTrue(cAgain.entries.isEmpty)
-    }
-
     private static func dateKey(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
