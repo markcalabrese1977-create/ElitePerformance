@@ -58,6 +58,13 @@ struct PlanMemoryEngine {
         for sourceItem in session.items {
             guard hasMeaningfulPlan(sourceItem) else { continue }
 
+            // Fixed-load exercise (per-exercise exemption): this source never writes an
+            // increase anywhere. Resolved once per item from the profile fetched above.
+            let isProgressionExempt = UserProfile.isProgressionExempt(
+                exerciseId: sourceItem.exerciseId,
+                profile: profile
+            )
+
             guard let targetItem = Self.nextTargetItem(
                 for: sourceItem,
                 after: session,
@@ -81,7 +88,8 @@ struct PlanMemoryEngine {
                     loadIncrement: loadIncrement,
                     bodyWeight: bodyWeight,
                     customExercises: customExercises,
-                    progressionEnabled: progressionEnabled
+                    progressionEnabled: progressionEnabled,
+                    isProgressionExempt: isProgressionExempt
                 )
                 continue
             }
@@ -170,18 +178,25 @@ struct PlanMemoryEngine {
             // lastLoad is nil only on project()'s early exits, where no prior
             // working load was resolved at all — nothing to step off, nothing to cap.
             if let projection = projection, projection.suggestedLoad > 0 {
-                let floorCapped: Double = {
+                // Fixed-load exercise: the seed may not step ABOVE the last lifted
+                // load at all (cap = lastLoad exactly, no increment). With no resolved
+                // lastLoad there is nothing to cap against, so the carried-forward load
+                // written above stands and the projection is not applied.
+                let floorCapped: Double? = {
                     guard let lastLoad = projection.lastLoad, lastLoad > 0 else {
-                        return projection.suggestedLoad
+                        return isProgressionExempt ? nil : projection.suggestedLoad
                     }
-                    return min(projection.suggestedLoad, lastLoad + loadIncrement)
+                    let step = isProgressionExempt ? 0 : loadIncrement
+                    return min(projection.suggestedLoad, lastLoad + step)
                 }()
-                let finalLoad = min(floorCapped, sourceItem.suggestedLoad * 2.0)
-                targetItem.suggestedLoad = finalLoad
-                targetItem.plannedLoadsBySet = Array(
-                    repeating: finalLoad,
-                    count: targetItem.plannedLoadsBySet.count
-                )
+                if let floorCapped {
+                    let finalLoad = min(floorCapped, sourceItem.suggestedLoad * 2.0)
+                    targetItem.suggestedLoad = finalLoad
+                    targetItem.plannedLoadsBySet = Array(
+                        repeating: finalLoad,
+                        count: targetItem.plannedLoadsBySet.count
+                    )
+                }
             }
 
             // Phase 0.4 — CoachingEngine is the authoritative load layer.
@@ -212,7 +227,8 @@ struct PlanMemoryEngine {
                 // A targetItem exists by construction here (guarded above), so the
                 // message may name it. Only nextSuggestedLoad is consumed below —
                 // this keeps the message correct for any future caller of it.
-                carryForwardTarget: .exists
+                carryForwardTarget: .exists,
+                isProgressionExempt: isProgressionExempt
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
                 targetItem.suggestedLoad = recommendedLoad
                 targetItem.plannedLoadsBySet = Array(
@@ -258,7 +274,7 @@ struct PlanMemoryEngine {
                         }
 
                         // Progression coaching note — only if no higher-priority note already set
-                        if let projection = projection, targetItem.coachNote == nil {
+                        if let projection = projection, targetItem.coachNote == nil, !isProgressionExempt {
                             let loadStr = String(format: "%.1f", projection.suggestedLoad)
                             switch projection.basis {
                             case .consecutiveCleanProgression:
@@ -380,9 +396,12 @@ struct PlanMemoryEngine {
         loadIncrement: Double,
         bodyWeight: Double?,
         customExercises: [CustomExercise],
-        progressionEnabled: Bool
+        progressionEnabled: Bool,
+        isProgressionExempt: Bool
     ) {
         guard progressionEnabled else { return }
+        // Fixed-load exercise: an exempt source never writes an increase anywhere.
+        guard !isProgressionExempt else { return }
         guard !targetItem.planEdited else { return }                       // preserve user edit
         // Flagged source: a temporarily/deliberately reduced load never earns a
         // write-back. CoachingEngine RULE 4b already returns a nil load here, so
@@ -423,7 +442,8 @@ struct PlanMemoryEngine {
             e1rmFloorLoad: projection?.e1rmFloorLoad,
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
-            carryForwardTarget: .exists   // targetItem is non-nil by construction
+            carryForwardTarget: .exists,  // targetItem is non-nil by construction
+            isProgressionExempt: isProgressionExempt
         ), let recommendedLoad = recommendation.nextSuggestedLoad else { return }
 
         // Only an ACTUAL increase propagates. Hold (== current) or decrease is left

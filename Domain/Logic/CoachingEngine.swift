@@ -79,7 +79,8 @@ struct CoachingEngine {
         e1rmFloorLoad: Double? = nil,
         peakE1RM: Double? = nil,
         lastKnownLoad: Double? = nil,
-        carryForwardTarget: CarryForwardTarget = .unresolved
+        carryForwardTarget: CarryForwardTarget = .unresolved,
+        isProgressionExempt: Bool = false
     ) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
@@ -404,6 +405,20 @@ struct CoachingEngine {
            allSetsAtTop || overPerformed {
             let msg = "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: nil)
+        }
+
+        // RULE 4c — Fixed-load exercise (per-exercise exemption, set by the lifter —
+        // e.g. a tendon-rehab track whose load moves only on his say-so). Same shape
+        // as RULE 4b: blocks the UPWARD paths only. Exactly the conditions under which
+        // RULE 5a/5b would fire (all primary sets at the top at target RIR) return a
+        // fixed message and a nil load, so nothing is written and the plan stands.
+        // Pain, fatigue, failure, drop, incomplete and under-range handling all ran
+        // above and are untouched; 5c/5d holds below are not upward and are untouched.
+        if isProgressionExempt, rirOnTarget, allSetsAtTop || overPerformed {
+            return CoachingRecommendation(
+                message: "Fixed-load exercise: load doesn't auto-progress. Change it yourself when you're ready.",
+                nextSuggestedLoad: nil
+            )
         }
 
         // RULE 5 — Progression (double progression). Reached only when safe, complete,

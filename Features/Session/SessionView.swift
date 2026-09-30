@@ -542,6 +542,7 @@ private struct SwapTarget {
 /// One card per exercise: header and set-by-set plan + actual logging.
 private struct SessionExerciseCardView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query private var profiles: [UserProfile]
     let exercise: UISessionExercise
 
     let onLoadChanged: (_ setIndex: Int, _ text: String) -> Void
@@ -670,6 +671,13 @@ private struct SessionExerciseCardView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if UserProfile.isProgressionExempt(exerciseId: exercise.exerciseId, profile: profiles.first) {
+                        Text("Fixed load")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.orange)
+                    }
 
                     if let executionNoteLine {
                         Text(executionNoteLine)
@@ -1419,7 +1427,11 @@ final class SessionScreenViewModel: ObservableObject {
                         e1rmFloorLoad: recProjection?.e1rmFloorLoad,
                         peakE1RM: recProjection?.peakE1RM,
                         lastKnownLoad: recProjection?.lastLoad,
-                        carryForwardTarget: recCarryForwardTarget
+                        carryForwardTarget: recCarryForwardTarget,
+                        isProgressionExempt: UserProfile.isProgressionExempt(
+                            exerciseId: matchingItem.exerciseId,
+                            profile: recProfile
+                        )
                     ) {
                         exercise.coachMessage = recommendation.message
                     } else {

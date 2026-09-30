@@ -44,6 +44,10 @@ struct UserProfileBackupDTO: Codable {
     // decoded value entirely, and BackupSnapshotExporter always writes nil.
     let unitPreferenceRaw: String?
     let bodyWeight: Double?
+    // Added (fixed-load exemptions). Optional so OLD backups that predate this key
+    // still decode (synthesized Codable maps an absent key to nil); the importer
+    // maps nil to UserProfile.defaultExemptExerciseIds, never to an empty list.
+    var exemptExerciseIds: [String]? = nil
 }
 
 // MARK: - AppState

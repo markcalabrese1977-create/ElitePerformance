@@ -68,6 +68,48 @@ final class UserProfile {
     var minLoadIncrement: Double
     var bodyWeight: Double?
 
+    /// Per-exercise "fixed load" exemptions: canonical exerciseIds whose load never
+    /// auto-progresses (tendon-rehab track — the lifter raises it himself).
+    ///
+    /// Stored OPTIONAL on purpose: nil means "never customised" and reads as
+    /// `defaultExemptExerciseIds`, so the additive SwiftData lightweight migration
+    /// (existing rows get nil) and an old backup without the field both resolve to the
+    /// default without any backfill, while an explicit empty array still means
+    /// "the lifter turned every exemption off". Use `exemptExerciseIds` /
+    /// `isProgressionExempt`, never this raw column.
+    var exemptExerciseIdsStored: [String]? = nil
+
+    static let defaultExemptExerciseIds: [String] = ["cable_tricep_rope_pushdown"]
+
+    var exemptExerciseIds: [String] {
+        get { exemptExerciseIdsStored ?? Self.defaultExemptExerciseIds }
+        set { exemptExerciseIdsStored = newValue }
+    }
+
+    /// True when `exerciseId` (any legacy alias spelling) is on the fixed-load list.
+    func isProgressionExempt(exerciseId: String) -> Bool {
+        Self.isProgressionExempt(exerciseId: exerciseId, in: exemptExerciseIds)
+    }
+
+    /// Profile-optional variant for callers that may run before a profile exists:
+    /// no profile resolves to the default list.
+    static func isProgressionExempt(exerciseId: String, profile: UserProfile?) -> Bool {
+        isProgressionExempt(exerciseId: exerciseId, in: profile?.exemptExerciseIds ?? defaultExemptExerciseIds)
+    }
+
+    private static func isProgressionExempt(exerciseId: String, in list: [String]) -> Bool {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        return list.contains { ExerciseCatalog.canonicalExerciseId(for: $0) == canonical }
+    }
+
+    /// Turn the exemption on or off for one exercise (canonical-id aware).
+    func setProgressionExempt(_ exempt: Bool, exerciseId: String) {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        var list = exemptExerciseIds.filter { ExerciseCatalog.canonicalExerciseId(for: $0) != canonical }
+        if exempt { list.append(canonical) }
+        exemptExerciseIds = list
+    }
+
     var experience: TrainingExperience {
         get { TrainingExperience(rawValue: experienceRaw) ?? .intermediate }
         set { experienceRaw = newValue.rawValue }
