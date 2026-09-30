@@ -69,7 +69,8 @@ enum BackupSnapshotExporter {
                     // exists — the DTO field stays (Optional already) so old
                     // app versions importing a new export still decode fine.
                     unitPreferenceRaw: nil,
-                    bodyWeight: $0.bodyWeight
+                    bodyWeight: $0.bodyWeight,
+                    exemptExerciseIds: $0.exemptExerciseIds
                 )
             },
             mesoBlocks: mesoBlocks.map { block in

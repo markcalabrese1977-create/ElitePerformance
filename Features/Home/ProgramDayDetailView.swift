@@ -291,6 +291,12 @@ struct ProgramDayDetailView: View {
                                             continue
                                         }
 
+                                        // Fixed-load exercise (per-exercise exemption): Auto+ must not
+                                        // change its load or per-set loads. Left exactly as the lifter set it.
+                                        if UserProfile.isProgressionExempt(exerciseId: item.exerciseId, profile: profile) {
+                                            continue
+                                        }
+
                                         // Use repMin as the effective target when set — targetReps may be
                                         // stale from a prior wave's carry-forward. repMin/repMax are always
                                         // wave-correct since they come from the prescription, not carry-forward.

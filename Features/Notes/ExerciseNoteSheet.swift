@@ -10,6 +10,7 @@ struct ExerciseNoteSheet: View {
     let onClose: () -> Void
 
     @Query private var allNotes: [ExerciseNote]
+    @Query private var profiles: [UserProfile]
 
     @State private var text: String = ""
 
@@ -20,6 +21,23 @@ struct ExerciseNoteSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let profile = profiles.first {
+                    Toggle(isOn: Binding(
+                        get: { profile.isProgressionExempt(exerciseId: exerciseId) },
+                        set: { newValue in
+                            profile.setProgressionExempt(newValue, exerciseId: exerciseId)
+                            try? modelContext.save()
+                        }
+                    )) {
+                        Text("Fixed load (rehab track): never auto-increase")
+                            .font(.subheadline)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+
+                    Divider().padding(.top, 8)
+                }
+
                 TextEditor(text: $text)
                     .padding(12)
 
