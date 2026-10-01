@@ -2,6 +2,12 @@ import XCTest
 import SwiftData
 @testable import ElitePerformance
 
+/// SessionScreenViewModel aborts the test host when it is released from a plain XCTest method
+/// (SIGABRT in swift_task_deinitOnExecutorMainActorBackDeploy). Objects built by tests that
+/// create one are parked here for the life of the process.
+private var parkedForProcessLifetime: [AnyObject] = []
+private func parkForProcessLifetime(_ objects: AnyObject...) { parkedForProcessLifetime.append(contentsOf: objects) }
+
 final class CoachingMessageSeamTests: XCTestCase {
 
     // Broken at authorship (see TestOpenQuestions.swift): this fixture logs
@@ -33,6 +39,7 @@ final class CoachingMessageSeamTests: XCTestCase {
         context.insert(session)
 
         let vm = SessionScreenViewModel(session: session)
+        parkForProcessLifetime(vm, session, item, container)
 
         vm.exercises[0].sets[0].actualLoadText = "100"
         vm.exercises[0].sets[0].actualRepsText = "10"
@@ -75,6 +82,7 @@ final class CoachingMessageSeamTests: XCTestCase {
         context.insert(session)
 
         let vm = SessionScreenViewModel(session: session)
+        parkForProcessLifetime(vm, session, item, container)
 
         vm.exercises[0].sets[0].actualLoadText = "100"
         vm.exercises[0].sets[0].actualRepsText = "10"
