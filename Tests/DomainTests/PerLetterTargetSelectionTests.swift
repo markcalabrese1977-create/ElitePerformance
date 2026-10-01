@@ -801,4 +801,51 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertEqual(block.totalWeeks, 10)
         XCTAssertEqual(try fingerprint(ctx), before)
     }
+
+    // MARK: Same-named archived block (the live store has an April "10-Week DUP Meso")
+
+    private func addArchivedSameNameBlock(_ ctx: ModelContext, totalWeeks: Int?, status: MesoStatus) throws -> (MesoBlock, [Session]) {
+        let old = MesoBlock(name: "10-Week DUP Meso", startDate: date(2026, 4, 16), status: status, totalWeeks: totalWeeks)
+        ctx.insert(old)
+        var made: [Session] = []
+        for (w, wave) in [(7, "a"), (8, "b"), (9, "c"), (10, "deload")] {
+            let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: wave)
+            let s = Session(date: date(2026, 5, 1 + w), status: .completed, weekIndex: w, dayLabel: "Chest + Triceps", items: [item])
+            s.meso = old
+            ctx.insert(s)
+            made.append(s)
+        }
+        try ctx.save()
+        return (old, made)
+    }
+
+    func test_sameNamedArchivedBlock_isNeverTouched_evenWithTotalWeeks10() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, active) = try seededBlock()
+        let (old, oldSessions) = try addArchivedSameNameBlock(ctx, totalWeeks: 10, status: .archived)
+        let oldBefore = oldSessions.map { "\($0.weekIndex)|\($0.date.timeIntervalSince1970)|\($0.items.map { "\($0.waveRaw ?? "")|\($0.suggestedLoad)" })" }
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        XCTAssertEqual(active.totalWeeks, 12)
+        XCTAssertEqual(active.name, "12-Week DUP Meso")
+        XCTAssertEqual(old.name, "10-Week DUP Meso", "the archived block keeps its name")
+        XCTAssertEqual(old.totalWeeks, 10)
+        XCTAssertEqual(old.sessions.count, 4)
+        XCTAssertEqual(oldSessions.map { "\($0.weekIndex)|\($0.date.timeIntervalSince1970)|\($0.items.map { "\($0.waveRaw ?? "")|\($0.suggestedLoad)" })" }, oldBefore)
+        XCTAssertEqual(try sessions(ctx).filter { $0.meso === active }.count, 72)
+    }
+
+    func test_twoActiveTenWeekBlocks_isAmbiguous_andNothingIsDone() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, active) = try seededBlock()
+        _ = try addArchivedSameNameBlock(ctx, totalWeeks: 10, status: .active)   // pathological: two active blocks
+        let before = try fingerprint(ctx)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        XCTAssertEqual(active.totalWeeks, 10)
+        XCTAssertEqual(try fingerprint(ctx), before)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+    }
 }

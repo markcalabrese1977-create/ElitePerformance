@@ -232,7 +232,7 @@ enum DUPMesoLengthConversion {
             return finish(unevaluated: allGateNames)
         }
 
-        gate(allGateNames[0], detail: "'\(block.name)', \(sessions.count) sessions") {
+        gate(allGateNames[0], detail: "'\(block.name)' [\(block.id.map { String($0.uuidString.prefix(8)) } ?? "no id")], \(sessions.count) sessions") {
             if block.status != .active { fail("block status is \(block.status.rawValue), not active") }
             if block.isMaintenance { fail("block is a maintenance block") }
             if block.totalWeeks != sourceTotalWeeks { fail("totalWeeks is \(block.totalWeeks.map(String.init) ?? "nil"), expected \(sourceTotalWeeks)") }
