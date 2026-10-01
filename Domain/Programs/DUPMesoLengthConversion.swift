@@ -19,9 +19,16 @@ import SwiftData
 /// `apply` refuses on any blocker and saves once at the end. A re-run on an already converted
 /// block is a no-op.
 ///
-/// Loads are deliberately zeroed on every converted/created item: an empty target is what lets
-/// carry-forward's seed path write the earned hold/bump/reduce (see PlanMemoryEngine). A
-/// non-empty target takes the propagate path, which only ever raises a load.
+/// Loads are COPIED from the source week's matching item (week 7 -> 10, 8 -> 11, 9 -> 12):
+/// suggestedLoad and plannedLoadsBySet (resized to targetSets), plus the planned reps/RIR arrays.
+/// Bodyweight items (catalog or custom) stay at 0, as they do everywhere else in the app.
+///
+/// Why a copy and not an empty target (the alternative considered): carry-forward writes into an
+/// EMPTY target through its seed path (hold/bump/reduce applied to the carried load), but into a
+/// NON-empty target only through the propagate path, which writes only when the recommended load
+/// is higher than what is already there. A copied load therefore means a "reduce" outcome from
+/// week 7 will not lower week 10 below the copied value. The copy is the requested behavior; this
+/// is the tradeoff it carries.
 ///
 /// NOT wired to any UI or launch hook. It must be invoked deliberately (see the dry-run report
 /// first), and before the first week-7 session completes, or week 7's result will not reach
@@ -108,10 +115,11 @@ enum DUPMesoLengthConversion {
     static func apply(block: MesoBlock, context: ModelContext, calendar: Calendar = .current) throws -> Report {
         var plan = makePlan(block: block, context: context, calendar: calendar)
         guard plan.report.isSafe, !plan.report.alreadyConverted else { return plan.report }
+        let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
 
         for step in plan.converts {
             for (dst, src) in step.pairs {
-                copyPrescription(from: src, to: dst)
+                copyPrescription(from: src, to: dst, customExercises: customExercises)
                 plan.report.itemsConverted += 1
             }
             step.week10.sessionNotes = step.week7.sessionNotes
@@ -121,7 +129,7 @@ enum DUPMesoLengthConversion {
         for step in plan.creates {
             let items = step.source.items
                 .sorted { $0.order < $1.order }
-                .map { cloneItem($0) }
+                .map { cloneItem($0, customExercises: customExercises) }
             let session = Session(
                 date: step.newDate,
                 status: .planned,
@@ -213,6 +221,7 @@ enum DUPMesoLengthConversion {
             fail("could not fetch sessions")
             return finish(unevaluated: allGateNames)
         }
+        let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let sessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
         func week(_ w: Int) -> [Session] { sessions.filter { $0.weekIndex == w }.sorted { $0.date < $1.date } }
 
@@ -302,7 +311,7 @@ enum DUPMesoLengthConversion {
 
         // Describe.
         func fmt(_ d: Date) -> String { d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()) }
-        note("CONVERT week 10 in place (\(plan.converts.count) sessions, \(plan.converts.reduce(0) { $0 + $1.pairs.count }) items): waveRaw deload -> a; prescription copied from week 7; loads zeroed.")
+        note("CONVERT week 10 in place (\(plan.converts.count) sessions, \(plan.converts.reduce(0) { $0 + $1.pairs.count }) items): waveRaw deload -> a; prescription, loads (bodyweight stays 0) and planned reps/RIR copied from week 7.")
         for s in plan.converts.sorted(by: { $0.week10.date < $1.week10.date }) {
             note("  W10 \(s.week10.dayLabel ?? "?") \(fmt(s.week10.date)) <- W7 \(s.week7.dayLabel ?? "?") (\(s.pairs.count) items); programIndex \(s.week10.programIndex.map(String.init) ?? "nil") unchanged")
         }
@@ -325,8 +334,9 @@ enum DUPMesoLengthConversion {
         }
         for s in plan.converts.sorted(by: { $0.week10.date < $1.week10.date }) {
             for (dst, src) in s.pairs {
+                let bw = ExerciseCatalog.isBodyweight(exerciseId: src.exerciseId, customExercises: customExercises)
                 var after = desc(src)
-                after = after.replacingOccurrences(of: #"load [0-9.]+"#, with: "load 0", options: .regularExpression)
+                if bw { after = after.replacingOccurrences(of: #"load [0-9.]+"#, with: "load 0", options: .regularExpression) }
                 plan.report.itemTable.append("  \(s.week10.dayLabel ?? "?") | \(dst.exerciseNameSnapshot ?? dst.exerciseId) : \(desc(dst))  ->  \(after)")
             }
         }
@@ -384,14 +394,16 @@ enum DUPMesoLengthConversion {
 
     // MARK: - Item copying
 
-    /// Prescription + plan shape only. Loads are zeroed; actuals, feedback, PR, coach notes and
-    /// override reasons are never copied; `planEdited` stays false.
-    private static func copyPrescription(from src: SessionItem, to dst: SessionItem) {
+    /// Prescription, load and plan shape. Actuals, feedback, PR, coach notes and override reasons are
+    /// never copied; `planEdited` stays false. Bodyweight items keep load 0.
+    private static func copyPrescription(from src: SessionItem, to dst: SessionItem, customExercises: [CustomExercise]) {
+        let bodyweight = ExerciseCatalog.isBodyweight(exerciseId: src.exerciseId, customExercises: customExercises)
+        let n = max(0, src.targetSets)
         dst.order = src.order
         dst.targetReps = src.targetReps
         dst.targetSets = src.targetSets
         dst.targetRIR = src.targetRIR
-        dst.suggestedLoad = 0
+        dst.suggestedLoad = bodyweight ? 0 : src.suggestedLoad
         dst.waveRaw = src.waveRaw
         dst.priorityRaw = src.priorityRaw
         dst.setMin = src.setMin
@@ -403,9 +415,11 @@ enum DUPMesoLengthConversion {
         dst.intensifierRaw = src.intensifierRaw
         dst.intensifierNotes = src.intensifierNotes
         dst.prescriptionNotes = src.prescriptionNotes
-        dst.plannedRepsBySet = resized(src.plannedRepsBySet, to: src.targetSets, fill: src.targetReps)
-        dst.plannedRIRsBySet = resized(src.plannedRIRsBySet, to: src.targetSets, fill: src.targetRIR)
-        dst.plannedLoadsBySet = Array(repeating: 0.0, count: max(0, src.targetSets))
+        dst.plannedRepsBySet = resized(src.plannedRepsBySet, to: n, fill: src.targetReps)
+        dst.plannedRIRsBySet = resized(src.plannedRIRsBySet, to: n, fill: src.targetRIR)
+        dst.plannedLoadsBySet = bodyweight
+            ? Array(repeating: 0.0, count: n)
+            : resized(src.plannedLoadsBySet, to: n, fill: src.suggestedLoad)
         dst.planEdited = false
         dst.actualReps = []
         dst.actualLoads = []
@@ -420,7 +434,7 @@ enum DUPMesoLengthConversion {
         dst.updatedAt = Date()
     }
 
-    private static func cloneItem(_ src: SessionItem) -> SessionItem {
+    private static func cloneItem(_ src: SessionItem, customExercises: [CustomExercise]) -> SessionItem {
         let item = SessionItem(
             order: src.order,
             exerciseId: src.exerciseId,
@@ -430,7 +444,7 @@ enum DUPMesoLengthConversion {
             targetRIR: src.targetRIR,
             suggestedLoad: 0
         )
-        copyPrescription(from: src, to: item)
+        copyPrescription(from: src, to: item, customExercises: customExercises)
         return item
     }
 

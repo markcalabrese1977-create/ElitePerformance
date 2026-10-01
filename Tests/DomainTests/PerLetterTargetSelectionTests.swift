@@ -408,6 +408,37 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         try sessions(ctx).filter { $0.weekIndex == w }
     }
 
+    /// Gives weeks 7/8/9 real loads (distinct per week and item), week 10 stale deload loads, and makes
+    /// one day's first lift a bodyweight pull-up in weeks 7-10 (with a nonzero source load, to prove the
+    /// bodyweight rule wins over the copy).
+    private func seedLoads(_ ctx: ModelContext) throws {
+        let bwDay = try XCTUnwrap(try week(7, ctx).first { $0.dayLabel?.contains("Back") == true }?.dayLabel)
+        for w in 7...10 {
+            for s in try week(w, ctx) {
+                for i in s.items.sorted(by: { $0.order < $1.order }) {
+                    if s.dayLabel == bwDay, i.order == s.items.map(\.order).min() { i.exerciseId = "pull_up" }
+                    if w == 10 {
+                        i.suggestedLoad = 50
+                        i.plannedLoadsBySet = Array(repeating: 50.0, count: max(i.plannedLoadsBySet.count, 1))
+                    } else {
+                        let base = Double(100 + w * 10 + i.order)
+                        i.suggestedLoad = base
+                        i.plannedLoadsBySet = (0..<max(i.targetSets, 1)).map { base + Double($0) * 2.5 }
+                    }
+                }
+            }
+        }
+        try ctx.save()
+    }
+
+    private func expectedLoads(_ src: SessionItem) -> (suggested: Double, planned: [Double]) {
+        let n = max(0, src.targetSets)
+        if ExerciseCatalog.isBodyweight(exerciseId: src.exerciseId) { return (0, Array(repeating: 0, count: n)) }
+        var planned = Array(src.plannedLoadsBySet.prefix(n))
+        if planned.count < n { planned += Array(repeating: planned.last ?? src.suggestedLoad, count: n - planned.count) }
+        return (src.suggestedLoad, planned)
+    }
+
     // MARK: Fixture sanity
 
     func test_fixture_isTheDescribedBlock() throws {
@@ -502,6 +533,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
     func test_apply_producesTwelveWeekBlock() throws {
         let (ctx, block) = try seededBlock()
+        try seedLoads(ctx)
         let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.didWrite, "\(report.blockers)")
         XCTAssertEqual(report.sessionsConverted, 6)
@@ -547,9 +579,11 @@ final class DUPMesoLengthConversionTests: XCTestCase {
                 XCTAssertEqual(i10.targetSets, i7.targetSets)
                 XCTAssertEqual(i10.repMin, i7.repMin); XCTAssertEqual(i10.repMax, i7.repMax)
                 XCTAssertEqual(i10.targetRIRMin, i7.targetRIRMin); XCTAssertEqual(i10.targetRIRMax, i7.targetRIRMax)
-                XCTAssertEqual(i10.suggestedLoad, 0)
-                XCTAssertEqual(i10.plannedLoadsBySet, Array(repeating: 0.0, count: i10.targetSets))
+                let want = expectedLoads(i7)
+                XCTAssertEqual(i10.suggestedLoad, want.suggested, "W10 load copies W7 (bodyweight stays 0)")
+                XCTAssertEqual(i10.plannedLoadsBySet, want.planned)
                 XCTAssertEqual(i10.plannedRepsBySet.count, i10.targetSets)
+                XCTAssertEqual(i10.plannedRIRsBySet.count, i10.targetSets)
                 XCTAssertFalse(i10.planEdited)
                 XCTAssertTrue(i10.actualReps.isEmpty)
             }
@@ -561,7 +595,46 @@ final class DUPMesoLengthConversionTests: XCTestCase {
             XCTAssertEqual(s11.status, .planned)
             XCTAssertTrue(s11.meso === block)
             XCTAssertNotEqual(s11.id, s8.id)
+            for i11 in s11.items {
+                let i8 = try XCTUnwrap(s8.items.first { $0.order == i11.order })
+                let want = expectedLoads(i8)
+                XCTAssertEqual(i11.suggestedLoad, want.suggested, "W11 load copies W8")
+                XCTAssertEqual(i11.plannedLoadsBySet, want.planned)
+            }
         }
+        for s12 in try week(12, ctx) {
+            let s9 = try XCTUnwrap(try week(9, ctx).first { $0.dayLabel == s12.dayLabel })
+            for i12 in s12.items {
+                let i9 = try XCTUnwrap(s9.items.first { $0.order == i12.order })
+                let want = expectedLoads(i9)
+                XCTAssertEqual(i12.suggestedLoad, want.suggested, "W12 load copies W9")
+                XCTAssertEqual(i12.plannedLoadsBySet, want.planned)
+            }
+        }
+        // The bodyweight pull-up exists in weeks 10-12 and stayed at 0 despite a nonzero source load.
+        for w in 10...12 {
+            let bw = try week(w, ctx).flatMap(\.items).filter { $0.exerciseId == "pull_up" }
+            XCTAssertEqual(bw.count, 1, "week \(w) has the pull-up")
+            XCTAssertEqual(bw.first?.suggestedLoad, 0)
+        }
+    }
+
+    func test_dryRun_report_showsLoadsBeforeAndAfter() throws {
+        let (ctx, block) = try seededBlock()
+        try seedLoads(ctx)
+        let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.blockers.isEmpty, "\(report.blockers)")
+        // Every non-bodyweight row shows the stale deload load (50.0) turning into the week-7 load.
+        let rows = report.itemTable
+        XCTAssertFalse(rows.isEmpty)
+        XCTAssertTrue(rows.contains { $0.contains("load 50.0") && $0.contains("->") && !$0.hasSuffix("load 0") }, "\(rows.prefix(3))")
+        // The bodyweight pull-up row ends at load 0.
+        let bwItem = try XCTUnwrap(try week(10, ctx).flatMap(\.items).first { $0.exerciseId == "pull_up" })
+        let bwName = bwItem.exerciseNameSnapshot ?? bwItem.exerciseId
+        let bwRows = rows.filter { $0.contains("| \(bwName) :") && $0.contains(String(format: "%.1f", 50.0)) && $0.contains("->") }
+        XCTAssertFalse(bwRows.isEmpty, "expected a row for \(bwName)")
+        XCTAssertEqual(bwRows.filter { $0.hasSuffix("load 0") }.count, bwRows.count, "bodyweight row ends at load 0")
+        XCTAssertTrue(report.lines.contains { $0.contains("bodyweight stays 0") })
     }
 
     func test_apply_chainsRunOneFourSevenTen_twoFiveEightEleven_threeSixNineTwelve() throws {
