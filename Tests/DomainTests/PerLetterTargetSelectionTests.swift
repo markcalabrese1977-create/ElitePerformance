@@ -421,21 +421,81 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
     // MARK: Dry run
 
+    /// Everything a conversion could touch, as one comparable string.
+    private func fingerprint(_ ctx: ModelContext) throws -> String {
+        var out: [String] = []
+        for b in try ctx.fetch(FetchDescriptor<MesoBlock>()).sorted(by: { $0.name + "\($0.startDate)" < $1.name + "\($1.startDate)" }) {
+            out.append("B|\(b.name)|\(b.status.rawValue)|\(b.totalWeeks.map(String.init) ?? "nil")|\(b.isMaintenance)|\(b.notes ?? "")")
+        }
+        for s in try sessions(ctx) {
+            out.append("S|\(s.id?.uuidString ?? "")|\(s.date.timeIntervalSince1970)|\(s.weekIndex)|\(s.programIndex.map(String.init) ?? "nil")|\(s.dayLabel ?? "")|\(s.status.rawValue)|\(s.sessionNotes ?? "")|\(s.meso?.name ?? "")|\(s.items.count)")
+            for i in s.items.sorted(by: { $0.order < $1.order }) {
+                out.append("I|\(i.id?.uuidString ?? "")|\(i.order)|\(i.exerciseId)|\(i.waveRaw ?? "")|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.suggestedLoad)|\(i.setMin.map(String.init) ?? "")|\(i.setMax.map(String.init) ?? "")|\(i.repMin.map(String.init) ?? "")|\(i.repMax.map(String.init) ?? "")|\(i.targetRIRMin.map(String.init) ?? "")|\(i.targetRIRMax.map(String.init) ?? "")|\(i.intensifierRaw ?? "")|\(i.prescriptionNotes ?? "")|\(i.plannedRepsBySet)|\(i.plannedLoadsBySet)|\(i.plannedRIRsBySet)|\(i.actualReps)|\(i.actualLoads)|\(i.actualRIRs)|\(i.planEdited)|\(i.isCompleted)")
+            }
+        }
+        return out.joined(separator: "\n")
+    }
+
     func test_dryRun_writesNothing_andDescribesEveryWrite() throws {
         let (ctx, block) = try seededBlock()
-        let before = try sessions(ctx).map { ($0.persistentModelID, $0.weekIndex, $0.date, $0.items.count) }
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        XCTAssertFalse(ctx.hasChanges)
 
         let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: cal())
 
         XCTAssertTrue(report.blockers.isEmpty, "\(report.blockers)")
         XCTAssertFalse(report.didWrite)
+        XCTAssertEqual(try fingerprint(ctx), before, "a dry run must not change a single field")
+        XCTAssertFalse(ctx.hasChanges, "a dry run must leave the context clean (nothing inserted, deleted or dirtied)")
+        XCTAssertEqual(try sessions(ctx).count, 60)
         XCTAssertEqual(block.totalWeeks, 10)
         XCTAssertEqual(block.name, "10-Week DUP Meso")
-        let after = try sessions(ctx).map { ($0.persistentModelID, $0.weekIndex, $0.date, $0.items.count) }
-        XCTAssertEqual(after.count, before.count)
-        XCTAssertEqual(Set(try week(10, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["deload"], "week 10 untouched")
         XCTAssertTrue(report.lines.contains { $0.contains("CONVERT week 10") })
         XCTAssertTrue(report.lines.contains { $0.contains("CREATE weeks 11-12 (12 sessions") })
+        // Report content: every gate passed, one table row per week-10 item, one chain row per day x letter.
+        XCTAssertEqual(report.gates.count, 9)
+        XCTAssertTrue(report.gates.allSatisfy { $0.status == .passed }, "\(report.gates)")
+        XCTAssertEqual(report.itemTable.count, try week(10, ctx).reduce(0) { $0 + $1.items.count })
+        XCTAssertEqual(report.chainTable.count, 6 * 3)
+        XCTAssertTrue(report.chainTable.allSatisfy { $0.contains("→nil") })
+    }
+
+    /// LOCAL ONLY: runs the dry run against a real backup export (never committed). Enable with
+    ///   TEST_RUNNER_EP_BACKUP_FIXTURE=/path/to/ElitePerformance_Backup_v1_….json
+    ///   TEST_RUNNER_EP_DRYRUN_REPORT_OUT=/path/to/report.txt   (optional)
+    func test_dryRun_againstBackupFixture_writesNothing() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
+        let ctx = ModelContext(c)
+
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>())
+        let active = blocks.filter { $0.status == .active && !$0.isMaintenance }
+        var lines = ["blocks in backup: " + blocks.map { "'\($0.name)' \($0.status.rawValue) tw=\($0.totalWeeks.map(String.init) ?? "nil") maint=\($0.isMaintenance)" }.joined(separator: "; ")]
+        let block = try XCTUnwrap(active.first, "no active non-maintenance block in the backup")
+        XCTAssertEqual(active.count, 1, "expected exactly one active regular block")
+
+        let before = try fingerprint(ctx)
+        let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: Calendar.current)
+        XCTAssertEqual(try fingerprint(ctx), before, "a dry run must not change a single field")
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertFalse(report.didWrite)
+
+        lines.append("sessions in block: \(block.sessions.count)")
+        lines.append(report.text)
+        let text = lines.joined(separator: "\n")
+        if let out = ProcessInfo.processInfo.environment["EP_DRYRUN_REPORT_OUT"], !out.isEmpty {
+            try text.write(toFile: out, atomically: true, encoding: .utf8)
+        }
     }
 
     // MARK: Apply
