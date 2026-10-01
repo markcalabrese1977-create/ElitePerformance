@@ -462,16 +462,36 @@ extension Session {
 extension Session {
     /// Meso phase derived from position within the block.
     /// Uses percentage bands so it works for any meso length.
+    ///
+    /// Wave-based blocks (DUP A/B/C) are the exception for the DELOAD phase: whether a
+    /// week is a deload is a fact of its prescription (its items carry waveRaw
+    /// "deload"), not of its position. The 90% band would otherwise flag a full-volume
+    /// week as deload — week 9 of a 10-week block, and weeks 11-12 of a 12-week block
+    /// with no scheduled deload — and MesoPerformanceAnalyzer would drop them from the
+    /// verdicts. For such sessions .deload iff an item says so; any other week is
+    /// capped at .late. Sessions without wave data (legacy/hand-built) and maintenance
+    /// blocks keep the pure band behavior.
     var mesoPhase: MesoPhase {
         guard let total = meso?.totalWeeks, total > 0 else {
             return .early
         }
         let pct = Double(weekIndex) / Double(total)
+        let band: MesoPhase
         switch pct {
-        case ..<0.30: return .early
-        case ..<0.70: return .mid
-        case ..<0.90: return .late
-        default:      return .deload
+        case ..<0.30: band = .early
+        case ..<0.70: band = .mid
+        case ..<0.90: band = .late
+        default:      band = .deload
         }
+
+        guard meso?.isMaintenance != true,
+              items.contains(where: { WavePrescriptionGuard.isWaveLetter($0.waveRaw) || $0.waveRaw?.lowercased() == "deload" })
+        else {
+            return band
+        }
+        if items.contains(where: { $0.waveRaw?.lowercased() == "deload" }) {
+            return .deload
+        }
+        return band == .deload ? .late : band
     }
 }
