@@ -468,9 +468,21 @@ extension Session {
     /// "deload"), not of its position. The 90% band would otherwise flag a full-volume
     /// week as deload — week 9 of a 10-week block, and weeks 11-12 of a 12-week block
     /// with no scheduled deload — and MesoPerformanceAnalyzer would drop them from the
-    /// verdicts. For such sessions .deload iff an item says so; any other week is
-    /// capped at .late. Sessions without wave data (legacy/hand-built) and maintenance
-    /// blocks keep the pure band behavior.
+    /// verdicts.
+    ///
+    /// EXACT RULE (non-maintenance blocks), decided per SESSION from its items' waveRaw
+    /// (compared case-insensitively; a nil or empty waveRaw casts no vote):
+    ///   1. ANY item with waveRaw "deload"            -> .deload   (any, not all)
+    ///   2. else ANY item with a wave letter (a/b/c)  -> position band, but .deload is
+    ///                                                   capped to .late
+    ///   3. else (no item has wave data)              -> position band, unchanged
+    /// So a session mixing deload items with nil-wave items is .deload (the nil-wave items
+    /// are ignored, not counted against it), and a session mixing a deload item with letter
+    /// items is also .deload. Mixed sessions do not occur in generated blocks (the
+    /// materializer stamps every item of a session with the week's wave); they can only come
+    /// from hand-added items, which is why the rule is "any" rather than "all": a single
+    /// deload-prescribed lift is enough to keep the week out of working-week verdicts.
+    /// Maintenance blocks (isMaintenance) always use the position band.
     var mesoPhase: MesoPhase {
         guard let total = meso?.totalWeeks, total > 0 else {
             return .early

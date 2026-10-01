@@ -165,6 +165,36 @@ final class MesoPhaseBandTests: XCTestCase {
         }
     }
 
+    /// Mixed-wave sessions: the rule is ANY deload item => deload; nil/empty waves cast no vote.
+    func test_D11_mixedWaveSessions_anyDeloadItemWins_nilWaveIsIgnored() {
+        func session(week: Int, total: Int, waves: [String?]) -> Session {
+            let meso = MesoBlock(name: "Test Meso", startDate: Date(), status: .active, totalWeeks: total)
+            let items = waves.enumerated().map { idx, w in
+                SessionItem(order: idx + 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: w)
+            }
+            let s = Session(date: Date(), weekIndex: week, items: items)
+            s.meso = meso
+            return s
+        }
+        // deload + nil-wave item -> deload (nil is ignored, not a vote for "working week").
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["deload", nil]).mesoPhase, .deload)
+        XCTAssertTrue(session(week: 5, total: 12, waves: [nil, "deload"]).isDeloadWeek)
+        // deload + empty-string wave -> deload.
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["deload", ""]).mesoPhase, .deload)
+        // deload + a letter item -> deload (any, not all).
+        XCTAssertEqual(session(week: 3, total: 12, waves: ["a", "deload", "a"]).mesoPhase, .deload)
+        // case-insensitive.
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["DELOAD", nil]).mesoPhase, .deload)
+        // letter + nil-wave item (no deload): wave-based, deload band capped to .late.
+        XCTAssertEqual(session(week: 12, total: 12, waves: ["c", nil]).mesoPhase, .late)
+        XCTAssertFalse(session(week: 12, total: 12, waves: [nil, "c"]).isDeloadWeek)
+        // the cap only lowers .deload; earlier bands are untouched.
+        XCTAssertEqual(session(week: 1, total: 12, waves: ["a", nil]).mesoPhase, .early)
+        // only nil / empty waves: no wave data at all -> pure band (week 12/12 stays .deload).
+        XCTAssertEqual(session(week: 12, total: 12, waves: [nil, ""]).mesoPhase, .deload)
+        XCTAssertEqual(session(week: 12, total: 12, waves: []).mesoPhase, .deload)
+    }
+
     // MARK: - T-D.6/7/8: ProgramExerciseTemplate.sets(forWeek:wave:) — confirmed
     // live via ProgramTemplateResolver.resolveDay (Features/Programs/
     // DUPWaveModels.swift:330), not dead code.
