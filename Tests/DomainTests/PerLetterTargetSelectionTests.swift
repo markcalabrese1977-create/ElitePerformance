@@ -366,3 +366,230 @@ final class PerLetterTargetSelectionTests: XCTestCase {
         XCTAssertNil(target, "a different block's A week must not be anchored from this block")
     }
 }
+
+// MARK: - 10 -> 12 week conversion (DUPMesoLengthConversion)
+
+
+/// 10 -> 12 week conversion of an active DUP block (see DUPMesoLengthConversion).
+/// Seeds a real 6-day DUP10WeekTemplate block, Fri Sep 25 2026, Fri/Sat/Sun/Mon/Tue/Wed.
+final class DUPMesoLengthConversionTests: XCTestCase {
+
+    private var container: ModelContainer?
+
+    private func cal() -> Calendar { Calendar(identifier: .gregorian) }
+
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        cal().date(from: DateComponents(year: y, month: m, day: d))!
+    }
+
+    private func seededBlock() throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        try DUPProgramSeeder.seed(
+            startDate: date(2026, 9, 25),
+            trainingWeekdays: [1, 2, 3, 4, 6, 7],
+            context: ctx,
+            template: DUP10WeekTemplate.template,
+            calendar: cal(),
+            mesoName: "10-Week DUP Meso",
+            mesoStatus: .active
+        )
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
+        return (ctx, block)
+    }
+
+    private func sessions(_ ctx: ModelContext) throws -> [Session] {
+        try ctx.fetch(FetchDescriptor<Session>()).sorted { $0.date < $1.date }
+    }
+
+    private func week(_ w: Int, _ ctx: ModelContext) throws -> [Session] {
+        try sessions(ctx).filter { $0.weekIndex == w }
+    }
+
+    // MARK: Fixture sanity
+
+    func test_fixture_isTheDescribedBlock() throws {
+        let (ctx, block) = try seededBlock()
+        XCTAssertEqual(block.totalWeeks, 10)
+        XCTAssertEqual(try sessions(ctx).count, 60)
+        let w7 = try week(7, ctx)
+        XCTAssertEqual(cal().startOfDay(for: w7[0].date), date(2026, 11, 6), "week 7 starts Fri Nov 6")
+        XCTAssertEqual(Set(try week(10, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["deload"])
+    }
+
+    // MARK: Dry run
+
+    func test_dryRun_writesNothing_andDescribesEveryWrite() throws {
+        let (ctx, block) = try seededBlock()
+        let before = try sessions(ctx).map { ($0.persistentModelID, $0.weekIndex, $0.date, $0.items.count) }
+
+        let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: cal())
+
+        XCTAssertTrue(report.blockers.isEmpty, "\(report.blockers)")
+        XCTAssertFalse(report.didWrite)
+        XCTAssertEqual(block.totalWeeks, 10)
+        XCTAssertEqual(block.name, "10-Week DUP Meso")
+        let after = try sessions(ctx).map { ($0.persistentModelID, $0.weekIndex, $0.date, $0.items.count) }
+        XCTAssertEqual(after.count, before.count)
+        XCTAssertEqual(Set(try week(10, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["deload"], "week 10 untouched")
+        XCTAssertTrue(report.lines.contains { $0.contains("CONVERT week 10") })
+        XCTAssertTrue(report.lines.contains { $0.contains("CREATE weeks 11-12 (12 sessions") })
+    }
+
+    // MARK: Apply
+
+    func test_apply_producesTwelveWeekBlock() throws {
+        let (ctx, block) = try seededBlock()
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.didWrite, "\(report.blockers)")
+        XCTAssertEqual(report.sessionsConverted, 6)
+        XCTAssertEqual(report.sessionsCreated, 12)
+
+        XCTAssertEqual(block.totalWeeks, 12)
+        XCTAssertEqual(block.name, "12-Week DUP Meso")
+        let all = try sessions(ctx)
+        XCTAssertEqual(all.count, 72)
+
+        // Six sessions per week, 12 weeks, programIndex 1...72 unique.
+        for w in 1...12 { XCTAssertEqual(try week(w, ctx).count, 6, "week \(w)") }
+        XCTAssertEqual(Set(all.compactMap(\.programIndex)), Set(1...72))
+        for w in 10...12 {
+            let idx = try week(w, ctx).compactMap(\.programIndex).sorted()
+            XCTAssertEqual(idx, Array(((w - 1) * 6 + 1)...(w * 6)), "week \(w) programIndex")
+        }
+
+        // Waves: 10 = a, 11 = b, 12 = c; no deload anywhere.
+        XCTAssertEqual(Set(try week(10, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["a"])
+        XCTAssertEqual(Set(try week(11, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["b"])
+        XCTAssertEqual(Set(try week(12, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["c"])
+        XCTAssertFalse(all.contains { $0.items.contains { $0.waveRaw == "deload" } })
+        for w in 1...12 { XCTAssertFalse(try week(w, ctx).contains { $0.isDeloadWeek }, "week \(w) must not read as deload") }
+
+        // Dates: wk 10 unchanged (Nov 27 - Dec 2), wk 11 Dec 4-9, wk 12 Dec 11-16; Thursdays empty.
+        func span(_ w: Int) throws -> (Date, Date) {
+            let ds = try week(w, ctx).map { cal().startOfDay(for: $0.date) }
+            return (ds.min()!, ds.max()!)
+        }
+        XCTAssertEqual(try span(10).0, date(2026, 11, 27)); XCTAssertEqual(try span(10).1, date(2026, 12, 2))
+        XCTAssertEqual(try span(11).0, date(2026, 12, 4));  XCTAssertEqual(try span(11).1, date(2026, 12, 9))
+        XCTAssertEqual(try span(12).0, date(2026, 12, 11)); XCTAssertEqual(try span(12).1, date(2026, 12, 16))
+        XCTAssertFalse(all.contains { cal().component(.weekday, from: $0.date) == 5 }, "Thursday is a rest day")
+        XCTAssertEqual(Set(all.map { cal().startOfDay(for: $0.date) }).count, 72, "no date collisions")
+
+        // Converted/created items: prescription matches the source letter, loads zero, nothing logged.
+        for s10 in try week(10, ctx) {
+            let s7 = try XCTUnwrap(try week(7, ctx).first { $0.dayLabel == s10.dayLabel })
+            XCTAssertEqual(s10.sessionNotes, s7.sessionNotes)
+            for i10 in s10.items {
+                let i7 = try XCTUnwrap(s7.items.first { $0.exerciseId == i10.exerciseId })
+                XCTAssertEqual(i10.targetSets, i7.targetSets)
+                XCTAssertEqual(i10.repMin, i7.repMin); XCTAssertEqual(i10.repMax, i7.repMax)
+                XCTAssertEqual(i10.targetRIRMin, i7.targetRIRMin); XCTAssertEqual(i10.targetRIRMax, i7.targetRIRMax)
+                XCTAssertEqual(i10.suggestedLoad, 0)
+                XCTAssertEqual(i10.plannedLoadsBySet, Array(repeating: 0.0, count: i10.targetSets))
+                XCTAssertEqual(i10.plannedRepsBySet.count, i10.targetSets)
+                XCTAssertFalse(i10.planEdited)
+                XCTAssertTrue(i10.actualReps.isEmpty)
+            }
+        }
+        for s11 in try week(11, ctx) {
+            let s8 = try XCTUnwrap(try week(8, ctx).first { $0.dayLabel == s11.dayLabel })
+            XCTAssertEqual(s11.items.count, s8.items.count)
+            XCTAssertEqual(s11.sessionNotes, s8.sessionNotes)
+            XCTAssertEqual(s11.status, .planned)
+            XCTAssertTrue(s11.meso === block)
+            XCTAssertNotEqual(s11.id, s8.id)
+        }
+    }
+
+    func test_apply_chainsRunOneFourSevenTen_twoFiveEightEleven_threeSixNineTwelve() throws {
+        let (ctx, block) = try seededBlock()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+
+        let result = DUPMesoLengthConversion.verifyChains(block: block, context: ctx)
+        XCTAssertGreaterThan(result.checked, 0)
+        XCTAssertEqual(result.broken, [])
+
+        // Spot-check one lift explicitly: Push-day W7 (A) -> W10 (A); W10 has no target.
+        let all = try sessions(ctx)
+        let s7 = try XCTUnwrap(try week(7, ctx).first)
+        let item7 = try XCTUnwrap(s7.items.first)
+        let t = try XCTUnwrap(PlanMemoryEngine.nextTargetItem(for: item7, after: s7, in: all))
+        let s10 = try XCTUnwrap(try week(10, ctx).first { $0.items.contains { $0 === t } })
+        XCTAssertEqual(s10.dayLabel, s7.dayLabel)
+        XCTAssertEqual(t.waveRaw, "a")
+        let s10Item = try XCTUnwrap(s10.items.first)
+        XCTAssertNil(PlanMemoryEngine.nextTargetItem(for: s10Item, after: s10, in: all))
+    }
+
+    func test_verifyChains_beforeConversion_showsWeek7To9Broken() throws {
+        let (ctx, block) = try seededBlock()
+        // On the 10-week block week 7 (A) has no later A: this is why the conversion has a deadline.
+        let result = DUPMesoLengthConversion.verifyChains(block: block, context: ctx)
+        XCTAssertFalse(result.broken.isEmpty)
+        XCTAssertTrue(result.broken.contains { $0.hasPrefix("W7 ") }, "W7 has no week-10 A target before conversion")
+    }
+
+    func test_apply_isIdempotent() throws {
+        let (ctx, block) = try seededBlock()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        let second = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(second.alreadyConverted)
+        XCTAssertFalse(second.didWrite)
+        XCTAssertEqual(try sessions(ctx).count, 72)
+    }
+
+    // MARK: Blockers (nothing is written)
+
+    private func assertRefusedAndUntouched(_ ctx: ModelContext, _ block: MesoBlock, contains text: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let countBefore = try sessions(ctx).count
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertFalse(report.isSafe, file: file, line: line)
+        XCTAssertTrue(report.blockers.contains { $0.contains(text) }, "\(report.blockers)", file: file, line: line)
+        XCTAssertFalse(report.didWrite, file: file, line: line)
+        XCTAssertEqual(block.totalWeeks, 10, file: file, line: line)
+        XCTAssertEqual(try sessions(ctx).count, countBefore, file: file, line: line)
+        XCTAssertEqual(Set(try week(10, ctx).flatMap { $0.items.compactMap(\.waveRaw) }), ["deload"], file: file, line: line)
+    }
+
+    func test_blocker_loggedWeek10Session() throws {
+        let (ctx, block) = try seededBlock()
+        let item = try XCTUnwrap(try week(10, ctx).first?.items.first)
+        item.actualReps = [8]; item.actualLoads = [50]
+        try assertRefusedAndUntouched(ctx, block, contains: "logged data")
+    }
+
+    func test_blocker_week10RosterDiffersFromWeek7() throws {
+        let (ctx, block) = try seededBlock()
+        let s10 = try XCTUnwrap(try week(10, ctx).first)
+        ctx.delete(try XCTUnwrap(s10.items.first))
+        try ctx.save()
+        try assertRefusedAndUntouched(ctx, block, contains: "no week-10 counterpart")
+    }
+
+    func test_blocker_dateCollisionWithExistingSession() throws {
+        let (ctx, block) = try seededBlock()
+        let stray = Session(date: date(2026, 12, 4), status: .planned, weekIndex: 1, items: [])
+        ctx.insert(stray)
+        try ctx.save()
+        try assertRefusedAndUntouched(ctx, block, contains: "collides")
+    }
+
+    func test_blocker_wrongTotalWeeks() throws {
+        let (ctx, block) = try seededBlock()
+        block.totalWeeks = 8
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.blockers.contains { $0.contains("totalWeeks") })
+        XCTAssertFalse(report.didWrite)
+        XCTAssertEqual(try sessions(ctx).count, 60)
+    }
+
+    func test_blocker_maintenanceBlock() throws {
+        let (ctx, block) = try seededBlock()
+        block.isMaintenance = true
+        let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.blockers.contains { $0.contains("maintenance") })
+    }
+}
