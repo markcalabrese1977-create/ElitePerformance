@@ -652,4 +652,80 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         let report = DUPMesoLengthConversion.dryRun(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.blockers.contains { $0.contains("maintenance") })
     }
+
+    // MARK: On-device one-shot (TwelveWeekMesoConversionMigration)
+
+    private func clearMigrationFlags() {
+        for k in [TwelveWeekMesoConversionMigration.completionKey,
+                  TwelveWeekMesoConversionMigration.dryRunLoggedKey,
+                  TwelveWeekMesoConversionMigration.reportKey] {
+            UserDefaults.standard.removeObject(forKey: k)
+        }
+    }
+
+    func test_migration_shipsAsDryRun() {
+        XCTAssertTrue(TwelveWeekMesoConversionMigration.dryRun, "applying is a separate, deliberate commit that flips this")
+    }
+
+    func test_migration_dryRun_logsOnce_writesNothing_setsOnlyTheLoggedFlag() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, _) = try seededBlock()
+        try ctx.save()
+        let before = try fingerprint(ctx)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
+
+        let d = UserDefaults.standard
+        XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "completion is only ever set after a successful apply")
+        let report = try XCTUnwrap(d.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
+        XCTAssertTrue(report.contains("== GATES ==") && report.contains("== PROJECTED CHAINS =="))
+        XCTAssertEqual(try fingerprint(ctx), before, "dry run must not change any stored field")
+        XCTAssertFalse(ctx.hasChanges)
+
+        // Second launch: already logged -> no new report.
+        d.set("SENTINEL", forKey: TwelveWeekMesoConversionMigration.reportKey)
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
+        XCTAssertEqual(d.string(forKey: TwelveWeekMesoConversionMigration.reportKey), "SENTINEL")
+    }
+
+    func test_migration_noEligibleBlock_leavesEveryFlagUnset() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(c), dryRun: true)
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(c), dryRun: false)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+    }
+
+    func test_migration_applyMode_convertsThenSetsCompletionAfterSave_andIsIdempotent() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertEqual(block.totalWeeks, 12)
+        XCTAssertEqual(try sessions(ctx).count, 72)
+        XCTAssertEqual(DUPMesoLengthConversion.verifyChains(block: block, context: ctx).broken, [])
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertEqual(try sessions(ctx).count, 72, "completed flag makes a second launch a no-op")
+    }
+
+    func test_migration_applyMode_unsafeBlock_isRefusedAndFlagStaysUnset() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        let item = try XCTUnwrap(try week(10, ctx).first?.items.first)
+        item.actualReps = [8]; item.actualLoads = [50]
+        try ctx.save()
+        let before = try fingerprint(ctx)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "unset so it retries")
+        XCTAssertEqual(block.totalWeeks, 10)
+        XCTAssertEqual(try fingerprint(ctx), before)
+    }
 }
