@@ -736,6 +736,26 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         }
     }
 
+    func test_migration_dryRunLoggedFlag_isKeyedByReportVersion_soAChangedReportLogsAgain() {
+        XCTAssertEqual(TwelveWeekMesoConversionMigration.dryRunLoggedKey, "twelveWeekMesoConversion.v1.dryRunLogged.\(TwelveWeekMesoConversionMigration.reportVersion)")
+        XCTAssertEqual(TwelveWeekMesoConversionMigration.reportVersion, "v2")
+        // A flag left by an earlier report version does not suppress the current one.
+        let legacy = "twelveWeekMesoConversion.v1.dryRunLogged"
+        UserDefaults.standard.set(true, forKey: legacy); defer { UserDefaults.standard.removeObject(forKey: legacy); clearMigrationFlags() }
+        clearMigrationFlags()
+        UserDefaults.standard.set(true, forKey: legacy)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
+    }
+
+    func test_migration_reRunsDryRunWhenTheVersionedFlagIsMissing() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags(); UserDefaults.standard.removeObject(forKey: "twelveWeekMesoConversion.v1.dryRunLogged") }
+        UserDefaults.standard.set(true, forKey: "twelveWeekMesoConversion.v1.dryRunLogged")   // old-version flag
+        let (ctx, _) = try seededBlock()
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey), "logged again under the new version key")
+        XCTAssertNotNil(UserDefaults.standard.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
+    }
+
     func test_migration_shipsAsDryRun() {
         XCTAssertTrue(TwelveWeekMesoConversionMigration.dryRun, "applying is a separate, deliberate commit that flips this")
     }

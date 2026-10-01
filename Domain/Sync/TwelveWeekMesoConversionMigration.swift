@@ -20,9 +20,16 @@ enum TwelveWeekMesoConversionMigration {
     /// Flip to false (its own commit) to apply. Read-only while true.
     static let dryRun = true
 
+    /// Bump this whenever the dry-run REPORT changes (new gates, columns, rules, copy semantics):
+    /// the logged flag and stored report are keyed by it, so a changed report logs again on the
+    /// next launch instead of being swallowed by the previous install's "already logged" flag.
+    /// v2: loads are copied from the source week (v1 zeroed them) and the report shows
+    /// before -> after loads, block id, gates, item table and chain table.
+    static let reportVersion = "v2"
+
     static let completionKey = "twelveWeekMesoConversion.v1.completed"
-    static let dryRunLoggedKey = "twelveWeekMesoConversion.v1.dryRunLogged"
-    static let reportKey = "twelveWeekMesoConversion.v1.dryRunReport"
+    static var dryRunLoggedKey: String { "twelveWeekMesoConversion.v1.dryRunLogged.\(reportVersion)" }
+    static var reportKey: String { "twelveWeekMesoConversion.v1.dryRunReport.\(reportVersion)" }
 
     static func runIfNeeded(in context: ModelContext, dryRun: Bool = TwelveWeekMesoConversionMigration.dryRun) {
         let defaults = UserDefaults.standard

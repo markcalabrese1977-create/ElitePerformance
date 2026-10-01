@@ -49,7 +49,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "sessionHistoryBlockBackfill.v1.completed",
         "exerciseNameSnapshotRepair.v6.completed",
         "twelveWeekMesoConversion.v1.completed",
-        "twelveWeekMesoConversion.v1.dryRunLogged"
+        "twelveWeekMesoConversion.v1.dryRunLogged.v2"
     ]
 
     /// Field names whose values are safe to show in the report (no health data,
@@ -100,7 +100,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("PrescriptionNotesClearMigration", "prescriptionNotesClear.v1.completed"),
         ("Week6UpperBCleanupMigration", "week6UpperBCleanupMigration.v1.completed"),
         ("TwelveWeekMesoConversionMigration", "twelveWeekMesoConversion.v1.completed"),
-        ("TwelveWeekMesoConversionMigration (dry-run log)", "twelveWeekMesoConversion.v1.dryRunLogged"),
+        ("TwelveWeekMesoConversionMigration (dry-run log)", "twelveWeekMesoConversion.v1.dryRunLogged.v2"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
