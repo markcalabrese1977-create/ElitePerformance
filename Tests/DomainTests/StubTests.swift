@@ -143,6 +143,28 @@ final class MesoPhaseBandTests: XCTestCase {
         XCTAssertEqual(waveSession(weekIndex: 9, totalWeeks: 10, waveRaw: nil).mesoPhase, .deload)
     }
 
+    /// Proof that maintenance behavior is unchanged: a block seeded by the REAL maintenance
+    /// seeder (every item waveRaw "deload", isMaintenance true) keeps pure band phases, i.e.
+    /// only the final week is .deload — NOT every week, which the wave-aware rule would give
+    /// if the isMaintenance exemption were missing.
+    func test_D10_seededMaintenanceBlock_phasesAreBandOnly() throws {
+        let fixture = try JourneyFixture.make()
+        let start = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 6))!
+        let block = try fixture.seedMaintenanceFromTemplate(template: FullBody2DayTemplate.template, totalWeeks: 4, startDate: start)
+
+        XCTAssertTrue(block.isMaintenance)
+        XCTAssertEqual(block.totalWeeks, 4)
+        let sessions = fixture.allSessionsSorted().filter { $0.meso?.persistentModelID == block.persistentModelID }
+        XCTAssertFalse(sessions.isEmpty)
+        XCTAssertTrue(sessions.allSatisfy { $0.items.allSatisfy { $0.waveRaw == "deload" } }, "precondition: maintenance items are all deload-wave")
+
+        let expected: [Int: MesoPhase] = [1: .early, 2: .mid, 3: .late, 4: .deload]   // 0.25 / 0.50 / 0.75 / 1.00
+        for s in sessions {
+            XCTAssertEqual(s.mesoPhase, expected[s.weekIndex], "maintenance week \(s.weekIndex)")
+            XCTAssertEqual(s.isDeloadWeek, s.weekIndex == 4, "maintenance week \(s.weekIndex)")
+        }
+    }
+
     // MARK: - T-D.6/7/8: ProgramExerciseTemplate.sets(forWeek:wave:) — confirmed
     // live via ProgramTemplateResolver.resolveDay (Features/Programs/
     // DUPWaveModels.swift:330), not dead code.
