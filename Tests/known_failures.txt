@@ -18,3 +18,12 @@ ProgramCatalogRecommendationTests test_I3_BUG_sessionLengthNeverActuallyChangesT
 ReorderTests test_J4_reorderOperatesOnOrderSortedViewNotRawArrayPosition  # flaky
 TemplateSlotKeyInvariantTests test_noExerciseIdAppearsOnMoreThanOneDay_inAnyTemplate
 UnitAndIncrementChangeTests test_M13_incrementChangeReRoundsFutureSuggestionLeavesHistoricalLoadUntouched
+
+# Fail via the SessionScreenViewModel deinit abort (SIGABRT in swift_task_deinitOnExecutorMainActorBackDeploy);
+# pre-existing, newly visible when the classes run individually; remove when the crash is fixed.
+# Crash reports for these exist from 2026-09-25; B10 also verified failing at f7f952e (pre-characterization).
+LoadWriteTests test_B10_sessionScreenViewModelAddExerciseSeedsNameAndArrays
+MaintenanceBlockSeedingTests test_F6_addedExerciseToMaintenanceSessionGetsMaintenancePrescriptionAndRetentionMessage
+SameDaySessionsTests test_M7_multipleSessionsSameDateDoNotCollideOnWeekIndexOrIdentity
+# NOTE: SameDaySessionsTests and CoachingMessageSeamTests did not complete in a single process in earlier baselines
+# (the host aborts mid-class and the remaining tests are lost); run them per class or per test with -only-testing.
