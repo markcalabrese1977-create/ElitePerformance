@@ -300,4 +300,95 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let r = rec(3, [8, 8, 8, 5], [100, 100, 100, 100], "3d")
         XCTAssertEqual(r?.nextSuggestedLoad, 105.0)
     }
+
+    // MARK: 4. Top-set pattern, persistent 4-set items, Skip
+
+    private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {
+        let i = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 6, targetSets: 4, targetRIR: 2, suggestedLoad: 290,
+            repMin: 6, repMax: 8
+        )
+        i.actualReps = reps
+        i.actualLoads = loads
+        i.actualRIRs = Array(repeating: 2, count: reps.count)
+        i.plannedRepsBySet = Array(repeating: 7, count: reps.count)
+        i.setFeedbackBySet = Array(repeating: "", count: reps.count)
+        return i
+    }
+
+    /// 4a. Three back-offs at 290 x 7 plus a 315 x 5 top set in row 4.
+    func test_4a_benchTopSetPattern_backOffsMidRange_holdsAtThirdBackOffLoad() {
+        let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [7, 7, 7, 5], loads: [290, 290, 290, 315]))
+        XCTAssertEqual(r?.nextSuggestedLoad, 290, "baseLoad is the 3rd working set (a back-off), not the 315 top set")
+        XCTAssertTrue(r?.message.contains("hold 290.0") ?? false, r?.message ?? "nil")
+        // The 315 row is the 4th set, so it is not a primary set: it neither earns a bump nor
+        // appears in baseLoad. Primary reps (7,7,7) are below repMax 8, so the outcome is a hold.
+    }
+
+    /// 4b. Same, but the back-offs top the range.
+    func test_4b_benchTopSetPattern_backOffsAtTop_bumpComputesFrom290Not315() {
+        let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [8, 8, 8, 5], loads: [290, 290, 290, 315]))
+        XCTAssertEqual(r?.nextSuggestedLoad, 295, "bump = 290 + one 5.0 bench step, computed from the 3rd back-off")
+        XCTAssertTrue(r?.message.contains("increase earned") ?? false, r?.message ?? "nil")
+        // SURPRISING: the top set's 315 is ignored for next load; the next session's load is
+        // 295 even though the lifter just did 315 x 5.
+    }
+
+    /// Four-set item sized the way a repair would size it: every planned array non-zero, length 4.
+    private func persistentFourSetSession(in context: ModelContext) -> (Session, SessionItem) {
+        let session = Session(date: Date(), weekIndex: 1, items: [])
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 8, targetSets: 4, targetRIR: 2, suggestedLoad: 100,
+            repMin: 6, repMax: 8,
+            plannedRepsBySet: [8, 8, 8, 8],
+            plannedLoadsBySet: [100, 100, 100, 100],
+            plannedRIRsBySet: [2, 2, 2, 2]
+        )
+        session.items = [item]
+        context.insert(session)
+        return (session, item)
+    }
+
+    /// 4c. Persistent 4-set item, all four rows logged normally (compare with the Add Set path).
+    func test_4c_persistentFourSetItem_logAllFour() throws {
+        let ctx = try makeContext()
+        let (session, item) = persistentFourSetSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+
+        XCTAssertEqual(vm.exercises[0].sets.count, 4, "no hidden 5th row: rows = max(4, targetSets)")
+        XCTAssertEqual(vm.exercises[0].sets[3].plannedLoad, 100, "row 4 is a planned working set: planned load comes from the array")
+        XCTAssertEqual(vm.exercises[0].sets[3].actualLoadText, "100.0", "prefilled with the planned load, not 0")
+        for s in 1...4 { log(vm, ctx, set: s, load: nil) }
+
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual(item.actualLoads, [100, 100, 100, 100])
+        XCTAssertEqual(item.actualReps, [8, 8, 8, 8])
+        XCTAssertEqual(item.plannedLoadsBySet, [100, 100, 100, 100])
+        XCTAssertEqual(CoachingEngine.recommend(for: item)?.nextSuggestedLoad, 105, "same bump as the control; no 0-load trap")
+        // Contrast with the Add Set path: there row 4 prefills 0 and the seed lands on a hidden 5th row.
+    }
+
+    /// 4d. Persistent 4-set item: 3 sets logged, then Skip on row 4.
+    func test_4d_skipFourthRow_stillTripsNSetsInHold() throws {
+        let ctx = try makeContext()
+        let (session, item) = persistentFourSetSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        for s in 1...3 { log(vm, ctx, set: s, load: nil) }
+        vm.skipSet(exerciseID: vm.exercises[0].id, setIndex: 4, reason: .none, context: ctx)
+
+        XCTAssertEqual(item.targetSets, 4, "Skip does not reduce the planned working set count")
+        XCTAssertEqual(item.actualReps, [8, 8, 8, 0])
+        XCTAssertEqual(item.restPausePatternsBySet[3], "SKIP")
+        XCTAssertTrue(vm.exercises[0].isComplete, "a skipped set counts as done for completion")
+        XCTAssertEqual(session.status, .completed)
+        let r = CoachingEngine.recommend(for: item)
+        XCTAssertEqual(r?.nextSuggestedLoad, 100)
+        XCTAssertTrue(r?.message.contains("3 sets in") ?? false, r?.message ?? "nil")
+        // SURPRISING: the item is complete and carry-forward ran, yet the engine treats it as
+        // incomplete (RULE 3) and withholds the bump the three primary sets earned.
+    }
 }
