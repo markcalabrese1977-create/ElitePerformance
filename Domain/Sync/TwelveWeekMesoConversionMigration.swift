@@ -31,7 +31,9 @@ enum TwelveWeekMesoConversionMigration {
     static var dryRunLoggedKey: String { "twelveWeekMesoConversion.v1.dryRunLogged.\(reportVersion)" }
     static var reportKey: String { "twelveWeekMesoConversion.v1.dryRunReport.\(reportVersion)" }
 
-    static func runIfNeeded(in context: ModelContext, dryRun: Bool = TwelveWeekMesoConversionMigration.dryRun) {
+    static func runIfNeeded(in context: ModelContext,
+                            dryRun: Bool = TwelveWeekMesoConversionMigration.dryRun,
+                            hooks: DUPMesoLengthConversion.ApplyHooks = .init()) {
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: completionKey) {
             print("ℹ️ 12-week conversion not needed.")
@@ -70,17 +72,51 @@ enum TwelveWeekMesoConversionMigration {
             print("⛔️ 12-week conversion refused: \(report.blockers.count) blocker(s). Flags left unset; will retry.")
             return
         }
+        // Earlier startup migrations share this context and may leave unsaved edits. Commit them first
+        // (autosave would have), so apply() can roll back without ever discarding someone else's work.
+        if context.hasChanges {
+            do { try context.save() } catch {
+                print("⚠️ 12-week conversion: could not flush pending changes before apply: \(error). Flag NOT set; will retry.")
+                return
+            }
+        }
         do {
-            let applied = try DUPMesoLengthConversion.apply(block: block, context: context)
+            let applied = try DUPMesoLengthConversion.apply(block: block, context: context, hooks: hooks)
             guard applied.didWrite else {
                 print("⚠️ 12-week conversion: apply wrote nothing. Flags left unset.")
                 return
             }
             // Only after the save inside apply() succeeded.
             defaults.set(true, forKey: completionKey)
-            print("✅ 12-week conversion applied:\n\(applied.lines.last ?? "")")
+            logPostWriteSummary(applied, block: block, context: context)
         } catch {
-            print("⚠️ 12-week conversion save failed: \(error). Flag NOT set; will retry.")
+            // apply() has already rolled the context back for every failure after its first mutation.
+            print("⛔️ 12-week conversion NOT applied (store unchanged, flag NOT set; will retry): \(error)")
         }
+    }
+
+    /// Everything a human needs from the launch log to trust the write.
+    private static func logPostWriteSummary(_ r: DUPMesoLengthConversion.Report, block: MesoBlock, context: ModelContext) {
+        var out: [String] = ["✅ 12-week conversion applied to '\(block.name)' (totalWeeks \(block.totalWeeks.map(String.init) ?? "nil"))"]
+        out.append("sessions converted: \(r.sessionsConverted)   items converted: \(r.itemsConverted)")
+        out.append("sessions created:   \(r.sessionsCreated)   items created:   \(r.itemsCreated)")
+        out.append("== CHAINS (\(r.postWriteChainTable.count)) ==")
+        out += r.postWriteChainTable
+        out.append("== VERIFICATION (ran before save) ==")
+        out += r.verification.map { "  \($0)" }
+        out.append("== SCHEDULED NEXT MESO (logged, not gated) ==")
+        out.append("  " + scheduledNextMesoDescription(in: context))
+        print(out.joined(separator: "\n"))
+    }
+
+    /// Reads the scheduled-next-meso value from AppState and from the UserDefaults mirror, without
+    /// creating or changing anything.
+    static func scheduledNextMesoDescription(in context: ModelContext) -> String {
+        let state = (try? context.fetch(FetchDescriptor<AppState>()))?.first
+        let fromState = state?.scheduledNextMesoStartDate
+        let epoch = UserDefaults.standard.double(forKey: AppStateBridge.scheduledStartEpochKey)
+        let fromDefaults: Date? = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
+        func f(_ d: Date?) -> String { d.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "none" }
+        return "AppState.scheduledNextMesoStartDate = \(f(fromState))\(state == nil ? " (no AppState row)" : ""); UserDefaults \(AppStateBridge.scheduledStartEpochKey) = \(f(fromDefaults))"
     }
 }

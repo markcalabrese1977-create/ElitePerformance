@@ -66,6 +66,10 @@ enum DUPMesoLengthConversion {
         var sessionsCreated = 0
         var itemsCreated = 0
         var didWrite = false
+        /// Pre-save verification results, one line per check ("[PASS] ..." / "[FAIL] ..."), and the
+        /// 18-row chain table read back from the live (pre-save) object graph.
+        var verification: [String] = []
+        var postWriteChainTable: [String] = []
 
         var isSafe: Bool { blockers.isEmpty }
 
@@ -110,16 +114,59 @@ enum DUPMesoLengthConversion {
         makePlan(block: block, context: context, calendar: calendar).report
     }
 
-    /// Applies the conversion if (and only if) the dry run is clean. Single save at the end.
+    /// Why an apply attempt did not persist. Every case means: nothing was saved, the context was
+    /// rolled back (or never touched), and the caller must leave the completion flag unset.
+    enum ApplyError: Error, CustomStringConvertible {
+        case pendingChanges
+        case verificationFailed([String])
+        case saveFailed(String)
+
+        var description: String {
+            switch self {
+            case .pendingChanges: return "context had unsaved changes before apply; refusing so a rollback can never discard them"
+            case .verificationFailed(let f): return "post-mutation verification failed (rolled back): " + f.joined(separator: "; ")
+            case .saveFailed(let m): return "save failed (rolled back): \(m)"
+            }
+        }
+    }
+
+    /// Test seams. Production uses the defaults.
+    struct ApplyHooks {
+        /// Replaces `context.save()`.
+        var save: (ModelContext) throws -> Void = { try $0.save() }
+        /// Runs after the mutations and before verification (used to force a broken result).
+        var beforeVerify: ((ModelContext) -> Void)? = nil
+        init(save: @escaping (ModelContext) throws -> Void = { try $0.save() },
+             beforeVerify: ((ModelContext) -> Void)? = nil) {
+            self.save = save; self.beforeVerify = beforeVerify
+        }
+    }
+
+    /// Applies the conversion if (and only if) the dry run is clean.
+    ///
+    /// Order: plan -> (autosave off) -> mutate -> verify the whole result -> ONE save. Any failure
+    /// after the first mutation (verification, save) rolls the context back and throws, so the
+    /// store is exactly as it was and the caller leaves its completion flag unset.
     @discardableResult
-    static func apply(block: MesoBlock, context: ModelContext, calendar: Calendar = .current) throws -> Report {
+    static func apply(block: MesoBlock, context: ModelContext, calendar: Calendar = .current,
+                      hooks: ApplyHooks = ApplyHooks()) throws -> Report {
         var plan = makePlan(block: block, context: context, calendar: calendar)
         guard plan.report.isSafe, !plan.report.alreadyConverted else { return plan.report }
+        // rollback() discards every unsaved change in the context, so never start with someone else's.
+        guard !context.hasChanges else { throw ApplyError.pendingChanges }
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let snapshot = Snapshot(block: block, converts: plan.converts.map { ($0.week10, $0.pairs) })
         let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        var touchedItems: [SessionItem] = []          // converted + newly created: held to the "clean plan" rule
 
         for step in plan.converts {
             for (dst, src) in step.pairs {
                 copyPrescription(from: src, to: dst, customExercises: customExercises)
+                touchedItems.append(dst)
                 plan.report.itemsConverted += 1
             }
             step.week10.sessionNotes = step.week7.sessionNotes
@@ -142,6 +189,7 @@ enum DUPMesoLengthConversion {
             session.programIndex = step.newProgramIndex
             session.meso = block
             context.insert(session)
+            touchedItems += items
             plan.report.sessionsCreated += 1
             plan.report.itemsCreated += items.count
         }
@@ -152,14 +200,224 @@ enum DUPMesoLengthConversion {
         }
         block.updatedAt = Date()
 
-        try context.save()
+        hooks.beforeVerify?(context)
+
+        let result = verifyConversion(block: block, context: context, touchedItems: touchedItems, calendar: calendar)
+        plan.report.verification = result.lines
+        plan.report.postWriteChainTable = result.chainTable
+        guard result.failures.isEmpty else {
+            snapshot.undo(in: context)
+            throw ApplyError.verificationFailed(result.failures)
+        }
+
+        do {
+            try hooks.save(context)
+        } catch {
+            snapshot.undo(in: context)
+            throw ApplyError.saveFailed("\(error)")
+        }
         plan.report.didWrite = true
         plan.report.lines.append("WROTE: week 10 converted in place (\(plan.report.sessionsConverted) sessions, \(plan.report.itemsConverted) items); weeks 11-12 created (\(plan.report.sessionsCreated) sessions, \(plan.report.itemsCreated) items); totalWeeks = \(targetTotalWeeks).")
         return plan.report
     }
 
-    /// Post-write check usable at any time: for every item in weeks 1...9, the per-letter target
-    /// must be the same lift three weeks later (same dayLabel, same wave); weeks 10+ have no target.
+    // MARK: - Undo
+
+    /// `ModelContext.rollback()` discards inserts but does NOT revert property edits on objects that
+    /// were already persisted (verified: converted week-10 items kept their new values). So apply
+    /// records every field it is about to overwrite and restores them itself before rolling back.
+    private struct Snapshot {
+        struct ItemState {
+            let item: SessionItem
+            let order: Int, targetReps: Int, targetSets: Int, targetRIR: Int, suggestedLoad: Double
+            let waveRaw: String?, priorityRaw: String?
+            let setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, targetRIRMin: Int?, targetRIRMax: Int?
+            let intensifierRaw: String?, intensifierNotes: String?, prescriptionNotes: String?
+            let plannedRepsBySet: [Int], plannedRIRsBySet: [Int], plannedLoadsBySet: [Double]
+            let planEdited: Bool
+            let actualReps: [Int], actualLoads: [Double], actualRIRs: [Int]
+            let usedRestPauseFlags: [Bool], restPausePatternsBySet: [String], dropSetPatternsBySet: [String]
+            let setFeedbackBySet: [String], pumpRatingsBySet: [Int]
+            let coachNote: String?, nextSuggestedLoad: Double?, updatedAt: Date?
+
+            init(_ i: SessionItem) {
+                item = i
+                order = i.order; targetReps = i.targetReps; targetSets = i.targetSets; targetRIR = i.targetRIR
+                suggestedLoad = i.suggestedLoad; waveRaw = i.waveRaw; priorityRaw = i.priorityRaw
+                setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
+                targetRIRMin = i.targetRIRMin; targetRIRMax = i.targetRIRMax
+                intensifierRaw = i.intensifierRaw; intensifierNotes = i.intensifierNotes; prescriptionNotes = i.prescriptionNotes
+                plannedRepsBySet = i.plannedRepsBySet; plannedRIRsBySet = i.plannedRIRsBySet; plannedLoadsBySet = i.plannedLoadsBySet
+                planEdited = i.planEdited
+                actualReps = i.actualReps; actualLoads = i.actualLoads; actualRIRs = i.actualRIRs
+                usedRestPauseFlags = i.usedRestPauseFlags; restPausePatternsBySet = i.restPausePatternsBySet
+                dropSetPatternsBySet = i.dropSetPatternsBySet; setFeedbackBySet = i.setFeedbackBySet
+                pumpRatingsBySet = i.pumpRatingsBySet
+                coachNote = i.coachNote; nextSuggestedLoad = i.nextSuggestedLoad; updatedAt = i.updatedAt
+            }
+
+            func restore() {
+                let i = item
+                i.order = order; i.targetReps = targetReps; i.targetSets = targetSets; i.targetRIR = targetRIR
+                i.suggestedLoad = suggestedLoad; i.waveRaw = waveRaw; i.priorityRaw = priorityRaw
+                i.setMin = setMin; i.setMax = setMax; i.repMin = repMin; i.repMax = repMax
+                i.targetRIRMin = targetRIRMin; i.targetRIRMax = targetRIRMax
+                i.intensifierRaw = intensifierRaw; i.intensifierNotes = intensifierNotes; i.prescriptionNotes = prescriptionNotes
+                i.plannedRepsBySet = plannedRepsBySet; i.plannedRIRsBySet = plannedRIRsBySet; i.plannedLoadsBySet = plannedLoadsBySet
+                i.planEdited = planEdited
+                i.actualReps = actualReps; i.actualLoads = actualLoads; i.actualRIRs = actualRIRs
+                i.usedRestPauseFlags = usedRestPauseFlags; i.restPausePatternsBySet = restPausePatternsBySet
+                i.dropSetPatternsBySet = dropSetPatternsBySet; i.setFeedbackBySet = setFeedbackBySet
+                i.pumpRatingsBySet = pumpRatingsBySet
+                i.coachNote = coachNote; i.nextSuggestedLoad = nextSuggestedLoad; i.updatedAt = updatedAt
+            }
+        }
+
+        let block: MesoBlock
+        let totalWeeks: Int?, name: String, updatedAt: Date?
+        let sessionNotes: [(Session, String?)]
+        let items: [ItemState]
+
+        init(block: MesoBlock, converts: [(week10: Session, pairs: [(dst: SessionItem, src: SessionItem)])]) {
+            self.block = block
+            totalWeeks = block.totalWeeks; name = block.name; updatedAt = block.updatedAt
+            sessionNotes = converts.map { ($0.week10, $0.week10.sessionNotes) }
+            items = converts.flatMap { $0.pairs.map { ItemState($0.dst) } }
+        }
+
+        /// Puts every overwritten field back, then discards the inserted sessions.
+        func undo(in context: ModelContext) {
+            block.totalWeeks = totalWeeks; block.name = name; block.updatedAt = updatedAt
+            for (s, notes) in sessionNotes { s.sessionNotes = notes }
+            for i in items { i.restore() }
+            context.rollback()
+        }
+    }
+
+    // MARK: - Verification (runs before save)
+
+    private static let expectedSessionsPerWeek = 6
+    private static let thursday = 5                        // Gregorian weekday: the rest day stays empty
+
+    /// Checks the converted object graph as it will be saved. Reads through the context, which sees
+    /// the pending mutations. Returns one line per check plus the failures (empty = all passed).
+    static func verifyConversion(block: MesoBlock, context: ModelContext, touchedItems: [SessionItem],
+                                 calendar: Calendar) -> (lines: [String], failures: [String], chainTable: [String]) {
+        var lines: [String] = []
+        var failures: [String] = []
+        func check(_ name: String, detail: String = "", _ problems: [String]) {
+            if problems.isEmpty {
+                lines.append("[PASS] \(name)\(detail.isEmpty ? "" : " — \(detail)")")
+            } else {
+                lines.append("[FAIL] \(name) — \(problems.joined(separator: "; "))")
+                failures += problems.map { "\(name): \($0)" }
+            }
+        }
+
+        let all = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let sessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
+        let total = expectedSessionsPerWeek * targetTotalWeeks
+
+        // Chains: every item in weeks 1...9 targets the same lift 3 weeks later; weeks 10-12 have no target.
+        let chains = verifyChains(block: block, context: context)
+        check("verifyChains: all chains link, nil at weeks 10/11/12", detail: "\(chains.checked) items checked", chains.broken)
+        let table = chainTable(block: block, sessions: sessions, all: all)
+        check("18 chains (6 days x A/B/C) each link 4 weeks", detail: "\(table.rows.count) chains", table.problems + (table.rows.count == 18 ? [] : ["found \(table.rows.count) chains, expected 18"]))
+
+        let unwaved = unwavedItems(block: block, context: context)
+        if !unwaved.isEmpty {
+            lines.append("[INFO] \(unwaved.count) hand-added item(s) with no wave letter are outside the A/B/C chains (legacy chronological path, unchanged by this conversion): \(unwaved.joined(separator: ", "))")
+        }
+
+        check("block has exactly \(total) sessions", detail: "\(sessions.count)", sessions.count == total ? [] : ["\(sessions.count) sessions"])
+        var perWeek: [String] = []
+        for w in 1...targetTotalWeeks {
+            let n = sessions.filter { $0.weekIndex == w }.count
+            if n != expectedSessionsPerWeek { perWeek.append("week \(w) has \(n)") }
+        }
+        let stray = sessions.filter { !(1...targetTotalWeeks).contains($0.weekIndex) }.count
+        if stray > 0 { perWeek.append("\(stray) session(s) outside weeks 1-\(targetTotalWeeks)") }
+        check("\(expectedSessionsPerWeek) sessions in each of weeks 1-\(targetTotalWeeks)", perWeek)
+
+        let indices = sessions.compactMap { $0.programIndex }
+        var pi: [String] = []
+        if indices.count != sessions.count { pi.append("\(sessions.count - indices.count) session(s) have no programIndex") }
+        if Set(indices).count != indices.count { pi.append("duplicate programIndex values") }
+        if Set(indices) != Set(1...total) { pi.append("programIndex is not exactly 1...\(total)") }
+        check("programIndex is exactly 1...\(total), no repeats", pi)
+
+        let days = sessions.map { calendar.startOfDay(for: $0.date) }
+        check("no two sessions share a date", Set(days).count == days.count ? [] : ["\(days.count - Set(days).count) shared date(s)"])
+        let thursdays = sessions.filter { calendar.component(.weekday, from: $0.date) == thursday }
+        check("no session falls on a Thursday", thursdays.map { "W\($0.weekIndex) \($0.dayLabel ?? "?")" })
+
+        let deloadItems = sessions.flatMap { s in s.items.filter { $0.waveRaw?.lowercased() == "deload" }.map { _ in "W\(s.weekIndex) \(s.dayLabel ?? "?")" } }
+        check("no item has waveRaw == deload", deloadItems)
+        check("isDeloadWeek is false for every session", sessions.filter { $0.isDeloadWeek }.map { "W\($0.weekIndex) \($0.dayLabel ?? "?")" })
+        check("totalWeeks == \(targetTotalWeeks)", block.totalWeeks == targetTotalWeeks ? [] : ["totalWeeks is \(block.totalWeeks.map(String.init) ?? "nil")"])
+
+        var dirty: [String] = []
+        for i in touchedItems {
+            if i.planEdited { dirty.append("\(i.exerciseId) planEdited") }
+            if !i.actualReps.isEmpty || !i.actualLoads.isEmpty || !i.actualRIRs.isEmpty { dirty.append("\(i.exerciseId) has actuals") }
+            if i.isCompleted { dirty.append("\(i.exerciseId) isCompleted") }
+        }
+        check("converted/new items: planEdited false, no actuals, not completed", detail: "\(touchedItems.count) items", dirty)
+
+        var waves: [String] = []
+        for (w, letter) in [(11, "b"), (12, "c")] {
+            for s in sessions where s.weekIndex == w {
+                for i in s.items where i.waveRaw?.lowercased() != letter { waves.append("W\(w) \(s.dayLabel ?? "?") \(i.exerciseId) wave \(i.waveRaw ?? "nil")") }
+            }
+        }
+        check("weeks 11/12 waves are b/c", waves)
+
+        return (lines, failures, table.rows)
+    }
+
+    /// Hand-added items in the block that carry no wave letter ("W1 Pull A dumbbell_lateral_raise").
+    static func unwavedItems(block: MesoBlock, context: ModelContext) -> [String] {
+        let all = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        return all.filter { $0.meso?.persistentModelID == block.persistentModelID }
+            .sorted { $0.date < $1.date }
+            .flatMap { s in s.items.filter { !WavePrescriptionGuard.isWaveLetter($0.waveRaw) && $0.waveRaw?.lowercased() != "deload" }
+                .map { "W\(s.weekIndex) \(s.dayLabel ?? "?") \($0.exerciseId)" } }
+    }
+
+    /// One row per (dayLabel, letter): walks `PlanMemoryEngine.nextTargetItem` from every item of the
+    /// letter's first week and records the weeks it visits.
+    private static func chainTable(block: MesoBlock, sessions: [Session], all: [Session]) -> (rows: [String], problems: [String]) {
+        var rows: [String] = []
+        var problems: [String] = []
+        let labels = Set(sessions.compactMap { $0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) }).sorted()
+        for label in labels {
+            for (letter, start) in [("A", 1), ("B", 2), ("C", 3)] {
+                guard let first = sessions.first(where: { $0.weekIndex == start && $0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) == label }) else {
+                    problems.append("\(label) / \(letter): no week-\(start) session"); continue
+                }
+                let expected = [start, start + 3, start + 6, start + 9]
+                var linked = 0
+                let lettered = first.items.filter { WavePrescriptionGuard.isWaveLetter($0.waveRaw) }
+                for item in lettered {
+                    var weeks = [start]
+                    var cur = item, curSession = first
+                    while let next = PlanMemoryEngine.nextTargetItem(for: cur, after: curSession, in: all),
+                          let nextSession = sessions.first(where: { $0.items.contains { $0 === next } }) {
+                        weeks.append(nextSession.weekIndex); cur = next; curSession = nextSession
+                        if weeks.count > 6 { break }
+                    }
+                    if weeks == expected { linked += 1 } else { problems.append("\(label) / \(letter) \(item.exerciseId): visits \(weeks) expected \(expected)") }
+                }
+                rows.append("  \(label) / \(letter): " + expected.map { "W\($0)" }.joined(separator: "→") + "→nil   items linked \(linked)/\(lettered.count)")
+            }
+        }
+        return (rows, problems)
+    }
+
+    /// Post-write check usable at any time: for every wave-lettered item in weeks 1...9, the per-letter
+    /// target must be the same lift three weeks later (same dayLabel, same wave); weeks 10+ have no
+    /// target. Items with no wave letter (hand-added lifts) are not in a rotation: they follow the legacy
+    /// chronological path, so they are excluded here and listed separately by `unwavedItems`.
     static func verifyChains(block: MesoBlock, context: ModelContext) -> (checked: Int, broken: [String]) {
         let all = ((try? context.fetch(FetchDescriptor<Session>())) ?? [])
         let blockSessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
@@ -167,7 +425,7 @@ enum DUPMesoLengthConversion {
         var broken: [String] = []
         for session in blockSessions.sorted(by: { $0.date < $1.date }) {
             let week = session.weekIndex
-            for item in session.items {
+            for item in session.items where WavePrescriptionGuard.isWaveLetter(item.waveRaw) {
                 checked += 1
                 let target = PlanMemoryEngine.nextTargetItem(for: item, after: session, in: all)
                 let targetSession = target.flatMap { t in blockSessions.first { $0.items.contains { $0 === t } } }

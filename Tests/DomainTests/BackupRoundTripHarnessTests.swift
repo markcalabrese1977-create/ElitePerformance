@@ -424,6 +424,91 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         log("group mechanicalLoad.* keys after migrations: \(groupAfterMig.count) (was \(postImportGroup.count - (postImportGroup[sentinelKey] != nil ? 1 : 0)) right after import)")
     }
 
+    // MARK: - 12-week conversion on the real export: apply, idempotency, post-conditions
+
+    func testTwelveWeekConversionOnFixture_appliesIdempotently_andMeetsPostconditions() throws {
+        guard let fixturePath = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !fixturePath.isEmpty else {
+            throw XCTSkip("EP_BACKUP_FIXTURE not set")
+        }
+        let savedDomain = appDomainSnapshot()
+        let savedGroup = groupLoadKeys()
+        defer { restoreAppDomain(savedDomain); restoreGroupLoadKeys(savedGroup); flushReport() }
+        for k in Self.completionKeys { UserDefaults.standard.removeObject(forKey: k) }
+
+        let container = try makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: fixturePath), modelContainer: container)
+        let ctx = ModelContext(container)
+
+        // The whole startup sequence in app order; the conversion is run armed regardless of the shipped switch.
+        func startupSequence() {
+            for (name, run) in Self.migrationList where !name.hasPrefix("TwelveWeek") {
+                run(ctx); try? ctx.save()
+            }
+            TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+            try? ctx.save()
+        }
+
+        startupSequence()
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "conversion applied and flag set")
+        let exportA = try exportJSON(container)
+
+        // ---- (d) post-conditions on the real data, independent of the in-app verifier ----
+        let cal = Calendar.current
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>()).filter { $0.status == .active && !$0.isMaintenance }
+        XCTAssertEqual(blocks.count, 1)
+        let block = try XCTUnwrap(blocks.first)
+        XCTAssertEqual(block.totalWeeks, 12)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        let ss = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
+        log("[conversion fixture] block '\(block.name)': \(ss.count) sessions")
+        XCTAssertEqual(ss.count, 72)
+        for w in 1...12 { XCTAssertEqual(ss.filter { $0.weekIndex == w }.count, 6, "week \(w)") }
+        XCTAssertEqual(Set(ss.compactMap { $0.programIndex }), Set(1...72))
+        XCTAssertEqual(ss.compactMap { $0.programIndex }.count, 72, "no repeats")
+        XCTAssertEqual(Set(ss.map { cal.startOfDay(for: $0.date) }).count, 72, "no shared dates")
+        XCTAssertTrue(ss.allSatisfy { cal.component(.weekday, from: $0.date) != 5 }, "no Thursday sessions")
+        XCTAssertTrue(ss.allSatisfy { s in s.items.allSatisfy { $0.waveRaw?.lowercased() != "deload" } }, "no deload items")
+        XCTAssertTrue(ss.allSatisfy { !$0.isDeloadWeek }, "isDeloadWeek false everywhere")
+        XCTAssertEqual(DUPMesoLengthConversion.verifyChains(block: block, context: ctx).broken, [])
+        let unwaved = DUPMesoLengthConversion.unwavedItems(block: block, context: ctx)
+        log("[conversion fixture] hand-added items outside the chains: \(unwaved)")
+        XCTAssertEqual(unwaved.count, 2, "the two hand-added week-1 lifts, nothing else")
+        for s in ss where s.weekIndex >= 10 {
+            for i in s.items {
+                XCTAssertFalse(i.planEdited); XCTAssertFalse(i.isCompleted)
+                XCTAssertTrue(i.actualReps.isEmpty && i.actualLoads.isEmpty && i.actualRIRs.isEmpty)
+            }
+        }
+        for (w, letter) in [(11, "b"), (12, "c")] {
+            XCTAssertTrue(ss.filter { $0.weekIndex == w }.allSatisfy { $0.items.allSatisfy { $0.waveRaw?.lowercased() == letter } }, "week \(w) wave \(letter)")
+        }
+        log("[conversion fixture] scheduled next meso: \(TwelveWeekMesoConversionMigration.scheduledNextMesoDescription(in: ctx))")
+
+        // ---- (c) idempotency: run ALL startup migrations again, flags intact, then with every flag cleared ----
+        func assertOnlyExportedAtDiffers(_ label: String) throws {
+            let now = try exportJSON(container)
+            let c = Collector()
+            diff(exportA, now, path: "", record: nil, key: "", into: c)
+            render(c, indent: "   ")
+            XCTAssertTrue(Set(c.entries.keys).isSubset(of: ["valueChanged\texportedAt"]), "\(label): \(c.entries.keys.sorted())")
+            XCTAssertTrue(c.orderDiffs.isEmpty, "\(label): reordered arrays \(c.orderDiffs)")
+        }
+        startupSequence()
+        try assertOnlyExportedAtDiffers("second launch (flags intact)")
+        // Third launch: the conversion's own flags are lost (e.g. defaults wiped) while every other flag stays.
+        // The block is already 12 weeks, so no 10-week block is eligible and nothing may change.
+        // (Clearing EVERY flag is not a supported re-run: CustomExerciseStoreMigration then re-migrates the 20
+        // customs to 40, and CustomExerciseDedupMigration.swift:21 traps on the duplicate ids. Existing issue,
+        // unreachable while those flags stay set, and unrelated to the conversion.)
+        for k in ["twelveWeekMesoConversion.v1.completed", "twelveWeekMesoConversion.v1.dryRunLogged.v2"] {
+            UserDefaults.standard.removeObject(forKey: k)
+        }
+        startupSequence()
+        try assertOnlyExportedAtDiffers("third launch (conversion flags lost, all migrations re-run)")
+        let after = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.meso?.persistentModelID == block.persistentModelID }
+        XCTAssertEqual(after.count, 72, "no duplicate weeks 11-12 after re-running")
+    }
+
     // MARK: - Realistic order: fresh install first launch -> restore -> next launch
 
     func testFreshInstallThenRestoreOrder() throws {

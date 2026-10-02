@@ -3,7 +3,7 @@ import SwiftData
 
 enum AppStateBridge {
     private static let activeStartEpochKey = "meso.activeStartDateEpoch"
-    private static let scheduledStartEpochKey = "meso.scheduledStartDateEpoch"
+    static let scheduledStartEpochKey = "meso.scheduledStartDateEpoch"
     private static let promptSnoozeEpochKey = "meso.promptSnoozeEpoch"
     private static let anchorDateKey = "meso.anchorDate"
     private static let anchorDayNumberKey = "meso.anchorDayNumber"
