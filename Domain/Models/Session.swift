@@ -462,16 +462,48 @@ extension Session {
 extension Session {
     /// Meso phase derived from position within the block.
     /// Uses percentage bands so it works for any meso length.
+    ///
+    /// Wave-based blocks (DUP A/B/C) are the exception for the DELOAD phase: whether a
+    /// week is a deload is a fact of its prescription (its items carry waveRaw
+    /// "deload"), not of its position. The 90% band would otherwise flag a full-volume
+    /// week as deload — week 9 of a 10-week block, and weeks 11-12 of a 12-week block
+    /// with no scheduled deload — and MesoPerformanceAnalyzer would drop them from the
+    /// verdicts.
+    ///
+    /// EXACT RULE (non-maintenance blocks), decided per SESSION from its items' waveRaw
+    /// (compared case-insensitively; a nil or empty waveRaw casts no vote):
+    ///   1. ANY item with waveRaw "deload"            -> .deload   (any, not all)
+    ///   2. else ANY item with a wave letter (a/b/c)  -> position band, but .deload is
+    ///                                                   capped to .late
+    ///   3. else (no item has wave data)              -> position band, unchanged
+    /// So a session mixing deload items with nil-wave items is .deload (the nil-wave items
+    /// are ignored, not counted against it), and a session mixing a deload item with letter
+    /// items is also .deload. Mixed sessions do not occur in generated blocks (the
+    /// materializer stamps every item of a session with the week's wave); they can only come
+    /// from hand-added items, which is why the rule is "any" rather than "all": a single
+    /// deload-prescribed lift is enough to keep the week out of working-week verdicts.
+    /// Maintenance blocks (isMaintenance) always use the position band.
     var mesoPhase: MesoPhase {
         guard let total = meso?.totalWeeks, total > 0 else {
             return .early
         }
         let pct = Double(weekIndex) / Double(total)
+        let band: MesoPhase
         switch pct {
-        case ..<0.30: return .early
-        case ..<0.70: return .mid
-        case ..<0.90: return .late
-        default:      return .deload
+        case ..<0.30: band = .early
+        case ..<0.70: band = .mid
+        case ..<0.90: band = .late
+        default:      band = .deload
         }
+
+        guard meso?.isMaintenance != true,
+              items.contains(where: { WavePrescriptionGuard.isWaveLetter($0.waveRaw) || $0.waveRaw?.lowercased() == "deload" })
+        else {
+            return band
+        }
+        if items.contains(where: { $0.waveRaw?.lowercased() == "deload" }) {
+            return .deload
+        }
+        return band == .deload ? .late : band
     }
 }

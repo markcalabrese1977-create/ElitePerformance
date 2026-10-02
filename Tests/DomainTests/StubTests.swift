@@ -102,6 +102,99 @@ final class MesoPhaseBandTests: XCTestCase {
         XCTAssertTrue(week9.isDeloadWeek, "BUG CONFIRMED: mesoPhase says .deload but isDeloadWeek says false for week 9 of a 10-week meso — the two signals must agree and currently don't")
     }
 
+    // MARK: - Wave-aware deload phase (wave-based blocks)
+
+    private func waveSession(weekIndex: Int, totalWeeks: Int, waveRaw: String?, maintenance: Bool = false) -> Session {
+        let meso = MesoBlock(name: "Test Meso", startDate: Date(), status: .active, totalWeeks: totalWeeks, isMaintenance: maintenance)
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: waveRaw)
+        let s = Session(date: Date(), weekIndex: weekIndex, items: [item])
+        s.meso = meso
+        return s
+    }
+
+    func test_D6_waveBlock_fullVolumeLateWeeksAreNotDeload() {
+        // 10-week block: week 9 is wave C (full prescription). The 90% band alone said .deload.
+        XCTAssertEqual(waveSession(weekIndex: 9, totalWeeks: 10, waveRaw: "c").mesoPhase, .late)
+        XCTAssertFalse(waveSession(weekIndex: 9, totalWeeks: 10, waveRaw: "c").isDeloadWeek)
+        // 12-week block with no scheduled deload: weeks 11 (B) and 12 (C) are working weeks.
+        XCTAssertEqual(waveSession(weekIndex: 11, totalWeeks: 12, waveRaw: "b").mesoPhase, .late)
+        XCTAssertEqual(waveSession(weekIndex: 12, totalWeeks: 12, waveRaw: "c").mesoPhase, .late)
+        XCTAssertFalse(waveSession(weekIndex: 12, totalWeeks: 12, waveRaw: "c").isDeloadWeek)
+    }
+
+    func test_D7_waveBlock_deloadWaveIsDeloadAtAnyPosition() {
+        XCTAssertEqual(waveSession(weekIndex: 10, totalWeeks: 10, waveRaw: "deload").mesoPhase, .deload)
+        XCTAssertTrue(waveSession(weekIndex: 10, totalWeeks: 10, waveRaw: "deload").isDeloadWeek)
+        // A tripwire deload materialized mid-block is a deload regardless of position.
+        XCTAssertEqual(waveSession(weekIndex: 5, totalWeeks: 12, waveRaw: "deload").mesoPhase, .deload)
+    }
+
+    func test_D8_waveBlock_earlyAndMidBandsUnchanged() {
+        XCTAssertEqual(waveSession(weekIndex: 1, totalWeeks: 12, waveRaw: "a").mesoPhase, .early)
+        XCTAssertEqual(waveSession(weekIndex: 5, totalWeeks: 12, waveRaw: "b").mesoPhase, .mid)
+        XCTAssertEqual(waveSession(weekIndex: 9, totalWeeks: 12, waveRaw: "c").mesoPhase, .late)
+    }
+
+    func test_D9_maintenanceBlockAndWaveLessSessionsKeepBandBehavior() {
+        // Maintenance: every item is "deload", but the band rule is unchanged (week 4 of 4 only).
+        XCTAssertEqual(waveSession(weekIndex: 2, totalWeeks: 4, waveRaw: "deload", maintenance: true).mesoPhase, .mid)
+        XCTAssertEqual(waveSession(weekIndex: 4, totalWeeks: 4, waveRaw: "deload", maintenance: true).mesoPhase, .deload)
+        // No wave data at all: pure bands (week 9 of 10 stays .deload, as test_D1 pins).
+        XCTAssertEqual(waveSession(weekIndex: 9, totalWeeks: 10, waveRaw: nil).mesoPhase, .deload)
+    }
+
+    /// Proof that maintenance behavior is unchanged: a block seeded by the REAL maintenance
+    /// seeder (every item waveRaw "deload", isMaintenance true) keeps pure band phases, i.e.
+    /// only the final week is .deload — NOT every week, which the wave-aware rule would give
+    /// if the isMaintenance exemption were missing.
+    func test_D10_seededMaintenanceBlock_phasesAreBandOnly() throws {
+        let fixture = try JourneyFixture.make()
+        let start = Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 6))!
+        let block = try fixture.seedMaintenanceFromTemplate(template: FullBody2DayTemplate.template, totalWeeks: 4, startDate: start)
+
+        XCTAssertTrue(block.isMaintenance)
+        XCTAssertEqual(block.totalWeeks, 4)
+        let sessions = fixture.allSessionsSorted().filter { $0.meso?.persistentModelID == block.persistentModelID }
+        XCTAssertFalse(sessions.isEmpty)
+        XCTAssertTrue(sessions.allSatisfy { $0.items.allSatisfy { $0.waveRaw == "deload" } }, "precondition: maintenance items are all deload-wave")
+
+        let expected: [Int: MesoPhase] = [1: .early, 2: .mid, 3: .late, 4: .deload]   // 0.25 / 0.50 / 0.75 / 1.00
+        for s in sessions {
+            XCTAssertEqual(s.mesoPhase, expected[s.weekIndex], "maintenance week \(s.weekIndex)")
+            XCTAssertEqual(s.isDeloadWeek, s.weekIndex == 4, "maintenance week \(s.weekIndex)")
+        }
+    }
+
+    /// Mixed-wave sessions: the rule is ANY deload item => deload; nil/empty waves cast no vote.
+    func test_D11_mixedWaveSessions_anyDeloadItemWins_nilWaveIsIgnored() {
+        func session(week: Int, total: Int, waves: [String?]) -> Session {
+            let meso = MesoBlock(name: "Test Meso", startDate: Date(), status: .active, totalWeeks: total)
+            let items = waves.enumerated().map { idx, w in
+                SessionItem(order: idx + 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: w)
+            }
+            let s = Session(date: Date(), weekIndex: week, items: items)
+            s.meso = meso
+            return s
+        }
+        // deload + nil-wave item -> deload (nil is ignored, not a vote for "working week").
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["deload", nil]).mesoPhase, .deload)
+        XCTAssertTrue(session(week: 5, total: 12, waves: [nil, "deload"]).isDeloadWeek)
+        // deload + empty-string wave -> deload.
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["deload", ""]).mesoPhase, .deload)
+        // deload + a letter item -> deload (any, not all).
+        XCTAssertEqual(session(week: 3, total: 12, waves: ["a", "deload", "a"]).mesoPhase, .deload)
+        // case-insensitive.
+        XCTAssertEqual(session(week: 5, total: 12, waves: ["DELOAD", nil]).mesoPhase, .deload)
+        // letter + nil-wave item (no deload): wave-based, deload band capped to .late.
+        XCTAssertEqual(session(week: 12, total: 12, waves: ["c", nil]).mesoPhase, .late)
+        XCTAssertFalse(session(week: 12, total: 12, waves: [nil, "c"]).isDeloadWeek)
+        // the cap only lowers .deload; earlier bands are untouched.
+        XCTAssertEqual(session(week: 1, total: 12, waves: ["a", nil]).mesoPhase, .early)
+        // only nil / empty waves: no wave data at all -> pure band (week 12/12 stays .deload).
+        XCTAssertEqual(session(week: 12, total: 12, waves: [nil, ""]).mesoPhase, .deload)
+        XCTAssertEqual(session(week: 12, total: 12, waves: []).mesoPhase, .deload)
+    }
+
     // MARK: - T-D.6/7/8: ProgramExerciseTemplate.sets(forWeek:wave:) — confirmed
     // live via ProgramTemplateResolver.resolveDay (Features/Programs/
     // DUPWaveModels.swift:330), not dead code.
@@ -469,8 +562,8 @@ final class MesoAnchoringAndAnalyzerTests: XCTestCase {
         //    .swift:266-267 `guard catalog != nil || snapshotName != nil else { continue }`).
         // 2) Deload sessions are NOT excluded from anything in this file — see
         //    test_E4_BUG above. Asserted again here narrowly: the deload item's
-        //    own exercise still produces a verdict drawn from the deload data,
-        //    confirming no exclusion happened.
+        //    own exercise still produced a verdict drawn from the deload data.
+        //    (Superseded: see the behavior-change note on the assertion below.)
         let context = try makeContext()
         let meso = MesoBlock(name: "Meso", startDate: Date(), status: .active, totalWeeks: 8)
 
@@ -494,7 +587,11 @@ final class MesoAnchoringAndAnalyzerTests: XCTestCase {
         let analysis = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
 
         XCTAssertNil(analysis.exerciseSummaries.first { $0.exerciseId == ExerciseCatalog.canonicalExerciseId(for: "00000000-aaaa-bbbb-cccc-111111111111") }, "orphan UUID with no name snapshot must be excluded from per-exercise summaries")
-        XCTAssertNotNil(analysis.exerciseSummaries.first { $0.exerciseId == "machine_hip_thrust" }, "BUG CONFIRMED (same root cause as T-E.4): the deload-flagged item is NOT excluded — it still produces a normal exercise summary as if it were a regular working session")
+        // Behavior change (wave-aware mesoPhase): a session carrying a deload-wave item is a
+        // deload session regardless of its position in the block, so the analyzer's
+        // !isDeloadWeek filter now excludes it. Previously (position-only bands) week 1 of 8
+        // was never "deload", so the deload item produced a normal summary.
+        XCTAssertNil(analysis.exerciseSummaries.first { $0.exerciseId == "machine_hip_thrust" }, "deload-wave item's session is excluded from per-exercise summaries")
     }
 
     func test_E8_verdictUsesFirstVsLastDeltaNotARegressionSlope() throws {

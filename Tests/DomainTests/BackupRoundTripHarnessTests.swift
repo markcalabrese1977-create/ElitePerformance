@@ -47,7 +47,9 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "mesoBlockIsMaintenanceBackfill.v1.completed",
         "customExerciseIdRepairMigration.v1.completed",
         "sessionHistoryBlockBackfill.v1.completed",
-        "exerciseNameSnapshotRepair.v6.completed"
+        "exerciseNameSnapshotRepair.v6.completed",
+        "twelveWeekMesoConversion.v1.completed",
+        "twelveWeekMesoConversion.v1.dryRunLogged.v2"
     ]
 
     /// Field names whose values are safe to show in the report (no health data,
@@ -76,7 +78,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
         ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
         ("PrescriptionNotesClearMigration", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
-        ("Week6UpperBCleanupMigration", { Week6UpperBCleanupMigration.runIfNeeded(in: $0) })
+        ("Week6UpperBCleanupMigration", { Week6UpperBCleanupMigration.runIfNeeded(in: $0) }),
+        ("TwelveWeekMesoConversionMigration", { TwelveWeekMesoConversionMigration.runIfNeeded(in: $0) })
     ]
 
 
@@ -96,6 +99,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
         ("PrescriptionNotesClearMigration", "prescriptionNotesClear.v1.completed"),
         ("Week6UpperBCleanupMigration", "week6UpperBCleanupMigration.v1.completed"),
+        ("TwelveWeekMesoConversionMigration", "twelveWeekMesoConversion.v1.completed"),
+        ("TwelveWeekMesoConversionMigration (dry-run log)", "twelveWeekMesoConversion.v1.dryRunLogged.v2"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
