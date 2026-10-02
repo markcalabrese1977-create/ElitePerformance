@@ -3,22 +3,24 @@ import SwiftData
 
 /// One-shot, on-device driver for DUPMesoLengthConversion (10 -> 12 week DUP block).
 ///
-/// SHIPS AS A DRY RUN. While `dryRun` is true this migration is strictly read-only: on the first
-/// launch that finds an eligible active block it runs the planner, prints the full report (gates,
-/// week-10 before/after table, weeks 11-12 clone summary, projected chains), stores the same text
-/// in UserDefaults under `reportKey`, sets `dryRunLoggedKey`, and returns. A single install
-/// therefore yields one on-device dry-run log and nothing else.
+/// SHIPS ARMED (`dryRun == false`). On the first launch that finds exactly one eligible active
+/// 10-week block it runs the planner and, only if every gate passes, applies the conversion:
+/// mutate -> verify the whole result (chains, 72 sessions, programIndex 1...72, dates, waves, ...)
+/// -> one save. Any failed verification or failed save restores the store and leaves
+/// `completionKey` unset, so the next launch retries; `completionKey` is set ONLY after the save
+/// succeeds. After a successful write the full summary (counts, 18-chain table, each verification
+/// line, scheduled-next-meso value) goes to the launch log.
 ///
-/// Applying is a separate, deliberate change: flip `dryRun` to false. Then, on the next launch,
-/// it applies only if every gate passes, and `completionKey` is set ONLY after the save succeeds
-/// (an unsafe plan or a failed save leaves it unset so it is retried, never silently skipped).
+/// Dry-run mode (`dryRun == true`, still available through the `dryRun:` parameter and used by the
+/// tests) is strictly read-only: it prints the report (gates, week-10 before/after table, weeks
+/// 11-12 summary, projected chains), stores it under `reportKey`, sets `dryRunLoggedKey`, and returns.
 ///
-/// Time constraint: apply before the first week-7 session completes (Fri Nov 6, 2026), or week
-/// 7's result will not reach week 10 (carry-forward looks its target up when the source session
-/// is saved).
+/// Time constraint: this must be installed and run before the first week-7 session completes (Fri
+/// Nov 6, 2026), or week 7's result will not reach week 10 (carry-forward looks its target up when
+/// the source session is saved).
 enum TwelveWeekMesoConversionMigration {
-    /// Flip to false (its own commit) to apply. Read-only while true.
-    static let dryRun = true
+    /// false = apply when every gate passes; true = read-only dry run.
+    static let dryRun = false
 
     /// Bump this whenever the dry-run REPORT changes (new gates, columns, rules, copy semantics):
     /// the logged flag and stored report are keyed by it, so a changed report logs again on the

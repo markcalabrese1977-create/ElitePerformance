@@ -762,8 +762,8 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertNotNil(UserDefaults.standard.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
     }
 
-    func test_migration_shipsAsDryRun() {
-        XCTAssertTrue(TwelveWeekMesoConversionMigration.dryRun, "applying is a separate, deliberate commit that flips this")
+    func test_migration_shipsArmed_applyMode() {
+        XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun, "armed: the launch driver applies the conversion when every gate passes")
     }
 
     func test_migration_dryRun_logsOnce_writesNothing_setsOnlyTheLoggedFlag() throws {

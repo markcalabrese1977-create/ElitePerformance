@@ -57,8 +57,8 @@ struct ElitePerformanceApp: App {
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
             Week6UpperBCleanupMigration.runIfNeeded(in: context)
-            // Registered last: reads the finished state of every earlier backfill. Read-only while
-            // TwelveWeekMesoConversionMigration.dryRun is true.
+            // Registered last: reads the finished state of every earlier backfill. Armed: applies the
+            // 12-week conversion when every gate and post-write verification passes (see the type's doc).
             TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
         }
 
