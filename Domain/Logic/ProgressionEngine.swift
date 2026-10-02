@@ -23,7 +23,7 @@ struct SetSnapshot {
 
 /// Where you are within a mesocycle.
 /// Your 8-week blocks can map week numbers to these phases.
-enum MesoPhase {
+nonisolated enum MesoPhase {
     case early      // Weeks 1–3
     case mid        // Weeks 4–5
     case late       // Weeks 6–7 (1 RIR bias kicks in)
