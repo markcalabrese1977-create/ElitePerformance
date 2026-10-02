@@ -18,7 +18,7 @@ import SwiftData
 /// is saved).
 enum TwelveWeekMesoConversionMigration {
     /// Flip to false (its own commit) to apply. Read-only while true.
-    static let dryRun = true
+    static let dryRun = false
 
     /// Bump this whenever the dry-run REPORT changes (new gates, columns, rules, copy semantics):
     /// the logged flag and stored report are keyed by it, so a changed report logs again on the
