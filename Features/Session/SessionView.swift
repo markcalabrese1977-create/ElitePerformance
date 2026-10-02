@@ -1269,6 +1269,17 @@ final class SessionScreenViewModel: ObservableObject {
         return LastSameLetterPerformance.captions(for: session, allSessions: all, customExercises: custom)
     }
 
+    // The app target builds with SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, which makes this class
+    // implicitly @MainActor and makes the compiler-synthesized deinit an ISOLATED deinit
+    // (swift_task_deinitOnExecutor, reached through the iOS 17.6 back-deploy shim). Releasing the
+    // last reference from a plain XCTest method then aborts the host (SIGABRT: "pointer being freed
+    // was not allocated" in TaskLocal::StopLookupScope, via SessionScreenViewModel.__deallocating_deinit
+    // -> swift_task_deinitOnExecutorMainActorBackDeploy). Verified with swiftc 6.4 at -target
+    // ios17.6: implicit deinit and @MainActor emit 2 swift_task_deinitOnExecutor references; an
+    // explicit `nonisolated deinit {}` emits 0. Nothing here needs the main actor on teardown (no
+    // observers, timers or tasks; only stored values and the SwiftData model reference).
+    nonisolated deinit {}
+
     func refreshFromSession() {
         let refreshed = SessionScreenViewModel(session: session)
         self.title = refreshed.title
