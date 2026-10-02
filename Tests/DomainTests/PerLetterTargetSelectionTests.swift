@@ -1008,6 +1008,61 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
     }
 
+    /// Opens (or reopens) an on-disk store with the same schema the conversion tests use.
+    private func onDiskContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url))
+    }
+
+    func test_apply_killedBeforeSave_leavesTheOnDiskStoreUnchanged_thenNextLaunchConverts() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep-killtest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("kill.store")
+
+        var before = ""
+        do {
+            // "Launch 1": seed an on-disk store, then die between the mutations and save().
+            let c1 = try onDiskContainer(at: url)
+            let ctx1 = ModelContext(c1)
+            ctx1.autosaveEnabled = false
+            try DUPProgramSeeder.seed(
+                startDate: date(2026, 9, 25), trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx1,
+                template: DUP10WeekTemplate.template, calendar: cal(), mesoName: "10-Week DUP Meso", mesoStatus: .active)
+            try ctx1.save()
+            let block1 = try XCTUnwrap(try ctx1.fetch(FetchDescriptor<MesoBlock>()).first)
+            before = try fingerprint(ctx1)
+
+            // A save hook that persists nothing: exactly what a process kill before save() leaves behind.
+            // The mutations (and the verification) really ran against ctx1; only the commit never happens.
+            var mutatedInMemory = false
+            let hooks = DUPMesoLengthConversion.ApplyHooks(save: { c in mutatedInMemory = c.hasChanges })
+            try DUPMesoLengthConversion.apply(block: block1, context: ctx1, calendar: cal(), hooks: hooks)
+            XCTAssertTrue(mutatedInMemory, "the conversion was staged in memory when the 'kill' hit")
+            XCTAssertEqual(block1.totalWeeks, 12, "in-memory state only")
+            // ctx1 / c1 go out of scope here without ever saving: the process is gone.
+        }
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "flag unset")
+
+        // "Launch 2": a fresh container on the same file sees exactly the pre-apply store.
+        let c2 = try onDiskContainer(at: url)
+        let ctx2 = ModelContext(c2)
+        XCTAssertEqual(try fingerprint(ctx2), before, "on-disk store identical to before the killed apply")
+        let block2 = try XCTUnwrap(try ctx2.fetch(FetchDescriptor<MesoBlock>()).first)
+        XCTAssertEqual(block2.totalWeeks, 10)
+        XCTAssertEqual(try sessions(ctx2).count, 60)
+
+        // ...and the real migration then converts it.
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx2, dryRun: false)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertEqual(block2.totalWeeks, 12)
+        XCTAssertEqual(try sessions(ctx2).count, 72)
+        // Reopen once more: the conversion really reached disk this time.
+        let ctx3 = ModelContext(try onDiskContainer(at: url))
+        XCTAssertEqual(try ctx3.fetch(FetchDescriptor<Session>()).count, 72)
+    }
+
     // MARK: Same-named archived block (the live store has an April "10-Week DUP Meso")
 
     private func addArchivedSameNameBlock(_ ctx: ModelContext, totalWeeks: Int?, status: MesoStatus) throws -> (MesoBlock, [Session]) {
