@@ -141,7 +141,7 @@ struct MesoSummaryView: View {
             // normal rest day), permanently corrupting the maintenance schedule.
             var weekdayCountsByLabel: [String: [Int: Int]] = [:]
             for session in meso.sessions {
-                let label = session.dayLabel ?? "Day \(session.programIndex)"
+                let label = session.dayLabel ?? "Day \(session.programIndex.map(String.init) ?? "?")"
                 let weekday = Calendar.current.component(.weekday, from: session.date)
                 weekdayCountsByLabel[label, default: [:]][weekday, default: 0] += 1
             }
