@@ -49,7 +49,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "sessionHistoryBlockBackfill.v1.completed",
         "exerciseNameSnapshotRepair.v6.completed",
         "twelveWeekMesoConversion.v1.completed",
-        "twelveWeekMesoConversion.v1.dryRunLogged.v2"
+        "twelveWeekMesoConversion.v1.dryRunLogged.v2",
+        "twelveWeekMesoConversion.v1.shapeWarned"
     ]
 
     /// Field names whose values are safe to show in the report (no health data,

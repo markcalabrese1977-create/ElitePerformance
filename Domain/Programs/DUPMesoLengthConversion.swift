@@ -221,6 +221,31 @@ enum DUPMesoLengthConversion {
         return plan.report
     }
 
+    // MARK: - Already-converted shape
+
+    /// Empty = `block` already has exactly the converted shape (12 weeks, 6 sessions in each of weeks
+    /// 1-12, programIndex covering 1...72 with no repeats, no deload item). Anything else is listed.
+    static func convertedShapeProblems(block: MesoBlock, context: ModelContext) -> [String] {
+        let all = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let sessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
+        let total = expectedSessionsPerWeek * targetTotalWeeks
+        var problems: [String] = []
+        if block.totalWeeks != targetTotalWeeks { problems.append("totalWeeks is \(block.totalWeeks.map(String.init) ?? "nil")") }
+        for w in 1...targetTotalWeeks {
+            let n = sessions.filter { $0.weekIndex == w }.count
+            if n != expectedSessionsPerWeek { problems.append("week \(w) has \(n) session(s), expected \(expectedSessionsPerWeek)") }
+        }
+        let stray = sessions.filter { !(1...targetTotalWeeks).contains($0.weekIndex) }.count
+        if stray > 0 { problems.append("\(stray) session(s) outside weeks 1-\(targetTotalWeeks)") }
+        let indices = sessions.compactMap { $0.programIndex }
+        if indices.count != sessions.count || Set(indices) != Set(1...total) || indices.count != total {
+            problems.append("programIndex does not cover exactly 1...\(total) once each")
+        }
+        let deload = sessions.reduce(0) { $0 + $1.items.filter { $0.waveRaw?.lowercased() == "deload" }.count }
+        if deload > 0 { problems.append("\(deload) item(s) with waveRaw == deload") }
+        return problems
+    }
+
     // MARK: - Undo
 
     /// `ModelContext.rollback()` discards inserts but does NOT revert property edits on objects that

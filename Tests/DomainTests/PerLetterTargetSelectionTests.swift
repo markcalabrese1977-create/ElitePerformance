@@ -737,7 +737,8 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     private func clearMigrationFlags() {
         for k in [TwelveWeekMesoConversionMigration.completionKey,
                   TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                  TwelveWeekMesoConversionMigration.reportKey] {
+                  TwelveWeekMesoConversionMigration.reportKey,
+                  TwelveWeekMesoConversionMigration.shapeWarnedKey] {
             UserDefaults.standard.removeObject(forKey: k)
         }
     }
@@ -945,6 +946,66 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertTrue(report.verification.contains { $0.hasPrefix("[INFO] 1 hand-added item(s)") && $0.contains("dumbbell_lateral_raise") }, "\(report.verification)")
         XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") })
         XCTAssertEqual(report.postWriteChainTable.count, 18)
+    }
+
+    // MARK: Already-converted blocks and the killed-before-save case
+
+    func test_migration_alreadyConvertedBlock_setsBothFlags_andWritesNothing() throws {
+        for dry in [false, true] {
+            clearMigrationFlags(); defer { clearMigrationFlags() }
+            let (ctx, block) = try seededBlock()
+            try ctx.save()
+            try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+            clearMigrationFlags()                      // converted, but the flags were lost
+            let before = try fingerprint(ctx)
+            XCTAssertFalse(ctx.hasChanges)
+
+            TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: dry)
+
+            let d = UserDefaults.standard
+            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "dryRun=\(dry)")
+            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey), "dryRun=\(dry)")
+            XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey))
+            XCTAssertEqual(try fingerprint(ctx), before, "writes nothing")
+            XCTAssertFalse(ctx.hasChanges)
+        }
+    }
+
+    func test_migration_partialTwelveWeekBlock_doesNotSetTheFlag_andWarnsOnce() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        let missing = try XCTUnwrap(try week(12, ctx).last)
+        ctx.delete(missing)
+        try ctx.save()
+        clearMigrationFlags()
+        let before = try fingerprint(ctx)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        let d = UserDefaults.standard
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
+        XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey), "one-time warning recorded")
+        XCTAssertEqual(try fingerprint(ctx), before)
+        XCTAssertTrue(DUPMesoLengthConversion.convertedShapeProblems(block: block, context: ctx).contains { $0.contains("week 12") })
+
+        // Second launch: still unset, no second warning marker change needed.
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+    }
+
+    func test_migration_twelveWeekBlockWithDeloadItem_doesNotSetTheFlag() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        try XCTUnwrap(try week(5, ctx).first?.items.first).waveRaw = "deload"
+        try ctx.save()
+        clearMigrationFlags()
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
     }
 
     // MARK: Same-named archived block (the live store has an April "10-Week DUP Meso")

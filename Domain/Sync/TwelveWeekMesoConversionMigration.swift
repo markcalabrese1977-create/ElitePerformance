@@ -53,6 +53,7 @@ enum TwelveWeekMesoConversionMigration {
         let candidates = blocks.filter {
             $0.status == .active && !$0.isMaintenance && $0.totalWeeks == DUPMesoLengthConversion.sourceTotalWeeks
         }
+        if candidates.isEmpty, handleTwelveWeekBlocks(blocks, in: context, defaults: defaults) { return }
         guard candidates.count == 1, let block = candidates.first else {
             // No eligible block yet (fresh install / empty store) or ambiguous: leave every flag
             // unset so it is evaluated again on a later launch.
@@ -95,6 +96,35 @@ enum TwelveWeekMesoConversionMigration {
             // apply() has already rolled the context back for every failure after its first mutation.
             print("⛔️ 12-week conversion NOT applied (store unchanged, flag NOT set; will retry): \(error)")
         }
+    }
+
+    /// One-time (per install) warning marker for a 12-week block that is not the converted shape.
+    static let shapeWarnedKey = "twelveWeekMesoConversion.v1.shapeWarned"
+
+    /// No 10-week block is eligible: is there a 12-week block that is already the converted result
+    /// (e.g. converted, then the completion flag was lost)? Returns true when it handled the launch.
+    private static func handleTwelveWeekBlocks(_ blocks: [MesoBlock], in context: ModelContext, defaults: UserDefaults) -> Bool {
+        let twelve = blocks.filter { $0.status == .active && !$0.isMaintenance && $0.totalWeeks == DUPMesoLengthConversion.targetTotalWeeks }
+        guard !twelve.isEmpty else { return false }
+        if twelve.count == 1, let block = twelve.first {
+            let problems = DUPMesoLengthConversion.convertedShapeProblems(block: block, context: context)
+            if problems.isEmpty {
+                defaults.set(true, forKey: completionKey)
+                defaults.set(true, forKey: dryRunLoggedKey)
+                print("ℹ️ 12-week conversion: block already converted, nothing to do.")
+                return true
+            }
+            warnOnce("'\(block.name)' is 12 weeks but not the converted shape: \(problems.joined(separator: "; "))", defaults: defaults)
+        } else {
+            warnOnce("\(twelve.count) active 12-week blocks — ambiguous", defaults: defaults)
+        }
+        return true
+    }
+
+    private static func warnOnce(_ detail: String, defaults: UserDefaults) {
+        guard !defaults.bool(forKey: shapeWarnedKey) else { return }
+        defaults.set(true, forKey: shapeWarnedKey)
+        print("⚠️ 12-week conversion: \(detail). Nothing done; flags left unset.")
     }
 
     /// Everything a human needs from the launch log to trust the write.
