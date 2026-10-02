@@ -322,7 +322,6 @@ enum LoadProjectionService {
         }
 
         let prescribedMin = lastItem.repMin ?? repMin
-        let prescribedMax = lastItem.repMax ?? repMax
 
         // Count consecutive clean sessions using the promoted static method
         let recentSameWave = Array(candidateSessions.suffix(3))

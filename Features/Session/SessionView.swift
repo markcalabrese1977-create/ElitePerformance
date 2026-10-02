@@ -1683,8 +1683,6 @@ final class SessionScreenViewModel: ObservableObject {
             exercise.sets[i].actualRepsText = "\(exercise.sets[i].plannedReps)"
         }
 
-        let baseReps = exercise.sets.first?.plannedReps ?? 10
-        let baseRIR = exercise.sets.first?.plannedRIR ?? 2
 
         exercise.detail = "Week \(exercise.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(exercise.prescriptionDetailLine.replacingOccurrences(of: "Week \(exercise.weekIndex) · ", with: ""))"
         exercise.coachMessage = ""
@@ -1816,8 +1814,6 @@ final class SessionScreenViewModel: ObservableObject {
             )
         }
 
-        let range = RepRangeRulebook.range(forExerciseId: catalogExercise.id, exerciseName: catalogExercise.name)
-        let repsLabel = RepRangeRulebook.display(targetReps: defaultReps, range: range)
         let detail = "Week \(session.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(defaultSets) sets · \(defaultReps) reps · \(defaultRIR) RIR"
 
         let uiExercise = UISessionExercise(
@@ -2691,7 +2687,7 @@ struct UISessionExercise: Identifiable {
         // Derive a stable UUID from exerciseId so ForEach identity is consistent
         // across republishes of viewModel.exercises.
         self.id = UUID(uuidString: exerciseId) ?? {
-            var hash = exerciseId.utf8.reduce(UInt64(14695981039346656037)) { acc, byte in
+            let hash = exerciseId.utf8.reduce(UInt64(14695981039346656037)) { acc, byte in
                 (acc ^ UInt64(byte)) &* 1099511628211
             }
             let a = UInt32(hash & 0xFFFFFFFF)

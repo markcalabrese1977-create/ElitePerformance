@@ -411,7 +411,6 @@ struct SettingsView: View {
             let descriptor = FetchDescriptor<SessionHistory>()
             guard let histories = try? context.fetch(descriptor) else { return }
 
-        let uuidPattern = #"^[0-9a-fA-F\s\-]{32,}$"#
             var removedCount = 0
 
             for history in histories {
