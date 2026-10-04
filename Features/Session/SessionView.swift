@@ -30,6 +30,8 @@ struct SessionView: View {
     @State private var showSwapPropagationDialog = false
     @State private var pendingAddedExerciseForPropagation: (exerciseId: String, exerciseName: String)?
     @State private var showAddExercisePropagationDialog = false
+    /// "Last A: 315 x 5, 6, 5, 5" per exerciseId — computed once when the screen loads.
+    @State private var lastLetterCaptions: [String: String] = [:]
 
     // MARK: - Initializers
 
@@ -98,6 +100,7 @@ struct SessionView: View {
                 ForEach(Array(viewModel.exercises.enumerated()), id: \.element.id) { index, exercise in
                     SessionExerciseCardView(
                         exercise: exercise,
+                        lastLetterCaption: lastLetterCaptions[exercise.exerciseId],
                         onLoadChanged: { setIndex, text in
                             viewModel.updateActualLoad(
                                 exerciseID: exercise.id,
@@ -251,6 +254,8 @@ struct SessionView: View {
         .onAppear {
             disableIdleTimerIfNeeded()
             viewModel.refreshFromSession()
+            // Once per appearance (not per body evaluation): history is fixed while the screen is open.
+            lastLetterCaptions = viewModel.lastLetterCaptions(context: modelContext)
         }
         .onDisappear(perform: restoreIdleTimerIfNeeded)
         .onChange(of: scenePhase) { newPhase in
@@ -544,6 +549,8 @@ private struct SessionExerciseCardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var profiles: [UserProfile]
     let exercise: UISessionExercise
+    /// Last same-letter performance caption; nil hides the line.
+    let lastLetterCaption: String?
 
     let onLoadChanged: (_ setIndex: Int, _ text: String) -> Void
     let onRepsChanged: (_ setIndex: Int, _ text: String) -> Void
@@ -671,6 +678,14 @@ private struct SessionExerciseCardView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if let lastLetterCaption {
+                        Text(lastLetterCaption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if UserProfile.isProgressionExempt(exerciseId: exercise.exerciseId, profile: profiles.first) {
                         Text("Fixed load")
@@ -1275,6 +1290,14 @@ final class SessionScreenViewModel: ObservableObject {
         self.title = title
         self.subtitle = subtitle
         self.exercises = exercises
+    }
+
+    /// Read-only: the last same-letter performance caption for each exercise of this session.
+    /// Fetches once; the lookup itself is the pure `LastSameLetterPerformance`.
+    func lastLetterCaptions(context: ModelContext) -> [String: String] {
+        let all = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        return LastSameLetterPerformance.captions(for: session, allSessions: all, customExercises: custom)
     }
 
     func refreshFromSession() {

@@ -869,3 +869,376 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
     }
 }
+
+// MARK: - Last same-letter performance (LastSameLetterPerformance)
+
+/// The pure lookup behind the Today caption "Last A: 315 x 5, 6, 5, 5". Tested directly — never
+/// through SessionScreenViewModel (its deinit aborts the test host).
+final class LastSameLetterPerformanceTests: XCTestCase {
+
+    private var container: ModelContainer?
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        return ModelContext(c)
+    }
+
+    private func day(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: Date())! }
+
+    private func logged(
+        _ exerciseId: String = "bench_press", wave: String? = "a", sets: [(Int, Double)], order: Int = 1
+    ) -> SessionItem {
+        let i = SessionItem(order: order, exerciseId: exerciseId, targetReps: 8, targetSets: max(sets.count, 1),
+                            targetRIR: 2, suggestedLoad: sets.first?.1 ?? 0, waveRaw: wave)
+        i.actualReps = sets.map(\.0)
+        i.actualLoads = sets.map(\.1)
+        return i
+    }
+
+    private func session(
+        _ ctx: ModelContext, meso: MesoBlock, day dayOffset: Int, week: Int, label: String = "Push A",
+        status: SessionStatus = .completed, items: [SessionItem]
+    ) -> Session {
+        let s = Session(date: day(dayOffset), status: status, weekIndex: week, dayLabel: label, items: items)
+        s.meso = meso
+        ctx.insert(s)
+        return s
+    }
+
+    private func block(_ ctx: ModelContext, name: String = "DUP", maintenance: Bool = false) -> MesoBlock {
+        let b = MesoBlock(name: name, startDate: day(-60), status: .active, totalWeeks: 10)
+        b.isMaintenance = maintenance
+        ctx.insert(b)
+        return b
+    }
+
+    private func find(_ item: SessionItem, in s: Session, _ ctx: ModelContext) throws -> LastLetterPerformance? {
+        try ctx.save()
+        return LastSameLetterPerformance.find(
+            for: item, in: s, allSessions: try ctx.fetch(FetchDescriptor<Session>()))
+    }
+
+    // MARK: Basics and captions
+
+    func test_returnsTheMostRecentEarlierSameLetterExposure() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -20, week: 1, items: [logged(sets: [(5, 300)])])
+        let newer = session(ctx, meso: m, day: -10, week: 4, items: [logged(sets: [(5, 315), (6, 315), (5, 315), (5, 315)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 7, status: .planned, items: [target])
+        let r = try XCTUnwrap(try find(target, in: now, ctx))
+        XCTAssertEqual(r.date, newer.date)
+        XCTAssertEqual(r.weekIndex, 4)
+        XCTAssertEqual(r.caption, "Last A: 315 x 5, 6, 5, 5")
+    }
+
+    func test_fourRowTopSetPattern_groupsOnLoadChange() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -10, week: 2, items: [logged(wave: "b", sets: [(8, 290), (7, 290), (6, 290), (5, 315)])])
+        let target = logged(wave: "b", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 5, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.caption, "Last B: 290 x 8, 7, 6 · 315 x 5")
+    }
+
+    func test_fractionalLoad_keepsItsDecimal() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -10, week: 1, items: [logged("incline_rear_delt_fly", sets: [(12, 37.5), (12, 37.5), (12, 37.5)])])
+        let target = logged("incline_rear_delt_fly", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.caption, "Last A: 37.5 x 12, 12, 12")
+    }
+
+    func test_bodyweight_showsRepsOnly() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -10, week: 1, items: [logged("pull_up", sets: [(5, 0), (5, 0), (5, 0), (5, 0)])])
+        let target = logged("pull_up", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        let r = try XCTUnwrap(try find(target, in: now, ctx))
+        XCTAssertTrue(r.isBodyweight)
+        XCTAssertEqual(r.caption, "Last A: 5, 5, 5, 5 reps")
+    }
+
+    func test_zeroRepPaddingRowsAreIgnored() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -10, week: 1, items: [logged(sets: [(5, 315), (6, 315), (5, 315), (0, 0)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.caption, "Last A: 315 x 5, 6, 5")
+    }
+
+    // MARK: Scoping
+
+    func test_crossMesoIsolation_anOlderBlockWithTheSameLabelNeverMatches() throws {
+        let ctx = try makeContext()
+        let old = block(ctx, name: "Old"); let current = block(ctx, name: "Current")
+        _ = session(ctx, meso: old, day: -90, week: 3, items: [logged(sets: [(5, 400)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: current, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertNil(try find(target, in: now, ctx), "same dayLabel + wave + lift in ANOTHER block must not match")
+    }
+
+    func test_plannedAndInProgressSessionsInBetweenAreSkipped() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        let real = session(ctx, meso: m, day: -20, week: 1, items: [logged(sets: [(5, 315)])])
+        _ = session(ctx, meso: m, day: -10, week: 4, status: .planned, items: [logged(sets: [(9, 999)])])
+        _ = session(ctx, meso: m, day: -5, week: 4, status: .inProgress, items: [logged(sets: [(9, 888)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 7, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.date, real.date)
+    }
+
+    func test_itemsWithNoLoggedSetsAreSkipped() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        let real = session(ctx, meso: m, day: -20, week: 1, items: [logged(sets: [(5, 315)])])
+        _ = session(ctx, meso: m, day: -10, week: 4, items: [logged(sets: [(0, 0), (0, 0)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 7, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.date, real.date)
+    }
+
+    func test_otherDay_sameLiftAndLetter_neverMatches_andLabelsAreTrimmed() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -20, week: 1, label: "Push A", items: [logged("incline_rear_delt_fly", sets: [(12, 35)])])
+        let pullA = session(ctx, meso: m, day: -19, week: 1, label: "Pull A ", items: [logged("incline_rear_delt_fly", sets: [(12, 40)])])
+        let target = logged("incline_rear_delt_fly", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, label: "Pull A", status: .planned, items: [target])
+        let r = try XCTUnwrap(try find(target, in: now, ctx))
+        XCTAssertEqual(r.date, pullA.date, "Pull A, not Push A (and 'Pull A ' == 'Pull A')")
+        XCTAssertEqual(r.caption, "Last A: 40 x 12")
+    }
+
+    func test_otherLetter_neverMatches() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -20, week: 1, items: [logged(wave: "a", sets: [(5, 315)])])
+        let target = logged(wave: "b", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 2, status: .planned, items: [target])
+        XCTAssertNil(try find(target, in: now, ctx), "only an A-week exposure exists")
+    }
+
+    func test_waveComesFromTheMatchedItem_notTheSessionsFirstItem() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        // First item is wave b; the matched bench is wave a.
+        let first = logged("dumbbell_lateral_raise", wave: "b", sets: [(12, 35)], order: 1)
+        let matched = logged(wave: "a", sets: [(5, 315)], order: 2)
+        let src = session(ctx, meso: m, day: -20, week: 1, items: [first, matched])
+        let target = logged(wave: "a", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertEqual(try find(target, in: now, ctx)?.date, src.date)
+    }
+
+    func test_laterSessionsAreNeverReturned() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: 10, week: 7, items: [logged(sets: [(5, 400)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertNil(try find(target, in: now, ctx))
+    }
+
+    // MARK: Nil cases
+
+    func test_noWave_deload_andMaintenance_returnNil() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -20, week: 1, items: [logged(wave: "a", sets: [(5, 315)]), logged(wave: "deload", sets: [(5, 200)], order: 2)])
+
+        let noWave = logged(wave: nil, sets: [])
+        let s1 = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [noWave])
+        XCTAssertNil(try find(noWave, in: s1, ctx))
+
+        let empty = logged(wave: "", sets: [])
+        let s2 = session(ctx, meso: m, day: 6, week: 4, status: .planned, items: [empty])
+        XCTAssertNil(try find(empty, in: s2, ctx))
+
+        let deload = logged(wave: "deload", sets: [])
+        let s3 = session(ctx, meso: m, day: 7, week: 10, status: .planned, items: [deload])
+        XCTAssertNil(try find(deload, in: s3, ctx), "a deload item has no letter")
+
+        let maint = block(ctx, name: "Maintenance Block", maintenance: true)
+        _ = session(ctx, meso: maint, day: -15, week: 1, items: [logged(wave: "a", sets: [(5, 315)])])
+        let mt = logged(wave: "a", sets: [])
+        let s4 = session(ctx, meso: maint, day: 8, week: 2, status: .planned, items: [mt])
+        XCTAssertNil(try find(mt, in: s4, ctx), "maintenance blocks never show a letter caption")
+    }
+
+    func test_waveNilHistoryItem_isNotAnExposure() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -20, week: 1, items: [logged("dumbbell_lateral_raise", wave: nil, sets: [(12, 35)])])
+        let target = logged("dumbbell_lateral_raise", wave: "a", sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        XCTAssertNil(try find(target, in: now, ctx))
+    }
+
+    // MARK: Purity
+
+    func test_neverMutatesItsInput() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        let src = session(ctx, meso: m, day: -10, week: 1, items: [logged(sets: [(5, 315), (6, 315)])])
+        let target = logged(sets: [])
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [target])
+        try ctx.save()
+        func snap() -> String {
+            [src, now].flatMap { s in [s.status.rawValue, "\(s.date)", "\(s.weekIndex)"] + s.items.flatMap {
+                ["\($0.suggestedLoad)", "\($0.plannedLoadsBySet)", "\($0.actualReps)", "\($0.actualLoads)", "\($0.planEdited)", $0.coachNote ?? ""]
+            } }.joined(separator: "|")
+        }
+        let before = snap()
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        _ = LastSameLetterPerformance.find(for: target, in: now, allSessions: all)
+        _ = LastSameLetterPerformance.captions(for: now, allSessions: all)
+        XCTAssertEqual(snap(), before)
+        XCTAssertFalse(ctx.hasChanges)
+    }
+
+    func test_captions_isKeyedByExerciseId() throws {
+        let ctx = try makeContext(); let m = block(ctx)
+        _ = session(ctx, meso: m, day: -10, week: 1, items: [logged(sets: [(5, 315)]), logged("hammer_curl", sets: [(6, 102), (7, 102)], order: 2)])
+        let a = logged(sets: []), b = logged("hammer_curl", sets: [], order: 2), c = logged("leg_extension", sets: [], order: 3)
+        let now = session(ctx, meso: m, day: 5, week: 4, status: .planned, items: [a, b, c])
+        try ctx.save()
+        let caps = LastSameLetterPerformance.captions(for: now, allSessions: try ctx.fetch(FetchDescriptor<Session>()))
+        XCTAssertEqual(caps["bench_press"], "Last A: 315 x 5")
+        XCTAssertEqual(caps["hammer_curl"], "Last A: 102 x 6, 7")
+        XCTAssertNil(caps["leg_extension"], "no prior exposure -> no caption")
+    }
+
+    // MARK: 12-week conversion: week 7 reaches week 10
+
+    private func gregorian() -> Calendar { Calendar(identifier: .gregorian) }
+
+    func test_afterTheConversion_weekTenResolvesToACompletedWeekSeven_seeded() throws {
+        let ctx = try makeContext()
+        let cal = gregorian()
+        try DUPProgramSeeder.seed(
+            startDate: cal.date(from: DateComponents(year: 2026, month: 9, day: 25))!,
+            trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx, template: DUP10WeekTemplate.template,
+            calendar: cal, mesoName: "10-Week DUP Meso", mesoStatus: .active)
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
+        try assertWeekTenResolves(ctx: ctx, block: block, calendar: cal)
+    }
+
+    /// Applies the conversion in memory, completes a week-7 session synthetically, and checks that
+    /// the converted week 10 (now a real A week, not a deload) resolves to it.
+    private func assertWeekTenResolves(ctx: ModelContext, block: MesoBlock, calendar: Calendar) throws {
+        let all0 = try ctx.fetch(FetchDescriptor<Session>())
+        let w10Before = try XCTUnwrap(all0.first { $0.weekIndex == 10 && $0.meso?.persistentModelID == block.persistentModelID })
+        XCTAssertEqual(w10Before.items.first?.waveRaw, "deload", "before the conversion week 10 is a deload")
+
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: calendar)
+        XCTAssertTrue(report.didWrite, "conversion must apply: \(report.blockers)")
+
+        let all = try ctx.fetch(FetchDescriptor<Session>()).sorted { $0.date < $1.date }
+        let blockSessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
+        let w7 = try XCTUnwrap(blockSessions.first { $0.weekIndex == 7 })
+        let w7Item = try XCTUnwrap(w7.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) != "pull_up" })
+        let w10 = try XCTUnwrap(blockSessions.first { $0.weekIndex == 10 && $0.dayLabel == w7.dayLabel })
+        let w10Item = try XCTUnwrap(w10.items.first {
+            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: w7Item.exerciseId)
+        })
+        XCTAssertEqual(w7Item.waveRaw, w10Item.waveRaw, "week 10 now carries week 7's letter")
+
+        // Week 7 completes (synthetically): week 10 now resolves to it, the nearest earlier A.
+        w7.status = .completed
+        w7Item.actualReps = [8, 8, 7]
+        w7Item.actualLoads = [200, 200, 200]
+        try ctx.save()
+        let r = try XCTUnwrap(LastSameLetterPerformance.find(for: w10Item, in: w10, allSessions: all))
+        XCTAssertEqual(r.weekIndex, 7)
+        XCTAssertEqual(r.date, w7.date)
+        XCTAssertEqual(r.caption, "Last \(w7Item.waveRaw!.uppercased()): 200 x 8, 8, 7")
+    }
+
+    // MARK: Fixture (EP_BACKUP_FIXTURE; the newest ElitePerformance_Backup_*.json in ~/Downloads)
+
+    private func fixtureURL() throws -> URL {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        print("LASTLETTER| fixture: \(URL(fileURLWithPath: path).lastPathComponent)")
+        return URL(fileURLWithPath: path)
+    }
+
+    private func importFixture() throws -> (ModelContext, MesoBlock, [Session]) {
+        let url = try fixtureURL()
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: c)
+        let ctx = ModelContext(c)
+        ctx.autosaveEnabled = false
+        let active = try ctx.fetch(FetchDescriptor<MesoBlock>()).filter { $0.status == .active && !$0.isMaintenance }
+        let block = try XCTUnwrap(active.first)
+        let all = try ctx.fetch(FetchDescriptor<Session>()).sorted { $0.date < $1.date }
+        return (ctx, block, all)
+    }
+
+    private func sameDay(_ d: Date, _ m: Int, _ dd: Int) -> Bool {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: d)
+        return c.year == 2026 && c.month == m && c.day == dd
+    }
+
+    private func fixtureItem(_ all: [Session], block: MesoBlock, month: Int, day: Int, label: String, name: String)
+        throws -> (Session, SessionItem) {
+        let s = try XCTUnwrap(all.first {
+            $0.meso?.persistentModelID == block.persistentModelID && sameDay($0.date, month, day) && $0.dayLabel == label
+        }, "no \(label) session on \(month)/\(day)")
+        let i = try XCTUnwrap(s.items.first { ($0.exerciseNameSnapshot ?? "").lowercased() == name.lowercased() },
+                              "\(name) missing from \(label) \(month)/\(day)")
+        return (s, i)
+    }
+
+    func test_fixture_expectedCaptions_andSourceSessions() throws {
+        let (ctx, block, all) = try importFixture()
+        struct Case { let m: Int; let d: Int; let label: String; let lift: String
+                      let srcM: Int; let srcD: Int; let caption: String }
+        let cases = [
+            Case(m: 10, d: 16, label: "Push A", lift: "Bench Press", srcM: 9, srcD: 25, caption: "Last A: 315 x 5, 6, 5, 5"),
+            Case(m: 10, d: 18, label: "Pull A", lift: "T-Bar Row", srcM: 9, srcD: 27, caption: "Last A: 340 x 5, 5, 5, 5"),
+            Case(m: 10, d: 18, label: "Pull A", lift: "Hammer Curl", srcM: 9, srcD: 27, caption: "Last A: 102 x 6, 7, 7"),
+            Case(m: 10, d: 21, label: "Pull B", lift: "Hammer Curl", srcM: 9, srcD: 30, caption: "Last A: 102 x 8, 7, 7"),
+            Case(m: 10, d: 18, label: "Pull A", lift: "Pull-Up", srcM: 9, srcD: 27, caption: "Last A: 5, 5, 5, 5 reps"),
+            Case(m: 10, d: 23, label: "Push A", lift: "Bench Press", srcM: 10, srcD: 2, caption: "Last B: 290 x 8, 7, 6 · 315 x 5"),
+            Case(m: 10, d: 24, label: "Legs A", lift: "Hack Squat", srcM: 10, srcD: 3, caption: "Last B: 300 x 12, 12, 10"),
+            // The same lift on two days: Pull A's Sept 27 (37.5 x 12,12,12), never Push A's Sept 25.
+            Case(m: 10, d: 18, label: "Pull A", lift: "Incline Rear Delt Fly", srcM: 9, srcD: 27, caption: "Last A: 37.5 x 12, 12, 12"),
+        ]
+        for c in cases {
+            let (s, i) = try fixtureItem(all, block: block, month: c.m, day: c.d, label: c.label, name: c.lift)
+            let r = try XCTUnwrap(LastSameLetterPerformance.find(for: i, in: s, allSessions: all),
+                                  "\(c.label) \(c.m)/\(c.d) \(c.lift): nil")
+            print("LASTLETTER| \(c.label) \(c.m)/\(c.d) \(c.lift) -> \(r.caption)  [source \(r.date), wk\(r.weekIndex)]")
+            XCTAssertEqual(r.caption, c.caption, "\(c.label) \(c.m)/\(c.d) \(c.lift)")
+            XCTAssertTrue(sameDay(r.date, c.srcM, c.srcD), "\(c.lift): source \(r.date), expected \(c.srcM)/\(c.srcD)")
+        }
+        _ = ctx
+    }
+
+    func test_fixture_nilCases() throws {
+        let (_, block, all) = try importFixture()
+        // Mon Oct 5 Push B decline (wave B): only an A-week exposure exists.
+        let (s, i) = try fixtureItem(all, block: block, month: 10, day: 5, label: "Push B", name: "Decline Bench Press")
+        XCTAssertEqual(i.waveRaw, "b")
+        XCTAssertNil(LastSameLetterPerformance.find(for: i, in: s, allSessions: all))
+
+        // Every week-1 session (no earlier exposure) and the hand-added wave-less lifts.
+        let weekOne = all.filter { $0.meso?.persistentModelID == block.persistentModelID && $0.weekIndex == 1 }
+        XCTAssertFalse(weekOne.isEmpty)
+        for w in weekOne {
+            for it in w.items {
+                XCTAssertNil(LastSameLetterPerformance.find(for: it, in: w, allSessions: all),
+                             "week 1 \(w.dayLabel ?? "?") \(it.exerciseNameSnapshot ?? it.exerciseId)")
+            }
+        }
+        let handAdded = weekOne.flatMap { $0.items }.filter { ($0.waveRaw ?? "").isEmpty }
+        XCTAssertGreaterThanOrEqual(handAdded.count, 2, "the two hand-added week-1 lifts have no wave letter")
+    }
+
+    func test_fixture_afterTheConversion_weekTenResolvesToACompletedWeekSeven() throws {
+        let (ctx, block, _) = try importFixture()
+        try assertWeekTenResolves(ctx: ctx, block: block, calendar: Calendar.current)
+    }
+}
