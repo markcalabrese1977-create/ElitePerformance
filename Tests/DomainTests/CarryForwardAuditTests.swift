@@ -94,6 +94,7 @@ final class CarryForwardAuditTests: XCTestCase {
         // 3. Report: stored (reference) vs would-write (copy), where they differ.
         var rows: [(date: Date, line: String)] = []
         var unchanged = 0
+        var waveNilRows: [String] = []
         for (tid, pair) in targetOf {
             guard let stored = refBlock.flatMap({ $0.items }).first(where: { $0.id == tid }),
                   let after = copyItems[tid],
@@ -107,10 +108,12 @@ final class CarryForwardAuditTests: XCTestCase {
             let sets = zip(src.actualReps, src.actualLoads).map { "\($1 == $1.rounded() ? String(Int($1)) : String(format: "%.1f", $1))x\($0)" }.joined(separator: ",")
             let name = stored.exerciseNameSnapshot ?? stored.exerciseId
             let df = DateFormatter(); df.dateFormat = "EEE MMM d"
+            let sourceWaveNil = (src.waveRaw ?? "").isEmpty
+            if sourceWaveNil { waveNilRows.append("\(df.string(from: owner.date)) \(owner.dayLabel ?? "?") \(name)") }
             rows.append((owner.date,
                 "\(df.string(from: owner.date)) wk\(owner.weekIndex) \(owner.dayLabel ?? "?") [\((stored.waveRaw ?? "-").uppercased())] \(name): "
                 + "\(fmt(stored.suggestedLoad)) -> \(fmt(after.suggestedLoad))"
-                + "   (from \(df.string(from: pair.source.date)) wk\(pair.source.weekIndex): \(sets) @RIR \(src.actualRIRs.map(String.init).joined(separator: "/")); planEdited=\(stored.planEdited))"))
+                + "   (from \(df.string(from: pair.source.date)) wk\(pair.source.weekIndex): \(sets) @RIR \(src.actualRIRs.map(String.init).joined(separator: "/")); planEdited=\(stored.planEdited), source wave=\(sourceWaveNil ? "NIL" : (src.waveRaw ?? "")))"))
         }
         rows.sort { $0.date < $1.date }
 
@@ -119,6 +122,7 @@ final class CarryForwardAuditTests: XCTestCase {
                    "stored == would-write: \(unchanged)",
                    "differ: \(rows.count)", ""]
         out += rows.map(\.line)
+        out += ["", "rows whose SOURCE is wave-nil (the catch-up skips these): \(waveNilRows.count)"] + waveNilRows.map { "  " + $0 }
         let text = out.joined(separator: "\n")
         print("AUDIT|\n\(text)")
         if let dest = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !dest.isEmpty {
