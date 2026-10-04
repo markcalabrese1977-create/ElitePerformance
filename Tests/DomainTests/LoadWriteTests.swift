@@ -74,9 +74,11 @@ final class LoadWriteTests: XCTestCase {
         XCTAssertEqual(futureItem.suggestedLoad, 0, "a still-.planned source session must not carry anything forward")
     }
 
-    // T-B.2: Never overwrites an already-planned future SessionItem (per the
-    // file's own doc comment) — isPlanEffectivelyEmpty guard.
-    func test_B2_neverOverwritesAnAlreadyPlannedFutureItem() throws {
+    // T-B.2: an already-planned, UNEDITED future item takes the source's recommendation.
+    // (Originally "never overwrites an already-planned item", pre-Cut-3. A user-edited plan
+    // is still protected — see CarryForwardWritesHoldsTests.) A clean 999 x 10 @2 earns a
+    // bump, which replaces the stale 50 seed.
+    func test_B2_uneditedTargetTakesTheSourceRecommendation() throws {
         let context = try makeContext()
         let yesterday = cal.date(byAdding: .day, value: -1, to: Date())!
         let tomorrow = cal.date(byAdding: .day, value: 1, to: Date())!
@@ -85,7 +87,7 @@ final class LoadWriteTests: XCTestCase {
         sourceItem.plannedLoadsBySet = [999]
         let sourceSession = Session(date: yesterday, status: .completed, weekIndex: 1, items: [sourceItem])
 
-        // Future item already has its own deliberate plan — not empty.
+        // Future item already carries a (seed) plan — not empty, not edited.
         let futureItem = item(reps: [0], loads: [0], rirs: [0], suggestedLoad: 50)
         futureItem.plannedLoadsBySet = [50]
         let futureSession = Session(date: tomorrow, status: .planned, weekIndex: 2, items: [futureItem])
@@ -96,8 +98,23 @@ final class LoadWriteTests: XCTestCase {
 
         PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
 
-        XCTAssertEqual(futureItem.suggestedLoad, 50, "an already-planned future item must be left alone")
-        XCTAssertEqual(futureItem.plannedLoadsBySet, [50])
+        XCTAssertGreaterThan(futureItem.suggestedLoad, 999, "an unedited planned item follows the source recommendation")
+        XCTAssertEqual(futureItem.plannedLoadsBySet, [futureItem.suggestedLoad])
+        XCTAssertFalse(futureItem.planEdited, "an automatic write never marks the plan edited")
+
+        // And a user-edited plan is left exactly as it stands.
+        let edited = item(reps: [0], loads: [0], rirs: [0], suggestedLoad: 50)
+        edited.plannedLoadsBySet = [50]
+        edited.planEdited = true
+        let editedSession = Session(date: cal.date(byAdding: .day, value: 3, to: Date())!, status: .planned, weekIndex: 3, items: [edited])
+        let source2 = item(reps: [10], loads: [999], rirs: [2], suggestedLoad: 999)
+        source2.plannedLoadsBySet = [999]
+        let sourceSession2 = Session(date: cal.date(byAdding: .day, value: 2, to: Date())!, status: .completed, weekIndex: 2, items: [source2])
+        context.insert(editedSession); context.insert(sourceSession2)
+        try context.save()
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession2)
+        XCTAssertEqual(edited.suggestedLoad, 50)
+        XCTAssertEqual(edited.plannedLoadsBySet, [50])
     }
 
     // T-B.3: hasMeaningfulPlan gate — a source item with no plan at all is

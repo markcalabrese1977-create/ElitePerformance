@@ -11,7 +11,8 @@ import SwiftData
 ///   - Find the next future Session (by date) that has the same `exerciseId`.
 ///   - If that future SessionItem has an "empty" plan (no per-set plan and 0 load),
 ///     copy the plan fields from the completed session's item.
-/// - Never overwrites an already-planned future SessionItem.
+/// - An already-planned future SessionItem is overwritten only by the propagate path,
+///   and only when the user has not edited it (planEdited == false).
 struct PlanMemoryEngine {
 
     let context: ModelContext
@@ -75,8 +76,8 @@ struct PlanMemoryEngine {
             // fills empty plans, so an earned bump would never reach an anchored/
             // carried future session (the Cut-3 write-back gap). Instead propagate the
             // bump directly onto the stored plan — but only when the user has NOT
-            // manually edited it (planEdited == false) and only for a real increase
-            // (hold/nil/BW/deload never write). Immediate-next occurrence scope: this
+            // manually edited it (planEdited == false). Bump, hold and reduce all write;
+            // nil/BW/deload/exempt/incomplete evidence never do. Immediate-next occurrence scope: this
             // loop already targets the first future session containing the exercise.
             if !isPlanEffectivelyEmpty(targetItem) {
                 propagateEarnedBumpToMaterializedItem(
@@ -374,15 +375,17 @@ struct PlanMemoryEngine {
 
     // MARK: - Write-back to already-materialized future sessions (Cut 3)
 
-    /// Writes an EARNED bump onto an already-materialized next-occurrence plan.
+    /// Writes the source's recommendation (bump, hold or reduce) onto an already-materialized
+    /// next-occurrence plan.
     ///
     /// Only fires when:
     /// - progression is enabled,
     /// - the target plan was NOT user-edited (`planEdited == false`) — a manual
     ///   edit is preserved, never clobbered,
     /// - the target is not a deload/bodyweight item (those never take a numeric bump),
-    /// - and `recommend` returns a real INCREASE over the target's current load
-    ///   (hold / decrease / nil do not write, so BW/deload/first-session no-op).
+    /// - enough primary working sets were logged (min(sets, 3)),
+    /// - and `recommend` returns a load (nil — pain, no baseline — does not write).
+    ///   A hold or reduce overwrites a higher seed: the stored plan follows the evidence.
     ///
     /// The value is written raw — `CoachingEngine.recommend` self-caps at
     /// baseLoad * 2.0, mirroring the empty-seed path. `planEdited` stays false
@@ -403,6 +406,9 @@ struct PlanMemoryEngine {
         // Fixed-load exercise: an exempt source never writes an increase anywhere.
         guard !isProgressionExempt else { return }
         guard !targetItem.planEdited else { return }                       // preserve user edit
+        // Incomplete evidence: fewer than min(sets, 3) primary working sets were logged, so
+        // there is nothing reliable to write (a 4-set item with 3 logged still qualifies).
+        guard CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) else { return }
         // Flagged source: a temporarily/deliberately reduced load never earns a
         // write-back. CoachingEngine RULE 4b already returns a nil load here, so
         // this is belt-and-braces — it also covers any non-bump recommendation.
@@ -446,9 +452,10 @@ struct PlanMemoryEngine {
             isProgressionExempt: isProgressionExempt
         ), let recommendedLoad = recommendation.nextSuggestedLoad else { return }
 
-        // Only an ACTUAL increase propagates. Hold (== current) or decrease is left
-        // untouched, so the already-materialized plan is never lowered.
-        guard recommendedLoad > targetItem.suggestedLoad else { return }
+        // Every recommendation with a load propagates — bump, hold or reduce — onto an
+        // unedited target: the target tracks the latest same-letter evidence. The guards
+        // above (disabled progression, exempt, planEdited, suppressing reason, deload,
+        // bodyweight) and the evidence guard below are the only reasons to leave it alone.
 
         targetItem.suggestedLoad = recommendedLoad
         targetItem.plannedLoadsBySet = Array(

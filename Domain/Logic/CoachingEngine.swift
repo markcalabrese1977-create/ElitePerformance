@@ -35,6 +35,9 @@ struct CoachingEngine {
     enum CarryForwardTarget {
         /// A materialized target exists, so a number may be promised.
         case exists
+        /// A materialized target exists but the user edited its plan (`planEdited`), so
+        /// carry-forward will not write to it. The message may say so, never promise a number.
+        case existsEdited
         /// No later same-letter, same-day session remains in this block. The load is
         /// still returned in `nextSuggestedLoad`, but nothing in this block will
         /// receive it, so the message must not promise it.
@@ -65,6 +68,59 @@ struct CoachingEngine {
         // A deload source never reaches the promise sites below (RULE 2 returns
         // first), so no deload spelling is needed here.
         return "Next Week \(wave.uppercased())"
+    }
+
+    /// Name of the session a load lands in ("Next Week B" / "Next session"), ignoring target state.
+    private static func landingName(for item: SessionItem) -> String {
+        landingPhrase(for: item, target: .exists) ?? "Next session"
+    }
+
+    /// "300" for a whole load, "317.5" otherwise — the landing text reads as a number, not a gauge.
+    private static func compactLoad(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+
+    private enum Forward {
+        case lands(String)        // "Next Week B" — the write will land there
+        case editedKept(String)   // the user's edited plan stays as set
+        case endOfChain           // nothing left in the block to receive it
+        case silent               // a write is blocked (incomplete evidence / flagged source): no claim
+    }
+
+    private static func forward(for item: SessionItem, target: CarryForwardTarget, writeBlocked: Bool) -> Forward {
+        switch target {
+        case .endOfChain:
+            return .endOfChain
+        case .existsEdited:
+            return .editedKept("Your edited plan for \(landingName(for: item)) stays as set.")
+        case .exists, .unresolved:
+            return writeBlocked ? .silent : .lands(landingName(for: item))
+        }
+    }
+
+    /// Working sets = any set with both load and reps > 0, minus warmups (< 50% of the
+    /// session max load). Shared with PlanMemoryEngine's incomplete-evidence guard.
+    static func workingSetIndices(for item: SessionItem) -> [Int] {
+        let count = min(item.actualReps.count, item.actualLoads.count)
+        var indices: [Int] = []
+        for idx in 0..<count where item.actualReps[idx] > 0 && item.actualLoads[idx] > 0 {
+            indices.append(idx)
+        }
+        if let maxLoad = indices.map({ item.actualLoads[$0] }).max(), maxLoad > 0 {
+            indices = indices.filter { item.actualLoads[$0] >= maxLoad * 0.5 }
+        }
+        return indices
+    }
+
+    /// Primary working sets the progression decision needs: min(planned sets, 3).
+    static func requiredPrimarySets(for item: SessionItem) -> Int {
+        min(max(1, item.targetSets), 3)
+    }
+
+    /// True when enough primary working sets were logged for a load to be written onto a
+    /// future plan. A 4-set item with 3 logged qualifies.
+    static func hasSufficientPrimaryEvidence(_ item: SessionItem) -> Bool {
+        workingSetIndices(for: item).count >= requiredPrimarySets(for: item)
     }
 
     /// What to say instead of a number when the chain has ended.
@@ -136,18 +192,7 @@ struct CoachingEngine {
             return fb == SetFeedback.soreness.rawValue || fb == SetFeedback.disruption.rawValue
         }
 
-        // Working sets = any set with both load and reps > 0
-        var workingIndices: [Int] = []
-        for idx in 0..<count {
-            if reps[idx] > 0 && loads[idx] > 0 {
-                workingIndices.append(idx)
-            }
-        }
-
-        // Warmup pollution guard: exclude sets below 50% of session max load
-        if let maxLoad = workingIndices.map({ loads[$0] }).max(), maxLoad > 0 {
-            workingIndices = workingIndices.filter { loads[$0] >= maxLoad * 0.5 }
-        }
+        let workingIndices = workingSetIndices(for: item)
         guard !workingIndices.isEmpty else { return nil }
 
         let plannedWorkingSetCount = max(1, item.targetSets)
@@ -156,6 +201,26 @@ struct CoachingEngine {
         // Progression evaluates only the first up to 3 working sets
         let primaryIndices = Array(workingIndices.prefix(growthSetTarget))
         guard !primaryIndices.isEmpty else { return nil }
+
+        // Will carry-forward actually write onto a materialized target? Not with incomplete
+        // evidence (fewer than min(sets, 3) primary sets logged) or a flagged source whose
+        // reduced load never earns a write. Messages claim a landing only when it will land.
+        let writeBlocked = primaryIndices.count < growthSetTarget
+            || item.loadOverrideReason?.suppressesEarnedProgression == true
+
+        /// Suffix for a HOLD message: promises the landing only when the write will happen.
+        /// Exempt (fixed-load) holds never claim one.
+        func holdLanding(_ load: Double) -> String {
+            guard !isProgressionExempt else { return "" }
+            switch carryForwardTarget {
+            case .exists where !writeBlocked:
+                return " \(landingName(for: item)): \(compactLoad(load)), same load, reps-first."
+            case .existsEdited:
+                return " Your edited plan for \(landingName(for: item)) stays as set."
+            default:
+                return ""
+            }
+        }
 
         let primaryLoads = primaryIndices.map { loads[$0] }
         let primaryReps = primaryIndices.map { reps[$0] }
@@ -266,7 +331,7 @@ struct CoachingEngine {
             } else {
                 msg = "Disruption was flagged this session. This wasn't a reliable performance indicator — hold this load and reassess next session."
             }
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+            return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }
 
         // RULE 1c — Safety: failure + big rep crash (minRIR ≤ 0 AND repDrop ≥ 3) → hold [was path C]
@@ -274,7 +339,7 @@ struct CoachingEngine {
             let msg = isProgressionExempt
                 ? "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set."
                 : "You hit failure and reps fell from \(firstReps) to \(lastReps) — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+            return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }
 
         // RULE 1d — Safety: intra-session load drop ≥10% (opened above the repeatable
@@ -302,10 +367,17 @@ struct CoachingEngine {
                 if isProgressionExempt {
                     // Fixed-load: no "Next Week X starts at N" promise; observed facts only.
                     msg = "\(observed) Load is fixed on this exercise: change it yourself when you're ready."
-                } else if let landing = landingPhrase(for: item, target: carryForwardTarget) {
-                    msg = "\(observed) \(landing) starts at \(Int(minLoad)). Build from there."
                 } else {
-                    msg = "\(observed) \(carriesForwardClause)"
+                    switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
+                    case .lands(let landing):
+                        msg = "\(observed) \(landing) starts at \(Int(minLoad)). Build from there."
+                    case .editedKept(let kept):
+                        msg = "\(observed) \(kept)"
+                    case .endOfChain:
+                        msg = "\(observed) \(carriesForwardClause)"
+                    case .silent:
+                        msg = "\(observed) Build from there."
+                    }
                 }
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: minLoad)
             }
@@ -394,25 +466,31 @@ struct CoachingEngine {
             if badMisses >= 2 {
                 let reduced = E1RMCalculator.rounded(baseLoad * 0.95, increment: minLoadIncrement ?? 2.5)
                 let msg: String
+                let lead = "Reps came in well under the bottom of the range across multiple sets."
                 if isProgressionExempt {
-                    // Fixed-load: no load number anywhere, and claim only what will land.
-                    // The lowered load is still returned (and written by carry-forward)
-                    // exactly as for any exercise; only the wording depends on whether a
-                    // target exists to receive it.
-                    if case .exists = carryForwardTarget {
-                        msg = "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; the plan is lowered to rebuild in range."
-                    } else {
-                        msg = "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; change it yourself if you want to rebuild in range."
-                    }
+                    // Fixed-load: no load number and no claim of a lowering or a landing, for
+                    // any target state — carry-forward never writes an exempt exercise's plan.
+                    msg = "\(lead) Load is fixed on this exercise; change it yourself if you want to rebuild in range."
+                } else if case .unresolved = carryForwardTarget {
+                    msg = "\(lead) Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
                 } else {
-                    msg = "Reps came in well under the bottom of the range across multiple sets. Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
+                    switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
+                    case .lands(let landing):
+                        msg = "\(lead) Backing the load down to rebuild in range. \(landing): \(compactLoad(reduced))."
+                    case .editedKept(let kept):
+                        msg = "\(lead) Backing the load down to rebuild in range. \(kept)"
+                    case .endOfChain:
+                        msg = "\(lead) Backing the load down to rebuild in range. \(carriesForwardClause)"
+                    case .silent:
+                        msg = "\(lead) Backing the load down to rebuild in range."
+                    }
                 }
                 return CoachingRecommendation(message: msg, nextSuggestedLoad: reduced)
             }
             let msg = isProgressionExempt
                 ? "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range."
                 : "Your best \(primaryWorkPhrase) came in below the planned range (\(repMin)–\(repMax) reps). Hold this load and focus on hitting the bottom of the range before considering an increase."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+            return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }
 
         // RULE 4b — Flagged load: the source session's load was TEMPORARILY or
@@ -457,10 +535,15 @@ struct CoachingEngine {
             let target = qualifyingBump()
             let lead = "Reps came in well above the top of your range with room to spare."
             let msg: String
-            if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+            switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
+            case .lands(let landing):
                 msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
-            } else {
+            case .editedKept(let kept):
+                msg = "\(lead) \(kept)\(pumpNote)"
+            case .endOfChain:
                 msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+            case .silent:
+                msg = "\(lead)\(pumpNote)"
             }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
@@ -471,10 +554,15 @@ struct CoachingEngine {
             let target = qualifyingBump()
             let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
             let msg: String
-            if let landing = landingPhrase(for: item, target: carryForwardTarget) {
+            switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
+            case .lands(let landing):
                 msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
-            } else {
+            case .editedKept(let kept):
+                msg = "\(lead) \(kept)\(pumpNote)"
+            case .endOfChain:
                 msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+            case .silent:
+                msg = "\(lead)\(pumpNote)"
             }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
@@ -486,14 +574,14 @@ struct CoachingEngine {
             let msg = isProgressionExempt
                 ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when your elbow reads clean."
                 : "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
-            return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+            return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }
 
         // 5d) Not clean (in range but off-target RIR) → hold [was catch-all G]
         let msg = isProgressionExempt
             ? "Effort was off the target. Hold this load; it is fixed on this exercise, so change it yourself when you're ready."
             : "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up."
-        return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
+        return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
     }
 
     private static func formatLoad(_ value: Double) -> String {

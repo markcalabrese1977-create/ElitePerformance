@@ -718,35 +718,36 @@ final class FixedLoadExemptTests: XCTestCase {
         XCTAssertEqual(rec.nextSuggestedLoad, 50, "behavior unchanged: still a hold")
     }
 
-    /// Non-exempt wording is byte-identical on every path whose exempt text was reworded.
+    /// Non-exempt wording is unchanged on every path whose exempt text was reworded, apart from
+    /// the landing suffix a hold now carries when a target exists (these items are wave A).
     func test_nonExempt_reworkedPaths_textByteIdentical() throws {
         func msg(_ i: SessionItem) throws -> String {
             try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists)).message
         }
         let byName = Dictionary(uniqueKeysWithValues: scenarios().map { ($0.name, $0.item) })
         XCTAssertEqual(try msg(byName["in range, not top"]!),
-            "On target and in range — hold 50.0. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session.")
+            "On target and in range — hold 50.0. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["off-target RIR"]!),
-            "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up.")
+            "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness+disruption"]!),
-            "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase.")
+            "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness"]!),
-            "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression.")
+            "Soreness was flagged this session. Hold this load — muscle soreness mid-session is a signal to avoid pushing progression. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["failure + rep crash"]!),
-            "You hit failure and reps fell from 12 to 8 — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase.")
+            "You hit failure and reps fell from 12 to 8 — the load exceeded your repeatable capacity. Hold here. Focus on keeping reps consistent set to set before considering an increase. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["under range: hold"]!),
-            "Your best first 3 working sets came in below the planned range (10–12 reps). Hold this load and focus on hitting the bottom of the range before considering an increase.")
+            "Your best first 3 working sets came in below the planned range (10–12 reps). Hold this load and focus on hitting the bottom of the range before considering an increase. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["flagged override at top"]!),
             "This session was flagged as general fatigue, so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase.")
         XCTAssertTrue(try msg(byName["intra-session load drop"]!).contains("Next Week A starts at 40. Build from there."))
     }
 
-    /// Exempt + reduce path: no load number in the text for ANY target state; "lowered" is
-    /// claimed only when a target exists to receive it. Behavior (the lowered load) is unchanged
-    /// and non-exempt text is untouched.
+    /// Exempt + reduce path: no load number in the text for ANY target state, and never a claim
+    /// of a lowering or a landing — carry-forward does not write an exempt exercise's plan.
+    /// Behavior (the lowered load is still returned) is unchanged.
     func test_exempt_reducePath_noLoadNumber_claimsOnlyWhatLands() throws {
         let banned = ["earn", "increase", "moving up", "move up", "next week", "next time", "starts at", "next session"]
-        for target in [CoachingEngine.CarryForwardTarget.exists, .endOfChain, .unresolved] {
+        for target in [CoachingEngine.CarryForwardTarget.exists, .existsEdited, .endOfChain, .unresolved] {
             let i = item(pushdown, load: 50, reps: [6, 6, 6])
             let rec = try XCTUnwrap(CoachingEngine.recommend(
                 for: i, minLoadIncrement: 2.5, carryForwardTarget: target, isProgressionExempt: true))
@@ -756,22 +757,21 @@ final class FixedLoadExemptTests: XCTestCase {
             for word in banned {
                 XCTAssertFalse(rec.message.lowercased().contains(word), "\(target): contains \"\(word)\": \(rec.message)")
             }
-            if case .exists = target {
-                XCTAssertEqual(rec.message,
-                    "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; the plan is lowered to rebuild in range.")
-            } else {
-                XCTAssertFalse(rec.message.lowercased().contains("lowered"), "\(target): must not claim a lowering: \(rec.message)")
-                XCTAssertEqual(rec.message,
-                    "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; change it yourself if you want to rebuild in range.")
-            }
+            XCTAssertFalse(rec.message.lowercased().contains("lowered"), "\(target): must not claim a lowering: \(rec.message)")
+            XCTAssertEqual(rec.message,
+                "Reps came in well under the bottom of the range across multiple sets. Load is fixed on this exercise; change it yourself if you want to rebuild in range.")
         }
     }
 
-    func test_nonExempt_reduceMessage_byteIdentical() throws {
+    func test_nonExempt_reduceMessage_landsInTheNamedSession() throws {
         let i = item(pushdown, load: 50, reps: [6, 6, 6])
         let rec = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 2.5, carryForwardTarget: .exists))
         XCTAssertEqual(rec.message,
-            "Reps came in well under the bottom of the range across multiple sets. Backing the load down to 47.5 next session to rebuild in range.")
+            "Reps came in well under the bottom of the range across multiple sets. Backing the load down to rebuild in range. Next Week A: 47.5.")
         XCTAssertEqual(try XCTUnwrap(rec.nextSuggestedLoad), 47.5, accuracy: 0.001)
+        // Recap callers pass no target: the original wording is kept for them.
+        let recap = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 2.5))
+        XCTAssertEqual(recap.message,
+            "Reps came in well under the bottom of the range across multiple sets. Backing the load down to 47.5 next session to rebuild in range.")
     }
 }

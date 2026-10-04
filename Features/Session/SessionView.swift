@@ -1404,8 +1404,14 @@ final class SessionScreenViewModel: ObservableObject {
                     // Tell CoachingEngine whether a target actually exists, so the
                     // message can name the week the load lands in — and say nothing
                     // numeric when this is the last session of its wave in the block.
-                    let recCarryForwardTarget: CoachingEngine.CarryForwardTarget =
-                        recResolvedTarget == nil ? .endOfChain : .exists
+                    // An edited, already-planned target is never written (propagate path), so
+                    // the message says its plan stays as set instead of promising a number. An
+                    // EMPTY target is seeded regardless of planEdited, so it still reads .exists.
+                    let recCarryForwardTarget: CoachingEngine.CarryForwardTarget = {
+                        guard let target = recResolvedTarget else { return .endOfChain }
+                        let hasPlan = target.suggestedLoad != 0 || target.plannedLoadsBySet.contains { $0 != 0 }
+                        return target.planEdited && hasPlan ? .existsEdited : .exists
+                    }()
                     let recProjection = LoadProjectionService.project(
                         exerciseId: recTargetItem.exerciseId,
                         targetReps: recTargetItem.targetReps,
