@@ -60,8 +60,8 @@ struct ElitePerformanceApp: App {
             // Registered last: reads the finished state of every earlier backfill. Read-only while
             // TwelveWeekMesoConversionMigration.dryRun is true.
             TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
-            // Registered after everything above, including the conversion. Read-only while
-            // SameLetterTargetCatchUpMigration.dryRun is true.
+            // Registered after everything above, including the conversion. Armed: applies once
+            // (SameLetterTargetCatchUpMigration.dryRun == false); the flag is set only after the save.
             SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
         }
 

@@ -200,8 +200,8 @@ final class SameLetterCatchUpTests: XCTestCase {
         XCTAssertNotNil(defaults.string(forKey: M.reportKey))
     }
 
-    func test_shipsAsADryRun() {
-        XCTAssertTrue(M.dryRun, "arming is its own, separately approved commit")
+    func test_shipsArmed() {
+        XCTAssertFalse(M.dryRun, "this branch applies the catch-up; the working branch ships it as a dry run")
     }
 
     func test_runIfNeeded_editedTarget_untouchedEvenWhenApplied() throws {

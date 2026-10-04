@@ -6,10 +6,10 @@ import SwiftData
 /// the old seed (e.g. a 317.5 seed after a 300 x 12,12,10 "hold 300" session). This replays, once,
 /// what carry-forward would now have written for every completed session of the active block.
 ///
-/// SHIPS AS A DRY RUN. While `dryRun` is true the migration is strictly read-only: it plans,
-/// prints the full report (every row, every skipped item and the guard that skipped it), stores
-/// the text under `reportKey`, sets `dryRunLoggedKey` and returns. Applying is a separate,
-/// deliberate change: flip `dryRun` to false.
+/// ARMED (`dryRun = false`): on the first launch with exactly one active regular block it plans,
+/// prints the full report (every row, every skipped item and the guard that skipped it) and
+/// applies. Setting `dryRun` back to true makes it strictly read-only again: it only logs the
+/// report, stores the text under `reportKey`, sets `dryRunLoggedKey` and returns.
 ///
 /// Applying: one atomic save. The overwritten fields (suggestedLoad, plannedLoadsBySet) are
 /// snapshotted first; if the post-conditions or the save fail, they are restored and nothing is
@@ -22,8 +22,8 @@ import SwiftData
 /// source with a wave (wave-nil sources are skipped entirely), a same-letter target that is
 /// planned and unlogged, and a non-empty target (an empty one is the seed path's job).
 enum SameLetterTargetCatchUpMigration {
-    /// Flip to false (its own commit) to apply. Read-only while true.
-    static let dryRun = true
+    /// false = armed: plan and apply. true = read-only (log the report only).
+    static let dryRun = false
 
     /// Bump when the REPORT changes, so a changed report logs again instead of being swallowed
     /// by the previous install's "already logged" flag.
