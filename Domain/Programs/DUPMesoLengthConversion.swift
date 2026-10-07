@@ -67,7 +67,7 @@ enum DUPMesoLengthConversion {
         var itemsCreated = 0
         var didWrite = false
         /// Pre-save verification results, one line per check ("[PASS] ..." / "[FAIL] ..."), and the
-        /// 18-row chain table read back from the live (pre-save) object graph.
+        /// 18-row table of the created links (weeks 7/8/9 to 10/11/12) read back from the live (pre-save) object graph.
         var verification: [String] = []
         var postWriteChainTable: [String] = []
 
@@ -343,12 +343,16 @@ enum DUPMesoLengthConversion {
         let sessions = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
         let total = expectedSessionsPerWeek * targetTotalWeeks
 
-        // Chains: every item in weeks 1...9 targets the same lift 3 weeks later; weeks 10-12 have no target.
-        let chains = verifyChains(block: block, context: context)
-        check("verifyChains: all chains link, nil at weeks 10/11/12", detail: "\(chains.checked) items checked", chains.broken)
-        let table = chainTable(block: block, sessions: sessions, all: all)
-        check("18 chains (6 days x A/B/C) each link 4 weeks", detail: "\(table.rows.count) chains", table.problems + (table.rows.count == 18 ? [] : ["found \(table.rows.count) chains, expected 18"]))
-
+        // Links the conversion CREATES: every wave-lettered item in weeks 7, 8, 9 targets the matching item
+        // (same meso, day, wave, canonical id) in weeks 10, 11, 12, and weeks 10-12 have no later target.
+        // Links in weeks 1-6 are not this conversion's doing and are NOT verified here (legacy dead ends such
+        // as hotel swaps, wave-nil lifts and replaced items are listed below as INFO, never as failures).
+        let created = createdLinks(sessions: sessions, all: all)
+        check("created links: weeks 7/8/9 -> 10/11/12 and nothing after 10-12", detail: "\(created.checked) items checked", created.problems)
+        let legacy = legacyDeadEnds(sessions: sessions, all: all)
+        if !legacy.isEmpty {
+            lines.append("[INFO] \(legacy.count) week 1-6 item(s) have no same-lift target 3 weeks later (legacy dead ends, not verified, not failures): \(legacy.prefix(14).joined(separator: ", "))\(legacy.count > 14 ? ", …" : "")")
+        }
         let unwaved = unwavedItems(block: block, context: context)
         if !unwaved.isEmpty {
             lines.append("[INFO] \(unwaved.count) hand-added item(s) with no wave letter are outside the A/B/C chains (legacy chronological path, unchanged by this conversion): \(unwaved.joined(separator: ", "))")
@@ -397,7 +401,7 @@ enum DUPMesoLengthConversion {
         }
         check("weeks 11/12 waves are b/c", waves)
 
-        return (lines, failures, table.rows)
+        return (lines, failures, created.rows)
     }
 
     /// Hand-added items in the block that carry no wave letter ("W1 Pull A dumbbell_lateral_raise").
@@ -409,34 +413,62 @@ enum DUPMesoLengthConversion {
                 .map { "W\(s.weekIndex) \(s.dayLabel ?? "?") \($0.exerciseId)" } }
     }
 
-    /// One row per (dayLabel, letter): walks `PlanMemoryEngine.nextTargetItem` from every item of the
-    /// letter's first week and records the weeks it visits.
-    private static func chainTable(block: MesoBlock, sessions: [Session], all: [Session]) -> (rows: [String], problems: [String]) {
+    /// The links this conversion creates. For every wave-lettered item of weeks 7, 8, 9 the target must be the
+    /// item with the same canonical id in the same day, three weeks later (weeks 10, 11, 12); every wave-lettered
+    /// item of weeks 10-12 must have no target. One row per (dayLabel, letter) for the report.
+    static func createdLinks(sessions: [Session], all: [Session]) -> (rows: [String], problems: [String], checked: Int) {
         var rows: [String] = []
         var problems: [String] = []
-        let labels = Set(sessions.compactMap { $0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) }).sorted()
-        for label in labels {
-            for (letter, start) in [("A", 1), ("B", 2), ("C", 3)] {
-                guard let first = sessions.first(where: { $0.weekIndex == start && $0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) == label }) else {
-                    problems.append("\(label) / \(letter): no week-\(start) session"); continue
+        var checked = 0
+        func label(_ s: Session) -> String { (s.dayLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        func owner(_ item: SessionItem) -> Session? { sessions.first { $0.items.contains { $0 === item } } }
+        for day in Set(sessions.map(label)).sorted() {
+            for (letter, source) in [("A", 7), ("B", 8), ("C", 9)] {
+                guard let from = sessions.first(where: { $0.weekIndex == source && label($0) == day }) else {
+                    problems.append("\(day) / \(letter): no week-\(source) session"); continue
                 }
-                let expected = [start, start + 3, start + 6, start + 9]
+                let lettered = from.items.filter { WavePrescriptionGuard.isWaveLetter($0.waveRaw) }
                 var linked = 0
-                let lettered = first.items.filter { WavePrescriptionGuard.isWaveLetter($0.waveRaw) }
                 for item in lettered {
-                    var weeks = [start]
-                    var cur = item, curSession = first
-                    while let next = PlanMemoryEngine.nextTargetItem(for: cur, after: curSession, in: all),
-                          let nextSession = sessions.first(where: { $0.items.contains { $0 === next } }) {
-                        weeks.append(nextSession.weekIndex); cur = next; curSession = nextSession
-                        if weeks.count > 6 { break }
+                    checked += 1
+                    let target = PlanMemoryEngine.nextTargetItem(for: item, after: from, in: all)
+                    let expected = sessions.first { $0.weekIndex == source + 3 && label($0) == day }?.items.first {
+                        ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                     }
-                    if weeks == expected { linked += 1 } else { problems.append("\(label) / \(letter) \(item.exerciseId): visits \(weeks) expected \(expected)") }
+                    if let target, let expected, target === expected { linked += 1 }
+                    else { problems.append("W\(source) \(day) \(item.exerciseId) -> \(target.flatMap(owner).map { "W\($0.weekIndex)" } ?? "none") (expected W\(source + 3))") }
                 }
-                rows.append("  \(label) / \(letter): " + expected.map { "W\($0)" }.joined(separator: "→") + "→nil   items linked \(linked)/\(lettered.count)")
+                rows.append("  \(day) / \(letter): W\(source)→W\(source + 3)→nil   items linked \(linked)/\(lettered.count)")
             }
         }
-        return (rows, problems)
+        for s in sessions where s.weekIndex >= 10 {
+            for item in s.items where WavePrescriptionGuard.isWaveLetter(item.waveRaw) {
+                checked += 1
+                if let t = PlanMemoryEngine.nextTargetItem(for: item, after: s, in: all) {
+                    problems.append("W\(s.weekIndex) \(label(s)) \(item.exerciseId) has a later target W\(owner(t)?.weekIndex ?? -1)")
+                }
+            }
+        }
+        return (rows, problems, checked)
+    }
+
+    /// Week 1-6 wave-lettered items that do not link to the same lift three weeks later: hotel swaps, replaced
+    /// lifts and the like. Information for the report only.
+    static func legacyDeadEnds(sessions: [Session], all: [Session]) -> [String] {
+        var out: [String] = []
+        for s in sessions.sorted(by: { $0.date < $1.date }) where s.weekIndex <= 6 {
+            for item in s.items where WavePrescriptionGuard.isWaveLetter(item.waveRaw) {
+                let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                let expected = sessions.first {
+                    $0.weekIndex == s.weekIndex + 3 && $0.dayLabel == s.dayLabel
+                }?.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id }
+                let target = PlanMemoryEngine.nextTargetItem(for: item, after: s, in: all)
+                if target == nil || target !== expected {
+                    out.append("W\(s.weekIndex) \(s.dayLabel ?? "?") \(item.exerciseNameSnapshot ?? item.exerciseId)")
+                }
+            }
+        }
+        return out
     }
 
     /// Post-write check usable at any time: for every wave-lettered item in weeks 1...9, the per-letter
@@ -647,7 +679,7 @@ enum DUPMesoLengthConversion {
                 plan.report.chainTable.append("  \(label) / \(letter): " + weeks.map { "W\($0)" }.joined(separator: "→") + "→nil   links: " + hops.joined(separator: ", ") + "   (W\(tail) has no later \(letter) -> target nil)")
             }
         }
-        note("Projected chains: 1→4→7→10, 2→5→8→11, 3→6→9→12 (run verifyChains after apply).")
+        note("Projected chains: 1→4→7→10, 2→5→8→11, 3→6→9→12. Apply verifies only the links it creates (weeks 7/8/9 → 10/11/12); weeks 1-6 are not verified.")
         return finish(unevaluated: [])
     }
 
