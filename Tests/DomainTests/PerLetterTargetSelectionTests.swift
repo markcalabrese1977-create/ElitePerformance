@@ -413,6 +413,12 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     /// bodyweight rule wins over the copy).
     private func seedLoads(_ ctx: ModelContext) throws {
         let bwDay = try XCTUnwrap(try week(7, ctx).first { $0.dayLabel?.contains("Back") == true }?.dayLabel)
+        // The swap runs in weeks 1-10 so the per-letter chains stay consistent (apply verifies them).
+        for w in 1...6 {
+            for s in try week(w, ctx) where s.dayLabel == bwDay {
+                if let first = s.items.min(by: { $0.order < $1.order }) { first.exerciseId = "pull_up" }
+            }
+        }
         for w in 7...10 {
             for s in try week(w, ctx) {
                 for i in s.items.sorted(by: { $0.order < $1.order }) {
@@ -731,7 +737,8 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     private func clearMigrationFlags() {
         for k in [TwelveWeekMesoConversionMigration.completionKey,
                   TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                  TwelveWeekMesoConversionMigration.reportKey] {
+                  TwelveWeekMesoConversionMigration.reportKey,
+                  TwelveWeekMesoConversionMigration.shapeWarnedKey] {
             UserDefaults.standard.removeObject(forKey: k)
         }
     }
@@ -756,8 +763,8 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertNotNil(UserDefaults.standard.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
     }
 
-    func test_migration_shipsAsDryRun() {
-        XCTAssertTrue(TwelveWeekMesoConversionMigration.dryRun, "applying is a separate, deliberate commit that flips this")
+    func test_migration_shipsArmed_applyMode() {
+        XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun, "armed: the launch driver applies the conversion when every gate passes")
     }
 
     func test_migration_dryRun_logsOnce_writesNothing_setsOnlyTheLoggedFlag() throws {
@@ -820,6 +827,240 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "unset so it retries")
         XCTAssertEqual(block.totalWeeks, 10)
         XCTAssertEqual(try fingerprint(ctx), before)
+    }
+
+    // MARK: Apply verifies its own result and rolls back on failure
+
+    private struct InjectedSaveFailure: Error {}
+
+    private func assertAppliedNothing(_ ctx: ModelContext, _ block: MesoBlock, before: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "flag must stay unset", file: file, line: line)
+        XCTAssertEqual(try fingerprint(ctx), before, "store must be exactly as before", file: file, line: line)
+        XCTAssertEqual(block.totalWeeks, 10, file: file, line: line)
+        XCTAssertEqual(block.name, "10-Week DUP Meso", file: file, line: line)
+        XCTAssertEqual(try sessions(ctx).count, 60, file: file, line: line)
+        XCTAssertFalse(ctx.hasChanges, "rollback leaves nothing pending", file: file, line: line)
+    }
+
+    func test_apply_forcedChainBreak_rollsBack_storeUnchanged_flagUnset() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        let priorAutosave = ctx.autosaveEnabled
+
+        // Remove one week-4 lift: the week-1 item's "+3 weeks" target disappears (it would skip to week 7).
+        let hooks = DUPMesoLengthConversion.ApplyHooks(beforeVerify: { c in
+            let w4 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 4 }!
+            let victim = w4.items.sorted { $0.order < $1.order }[0]
+            w4.items.removeAll { $0 === victim }
+            c.delete(victim)
+        })
+        XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal(), hooks: hooks)) { err in
+            guard case DUPMesoLengthConversion.ApplyError.verificationFailed(let f) = err else { return XCTFail("\(err)") }
+            XCTAssertTrue(f.contains { $0.hasPrefix("verifyChains") }, "\(f)")
+        }
+        try assertAppliedNothing(ctx, block, before: before)
+        XCTAssertEqual(ctx.autosaveEnabled, priorAutosave, "autosave restored")
+
+        // Same break through the launch driver: nothing written, flag unset.
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false, hooks: hooks)
+        try assertAppliedNothing(ctx, block, before: before)
+
+        // And with no hook the very same store converts fine afterwards (retry works).
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertEqual(block.totalWeeks, 12)
+    }
+
+    func test_apply_forcedSaveFailure_rollsBack_storeUnchanged_flagUnset() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        let hooks = DUPMesoLengthConversion.ApplyHooks(save: { _ in throw InjectedSaveFailure() })
+
+        XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal(), hooks: hooks)) { err in
+            guard case DUPMesoLengthConversion.ApplyError.saveFailed = err else { return XCTFail("\(err)") }
+        }
+        try assertAppliedNothing(ctx, block, before: before)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false, hooks: hooks)
+        try assertAppliedNothing(ctx, block, before: before)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "retry after a failed save succeeds")
+    }
+
+    func test_apply_forcedThursdaySession_failsVerification_andRollsBack() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        let hooks = DUPMesoLengthConversion.ApplyHooks(beforeVerify: { c in
+            let w11 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 11 }!
+            var d = w11.date
+            while Calendar(identifier: .gregorian).component(.weekday, from: d) != 5 { d = d.addingTimeInterval(86_400) }
+            w11.date = d
+        })
+        XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal(), hooks: hooks))
+        try assertAppliedNothing(ctx, block, before: before)
+    }
+
+    func test_apply_refusesToStartWithUnsavedChanges_andDoesNotDiscardThem() throws {
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        block.notes = "unsaved edit"
+        XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())) { err in
+            guard case DUPMesoLengthConversion.ApplyError.pendingChanges = err else { return XCTFail("\(err)") }
+        }
+        XCTAssertEqual(block.notes, "unsaved edit")
+        XCTAssertEqual(block.totalWeeks, 10)
+    }
+
+    func test_apply_success_reportsAllVerificationPassing_and18Chains() throws {
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.didWrite)
+        XCTAssertFalse(report.verification.isEmpty)
+        XCTAssertTrue(report.verification.allSatisfy { $0.hasPrefix("[PASS]") }, "\(report.verification)")
+        XCTAssertEqual(report.postWriteChainTable.count, 18)
+        XCTAssertTrue(report.postWriteChainTable.allSatisfy { $0.contains("W1→W4→W7→W10→nil") || $0.contains("W2→W5→W8→W11→nil") || $0.contains("W3→W6→W9→W12→nil") })
+        XCTAssertTrue(report.postWriteChainTable.allSatisfy { line in
+            let parts = line.components(separatedBy: "items linked ").last!.split(separator: "/")
+            return parts.count == 2 && parts[0] == parts[1]
+        }, "\(report.postWriteChainTable)")
+    }
+
+    func test_apply_handAddedUnwavedItem_isOutsideTheChains_andIsReportedNotGated() throws {
+        let (ctx, block) = try seededBlock()
+        let w1 = try XCTUnwrap(try week(1, ctx).first)
+        let extra = SessionItem(order: 99, exerciseId: "dumbbell_lateral_raise", targetReps: 12, targetSets: 3, targetRIR: 2, suggestedLoad: 20)
+        extra.planEdited = true
+        ctx.insert(extra); w1.items.append(extra)
+        try ctx.save()
+
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.didWrite)
+        XCTAssertTrue(report.verification.contains { $0.hasPrefix("[INFO] 1 hand-added item(s)") && $0.contains("dumbbell_lateral_raise") }, "\(report.verification)")
+        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") })
+        XCTAssertEqual(report.postWriteChainTable.count, 18)
+    }
+
+    // MARK: Already-converted blocks and the killed-before-save case
+
+    func test_migration_alreadyConvertedBlock_setsBothFlags_andWritesNothing() throws {
+        for dry in [false, true] {
+            clearMigrationFlags(); defer { clearMigrationFlags() }
+            let (ctx, block) = try seededBlock()
+            try ctx.save()
+            try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+            clearMigrationFlags()                      // converted, but the flags were lost
+            let before = try fingerprint(ctx)
+            XCTAssertFalse(ctx.hasChanges)
+
+            TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: dry)
+
+            let d = UserDefaults.standard
+            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "dryRun=\(dry)")
+            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey), "dryRun=\(dry)")
+            XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey))
+            XCTAssertEqual(try fingerprint(ctx), before, "writes nothing")
+            XCTAssertFalse(ctx.hasChanges)
+        }
+    }
+
+    func test_migration_partialTwelveWeekBlock_doesNotSetTheFlag_andWarnsOnce() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        let missing = try XCTUnwrap(try week(12, ctx).last)
+        ctx.delete(missing)
+        try ctx.save()
+        clearMigrationFlags()
+        let before = try fingerprint(ctx)
+
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+
+        let d = UserDefaults.standard
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
+        XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey), "one-time warning recorded")
+        XCTAssertEqual(try fingerprint(ctx), before)
+        XCTAssertTrue(DUPMesoLengthConversion.convertedShapeProblems(block: block, context: ctx).contains { $0.contains("week 12") })
+
+        // Second launch: still unset, no second warning marker change needed.
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+    }
+
+    func test_migration_twelveWeekBlockWithDeloadItem_doesNotSetTheFlag() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        try XCTUnwrap(try week(5, ctx).first?.items.first).waveRaw = "deload"
+        try ctx.save()
+        clearMigrationFlags()
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+    }
+
+    /// Opens (or reopens) an on-disk store with the same schema the conversion tests use.
+    private func onDiskContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url))
+    }
+
+    func test_apply_killedBeforeSave_leavesTheOnDiskStoreUnchanged_thenNextLaunchConverts() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep-killtest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("kill.store")
+
+        var before = ""
+        do {
+            // "Launch 1": seed an on-disk store, then die between the mutations and save().
+            let c1 = try onDiskContainer(at: url)
+            let ctx1 = ModelContext(c1)
+            ctx1.autosaveEnabled = false
+            try DUPProgramSeeder.seed(
+                startDate: date(2026, 9, 25), trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx1,
+                template: DUP10WeekTemplate.template, calendar: cal(), mesoName: "10-Week DUP Meso", mesoStatus: .active)
+            try ctx1.save()
+            let block1 = try XCTUnwrap(try ctx1.fetch(FetchDescriptor<MesoBlock>()).first)
+            before = try fingerprint(ctx1)
+
+            // A save hook that persists nothing: exactly what a process kill before save() leaves behind.
+            // The mutations (and the verification) really ran against ctx1; only the commit never happens.
+            var mutatedInMemory = false
+            let hooks = DUPMesoLengthConversion.ApplyHooks(save: { c in mutatedInMemory = c.hasChanges })
+            try DUPMesoLengthConversion.apply(block: block1, context: ctx1, calendar: cal(), hooks: hooks)
+            XCTAssertTrue(mutatedInMemory, "the conversion was staged in memory when the 'kill' hit")
+            XCTAssertEqual(block1.totalWeeks, 12, "in-memory state only")
+            // ctx1 / c1 go out of scope here without ever saving: the process is gone.
+        }
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "flag unset")
+
+        // "Launch 2": a fresh container on the same file sees exactly the pre-apply store.
+        let c2 = try onDiskContainer(at: url)
+        let ctx2 = ModelContext(c2)
+        XCTAssertEqual(try fingerprint(ctx2), before, "on-disk store identical to before the killed apply")
+        let block2 = try XCTUnwrap(try ctx2.fetch(FetchDescriptor<MesoBlock>()).first)
+        XCTAssertEqual(block2.totalWeeks, 10)
+        XCTAssertEqual(try sessions(ctx2).count, 60)
+
+        // ...and the real migration then converts it.
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx2, dryRun: false)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        XCTAssertEqual(block2.totalWeeks, 12)
+        XCTAssertEqual(try sessions(ctx2).count, 72)
+        // Reopen once more: the conversion really reached disk this time.
+        let ctx3 = ModelContext(try onDiskContainer(at: url))
+        XCTAssertEqual(try ctx3.fetch(FetchDescriptor<Session>()).count, 72)
     }
 
     // MARK: Same-named archived block (the live store has an April "10-Week DUP Meso")
