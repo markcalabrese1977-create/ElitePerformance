@@ -470,7 +470,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         XCTAssertTrue(ss.allSatisfy { cal.component(.weekday, from: $0.date) != 5 }, "no Thursday sessions")
         XCTAssertTrue(ss.allSatisfy { s in s.items.allSatisfy { $0.waveRaw?.lowercased() != "deload" } }, "no deload items")
         XCTAssertTrue(ss.allSatisfy { !$0.isDeloadWeek }, "isDeloadWeek false everywhere")
-        XCTAssertEqual(DUPMesoLengthConversion.verifyChains(block: block, context: ctx).broken, [])
+        XCTAssertEqual(DUPMesoLengthConversion.createdLinks(sessions: ss, all: all).problems, [], "weeks 7/8/9 link to 10/11/12; nothing after")
         let unwaved = DUPMesoLengthConversion.unwavedItems(block: block, context: ctx)
         log("[conversion fixture] hand-added items outside the chains: \(unwaved)")
         XCTAssertEqual(unwaved.count, 2, "the two hand-added week-1 lifts, nothing else")
