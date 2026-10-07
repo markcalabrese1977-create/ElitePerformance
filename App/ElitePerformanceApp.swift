@@ -65,6 +65,9 @@ struct ElitePerformanceApp: App {
             // After the catch-up: reads the finished state of every earlier backfill. Armed: applies the
             // 12-week conversion when every gate and post-write verification passes (see the type's doc).
             TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
+            // After the conversion: aligns the converted block to program v5.2. Read-only while
+            // V52AlignmentRepair.dryRun is true; a live run is blocked unless the conversion completed.
+            V52AlignmentRepair.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
