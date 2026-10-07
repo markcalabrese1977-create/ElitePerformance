@@ -434,7 +434,10 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         let savedDomain = appDomainSnapshot()
         let savedGroup = groupLoadKeys()
         defer { restoreAppDomain(savedDomain); restoreGroupLoadKeys(savedGroup); flushReport() }
-        for k in Self.completionKeys { UserDefaults.standard.removeObject(forKey: k) }
+        for k in Self.completionKeys + [SameLetterTargetCatchUpMigration.completionKey, SameLetterTargetCatchUpMigration.dryRunLoggedKey,
+                                        V52AlignmentRepair.completionKey, V52AlignmentRepair.dryRunLoggedKey, V52AlignmentRepair.reportKey] {
+            UserDefaults.standard.removeObject(forKey: k)
+        }
 
         let container = try makeContainer()
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: fixturePath), modelContainer: container)
@@ -445,8 +448,11 @@ final class BackupRoundTripHarnessTests: XCTestCase {
             for (name, run) in Self.migrationList where !name.hasPrefix("TwelveWeek") {
                 run(ctx); try? ctx.save()
             }
-            TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
+            SameLetterTargetCatchUpMigration.runIfNeeded(in: ctx)
             try? ctx.save()
+            // As in the app: the conversion and V52 each get their own fresh context.
+            TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(container), dryRun: false)
+            V52AlignmentRepair.runIfNeeded(in: ModelContext(container))
         }
 
         startupSequence()

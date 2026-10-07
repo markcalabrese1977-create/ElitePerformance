@@ -62,12 +62,16 @@ struct ElitePerformanceApp: App {
             // Armed: applies once (SameLetterTargetCatchUpMigration.dryRun == false); its flag is set
             // only after the save.
             SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
+            // The conversion and V52 each run on their OWN fresh ModelContext. A conversion that is refused rolls
+            // its context back, and a context that has been through a rollback must never be reused. Commit the
+            // earlier migrations first so the fresh contexts read their finished state from the store.
+            try? context.save()
             // After the catch-up: reads the finished state of every earlier backfill. Armed: applies the
             // 12-week conversion when every gate and post-write verification passes (see the type's doc).
-            TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
+            TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(container))
             // After the conversion: aligns the converted block to program v5.2. Read-only while
             // V52AlignmentRepair.dryRun is true; a live run is blocked unless the conversion completed.
-            V52AlignmentRepair.runIfNeeded(in: context)
+            V52AlignmentRepair.runIfNeeded(in: ModelContext(container))
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {

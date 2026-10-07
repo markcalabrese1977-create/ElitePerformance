@@ -528,6 +528,54 @@ final class V52AlignmentRepairTests: XCTestCase {
         XCTAssertEqual(ExerciseCatalog.displayName(for: try row("Prone Y-Raise").id), "Prone Y-Raise")
     }
 
+    // MARK: - Fresh contexts: a refused conversion, then V52
+
+    /// The conversion and V52 each run on their own fresh ModelContext (App/ElitePerformanceApp.swift). When the
+    /// conversion refuses (verification failure, rolled back), V52 on its own context reports
+    /// "blocked: not converted", writes nothing, creates nothing and leaves no pending changes behind.
+    func test_conversionRefuses_thenV52OnItsOwnContext_reportsBlockedNotConverted_withoutLeftovers() throws {
+        let key = TwelveWeekMesoConversionMigration.completionKey
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key); UserDefaults.standard.removeObject(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey) }
+        let (setup, _) = try makeTenWeekBlock()
+        let container = try XCTUnwrap(containers.last)
+        _ = setup
+        let before = try storeFingerprint(ModelContext(container))
+        let sessionsBefore = try allSessions(ModelContext(container)).count
+
+        // 1. The conversion, on its own context, forced to refuse: a week-10 lift disappears before verification.
+        let conversionCtx = ModelContext(container)
+        let refuse = DUPMesoLengthConversion.ApplyHooks(beforeVerify: { c in
+            let w10 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 10 }!
+            let victim = w10.items.sorted { $0.order < $1.order }[0]
+            w10.items.removeAll { $0 === victim }
+            c.delete(victim)
+        })
+        TwelveWeekMesoConversionMigration.runIfNeeded(in: conversionCtx, dryRun: false, hooks: refuse)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: key), "refused: the completion flag stays unset")
+        XCTAssertFalse(conversionCtx.hasChanges, "the refused context holds nothing pending")
+        XCTAssertNoThrow(try conversionCtx.save(), "and saving it does not throw")
+        XCTAssertEqual(try storeFingerprint(ModelContext(container)), before, "the store is exactly as before")
+
+        // 2. V52 on a FRESH context: blocked, no error, nothing written, nothing left over.
+        let v52Ctx = ModelContext(container)
+        let d = freshDefaults(converted: false)          // the conversion never completed
+        let customsBefore = try customRowCount(ModelContext(container))
+        R.runIfNeeded(in: v52Ctx, dryRun: false, defaults: d)
+        XCTAssertFalse(v52Ctx.hasChanges, "no leftover objects in V52's context")
+        XCTAssertNoThrow(try v52Ctx.save())
+        XCTAssertFalse(d.bool(forKey: R.completionKey))
+        XCTAssertEqual(try customRowCount(ModelContext(container)), customsBefore, "no custom exercise created")
+        XCTAssertEqual(try allSessions(ModelContext(container)).count, sessionsBefore, "no session created or removed")
+        XCTAssertEqual(try storeFingerprint(ModelContext(container)), before, "the store is still exactly as before")
+
+        let block = try XCTUnwrap(try v52Ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active })
+        let report = R.dryRun(block: block, context: v52Ctx, defaults: d)
+        XCTAssertNotNil(report.liveBlocker)
+        XCTAssertTrue(report.text.contains("blocked: not converted"), report.text)
+        XCTAssertFalse(v52Ctx.hasChanges)
+    }
+
     // MARK: - Failure injection
 
     private struct InjectedSaveFailure: Error {}
