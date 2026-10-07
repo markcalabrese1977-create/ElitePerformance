@@ -498,6 +498,77 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertTrue(report.chainTable.allSatisfy { $0.contains("→nil") })
     }
 
+    /// LOCAL ONLY. The 2026-10-07 backup carries a planned, hand-swapped [Hotel] Pull B session in week 2 that has
+    /// no week-5 counterpart. The conversion verifies only the links it creates (7/8/9 -> 10/11/12), so it must
+    /// convert this store as it is and name the legacy dead ends as [INFO], never as failures.
+    func test_fixture_convertsWithTheSwappedOct7PullBSession_andListsDeadEndsAsInfo() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        print("CONVERSION FIXTURE|\(URL(fileURLWithPath: path).lastPathComponent)")
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
+        let ctx = ModelContext(c)
+        ctx.autosaveEnabled = false
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
+
+        let sessions = try self.sessions(ctx).filter { $0.meso?.persistentModelID == block.persistentModelID }
+        let swapped = try XCTUnwrap(sessions.first { $0.weekIndex == 2 && $0.dayLabel == "Pull B" })
+        XCTAssertEqual(swapped.status, .planned)
+        let w5 = try XCTUnwrap(sessions.first { $0.weekIndex == 5 && $0.dayLabel == "Pull B" })
+        let w5Ids = Set(w5.items.map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
+        XCTAssertTrue(swapped.items.contains { !w5Ids.contains(ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId)) },
+                      "precondition: the Oct 7 session carries lifts with no week-5 counterpart")
+
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx)
+        print("CONVERSION FIXTURE VERIFICATION|\n" + report.verification.joined(separator: "\n"))
+
+        XCTAssertTrue(report.didWrite)
+        XCTAssertEqual(block.totalWeeks, 12)
+        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        XCTAssertTrue(report.verification.contains { $0.hasPrefix("[PASS] created links") })
+        let info = try XCTUnwrap(report.verification.first { $0.hasPrefix("[INFO]") && $0.contains("legacy dead ends") }, "\(report.verification)")
+        XCTAssertTrue(info.contains("W2 Pull B"), info)
+        XCTAssertEqual(report.postWriteChainTable.count, 18)
+    }
+
+    /// A break in a link the conversion creates (week 8 -> 11: a week-11 lift whose canonical id differs) fails
+    /// verification and restores the store.
+    func test_apply_forcedBreakInA8To11Link_failsAndRestoresTheStore() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        let hooks = DUPMesoLengthConversion.ApplyHooks(beforeVerify: { c in
+            let w11 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 11 }!
+            w11.items.sorted { $0.order < $1.order }[0].exerciseId = "tricep_kickback"
+        })
+        XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal(), hooks: hooks)) { err in
+            guard case DUPMesoLengthConversion.ApplyError.verificationFailed(let f) = err else { return XCTFail("\(err)") }
+            XCTAssertTrue(f.contains { $0.hasPrefix("created links") && $0.contains("W8") }, "\(f)")
+        }
+        try assertAppliedNothing(ctx, block, before: before)
+    }
+
+    /// Weeks 1-6 are not verified: a legacy dead end there is listed as [INFO] and the conversion still applies.
+    func test_apply_legacyDeadEndInWeek2_isInfoNotFailure() throws {
+        clearMigrationFlags(); defer { clearMigrationFlags() }
+        let (ctx, block) = try seededBlock()
+        let w2 = try XCTUnwrap(try week(2, ctx).first)
+        w2.items.sorted { $0.order < $1.order }[0].exerciseId = "tricep_kickback"      // no week-5 counterpart
+        try ctx.save()
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.didWrite)
+        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        XCTAssertTrue(report.verification.contains { $0.hasPrefix("[INFO] 1 week 1-6 item(s)") && $0.contains("W2") }, "\(report.verification)")
+    }
+
     /// LOCAL ONLY: runs the dry run against a real backup export (never committed). Enable with
     ///   TEST_RUNNER_EP_BACKUP_FIXTURE=/path/to/ElitePerformance_Backup_v1_….json
     ///   TEST_RUNNER_EP_DRYRUN_REPORT_OUT=/path/to/report.txt   (optional)
@@ -849,16 +920,16 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         let before = try fingerprint(ctx)
         let priorAutosave = ctx.autosaveEnabled
 
-        // Remove one week-4 lift: the week-1 item's "+3 weeks" target disappears (it would skip to week 7).
+        // Remove one week-10 lift: the week-7 item's 7 -> 10 target (a link the conversion creates) disappears.
         let hooks = DUPMesoLengthConversion.ApplyHooks(beforeVerify: { c in
-            let w4 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 4 }!
-            let victim = w4.items.sorted { $0.order < $1.order }[0]
-            w4.items.removeAll { $0 === victim }
+            let w10 = ((try? c.fetch(FetchDescriptor<Session>())) ?? []).first { $0.weekIndex == 10 }!
+            let victim = w10.items.sorted { $0.order < $1.order }[0]
+            w10.items.removeAll { $0 === victim }
             c.delete(victim)
         })
         XCTAssertThrowsError(try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal(), hooks: hooks)) { err in
             guard case DUPMesoLengthConversion.ApplyError.verificationFailed(let f) = err else { return XCTFail("\(err)") }
-            XCTAssertTrue(f.contains { $0.hasPrefix("verifyChains") }, "\(f)")
+            XCTAssertTrue(f.contains { $0.hasPrefix("created links") }, "\(f)")
         }
         try assertAppliedNothing(ctx, block, before: before)
         XCTAssertEqual(ctx.autosaveEnabled, priorAutosave, "autosave restored")
@@ -924,9 +995,11 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.didWrite)
         XCTAssertFalse(report.verification.isEmpty)
-        XCTAssertTrue(report.verification.allSatisfy { $0.hasPrefix("[PASS]") }, "\(report.verification)")
+        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        XCTAssertTrue(report.verification.contains { $0.hasPrefix("[PASS] created links") }, "\(report.verification)")
+        XCTAssertFalse(report.verification.contains { $0.contains("verifyChains") || $0.contains("18 chains") }, "the weeks 1-6 links and the 18-chains count are no longer asserted")
         XCTAssertEqual(report.postWriteChainTable.count, 18)
-        XCTAssertTrue(report.postWriteChainTable.allSatisfy { $0.contains("W1→W4→W7→W10→nil") || $0.contains("W2→W5→W8→W11→nil") || $0.contains("W3→W6→W9→W12→nil") })
+        XCTAssertTrue(report.postWriteChainTable.allSatisfy { $0.contains("W7→W10→nil") || $0.contains("W8→W11→nil") || $0.contains("W9→W12→nil") })
         XCTAssertTrue(report.postWriteChainTable.allSatisfy { line in
             let parts = line.components(separatedBy: "items linked ").last!.split(separator: "/")
             return parts.count == 2 && parts[0] == parts[1]

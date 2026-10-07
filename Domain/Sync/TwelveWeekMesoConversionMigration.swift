@@ -132,7 +132,7 @@ enum TwelveWeekMesoConversionMigration {
         var out: [String] = ["✅ 12-week conversion applied to '\(block.name)' (totalWeeks \(block.totalWeeks.map(String.init) ?? "nil"))"]
         out.append("sessions converted: \(r.sessionsConverted)   items converted: \(r.itemsConverted)")
         out.append("sessions created:   \(r.sessionsCreated)   items created:   \(r.itemsCreated)")
-        out.append("== CHAINS (\(r.postWriteChainTable.count)) ==")
+        out.append("== CREATED LINKS (\(r.postWriteChainTable.count)) ==")
         out += r.postWriteChainTable
         out.append("== VERIFICATION (ran before save) ==")
         out += r.verification.map { "  \($0)" }
