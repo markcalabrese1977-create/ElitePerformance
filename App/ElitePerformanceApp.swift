@@ -57,12 +57,14 @@ struct ElitePerformanceApp: App {
             BodyweightPhantomLoadMigration.runIfNeeded(in: context)
             PrescriptionNotesClearMigration.runIfNeeded(in: context)
             Week6UpperBCleanupMigration.runIfNeeded(in: context)
+            // Catch-up BEFORE the conversion: bring unedited same-letter targets current first, so
+            // the conversion clones week-7 prescriptions into weeks 10-12 from up-to-date loads.
+            // Armed: applies once (SameLetterTargetCatchUpMigration.dryRun == false); its flag is set
+            // only after the save.
+            SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
             // Registered last: reads the finished state of every earlier backfill. Read-only while
             // TwelveWeekMesoConversionMigration.dryRun is true.
             TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
-            // Registered after everything above, including the conversion. Read-only while
-            // SameLetterTargetCatchUpMigration.dryRun is true.
-            SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
