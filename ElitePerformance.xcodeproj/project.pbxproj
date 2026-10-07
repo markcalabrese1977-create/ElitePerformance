@@ -56,6 +56,9 @@
 		D588C08C2FE3670400B019A8 /* MechanicalLoadProjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */; };
 		D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */; };
 		D5AA00082F99900800AA0008 /* CoachMessageLandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */; };
+		D5AA0B062F99900700AA0001 /* SameLetterCatchUpTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA0B052F99900700AA0001 /* SameLetterCatchUpTests.swift */; };
+		D5AA0B022F99900700AA0001 /* CarryForwardWritesHoldsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA0B012F99900700AA0001 /* CarryForwardWritesHoldsTests.swift */; };
+		D5AA0B042F99900700AA0001 /* CarryForwardAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */; };
 		D5AA00092F99900900AA0009 /* E1RMFloorCapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */; };
 		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
@@ -158,6 +161,9 @@
 		D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadProjector.swift; sourceTree = "<group>"; };
 		D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerLetterTargetSelectionTests.swift; sourceTree = "<group>"; };
 		D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessageLandingTests.swift; sourceTree = "<group>"; };
+		D5AA0B052F99900700AA0001 /* SameLetterCatchUpTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SameLetterCatchUpTests.swift; sourceTree = "<group>"; };
+		D5AA0B012F99900700AA0001 /* CarryForwardWritesHoldsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForwardWritesHoldsTests.swift; sourceTree = "<group>"; };
+		D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForwardAuditTests.swift; sourceTree = "<group>"; };
 		D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMFloorCapTests.swift; sourceTree = "<group>"; };
 		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
@@ -521,6 +527,9 @@
 				1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */,
 				B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */,
 				D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */,
+				D5AA0B052F99900700AA0001 /* SameLetterCatchUpTests.swift */,
+				D5AA0B012F99900700AA0001 /* CarryForwardWritesHoldsTests.swift */,
+				D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */,
 				D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */,
 				D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */,
 				01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */,
@@ -769,6 +778,9 @@
 				4935C5EEE6864668BB05A199 /* CoachingEngineGuardTests.swift in Sources */,
 				7920EC09B73B4EB3AAF3086E /* LoadWriteTests.swift in Sources */,
 				D5AA00082F99900800AA0008 /* CoachMessageLandingTests.swift in Sources */,
+				D5AA0B062F99900700AA0001 /* SameLetterCatchUpTests.swift in Sources */,
+				D5AA0B022F99900700AA0001 /* CarryForwardWritesHoldsTests.swift in Sources */,
+				D5AA0B042F99900700AA0001 /* CarryForwardAuditTests.swift in Sources */,
 				D5AA00092F99900900AA0009 /* E1RMFloorCapTests.swift in Sources */,
 				D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */,
 				21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */,

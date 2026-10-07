@@ -11,7 +11,8 @@ import SwiftData
 ///   - Find the next future Session (by date) that has the same `exerciseId`.
 ///   - If that future SessionItem has an "empty" plan (no per-set plan and 0 load),
 ///     copy the plan fields from the completed session's item.
-/// - Never overwrites an already-planned future SessionItem.
+/// - An already-planned future SessionItem is overwritten only by the propagate path,
+///   and only when the user has not edited it (planEdited == false).
 struct PlanMemoryEngine {
 
     let context: ModelContext
@@ -20,26 +21,41 @@ struct PlanMemoryEngine {
     // reduction via LoadProjectionService once deload-week RIR targets are reliably seeded.
     private let deloadLoadReductionFactor: Double = 0.6
 
+    /// The profile / user settings every load decision reads. Shared by carry-forward and the
+    /// one-time catch-up so both resolve exactly the same inputs.
+    struct LoadPolicyInputs {
+        let profile: UserProfile?
+        let loadIncrement: Double
+        let bodyWeight: Double?
+        let customExercises: [CustomExercise]
+        let progressionEnabled: Bool
+        let activeMesoIDs: Set<PersistentIdentifier>
+    }
+
+    func loadPolicyInputs() -> LoadPolicyInputs {
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        return LoadPolicyInputs(
+            profile: profile,
+            loadIncrement: profile?.minLoadIncrement ?? 2.5,
+            bodyWeight: profile?.bodyWeight,
+            customExercises: (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? [],
+            progressionEnabled: (try? context.fetch(FetchDescriptor<User>()).first?.progressionEnabled) ?? true,
+            activeMesoIDs: LoadProjectionService.activeMesoSessionIDs(from: context)
+        )
+    }
+
     /// Carry today's plan forward into the next future session(s)
     /// where plan is still empty.
     func carryForwardPlans(from session: Session) {
         guard session.status == .inProgress || session.status == .completed else { return }
 
-        // Fetch UserProfile for load increment preference
-        let profileDescriptor = FetchDescriptor<UserProfile>()
-        let profile = try? context.fetch(profileDescriptor).first
-        let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
-        let bodyWeight = profile?.bodyWeight
-        let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
-
-        // Auto-progression gate
-        let progressionEnabled: Bool = {
-            let descriptor = FetchDescriptor<User>()
-            return (try? context.fetch(descriptor).first?.progressionEnabled) ?? true
-        }()
-
-        // Active meso session IDs for current meso peak calculation
-        let activeMesoIDs = LoadProjectionService.activeMesoSessionIDs(from: context)
+        let inputs = loadPolicyInputs()
+        let profile = inputs.profile
+        let loadIncrement = inputs.loadIncrement
+        let bodyWeight = inputs.bodyWeight
+        let customExercises = inputs.customExercises
+        let progressionEnabled = inputs.progressionEnabled
+        let activeMesoIDs = inputs.activeMesoIDs
 
         // Fetch all sessions in chronological order
         let descriptor = FetchDescriptor<Session>(
@@ -75,8 +91,8 @@ struct PlanMemoryEngine {
             // fills empty plans, so an earned bump would never reach an anchored/
             // carried future session (the Cut-3 write-back gap). Instead propagate the
             // bump directly onto the stored plan — but only when the user has NOT
-            // manually edited it (planEdited == false) and only for a real increase
-            // (hold/nil/BW/deload never write). Immediate-next occurrence scope: this
+            // manually edited it (planEdited == false). Bump, hold and reduce all write;
+            // nil/BW/deload/exempt/incomplete evidence never do. Immediate-next occurrence scope: this
             // loop already targets the first future session containing the exercise.
             if !isPlanEffectivelyEmpty(targetItem) {
                 propagateEarnedBumpToMaterializedItem(
@@ -374,15 +390,17 @@ struct PlanMemoryEngine {
 
     // MARK: - Write-back to already-materialized future sessions (Cut 3)
 
-    /// Writes an EARNED bump onto an already-materialized next-occurrence plan.
+    /// Writes the source's recommendation (bump, hold or reduce) onto an already-materialized
+    /// next-occurrence plan.
     ///
     /// Only fires when:
     /// - progression is enabled,
     /// - the target plan was NOT user-edited (`planEdited == false`) — a manual
     ///   edit is preserved, never clobbered,
     /// - the target is not a deload/bodyweight item (those never take a numeric bump),
-    /// - and `recommend` returns a real INCREASE over the target's current load
-    ///   (hold / decrease / nil do not write, so BW/deload/first-session no-op).
+    /// - enough primary working sets were logged (min(sets, 3)),
+    /// - and `recommend` returns a load (nil — pain, no baseline — does not write).
+    ///   A hold or reduce overwrites a higher seed: the stored plan follows the evidence.
     ///
     /// The value is written raw — `CoachingEngine.recommend` self-caps at
     /// baseLoad * 2.0, mirroring the empty-seed path. `planEdited` stays false
@@ -399,17 +417,55 @@ struct PlanMemoryEngine {
         progressionEnabled: Bool,
         isProgressionExempt: Bool
     ) {
-        guard progressionEnabled else { return }
+        guard case .write(let recommendedLoad) = propagationDecision(
+            sourceItem: sourceItem, targetItem: targetItem, session: session,
+            allSessions: allSessions, activeMesoIDs: activeMesoIDs, loadIncrement: loadIncrement,
+            bodyWeight: bodyWeight, customExercises: customExercises,
+            progressionEnabled: progressionEnabled, isProgressionExempt: isProgressionExempt
+        ) else { return }
+        Self.applyPropagatedLoad(recommendedLoad, to: targetItem)
+        // planEdited intentionally left false — this is an automatic write.
+    }
+
+    /// What the propagate path would do for one source/target pair — without doing it.
+    enum PropagationDecision: Equatable {
+        case write(Double)
+        /// The guard that left the target alone (human-readable; logged by the catch-up).
+        case skip(String)
+    }
+
+    /// The single definition of the propagate path's guards and value. `propagate...` writes
+    /// what this returns; the one-time catch-up logs and writes the same thing.
+    func propagationDecision(
+        sourceItem: SessionItem,
+        targetItem: SessionItem,
+        session: Session,
+        allSessions: [Session],
+        activeMesoIDs: Set<PersistentIdentifier>,
+        loadIncrement: Double,
+        bodyWeight: Double?,
+        customExercises: [CustomExercise],
+        progressionEnabled: Bool,
+        isProgressionExempt: Bool
+    ) -> PropagationDecision {
+        guard progressionEnabled else { return .skip("progression disabled") }
         // Fixed-load exercise: an exempt source never writes an increase anywhere.
-        guard !isProgressionExempt else { return }
-        guard !targetItem.planEdited else { return }                       // preserve user edit
+        guard !isProgressionExempt else { return .skip("exempt (fixed-load) exercise") }
+        guard !targetItem.planEdited else { return .skip("target plan edited by the user") }
+        // Incomplete evidence: fewer than min(sets, 3) primary working sets were logged, so
+        // there is nothing reliable to write (a 4-set item with 3 logged still qualifies).
+        guard CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) else {
+            return .skip("incomplete evidence (\(CoachingEngine.workingSetIndices(for: sourceItem).count) of \(CoachingEngine.requiredPrimarySets(for: sourceItem)) primary sets logged)")
+        }
         // Flagged source: a temporarily/deliberately reduced load never earns a
         // write-back. CoachingEngine RULE 4b already returns a nil load here, so
         // this is belt-and-braces — it also covers any non-bump recommendation.
-        if sourceItem.loadOverrideReason?.suppressesEarnedProgression == true { return }
-        guard targetItem.waveRaw?.lowercased() != "deload" else { return } // deload holds
+        if sourceItem.loadOverrideReason?.suppressesEarnedProgression == true {
+            return .skip("source flagged with a suppressing override reason")
+        }
+        guard targetItem.waveRaw?.lowercased() != "deload" else { return .skip("deload target holds") }
         if ExerciseCatalog.isBodyweight(exerciseId: targetItem.exerciseId, customExercises: customExercises) {
-            return                                                          // BW never takes a numeric bump
+            return .skip("bodyweight target")
         }
 
         let projection = LoadProjectionService.project(
@@ -444,18 +500,23 @@ struct PlanMemoryEngine {
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
             isProgressionExempt: isProgressionExempt
-        ), let recommendedLoad = recommendation.nextSuggestedLoad else { return }
+        ), let recommendedLoad = recommendation.nextSuggestedLoad else {
+            return .skip("no recommendation load (pain flag, no baseline or flagged top-of-range)")
+        }
 
-        // Only an ACTUAL increase propagates. Hold (== current) or decrease is left
-        // untouched, so the already-materialized plan is never lowered.
-        guard recommendedLoad > targetItem.suggestedLoad else { return }
+        // Every recommendation with a load propagates — bump, hold or reduce — onto an
+        // unedited target: the target tracks the latest same-letter evidence.
+        return .write(recommendedLoad)
+    }
 
-        targetItem.suggestedLoad = recommendedLoad
-        targetItem.plannedLoadsBySet = Array(
-            repeating: recommendedLoad,
-            count: max(targetItem.plannedLoadsBySet.count, targetItem.targetSets)
-        )
-        // planEdited intentionally left false — this is an automatic write.
+    /// The per-set plan a propagated load produces for `targetItem`.
+    static func propagatedPlan(_ load: Double, for targetItem: SessionItem) -> [Double] {
+        Array(repeating: load, count: max(targetItem.plannedLoadsBySet.count, targetItem.targetSets))
+    }
+
+    static func applyPropagatedLoad(_ load: Double, to targetItem: SessionItem) {
+        targetItem.suggestedLoad = load
+        targetItem.plannedLoadsBySet = propagatedPlan(load, for: targetItem)
     }
 
     // MARK: - Helpers
@@ -484,12 +545,12 @@ struct PlanMemoryEngine {
         }
     }
 
-    private func isPlanEffectivelyEmpty(_ item: SessionItem) -> Bool {
+    func isPlanEffectivelyEmpty(_ item: SessionItem) -> Bool {
         let allLoadsZero = item.plannedLoadsBySet.allSatisfy { $0 == 0 }
         return allLoadsZero && item.suggestedLoad == 0
     }
 
-    private func hasMeaningfulPlan(_ item: SessionItem) -> Bool {
+    func hasMeaningfulPlan(_ item: SessionItem) -> Bool {
         let anyPlannedReps  = item.plannedRepsBySet.contains(where: { $0 > 0 })
         let anyPlannedLoads = item.plannedLoadsBySet.contains(where: { $0 > 0 })
         return anyPlannedReps || anyPlannedLoads || item.suggestedLoad > 0

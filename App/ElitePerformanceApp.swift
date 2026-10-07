@@ -60,6 +60,9 @@ struct ElitePerformanceApp: App {
             // Registered last: reads the finished state of every earlier backfill. Read-only while
             // TwelveWeekMesoConversionMigration.dryRun is true.
             TwelveWeekMesoConversionMigration.runIfNeeded(in: context)
+            // Registered after everything above, including the conversion. Read-only while
+            // SameLetterTargetCatchUpMigration.dryRun is true.
+            SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
