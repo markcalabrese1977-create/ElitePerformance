@@ -531,7 +531,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
         XCTAssertTrue(report.didWrite)
         XCTAssertEqual(block.totalWeeks, 12)
-        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        assertVerificationLinesAreKnown(report.verification)
         XCTAssertTrue(report.verification.contains { $0.hasPrefix("[PASS] created links") })
         let info = try XCTUnwrap(report.verification.first { $0.hasPrefix("[INFO]") && $0.contains("legacy dead ends") }, "\(report.verification)")
         XCTAssertTrue(info.contains("W2 Pull B"), info)
@@ -565,7 +565,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         try ctx.save()
         let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.didWrite)
-        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        assertVerificationLinesAreKnown(report.verification)
         XCTAssertTrue(report.verification.contains { $0.hasPrefix("[INFO] 1 week 1-6 item(s)") && $0.contains("W2") }, "\(report.verification)")
     }
 
@@ -989,13 +989,41 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertEqual(block.totalWeeks, 10)
     }
 
+    /// Every verification line is either [PASS] or one of the two known [INFO] kinds; anything else (a [FAIL], an
+    /// unknown [INFO], stray text) fails the test.
+    private func assertVerificationLinesAreKnown(_ lines: [String], file: StaticString = #filePath, line: UInt = #line) {
+        let infoPatterns = [
+            #"^\[INFO\] \d+ week 1-6 item\(s\) have no same-lift target 3 weeks later \(legacy dead ends, not verified, not failures\): "#,
+            #"^\[INFO\] \d+ hand-added item\(s\) with no wave letter are outside the A/B/C chains "#
+        ]
+        for l in lines {
+            if l.hasPrefix("[PASS]") { continue }
+            let known = l.hasPrefix("[INFO]") && infoPatterns.contains { l.range(of: $0, options: .regularExpression) != nil }
+            XCTAssertTrue(known, "unexpected verification line: \(l)", file: file, line: line)
+        }
+    }
+
+    func test_logHeaders_sayApplyWhenTheLaunchMayWrite_andDryRunOnlyWhenReadOnly() {
+        XCTAssertEqual(TwelveWeekMesoConversionMigration.logHeader(dryRun: false, blockName: "B"), "🧪 12-week conversion APPLY for 'B':")
+        XCTAssertEqual(TwelveWeekMesoConversionMigration.logHeader(dryRun: true, blockName: "B"), "🧪 12-week conversion DRY RUN for 'B':")
+        XCTAssertEqual(SameLetterTargetCatchUpMigration.logHeader(dryRun: false), "🧪 Same-letter catch-up APPLY:")
+        XCTAssertEqual(SameLetterTargetCatchUpMigration.logHeader(dryRun: true), "🧪 Same-letter catch-up DRY RUN:")
+        XCTAssertEqual(V52AlignmentRepair.logHeader(dryRun: false, blockName: "B"), "🧪 V52 alignment APPLY for 'B':")
+        XCTAssertEqual(V52AlignmentRepair.logHeader(dryRun: true, blockName: "B"), "🧪 V52 alignment DRY RUN for 'B':")
+        // The shipped switches decide which word a real launch prints.
+        XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun)
+        XCTAssertFalse(SameLetterTargetCatchUpMigration.dryRun)
+        XCTAssertTrue(V52AlignmentRepair.dryRun)
+    }
+
     func test_apply_success_reportsAllVerificationPassing_and18Chains() throws {
         let (ctx, block) = try seededBlock()
         try ctx.save()
         let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.didWrite)
         XCTAssertFalse(report.verification.isEmpty)
-        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") }, "\(report.verification)")
+        assertVerificationLinesAreKnown(report.verification)
+        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[INFO]") }, "a clean block has no INFO lines: \(report.verification)")
         XCTAssertTrue(report.verification.contains { $0.hasPrefix("[PASS] created links") }, "\(report.verification)")
         XCTAssertFalse(report.verification.contains { $0.contains("verifyChains") || $0.contains("18 chains") }, "the weeks 1-6 links and the 18-chains count are no longer asserted")
         XCTAssertEqual(report.postWriteChainTable.count, 18)
@@ -1017,7 +1045,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertTrue(report.didWrite)
         XCTAssertTrue(report.verification.contains { $0.hasPrefix("[INFO] 1 hand-added item(s)") && $0.contains("dumbbell_lateral_raise") }, "\(report.verification)")
-        XCTAssertFalse(report.verification.contains { $0.hasPrefix("[FAIL]") })
+        assertVerificationLinesAreKnown(report.verification)
         XCTAssertEqual(report.postWriteChainTable.count, 18)
     }
 

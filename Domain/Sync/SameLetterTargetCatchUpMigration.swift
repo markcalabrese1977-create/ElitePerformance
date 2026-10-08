@@ -229,6 +229,11 @@ enum SameLetterTargetCatchUpMigration {
         return plan.rows.count
     }
 
+    /// First line of the report in the launch log: "APPLY" when this launch may write, "DRY RUN" only when read-only.
+    static func logHeader(dryRun: Bool) -> String {
+        "🧪 Same-letter catch-up \(dryRun ? "DRY RUN" : "APPLY"):"
+    }
+
     // MARK: - Driver
 
     static func runIfNeeded(
@@ -256,7 +261,7 @@ enum SameLetterTargetCatchUpMigration {
         }
 
         let plan = Self.plan(block: block, context: context)
-        print("🧪 Same-letter catch-up \(dryRun ? "DRY RUN" : "plan"):\n\(plan.text)")
+        print("\(logHeader(dryRun: dryRun))\n\(plan.text)")
 
         if dryRun {
             defaults.set(plan.text, forKey: reportKey)

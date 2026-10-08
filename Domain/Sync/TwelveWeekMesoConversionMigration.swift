@@ -62,7 +62,7 @@ enum TwelveWeekMesoConversionMigration {
         }
 
         let report = DUPMesoLengthConversion.dryRun(block: block, context: context)
-        print("🧪 12-week conversion DRY RUN for '\(block.name)':\n\(report.text)")
+        print("\(logHeader(dryRun: dryRun, blockName: block.name))\n\(report.text)")
 
         if dryRun {
             defaults.set(report.text, forKey: reportKey)
@@ -96,6 +96,11 @@ enum TwelveWeekMesoConversionMigration {
             // apply() has already rolled the context back for every failure after its first mutation.
             print("⛔️ 12-week conversion NOT applied (store unchanged, flag NOT set; will retry): \(error)")
         }
+    }
+
+    /// First line of the report in the launch log: "APPLY" when this launch may write, "DRY RUN" only when read-only.
+    static func logHeader(dryRun: Bool, blockName: String) -> String {
+        "🧪 12-week conversion \(dryRun ? "DRY RUN" : "APPLY") for '\(blockName)':"
     }
 
     /// One-time (per install) warning marker for a 12-week block that is not the converted shape.

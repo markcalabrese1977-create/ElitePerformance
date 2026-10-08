@@ -1040,7 +1040,7 @@ enum V52AlignmentRepair {
         }
 
         let report = makePlan(block: block, context: context, defaults: defaults).report
-        print("🧪 V52 alignment \(dryRun ? "DRY RUN" : "plan") for '\(block.name)':\n\(report.text)")
+        print("\(logHeader(dryRun: dryRun, blockName: block.name))\n\(report.text)")
 
         if dryRun {
             defaults.set(report.text, forKey: reportKey)
@@ -1083,6 +1083,11 @@ enum V52AlignmentRepair {
         } catch {
             print("⛔️ V52 alignment NOT applied (store unchanged, flag NOT set; will retry): \(error)")
         }
+    }
+
+    /// First line of the report in the launch log: "APPLY" when this launch may write, "DRY RUN" only when read-only.
+    static func logHeader(dryRun: Bool, blockName: String) -> String {
+        "🧪 V52 alignment \(dryRun ? "DRY RUN" : "APPLY") for '\(blockName)':"
     }
 
     private static func logPostWriteSummary(_ r: Report, block: MesoBlock, ensured: EnsureResult) {
