@@ -227,9 +227,6 @@ struct CoachingEngine {
 
         let baseLoad: Double = primaryLoads.last ?? 0
 
-        // Guard 6 — Sanity cap: never suggest more than 2x the previous load
-        let loadSanityCap = baseLoad * 2.0
-
         // (Cut 3 fix) The former ProgressionEngine `progressionDecision` sizing is no
         // longer consulted for bumps: the cluster increment it added equals loadStep's
         // cluster increment, and the unified bump now guarantees baseLoad + increment
@@ -237,7 +234,6 @@ struct CoachingEngine {
 
         let plannedTopReps = item.repMax ?? item.plannedRepsBySet.max() ?? item.targetReps
         let plannedBottomReps = item.repMin ?? item.plannedRepsBySet.min() ?? item.targetReps
-        let targetReps = item.targetReps
         let targetRIR = item.targetRIR
 
         let firstReps = primaryReps.first ?? 0
