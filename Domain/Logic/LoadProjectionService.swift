@@ -480,3 +480,130 @@ enum LoadProjectionService {
         return 0
     }
 }
+
+// MARK: - Last same-letter performance (read-only display lookup)
+
+/// What the lifter did the last time this lift appeared in the SAME wave letter, in the SAME
+/// block, on the SAME day slot. Progression is judged reps-first against that exposure, so Today
+/// shows it ("Last A: 315 x 5, 6, 5, 5"). Pure: takes already-fetched sessions, writes nothing.
+///
+/// Unlike `LoadProjectionService.sameWaveSessions` (neither block- nor day-scoped) this is scoped
+/// the way `PlanMemoryEngine.nextTargetItem` anchors loads: persistent meso id + trimmed dayLabel +
+/// the MATCHED item's own wave + canonical exerciseId.
+struct LastLetterPerformance: Equatable {
+    struct SetEntry: Equatable {
+        let reps: Int
+        let load: Double
+    }
+
+    /// Lowercased wave letter ("a", "b", "c").
+    let waveRaw: String
+    let date: Date
+    let weekIndex: Int
+    let sets: [SetEntry]
+    /// Bodyweight lifts show reps only.
+    let isBodyweight: Bool
+
+    var letter: String { waveRaw.uppercased() }
+
+    /// "Last A: 315 x 5, 6, 5, 5" — consecutive sets at one load are grouped, a new group starts
+    /// when the load changes ("Last B: 290 x 8, 7, 6 · 315 x 5"); bodyweight: "Last A: 5, 5, 5, 5 reps".
+    var caption: String {
+        if isBodyweight {
+            return "Last \(letter): \(sets.map { String($0.reps) }.joined(separator: ", ")) reps"
+        }
+        var groups: [(load: Double, reps: [Int])] = []
+        for s in sets {
+            if let last = groups.last, last.load == s.load {
+                groups[groups.count - 1].reps.append(s.reps)
+            } else {
+                groups.append((s.load, [s.reps]))
+            }
+        }
+        let body = groups
+            .map { "\(Self.formatLoad($0.load)) x \($0.reps.map(String.init).joined(separator: ", "))" }
+            .joined(separator: " · ")
+        return "Last \(letter): \(body)"
+    }
+
+    private static func formatLoad(_ v: Double) -> String {
+        v == v.rounded() ? String(Int(v)) : String(format: "%g", v)
+    }
+}
+
+enum LastSameLetterPerformance {
+
+    /// The most recent EARLIER completed exposure of `item` (in `session`) with the same meso,
+    /// trimmed dayLabel, wave letter on the matched item, and canonical exerciseId. Nil when the
+    /// item has no wave (or is a deload), the block is a maintenance block, or there is no prior
+    /// exposure with logged working sets.
+    static func find(
+        for item: SessionItem,
+        in session: Session,
+        allSessions: [Session],
+        customExercises: [CustomExercise] = []
+    ) -> LastLetterPerformance? {
+        guard let wave = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased(),
+              !wave.isEmpty, wave != "deload" else { return nil }
+        guard let meso = session.meso, !meso.isMaintenance else { return nil }
+        let mesoID = meso.persistentModelID
+        let day = (session.dayLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !day.isEmpty else { return nil }
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let isBodyweight = ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId, customExercises: customExercises)
+
+        var best: (session: Session, sets: [LastLetterPerformance.SetEntry])?
+        for candidate in allSessions {
+            guard candidate.status == .completed,
+                  candidate.persistentModelID != session.persistentModelID,
+                  candidate.date < session.date,
+                  candidate.meso?.persistentModelID == mesoID,
+                  (candidate.dayLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == day
+            else { continue }
+            if let b = best, b.session.date >= candidate.date { continue }
+
+            // The MATCHED item's own wave decides — never the session's first item.
+            for candidateItem in candidate.items {
+                guard ExerciseCatalog.canonicalExerciseId(for: candidateItem.exerciseId) == canonicalId,
+                      candidateItem.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == wave
+                else { continue }
+                let sets = workingSets(of: candidateItem, isBodyweight: isBodyweight)
+                guard !sets.isEmpty else { continue }
+                best = (candidate, sets)
+                break
+            }
+        }
+        guard let best else { return nil }
+        return LastLetterPerformance(
+            waveRaw: wave, date: best.session.date, weekIndex: best.session.weekIndex,
+            sets: best.sets, isBodyweight: isBodyweight
+        )
+    }
+
+    /// Logged working sets in set order: reps > 0, and load > 0 unless bodyweight (zero-rep padding
+    /// rows are ignored). A 4-row top-set pattern (290, 290, 290, 315) is kept as logged.
+    static func workingSets(of item: SessionItem, isBodyweight: Bool) -> [LastLetterPerformance.SetEntry] {
+        let n = min(item.actualReps.count, item.actualLoads.count)
+        return (0..<n).compactMap { i in
+            let reps = item.actualReps[i], load = item.actualLoads[i]
+            guard reps > 0, isBodyweight || load > 0 else { return nil }
+            return .init(reps: reps, load: isBodyweight ? 0 : load)
+        }
+    }
+
+    /// Captions for every item of `session`, keyed by exerciseId (first item wins). Call once when
+    /// the screen loads.
+    static func captions(
+        for session: Session,
+        allSessions: [Session],
+        customExercises: [CustomExercise] = []
+    ) -> [String: String] {
+        var out: [String: String] = [:]
+        for item in session.items where out[item.exerciseId] == nil {
+            if let r = find(for: item, in: session, allSessions: allSessions, customExercises: customExercises) {
+                out[item.exerciseId] = r.caption
+            }
+        }
+        return out
+    }
+}
