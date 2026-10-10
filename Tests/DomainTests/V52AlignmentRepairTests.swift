@@ -916,4 +916,51 @@ final class V52AlignmentRepairTests: XCTestCase {
         XCTAssertEqual(try storeFingerprint(ctx), stored)
         XCTAssertEqual(try Data(contentsOf: url), fileBefore, "the backup file is never modified")
     }
+
+    /// A backup taken from a device that already ran the catch-up and the conversion (12-week block, completion
+    /// flags set): the armed V52 applies once with the spec counts, and a second launch changes nothing.
+    func test_fixture_alreadyConverted_armedLaunchApplies_thenSecondLaunchIsANoOp() throws {
+        let (ctx, block, url) = try importFixture()
+        guard block.totalWeeks == 12 else { throw XCTSkip("fixture is not a converted (12-week) backup") }
+        let fileBefore = try Data(contentsOf: url)
+        let d = freshDefaults(converted: true)
+        XCTAssertFalse(R.dryRun, "shipped armed")
+        XCTAssertFalse(d.bool(forKey: R.completionKey))
+
+        let itemsBefore = try itemFingerprints(ctx)
+        let seeds: [String: (Double, [Double], String)] = Dictionary(uniqueKeysWithValues:
+            try allSessions(ctx).flatMap { s in s.items.map { ($0.id!.uuidString, ($0.suggestedLoad, $0.plannedLoadsBySet, $0.exerciseId)) } })
+        let rowsBefore = try customRowCount(ctx)
+        let plan = R.dryRun(block: block, context: ctx, defaults: d)
+        print("V52 FIXTURE PRE-CONVERTED PLAN|\n\(plan.text)")
+        XCTAssertTrue(plan.isSafe, plan.blockers.joined(separator: "\n"))
+        XCTAssertEqual(plan.replaced, 63); XCTAssertEqual(plan.reranged, 27); XCTAssertEqual(plan.created, 18)
+        XCTAssertEqual(plan.customsToCreate.count, 6)
+
+        // First launch: the shipped switch (default dryRun), as the app calls it.
+        R.runIfNeeded(in: ctx, defaults: d)
+        XCTAssertTrue(d.bool(forKey: R.completionKey), "completion set after the verified save")
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(try customRowCount(ctx) - rowsBefore, 6)
+        let itemsAfter = try itemFingerprints(ctx)
+        let changed = Set(itemsBefore.filter { itemsAfter[$0.key] != $0.value }.keys)
+        XCTAssertEqual(changed.count, 90, "63 replaced + 27 re-ranged; every unlisted item is byte-identical")
+        XCTAssertEqual(itemsAfter.count - itemsBefore.count, 18)
+        for s in try allSessions(ctx) where s.weekIndex >= 4 && s.meso === block {
+            for i in s.items where ["hack_squat", Self.hipThrust, "romanian_deadlift"].contains(i.exerciseId) {
+                let old = try XCTUnwrap(seeds[i.id!.uuidString])
+                XCTAssertEqual(i.suggestedLoad, old.0, "wk\(s.weekIndex) \(i.exerciseId) seed kept")
+            }
+        }
+        for s in try allSessions(ctx) where s.weekIndex <= 3 { for i in s.items { XCTAssertEqual(itemsBefore[i.id!.uuidString], itemsAfter[i.id!.uuidString]) } }
+        XCTAssertTrue(R.dryRun(block: block, context: ctx, defaults: d).alreadyAligned)
+        let chains = DUPMesoLengthConversion.createdLinks(sessions: try allSessions(ctx).filter { $0.meso === block }, all: try allSessions(ctx))
+        XCTAssertEqual(chains.problems, [], "chains verified")
+
+        // Second launch: nothing changes.
+        let stored = try storeFingerprint(ctx)
+        R.runIfNeeded(in: ctx, defaults: d)
+        XCTAssertEqual(try storeFingerprint(ctx), stored)
+        XCTAssertEqual(try Data(contentsOf: url), fileBefore, "the backup file is never modified")
+    }
 }
