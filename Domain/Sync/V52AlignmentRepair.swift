@@ -27,11 +27,12 @@ import SwiftData
 ///
 /// LIVE APPLY REQUIRES the 12-week conversion: `twelveWeekMesoConversion.v1.completed` AND the converted
 /// shape. Otherwise the run logs "blocked: not converted" and writes nothing (a dry run still reports).
-/// Ships `dryRun = true`.
+/// Ships ARMED (`dryRun = false`): applies once, on the first launch after the conversion has completed.
 enum V52AlignmentRepair {
 
-    /// Flip to false (its own commit) to apply. Read-only while true.
-    static let dryRun = true
+    /// false = apply (gated on the 12-week conversion, then on every plan gate and post-write verification);
+    /// true = read-only report. Armed.
+    static let dryRun = false
 
     /// Bump when the REPORT changes, so a changed report logs again instead of being swallowed by the
     /// previous install's "already logged" flag.
@@ -1013,8 +1014,9 @@ enum V52AlignmentRepair {
 
     // MARK: - Driver
 
-    /// Registered AFTER the 12-week conversion in `runStartupBackfills`. Dry run: plan, print, store the report,
-    /// set the version-keyed logged flag, return. Live: blocked unless the conversion completed.
+    /// Registered AFTER the 12-week conversion in `runStartupBackfills`. Armed: applies once; blocked unless the
+    /// conversion completed, and its completion flag is set only after the verified save. Dry run (when passed
+    /// `dryRun: true`): plan, print, store the report, set the version-keyed logged flag, return.
     static func runIfNeeded(
         in context: ModelContext,
         dryRun: Bool = V52AlignmentRepair.dryRun,

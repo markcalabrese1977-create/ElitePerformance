@@ -258,8 +258,8 @@ final class V52AlignmentRepairTests: XCTestCase {
 
     // MARK: - Shipping state
 
-    func test_shipsAsADryRun() {
-        XCTAssertTrue(R.dryRun)
+    func test_shipsArmed() {
+        XCTAssertFalse(R.dryRun)
         XCTAssertEqual(R.completionKey, "v52AlignmentRepair.v1.completed")
         XCTAssertEqual(R.dryRunLoggedKey, "v52AlignmentRepair.v1.dryRunLogged.\(R.reportVersion)")
     }
@@ -585,7 +585,7 @@ final class V52AlignmentRepairTests: XCTestCase {
     }
 
     /// Runs the launch sequence the way the app does, on the given container: catch-up (armed) on one context, the
-    /// conversion (armed) on its own fresh context, V52 (shipped dry run) on its own fresh context.
+    /// conversion (armed) on its own fresh context, V52 (armed) on its own fresh context.
     private func launch(_ container: ModelContainer, catchUpContext: ModelContext) {
         SameLetterTargetCatchUpMigration.runIfNeeded(in: catchUpContext, dryRun: false)
         try? catchUpContext.save()
@@ -626,16 +626,15 @@ final class V52AlignmentRepairTests: XCTestCase {
         let converted = try XCTUnwrap(try check.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
         XCTAssertEqual(converted.totalWeeks, 12)
         XCTAssertEqual(try allSessions(check).filter { $0.meso?.persistentModelID == converted.persistentModelID }.count, 72)
-        // V52: unset logged flag did not block the report; it logged once and wrote nothing.
-        XCTAssertTrue(d.bool(forKey: R.dryRunLoggedKey), "V52 reported and set its logged flag")
-        let report = try XCTUnwrap(d.string(forKey: R.reportKey))
-        XCTAssertTrue(report.contains("== SHAPE == converted"), report)
-        XCTAssertFalse(d.bool(forKey: R.completionKey))
-        XCTAssertEqual(try customRowCount(check), 24, "V52 dry run created no custom exercise")
+        // V52 (armed): runs right after the conversion on its own context, applies, and sets only its completion flag.
+        XCTAssertTrue(d.bool(forKey: R.completionKey), "V52 completion flag set after the verified save")
+        XCTAssertFalse(d.bool(forKey: R.dryRunLoggedKey), "armed: no dry-run logged flag")
+        XCTAssertNil(d.string(forKey: R.reportKey), "armed: no stored dry-run report")
+        XCTAssertEqual(try customRowCount(check), 30, "V52 created its 6 custom exercises")
     }
 
     /// The same flag state on the synthetic block, where the catch-up has nothing to write: it still sets its
-    /// completion flag, and the conversion still applies.
+    /// completion flag, the conversion still applies, and V52 then applies.
     func test_armedRuns_withLoggedFlagsSet_onASyntheticBlock_setBothCompletionFlags() throws {
         let d = UserDefaults.standard
         for k in installKeys { d.removeObject(forKey: k) }
@@ -651,8 +650,8 @@ final class V52AlignmentRepairTests: XCTestCase {
         XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
         let check = ModelContext(container)
         XCTAssertEqual(try check.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active }?.totalWeeks, 12)
-        XCTAssertTrue(d.bool(forKey: R.dryRunLoggedKey))
-        XCTAssertNotNil(d.string(forKey: R.reportKey))
+        XCTAssertTrue(d.bool(forKey: R.completionKey), "V52 applied after the conversion")
+        XCTAssertFalse(d.bool(forKey: R.dryRunLoggedKey))
     }
 
     // MARK: - Failure injection

@@ -1013,7 +1013,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         // The shipped switches decide which word a real launch prints.
         XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun)
         XCTAssertFalse(SameLetterTargetCatchUpMigration.dryRun)
-        XCTAssertTrue(V52AlignmentRepair.dryRun)
+        XCTAssertFalse(V52AlignmentRepair.dryRun)
     }
 
     func test_apply_success_reportsAllVerificationPassing_and18Chains() throws {
