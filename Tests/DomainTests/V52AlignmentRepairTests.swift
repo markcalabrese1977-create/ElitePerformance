@@ -963,4 +963,35 @@ final class V52AlignmentRepairTests: XCTestCase {
         XCTAssertEqual(try storeFingerprint(ctx), stored)
         XCTAssertEqual(try Data(contentsOf: url), fileBefore, "the backup file is never modified")
     }
+
+    // MARK: - Unregistered one-shots
+
+    /// The catch-up, the 12-week conversion and V52 are no longer part of the startup list: a fresh store holding a
+    /// template 10-week DUP block comes out of `StartupBackfills.run` still a 10-week block, with no completion or
+    /// logged flag set by any of the three and no custom exercise or week 11-12 session created.
+    func test_startupBackfills_leaveATemplateTenWeekBlockUntouched_noCatchUpNoConversionNoV52() throws {
+        let d = UserDefaults.standard
+        for k in installKeys { d.removeObject(forKey: k) }
+        defer { for k in installKeys { d.removeObject(forKey: k) } }
+
+        let (ctx, block) = try makeTenWeekBlock()
+        let container = try XCTUnwrap(containers.last)
+        let sessionsBefore = try allSessions(ctx).filter { $0.meso === block }.count
+        let rowsBefore = try customRowCount(ctx)
+        let loadsBefore = Dictionary(uniqueKeysWithValues: try allSessions(ctx).flatMap { s in
+            s.items.map { ($0.id!.uuidString, $0.suggestedLoad) } })
+
+        StartupBackfills.run(using: container)
+
+        let check = ModelContext(container)
+        let active = try XCTUnwrap(try check.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
+        XCTAssertEqual(active.totalWeeks, 10, "no conversion")
+        let sessions = try allSessions(check).filter { $0.meso?.persistentModelID == active.persistentModelID }
+        XCTAssertEqual(sessions.count, sessionsBefore)
+        XCTAssertEqual(sessions.map(\.weekIndex).max(), 10, "no week 11-12 sessions")
+        XCTAssertEqual(try customRowCount(check), rowsBefore, "V52 created no custom exercise")
+        for s in sessions { for i in s.items { XCTAssertEqual(loadsBefore[i.id!.uuidString], i.suggestedLoad, "catch-up wrote no load") } }
+        for k in installKeys { XCTAssertFalse(d.bool(forKey: k), k) }
+        XCTAssertNil(d.string(forKey: R.reportKey))
+    }
 }

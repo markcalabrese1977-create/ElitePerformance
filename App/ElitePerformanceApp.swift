@@ -41,37 +41,7 @@ struct ElitePerformanceApp: App {
         ]
 
         func runStartupBackfills(using container: ModelContainer) {
-            let context = ModelContext(container)
-            ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
-            ExerciseNameSnapshotRepair.runIfNeeded(in: context)
-            CanonicalExerciseIdMigration.runIfNeeded(in: context)
-            CustomExerciseDedupMigration.runIfNeeded(in: context)
-            D5ExerciseIdRepairMigration.runIfNeeded(in: context)
-            Apr21SessionHistoryRepairMigration.runIfNeeded(in: context) 
-            SessionHistoryBlockBackfill.runIfNeeded(in: context)
-            MechanicalLoadRecoveryMigration.runIfNeeded(in: context)
-            SessionDayLabelBackfill.runIfNeeded(in: context)
-            CustomExerciseStoreMigration.runIfNeeded(in: context)
-            CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
-            MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
-            BodyweightPhantomLoadMigration.runIfNeeded(in: context)
-            PrescriptionNotesClearMigration.runIfNeeded(in: context)
-            Week6UpperBCleanupMigration.runIfNeeded(in: context)
-            // Catch-up BEFORE the conversion: bring unedited same-letter targets current first, so
-            // the conversion clones week-7 prescriptions into weeks 10-12 from up-to-date loads.
-            // Armed: applies once (SameLetterTargetCatchUpMigration.dryRun == false); its flag is set
-            // only after the save.
-            SameLetterTargetCatchUpMigration.runIfNeeded(in: context)
-            // The conversion and V52 each run on their OWN fresh ModelContext. A conversion that is refused rolls
-            // its context back, and a context that has been through a rollback must never be reused. Commit the
-            // earlier migrations first so the fresh contexts read their finished state from the store.
-            try? context.save()
-            // After the catch-up: reads the finished state of every earlier backfill. Armed: applies the
-            // 12-week conversion when every gate and post-write verification passes (see the type's doc).
-            TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(container))
-            // After the conversion: aligns the converted block to program v5.2. Armed (V52AlignmentRepair.dryRun == false);
-            // blocked unless the conversion completed, and its flag is set only after the verified save.
-            V52AlignmentRepair.runIfNeeded(in: ModelContext(container))
+            StartupBackfills.run(using: container)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
@@ -232,5 +202,29 @@ struct ElitePerformanceApp: App {
                 }
                 .modelContainer(sharedModelContainer)
         }
+    }
+}
+
+/// The startup migration list, in app order. The one-shot catch-up, 12-week conversion and V52 alignment were
+/// applied on the device (release/oct11 at 7537f8c) and are no longer registered; their types, completion keys
+/// and tests stay in the tree.
+enum StartupBackfills {
+    static func run(using container: ModelContainer) {
+        let context = ModelContext(container)
+        ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
+        ExerciseNameSnapshotRepair.runIfNeeded(in: context)
+        CanonicalExerciseIdMigration.runIfNeeded(in: context)
+        CustomExerciseDedupMigration.runIfNeeded(in: context)
+        D5ExerciseIdRepairMigration.runIfNeeded(in: context)
+        Apr21SessionHistoryRepairMigration.runIfNeeded(in: context)
+        SessionHistoryBlockBackfill.runIfNeeded(in: context)
+        MechanicalLoadRecoveryMigration.runIfNeeded(in: context)
+        SessionDayLabelBackfill.runIfNeeded(in: context)
+        CustomExerciseStoreMigration.runIfNeeded(in: context)
+        CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
+        MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
+        BodyweightPhantomLoadMigration.runIfNeeded(in: context)
+        PrescriptionNotesClearMigration.runIfNeeded(in: context)
+        Week6UpperBCleanupMigration.runIfNeeded(in: context)
     }
 }
