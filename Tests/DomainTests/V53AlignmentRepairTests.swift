@@ -479,9 +479,9 @@ final class V53AlignmentRepairTests: XCTestCase {
 
     // MARK: - Registration
 
-    /// Registered last, on its own context, shipping armed: the first launch through `StartupBackfills` applies V53 and
-    /// sets the completion flag; the second launch is a no-op.
-    func test_fixture_startupBackfills_applyV53OnTheFirstLaunch_andTheSecondIsANoOp() throws {
+    /// V53 was applied on the device (492b7fa) and is no longer registered: a launch through `StartupBackfills` leaves a
+    /// not-yet-aligned store alone and sets none of its flags.
+    func test_fixture_startupBackfills_doNotRunV53AnyMore() throws {
         let (_, _, _) = try importFixture()
         let container = try XCTUnwrap(containers.last)
         let standard = UserDefaults.standard
@@ -489,18 +489,16 @@ final class V53AlignmentRepairTests: XCTestCase {
         let saved = keys.map { ($0, standard.object(forKey: $0)) }
         defer { for (k, v) in saved { if let v { standard.set(v, forKey: k) } else { standard.removeObject(forKey: k) } } }
         for k in keys { standard.removeObject(forKey: k) }
-        standard.set(true, forKey: V52AlignmentRepair.completionKey)   // as on the device
+        standard.set(true, forKey: V52AlignmentRepair.completionKey)   // V53's precondition, as on the device
 
-        let before = try storeFingerprint(ModelContext(container))
+        StartupBackfills.run(using: container)     // settle the older migrations
+        let settled = try storeFingerprint(ModelContext(container))
         StartupBackfills.run(using: container)
-        XCTAssertTrue(standard.bool(forKey: R.completionKey), "completion set after the verified save")
-        let applied = try storeFingerprint(ModelContext(container))
-        XCTAssertNotEqual(applied, before)
-        let fresh = ModelContext(container)
-        let legs = try XCTUnwrap(try fresh.fetch(FetchDescriptor<Session>()).first { $0.dayLabel == "Legs A" && $0.weekIndex == 4 && $0.meso?.totalWeeks == 12 })
-        XCTAssertEqual(legs.items.map(\.order).sorted(), [1, 2, 3, 4, 5])
-
-        StartupBackfills.run(using: container)
-        XCTAssertEqual(try storeFingerprint(ModelContext(container)), applied, "second launch changes nothing")
+        XCTAssertEqual(try storeFingerprint(ModelContext(container)), settled)
+        let legs = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<Session>()).first { $0.dayLabel == "Legs A" && $0.weekIndex == 4 && $0.meso?.totalWeeks == 12 })
+        XCTAssertEqual(legs.items.count, 6, "still the v5.2 Legs A roster: V53 did not run")
+        XCTAssertFalse(standard.bool(forKey: R.completionKey))
+        XCTAssertFalse(standard.bool(forKey: R.dryRunLoggedKey))
+        XCTAssertNil(standard.string(forKey: R.reportKey))
     }
 }

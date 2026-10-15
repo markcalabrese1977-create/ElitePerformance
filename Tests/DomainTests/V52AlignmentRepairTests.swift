@@ -581,7 +581,8 @@ final class V52AlignmentRepairTests: XCTestCase {
     private var installKeys: [String] {
         [SameLetterTargetCatchUpMigration.completionKey, SameLetterTargetCatchUpMigration.dryRunLoggedKey, SameLetterTargetCatchUpMigration.reportKey,
          TwelveWeekMesoConversionMigration.completionKey, TwelveWeekMesoConversionMigration.dryRunLoggedKey, TwelveWeekMesoConversionMigration.reportKey,
-         R.completionKey, R.dryRunLoggedKey, R.reportKey]
+         R.completionKey, R.dryRunLoggedKey, R.reportKey,
+         V53AlignmentRepair.completionKey, V53AlignmentRepair.dryRunLoggedKey, V53AlignmentRepair.reportKey]
     }
 
     /// Runs the launch sequence the way the app does, on the given container: catch-up (armed) on one context, the
@@ -974,10 +975,10 @@ final class V52AlignmentRepairTests: XCTestCase {
 
     // MARK: - Unregistered one-shots
 
-    /// The catch-up, the 12-week conversion and V52 are no longer part of the startup list: a fresh store holding a
+    /// The catch-up, the 12-week conversion, V52 and V53 are no longer part of the startup list: a fresh store holding a
     /// template 10-week DUP block comes out of `StartupBackfills.run` still a 10-week block, with no completion or
-    /// logged flag set by any of the three and no custom exercise or week 11-12 session created.
-    func test_startupBackfills_leaveATemplateTenWeekBlockUntouched_noCatchUpNoConversionNoV52() throws {
+    /// logged flag set by any of the four and no custom exercise or week 11-12 session created.
+    func test_startupBackfills_leaveATemplateTenWeekBlockUntouched_noCatchUpNoConversionNoV52NoV53() throws {
         let d = UserDefaults.standard
         for k in installKeys { d.removeObject(forKey: k) }
         defer { for k in installKeys { d.removeObject(forKey: k) } }
@@ -988,6 +989,8 @@ final class V52AlignmentRepairTests: XCTestCase {
         let rowsBefore = try customRowCount(ctx)
         let loadsBefore = Dictionary(uniqueKeysWithValues: try allSessions(ctx).flatMap { s in
             s.items.map { ($0.id!.uuidString, $0.suggestedLoad) } })
+        let itemsBefore = try itemFingerprints(ctx)
+        d.set(true, forKey: V52AlignmentRepair.completionKey)   // V53's precondition, as on the device
 
         StartupBackfills.run(using: container)
 
@@ -999,7 +1002,9 @@ final class V52AlignmentRepairTests: XCTestCase {
         XCTAssertEqual(sessions.map(\.weekIndex).max(), 10, "no week 11-12 sessions")
         XCTAssertEqual(try customRowCount(check), rowsBefore, "V52 created no custom exercise")
         for s in sessions { for i in s.items { XCTAssertEqual(loadsBefore[i.id!.uuidString], i.suggestedLoad, "catch-up wrote no load") } }
-        for k in installKeys { XCTAssertFalse(d.bool(forKey: k), k) }
+        for k in installKeys where k != V52AlignmentRepair.completionKey { XCTAssertFalse(d.bool(forKey: k), k) }
         XCTAssertNil(d.string(forKey: R.reportKey))
+        XCTAssertNil(d.string(forKey: V53AlignmentRepair.reportKey))
+        XCTAssertEqual(try itemFingerprints(check), itemsBefore, "no item changed")
     }
 }
