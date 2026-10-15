@@ -23,11 +23,12 @@ import SwiftData
 /// Live run: plan (every gate, nothing written) -> apply (autosave off, pending-changes refusal, snapshot, mutate,
 /// verify the whole result, ONE save). Any failed verification or failed save restores every written field and
 /// re-attaches every deleted item. No custom exercise is created: every target already exists.
-/// Ships DRY RUN (`dryRun = true`): reports once, writes nothing.
+/// Ships ARMED (`dryRun = false`): applies once, on the first launch after the install, once every gate passes.
 enum V53AlignmentRepair {
 
-    /// true = read-only report. Arm by flipping to false after the dry-run report has been reviewed.
-    static let dryRun = true
+    /// false = apply (gated on every plan gate, then on post-write verification); true = read-only report. Armed:
+    /// the dry-run report was reviewed and approved.
+    static let dryRun = false
 
     /// Bump when the REPORT changes, so a changed report logs again instead of being swallowed by the
     /// previous install's "already logged" flag.
@@ -1037,9 +1038,9 @@ enum V53AlignmentRepair {
 
     // MARK: - Driver
 
-    /// Registered LAST in `StartupBackfills`, on its own fresh context. Ships dry run: plan, print, store the report,
-    /// set the version-keyed logged flag (only once the plan is safe), return. Armed: blocked unless every gate passes;
-    /// the completion flag is set only after the verified save.
+    /// Registered LAST in `StartupBackfills`, on its own fresh context. Armed: refused unless every gate passes; the
+    /// completion flag is set only after the verified save. Dry run (when passed `dryRun: true`): plan, print, store the
+    /// report, set the version-keyed logged flag (only once the plan is safe), return.
     static func runIfNeeded(
         in context: ModelContext,
         dryRun: Bool = V53AlignmentRepair.dryRun,

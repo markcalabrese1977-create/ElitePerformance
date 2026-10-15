@@ -877,6 +877,9 @@ final class V52AlignmentRepairTests: XCTestCase {
         let before = try storeFingerprint(ctx)
         let dry = R.dryRun(block: block, context: ctx, defaults: d)
         print("V52 FIXTURE CONVERTED DRY RUN|\n\(dry.text)")
+        guard dry.replaced > 0 || dry.created > 0 else {
+            throw XCTSkip("fixture already has V52 applied (applied on the device); this test needs a converted backup from before V52")
+        }
         XCTAssertTrue(dry.isSafe, dry.blockers.joined(separator: "\n"))
         XCTAssertEqual(dry.replaced, 63); XCTAssertEqual(dry.reranged, 27); XCTAssertEqual(dry.created, 18)
         XCTAssertEqual(dry.customsToCreate.count, 6)
@@ -927,6 +930,10 @@ final class V52AlignmentRepairTests: XCTestCase {
         let d = freshDefaults(converted: true)
         XCTAssertFalse(R.dryRun, "shipped armed")
         XCTAssertFalse(d.bool(forKey: R.completionKey))
+        let pre = R.dryRun(block: block, context: ctx, defaults: d)
+        guard pre.replaced > 0 || pre.created > 0 else {
+            throw XCTSkip("fixture already has V52 applied (applied on the device); this test needs a converted backup from before V52")
+        }
 
         let itemsBefore = try itemFingerprints(ctx)
         let seeds: [String: (Double, [Double], String)] = Dictionary(uniqueKeysWithValues:

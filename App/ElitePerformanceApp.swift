@@ -208,7 +208,7 @@ struct ElitePerformanceApp: App {
 /// The startup migration list, in app order. The one-shot catch-up, 12-week conversion and V52 alignment were
 /// applied on the device (release/oct11 at 7537f8c) and are no longer registered; their types, completion keys
 /// and tests stay in the tree. V53 alignment (program v5.3, weeks 4-12) is registered last, on its own fresh context,
-/// and ships as a dry run.
+/// and ships armed: it applies once, then marks itself complete.
 enum StartupBackfills {
     static func run(using container: ModelContainer) {
         let context = ModelContext(container)

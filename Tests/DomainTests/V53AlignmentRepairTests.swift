@@ -128,8 +128,8 @@ final class V53AlignmentRepairTests: XCTestCase {
 
     // MARK: - Shipping state
 
-    func test_shipsAsADryRun_andHasItsOwnKeys() {
-        XCTAssertTrue(R.dryRun, "ships dryRun = true")
+    func test_shipsArmed_andHasItsOwnKeys() {
+        XCTAssertFalse(R.dryRun, "shipped armed (dryRun = false)")
         XCTAssertEqual(R.logHeader(dryRun: true, blockName: "B"), "🧪 V53 alignment DRY RUN for 'B':")
         XCTAssertEqual(R.logHeader(dryRun: false, blockName: "B"), "🧪 V53 alignment APPLY for 'B':")
         XCTAssertNotEqual(R.completionKey, V52AlignmentRepair.completionKey)
@@ -479,8 +479,9 @@ final class V53AlignmentRepairTests: XCTestCase {
 
     // MARK: - Registration
 
-    /// Registered last, on its own context, shipping dry: a launch through `StartupBackfills` reports once and writes nothing.
-    func test_fixture_startupBackfills_runV53AsADryRun_andWriteNothingToTheStoreForIt() throws {
+    /// Registered last, on its own context, shipping armed: the first launch through `StartupBackfills` applies V53 and
+    /// sets the completion flag; the second launch is a no-op.
+    func test_fixture_startupBackfills_applyV53OnTheFirstLaunch_andTheSecondIsANoOp() throws {
         let (_, _, _) = try importFixture()
         let container = try XCTUnwrap(containers.last)
         let standard = UserDefaults.standard
@@ -488,17 +489,18 @@ final class V53AlignmentRepairTests: XCTestCase {
         let saved = keys.map { ($0, standard.object(forKey: $0)) }
         defer { for (k, v) in saved { if let v { standard.set(v, forKey: k) } else { standard.removeObject(forKey: k) } } }
         for k in keys { standard.removeObject(forKey: k) }
-        standard.set(true, forKey: V52AlignmentRepair.completionKey)
+        standard.set(true, forKey: V52AlignmentRepair.completionKey)   // as on the device
 
-        // Settle the older migrations first so the comparison isolates V53.
+        let before = try storeFingerprint(ModelContext(container))
         StartupBackfills.run(using: container)
-        let settled = try storeFingerprint(ModelContext(container))
-        standard.removeObject(forKey: R.dryRunLoggedKey); standard.removeObject(forKey: R.reportKey)
+        XCTAssertTrue(standard.bool(forKey: R.completionKey), "completion set after the verified save")
+        let applied = try storeFingerprint(ModelContext(container))
+        XCTAssertNotEqual(applied, before)
+        let fresh = ModelContext(container)
+        let legs = try XCTUnwrap(try fresh.fetch(FetchDescriptor<Session>()).first { $0.dayLabel == "Legs A" && $0.weekIndex == 4 && $0.meso?.totalWeeks == 12 })
+        XCTAssertEqual(legs.items.map(\.order).sorted(), [1, 2, 3, 4, 5])
 
         StartupBackfills.run(using: container)
-        XCTAssertEqual(try storeFingerprint(ModelContext(container)), settled, "V53 dry run wrote nothing")
-        XCTAssertTrue(standard.bool(forKey: R.dryRunLoggedKey))
-        XCTAssertFalse(standard.bool(forKey: R.completionKey))
-        XCTAssertNotNil(standard.string(forKey: R.reportKey))
+        XCTAssertEqual(try storeFingerprint(ModelContext(container)), applied, "second launch changes nothing")
     }
 }
