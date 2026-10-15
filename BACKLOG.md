@@ -13,3 +13,4 @@ One line per item; dates are 2026.
 - Swap/add service: Today "Apply to future <weekday>" is unscoped and zeroes loads (guard or scope it); arrays sized to sets; rep range and wave on adds; lastKnownLoad must not read future plans; custom names from the table.
 - Test infrastructure: J4 flake; synchronized test folder (no hand-edited pbxproj); keep Tests/known_failures.txt set-based.
 - Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; bench top set as a feature; isCleanSession vs deliberateDeload; onChange deprecations.
+- Hack squat re-entry after Dr. Alexander clears (sled + 135 at W1 stance pain-free -> fresh anchors per letter); cable hip adduction returns only after hips clear.
