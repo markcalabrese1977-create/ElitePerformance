@@ -607,3 +607,75 @@ enum LastSameLetterPerformance {
         return out
     }
 }
+
+// MARK: - History seed load (completed-only, canonical)
+
+/// A starting load for an exercise the lifter is about to run, derived from what they actually
+/// lifted — never from what was planned.
+///
+/// This is the seed used when an item is swapped to a different exercise: it reads only
+/// `.completed` sessions and only the `actual*` arrays, so planned/future sessions and their
+/// `suggestedLoad` can never feed it (unlike `LoadProjectionService.lastKnownLoad`, which
+/// falls back to planned loads). Matching is by canonical exerciseId.
+///
+/// Same math as `ProgramGenerator.anchorLoadsForNewMeso`: best-set e1RM per session, decay-weighted
+/// across sessions, inverse Epley at the prescription's reps and RIR, rounded to the user's increment.
+enum HistorySeedLoad {
+
+    /// - Returns: `0` for bodyweight exercises (they never carry a numeric load),
+    ///   `nil` when no completed session has a usable logged set for the exercise.
+    static func load(
+        for exerciseId: String,
+        goalReps: Int,
+        targetRIR: Int,
+        in sessions: [Session],
+        loadIncrement: Double,
+        bodyWeight: Double? = nil,
+        customExercises: [CustomExercise] = [],
+        referenceDate: Date = Date()
+    ) -> Double? {
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
+            return 0
+        }
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+
+        var candidates: [(e1rm: Double, date: Date)] = []
+        for session in sessions where session.status == .completed {
+            guard let match = session.items.first(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+            }) else { continue }
+
+            var best = 0.0
+            for i in 0..<min(match.actualLoads.count, match.actualReps.count) {
+                let reps = match.actualReps[i], load = match.actualLoads[i]
+                guard reps > 0, load > 0 else { continue }
+                best = max(best, E1RMCalculator.e1RM(load: load, reps: reps))
+            }
+            if best > 0 { candidates.append((best, session.date)) }
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        let e1rm = E1RMCalculator.decayWeightedE1RM(from: candidates, referenceDate: referenceDate)
+        let raw = E1RMCalculator.load(for: e1rm, reps: goalReps, targetRIR: targetRIR)
+        let seeded = E1RMCalculator.rounded(raw, increment: loadIncrement)
+        return seeded > 0 ? seeded : nil
+    }
+
+    /// Context convenience: fetches sessions, custom exercises and the profile's increment/bodyweight.
+    static func load(
+        for exerciseId: String,
+        goalReps: Int,
+        targetRIR: Int,
+        context: ModelContext
+    ) -> Double? {
+        let sessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        return load(
+            for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: sessions,
+            loadIncrement: profile?.minLoadIncrement ?? 2.5,
+            bodyWeight: profile?.bodyWeight,
+            customExercises: custom
+        )
+    }
+}
