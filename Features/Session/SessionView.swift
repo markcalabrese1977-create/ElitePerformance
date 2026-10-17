@@ -271,14 +271,17 @@ struct SessionView: View {
             isPresented: $showSwapPropagationDialog,
             titleVisibility: .visible
         ) {
-            Button("Apply to future \(propagationWeekdayName) sessions") {
-                guard let swap = pendingSwapForPropagation else { return }
-                ExerciseSwapPropagationService.apply(
-                    fromExerciseId: swap.from,
-                    toExerciseId: swap.to,
-                    in: modelContext
-                )
-                pendingSwapForPropagation = nil
+            if !viewModel.isWaveBasedBlock {
+                Button("Apply to future \(propagationWeekdayName) sessions") {
+                    guard let swap = pendingSwapForPropagation else { return }
+                    ExerciseSwapPropagationService.apply(
+                        fromExerciseId: swap.from,
+                        toExerciseId: swap.to,
+                        sourceSession: viewModel.session,
+                        in: modelContext
+                    )
+                    pendingSwapForPropagation = nil
+                }
             }
 
             Button("Keep this session only") {
@@ -286,6 +289,10 @@ struct SessionView: View {
             }
 
             Button("Cancel", role: .cancel) { }
+        } message: {
+            if viewModel.isWaveBasedBlock {
+                Text("Changes apply to this session only for wave-based programs.")
+            }
         }
         .confirmationDialog(
             "Added \(pendingAddedExerciseForPropagation?.exerciseName ?? "exercise")",
@@ -1264,7 +1271,11 @@ private struct ExerciseSwapSheet: View {
 
 final class SessionScreenViewModel: ObservableObject {
     // Backing SwiftData model (what we persist to)
-    private let session: Session
+    let session: Session
+
+    /// True when this session's block undulates by wave (DUP A/B/C); future-session propagation
+    /// is unavailable there.
+    var isWaveBasedBlock: Bool { WavePrescriptionGuard.isWaveBasedBlock(session) }
 
     // UI state
     @Published var title: String

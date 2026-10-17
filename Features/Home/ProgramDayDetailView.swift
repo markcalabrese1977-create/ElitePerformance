@@ -663,6 +663,7 @@ struct ProgramDayDetailView: View {
             ExerciseSwapPropagationService.apply(
                 fromExerciseId: fromExerciseId,
                 toExerciseId: catalogExercise.id,
+                sourceSession: session,
                 in: modelContext
             )
         }

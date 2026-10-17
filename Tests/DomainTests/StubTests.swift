@@ -2005,6 +2005,88 @@ final class ExerciseSwapPropagationTests: XCTestCase {
         XCTAssertEqual(pastItem.exerciseId, "bench_press", "completed past session must not be modified")
         XCTAssertEqual(pastItem.suggestedLoad, 185, "past session load must be untouched")
     }
+
+    // MARK: - Wave-block guard (Today-tab "Apply to future <weekday> sessions" path)
+
+    /// Source session today (wave A) plus two future planned sessions of the same lift
+    /// (waves B, C), all in one meso. `waveLetters` false leaves every item wave-less.
+    private func makeBlock(_ context: ModelContext, waveLetters: Bool)
+        throws -> (source: Session, sourceItem: SessionItem, futureItems: [SessionItem])
+    {
+        let meso = MesoBlock(name: "Block", startDate: Date(), totalWeeks: 8)
+        context.insert(meso)
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        func item(wave: String?, load: Double) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2,
+                                suggestedLoad: load, waveRaw: wave)
+            i.plannedLoadsBySet = [load, load, load]
+            return i
+        }
+        let sourceItem = item(wave: waveLetters ? "a" : nil, load: 185)
+        let source = Session(date: today, status: .inProgress, weekIndex: 1, items: [sourceItem])
+        source.meso = meso
+        context.insert(source)
+
+        var futureItems: [SessionItem] = []
+        for (n, wave) in [(7, "b"), (14, "c")] {
+            let fi = item(wave: waveLetters ? wave : nil, load: 190)
+            let s = Session(date: cal.date(byAdding: .day, value: n, to: today)!, status: .planned,
+                            weekIndex: 2, items: [fi])
+            s.meso = meso
+            context.insert(s)
+            futureItems.append(fi)
+        }
+        try context.save()
+        return (source, sourceItem, futureItems)
+    }
+
+    func test_C1_waveBlock_swapPropagationWritesNothingOutsideTheCurrentSession() throws {
+        let context = try makeContext()
+        let block = try makeBlock(context, waveLetters: true)
+
+        ExerciseSwapPropagationService.apply(
+            fromExerciseId: "bench_press", toExerciseId: "machine_chest_press",
+            sourceSession: block.source, in: context
+        )
+
+        for fi in block.futureItems {
+            XCTAssertEqual(fi.exerciseId, "bench_press")
+            XCTAssertEqual(fi.suggestedLoad, 190)
+            XCTAssertEqual(fi.plannedLoadsBySet, [190, 190, 190])
+        }
+        XCTAssertEqual(block.sourceItem.exerciseId, "bench_press", "the service never writes the source session")
+    }
+
+    func test_C1_waveBlock_guardHoldsEvenWithoutASourceSession() throws {
+        let context = try makeContext()
+        let block = try makeBlock(context, waveLetters: true)
+
+        ExerciseSwapPropagationService.apply(
+            fromExerciseId: "bench_press", toExerciseId: "machine_chest_press", in: context
+        )
+
+        for fi in block.futureItems {
+            XCTAssertEqual(fi.exerciseId, "bench_press", "targets in a wave-based block are never written")
+        }
+    }
+
+    func test_C1_nonWaveBlock_swapPropagationUnchanged() throws {
+        let context = try makeContext()
+        let block = try makeBlock(context, waveLetters: false)
+
+        ExerciseSwapPropagationService.apply(
+            fromExerciseId: "bench_press", toExerciseId: "machine_chest_press",
+            sourceSession: block.source, in: context
+        )
+
+        for fi in block.futureItems {
+            XCTAssertEqual(fi.exerciseId, "machine_chest_press")
+            XCTAssertEqual(fi.suggestedLoad, 0)
+            XCTAssertEqual(fi.plannedLoadsBySet, [0, 0, 0])
+        }
+    }
 }
 
 final class ProgramPlanPropagationTests: XCTestCase {
