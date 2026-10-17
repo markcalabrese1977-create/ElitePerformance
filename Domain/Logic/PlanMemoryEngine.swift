@@ -379,7 +379,7 @@ struct PlanMemoryEngine {
 
         for candidate in future {
             guard candidate.meso?.persistentModelID == sourceMesoID else { continue }
-            guard candidate.dayLabel == sourceDayLabel else { continue }
+            guard SessionDayLabelMatcher.matches(candidate.dayLabel, sourceDayLabel) else { continue }
             guard let item = matchingItem(in: candidate) else { continue }
             // Wave read from the matched ITEM, symmetric with `sourceItem.waveRaw`.
             guard item.waveRaw?.lowercased() == sourceWave else { continue }

@@ -184,16 +184,11 @@ enum Week6UpperBCleanupMigration {
     // MARK: - Helpers
 
     private static func isSafeToModify(_ session: Session) -> Bool {
-        guard session.status == .planned else { return false }
-        return !hasLoggedData(session)
+        SessionEditSafety.isSafeToModify(session)
     }
 
     private static func hasLoggedData(_ session: Session) -> Bool {
-        session.items.contains { item in
-            item.isCompleted ||
-            item.actualLoads.contains { $0 > 0 } ||
-            item.actualReps.contains { $0 > 0 }
-        }
+        SessionEditSafety.hasLoggedData(session)
     }
 
     private static func replaceItems(on session: Session, with roster: [PlannedItem], in context: ModelContext) {
