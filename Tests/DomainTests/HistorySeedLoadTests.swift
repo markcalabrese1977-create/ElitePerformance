@@ -17,13 +17,25 @@ final class HistorySeedLoadTests: XCTestCase {
 
     private func session(
         _ ctx: ModelContext, status: SessionStatus, daysAgo n: Int, exerciseId: String = "bench_press",
-        reps: [Int] = [], loads: [Double] = [], suggested: Double = 0
+        reps: [Int] = [], loads: [Double] = [], suggested: Double = 0,
+        rirs: [Int] = [], wave: String? = nil, restPause: [String] = [], drop: [String] = [], rpFlags: [Bool] = [],
+        maintenance: Bool = false
     ) -> Session {
         let item = SessionItem(order: 1, exerciseId: exerciseId, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: suggested)
         item.plannedLoadsBySet = [suggested, suggested, suggested]
         item.actualReps = reps
         item.actualLoads = loads
+        item.actualRIRs = rirs
+        item.waveRaw = wave
+        item.restPausePatternsBySet = restPause
+        item.dropSetPatternsBySet = drop
+        item.usedRestPauseFlags = rpFlags
         let s = Session(date: daysAgo(n), status: status, weekIndex: 1, items: [item])
+        if maintenance {
+            let m = MesoBlock(name: "Maintenance Block", startDate: daysAgo(30), status: .active, totalWeeks: 4, isMaintenance: true)
+            ctx.insert(m)
+            s.meso = m
+        }
         ctx.insert(s)
         return s
     }
@@ -104,5 +116,65 @@ final class HistorySeedLoadTests: XCTestCase {
         XCTAssertGreaterThan(both, 80)
         XCTAssertLessThan(both, 100)
         XCTAssertGreaterThan(both, 90, "a 6-week-old session carries a quarter of the recent one's weight")
+    }
+
+    // MARK: - C3b: logged RIR and non-representative sets
+
+    func test_loggedRIR_raisesTheSeed() throws {
+        let ctx = try makeContext()
+        let rir0 = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [0])
+        let rir2 = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])
+        let heavy = try XCTUnwrap(seed([rir2])), light = try XCTUnwrap(seed([rir0]))
+        XCTAssertGreaterThan(heavy, light, "130x9@2 is a bigger lift than 130x9@0")
+        // 130 x (9+2) -> e1RM 177.67; /1.2667 * 0.95 = 133.25 -> 132.5 (nearest 2.5)
+        XCTAssertEqual(heavy, 132.5)
+        XCTAssertEqual(light, 127.5)   // 130 x 9 -> e1RM 169 -> 126.75 -> 127.5
+    }
+
+    func test_missingRIR_countsAsZero_andRIRIsClampedToFour() throws {
+        let ctx = try makeContext()
+        let none = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130])
+        let zero = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [0])
+        XCTAssertEqual(seed([none]), seed([zero]))
+        let four = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [4])
+        let seven = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [7])
+        XCTAssertEqual(seed([seven]), seed([four]), "RIR above 4 is not credited")
+        let negative = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [-3])
+        XCTAssertEqual(seed([negative]), seed([zero]), "negative RIR floors at 0")
+        XCTAssertGreaterThan(try XCTUnwrap(seed([four])), try XCTUnwrap(seed([zero])))
+    }
+
+    func test_deloadItem_andMaintenanceBlock_areExcluded() throws {
+        let ctx = try makeContext()
+        let deload = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100], wave: "deload")
+        XCTAssertNil(seed([deload]))
+        // Maintenance sessions carry the deload wave on every item.
+        let maint = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100], wave: "deload", maintenance: true)
+        XCTAssertNil(seed([maint]))
+        let a = session(ctx, status: .completed, daysAgo: 3, reps: [10], loads: [100], wave: "a")
+        XCTAssertEqual(seed([deload, maint, a]), 100.0, "only the wave-A session counts")
+    }
+
+    func test_restPauseDropSkipAndWarmupSets_areExcluded() throws {
+        let ctx = try makeContext()
+        let base = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100])
+        let baseline = try XCTUnwrap(seed([base]))
+
+        // Each inflating set sits beside a normal 100 x 10 set; none may move the seed.
+        let rpPattern = session(ctx, status: .completed, daysAgo: 0, reps: [10, 20], loads: [100, 100], restPause: ["", "5+3+2"])
+        let rpFlag = session(ctx, status: .completed, daysAgo: 0, reps: [10, 20], loads: [100, 100], rpFlags: [false, true])
+        let drop = session(ctx, status: .completed, daysAgo: 0, reps: [10, 20], loads: [100, 100], drop: ["", "80x8"])
+        let skip = session(ctx, status: .completed, daysAgo: 0, reps: [10, 20], loads: [100, 100], restPause: ["", "SKIP"])
+        let warmup = session(ctx, status: .completed, daysAgo: 0, reps: [10, 100], loads: [100, 45])   // 45 < 50% of 100
+        for (name, s) in [("rest-pause pattern", rpPattern), ("rest-pause flag", rpFlag), ("drop", drop),
+                          ("skip", skip), ("warm-up", warmup)] {
+            XCTAssertEqual(seed([s]), baseline, name)
+        }
+        // A session of only excluded sets contributes nothing.
+        let onlyRP = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100], restPause: ["5+3"])
+        XCTAssertNil(seed([onlyRP]))
+        // 50% exactly is kept (a real light set, not a warm-up).
+        let half = session(ctx, status: .completed, daysAgo: 0, reps: [10, 100], loads: [100, 50])
+        XCTAssertGreaterThan(try XCTUnwrap(seed([half])), baseline)
     }
 }

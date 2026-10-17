@@ -618,9 +618,34 @@ enum LastSameLetterPerformance {
 /// `suggestedLoad` can never feed it (unlike `LoadProjectionService.lastKnownLoad`, which
 /// falls back to planned loads). Matching is by canonical exerciseId.
 ///
-/// Same math as `ProgramGenerator.anchorLoadsForNewMeso`: best-set e1RM per session, decay-weighted
-/// across sessions, inverse Epley at the prescription's reps and RIR, rounded to the user's increment.
+/// Math: per set, e1RM from the logged load at reps + logged RIR (clamped 0...4, missing = 0 —
+/// reps left in the tank were capacity), best set per session, decay-weighted across sessions,
+/// inverse Epley at the prescription's reps and RIR, rounded to the user's increment (the same
+/// `E1RMCalculator` path `ProgramGenerator.anchorLoadsForNewMeso` uses, plus the RIR credit).
+///
+/// Excluded as non-representative: items on a "deload" wave (which also covers maintenance
+/// blocks), sets logged as rest-pause, drop or skipped, and sets under half of that session's
+/// heaviest qualifying set for the exercise (warm-ups).
 enum HistorySeedLoad {
+
+    static let maxCreditedRIR = 4
+    /// Sets lighter than this share of the session's heaviest set are warm-ups.
+    static let warmupFraction = 0.5
+
+    private struct LoggedSet { let reps: Int; let load: Double; let rir: Int }
+
+    /// Logged working sets: reps and load present, not rest-pause, drop or skipped.
+    private static func qualifyingSets(of item: SessionItem) -> [LoggedSet] {
+        func at<T>(_ a: [T], _ i: Int) -> T? { a.indices.contains(i) ? a[i] : nil }
+        return (0..<min(item.actualLoads.count, item.actualReps.count)).compactMap { i in
+            let reps = item.actualReps[i], load = item.actualLoads[i]
+            guard reps > 0, load > 0 else { return nil }
+            if at(item.usedRestPauseFlags, i) == true { return nil }
+            if let p = at(item.restPausePatternsBySet, i), !p.isEmpty { return nil }   // includes "SKIP"
+            if let d = at(item.dropSetPatternsBySet, i), !d.isEmpty { return nil }
+            return LoggedSet(reps: reps, load: load, rir: at(item.actualRIRs, i) ?? 0)
+        }
+    }
 
     /// - Returns: `0` for bodyweight exercises (they never carry a numeric load),
     ///   `nil` when no completed session has a usable logged set for the exercise.
@@ -644,12 +669,14 @@ enum HistorySeedLoad {
             guard let match = session.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
             }) else { continue }
+            if match.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" { continue }
 
+            let sets = qualifyingSets(of: match)
+            guard let heaviest = sets.map(\.load).max() else { continue }
             var best = 0.0
-            for i in 0..<min(match.actualLoads.count, match.actualReps.count) {
-                let reps = match.actualReps[i], load = match.actualLoads[i]
-                guard reps > 0, load > 0 else { continue }
-                best = max(best, E1RMCalculator.e1RM(load: load, reps: reps))
+            for set in sets where set.load >= heaviest * warmupFraction {
+                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                best = max(best, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
             if best > 0 { candidates.append((best, session.date)) }
         }
