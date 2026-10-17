@@ -620,13 +620,20 @@ enum LastSameLetterPerformance {
 ///
 /// Math: per set, e1RM from the logged load at reps + logged RIR (clamped 0...4, missing = 0 —
 /// reps left in the tank were capacity), best set per session, decay-weighted across sessions,
-/// inverse Epley at the prescription's reps and RIR, rounded to the user's increment (the same
+/// inverse Epley at the prescription's reps and RIR, rounded DOWN to the user's increment (the same
 /// `E1RMCalculator` path `ProgramGenerator.anchorLoadsForNewMeso` uses, plus the RIR credit).
 ///
 /// Excluded as non-representative: items on a "deload" wave (which also covers maintenance
 /// blocks), sets logged as rest-pause, drop or skipped, and sets under half of that session's
 /// heaviest qualifying set for the exercise (warm-ups).
 enum HistorySeedLoad {
+
+    /// Floors to the increment: a starting load is never above what history supports. The epsilon
+    /// keeps a value that is a whole increment up to float noise (99.99999999 at 2.5) from dropping a step.
+    static func roundedDown(_ load: Double, increment: Double) -> Double {
+        guard increment > 0 else { return load }
+        return ((load / increment) + 1e-9).rounded(.down) * increment
+    }
 
     static let maxCreditedRIR = 4
     /// Sets lighter than this share of the session's heaviest set are warm-ups.
@@ -684,7 +691,7 @@ enum HistorySeedLoad {
 
         let e1rm = E1RMCalculator.decayWeightedE1RM(from: candidates, referenceDate: referenceDate)
         let raw = E1RMCalculator.load(for: e1rm, reps: goalReps, targetRIR: targetRIR)
-        let seeded = E1RMCalculator.rounded(raw, increment: loadIncrement)
+        let seeded = roundedDown(raw, increment: loadIncrement)
         return seeded > 0 ? seeded : nil
     }
 

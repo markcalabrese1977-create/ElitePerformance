@@ -53,11 +53,35 @@ final class HistorySeedLoadTests: XCTestCase {
         XCTAssertEqual(seed([s]), 100.0)
     }
 
-    func test_roundsToTheUsersIncrement() throws {
+    func test_roundsDownToTheUsersIncrement_neverAboveTheComputedLoad() throws {
         let ctx = try makeContext()
-        let s = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [102])
-        XCTAssertEqual(seed([s], increment: 5), 100.0)   // raw ~102.0 -> nearest 5
-        XCTAssertEqual(seed([s], increment: 2.5), 102.5)
+        let s = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [104])   // raw 104.0
+        XCTAssertEqual(seed([s], increment: 5), 100.0, "nearest would be 105")
+        XCTAssertEqual(seed([s], increment: 2.5), 102.5, "nearest would be 105")
+        let exact = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100])   // float noise: 99.99999999
+        XCTAssertEqual(seed([exact], increment: 2.5), 100.0, "a whole increment is kept")
+    }
+
+    func test_RIR2History_forA4RepRIR3Target_roundsDownFromTheExactLoad() throws {
+        let ctx = try makeContext()
+        let s = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])
+        // e1RM 130 x (9+2) = 177.67; / (1 + 4/30) = 156.76; x 0.925 = 145.007 exact.
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 2.5), 145.0)
+        // At a 5 lb step the same exact load floors to 145, and a 10 lb step to 140 — never 150.
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 5), 145.0)
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 10), 140.0)
+    }
+
+    func test_decay_anOldHeavySetCountsLessThanARecentLighterOne() throws {
+        let ctx = try makeContext()
+        let oldHeavy = session(ctx, status: .completed, daysAgo: 84, reps: [10], loads: [120])   // 4 half-lives
+        let recentLight = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100])
+        let blended = try XCTUnwrap(seed([oldHeavy, recentLight]))
+        let recentOnly = try XCTUnwrap(seed([recentLight]))
+        XCTAssertGreaterThanOrEqual(blended, recentOnly)
+        XCTAssertLessThan(blended, 105, "the 84-day-old 120 carries 1/16 of the weight: it nudges, not leads")
+        let equalAge = try XCTUnwrap(seed([session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [120]), recentLight]))
+        XCTAssertGreaterThan(equalAge, blended, "the same heavy set, but recent, pulls much harder")
     }
 
     func test_ignoresPlannedAndInProgressSessions_evenWithActuals() throws {
@@ -126,9 +150,9 @@ final class HistorySeedLoadTests: XCTestCase {
         let rir2 = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])
         let heavy = try XCTUnwrap(seed([rir2])), light = try XCTUnwrap(seed([rir0]))
         XCTAssertGreaterThan(heavy, light, "130x9@2 is a bigger lift than 130x9@0")
-        // 130 x (9+2) -> e1RM 177.67; /1.2667 * 0.95 = 133.25 -> 132.5 (nearest 2.5)
+        // 130 x (9+2) -> e1RM 177.67; /1.2667 * 0.95 = 133.25 -> floor 132.5
         XCTAssertEqual(heavy, 132.5)
-        XCTAssertEqual(light, 127.5)   // 130 x 9 -> e1RM 169 -> 126.75 -> 127.5
+        XCTAssertEqual(light, 125.0)   // 130 x 9 -> e1RM 169 -> 126.75 -> floor 125
     }
 
     func test_missingRIR_countsAsZero_andRIRIsClampedToFour() throws {
