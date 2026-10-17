@@ -19,7 +19,7 @@ struct ReplaceExerciseModel {
 
     static let todayInSessionNote = "Finish the session, then replace the rest from the Program tab."
     static let unchangedFooter = "Unchanged: completed sessions, other days, every other exercise."
-    static let enterOnTheDay = "enter on the day"
+    static let enterOnTheDay = "No load history — enter on the day"
 
     let session: Session
     let item: SessionItem
@@ -93,7 +93,8 @@ struct ReplaceExerciseModel {
 
     static func loadText(_ seed: Double?) -> String {
         guard let seed else { return enterOnTheDay }
-        return seed == seed.rounded() ? "\(Int(seed)) lb" : String(format: "%g lb", seed)
+        let lb = seed == seed.rounded() ? "\(Int(seed)) lb" : String(format: "%g lb", seed)
+        return "Starts at \(lb)"
     }
 
     struct Row: Equatable {
@@ -245,7 +246,7 @@ private struct ReplacePreviewSheet: View {
                                     Spacer()
                                     Text(row.prescription).font(.subheadline).foregroundStyle(.secondary)
                                 }
-                                Text("Starts at \(row.load)")
+                                Text(row.load)
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }

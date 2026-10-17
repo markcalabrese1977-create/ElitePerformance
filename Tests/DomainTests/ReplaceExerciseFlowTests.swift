@@ -66,7 +66,10 @@ final class ReplaceExerciseFlowTests: XCTestCase {
         XCTAssertGreaterThan(rows.count, 3)
         XCTAssertEqual(m.title(for: .allRemaining, plan: plan), "All remaining \(m.dayLabel ?? "") sessions (\(plan.targets.count))")
         XCTAssertEqual(Model.confirmTitle(count: plan.targets.count), "Replace \(plan.targets.count)")
-        XCTAssertTrue(rows.allSatisfy { $0.load == Model.enterOnTheDay }, "no history for the new lift -> enter on the day")
+        XCTAssertEqual(Model.enterOnTheDay, "No load history — enter on the day")
+        XCTAssertTrue(rows.allSatisfy { $0.load == "No load history — enter on the day" }, "no history for the new lift")
+        XCTAssertEqual(Model.loadText(132.5), "Starts at 132.5 lb")
+        XCTAssertEqual(Model.loadText(135), "Starts at 135 lb")
         XCTAssertTrue(Set(rows.map(\.wave)).isSubset(of: ["A", "B", "C", "Deload", "–"]))
         XCTAssertTrue(rows.allSatisfy { $0.prescription.contains(" x ") && $0.prescription.contains("RIR") })
 
@@ -98,7 +101,7 @@ final class ReplaceExerciseFlowTests: XCTestCase {
         try ctx.save()
         var withNow = m; withNow.now = other.date.addingTimeInterval(86400)
         let rows = Model.rows(try XCTUnwrap(withNow.plan(for: .allRemaining)))
-        XCTAssertTrue(rows.allSatisfy { $0.load.hasSuffix(" lb") }, "\(rows.map(\.load))")
+        XCTAssertTrue(rows.allSatisfy { $0.load.hasPrefix("Starts at ") && $0.load.hasSuffix(" lb") }, "\(rows.map(\.load))")
     }
 
     // MARK: Failures show a message and write nothing
