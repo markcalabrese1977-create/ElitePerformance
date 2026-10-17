@@ -26,8 +26,6 @@ struct SessionView: View {
     @AppStorage("warmup.isHidden.v1") private var isWarmupHidden = false
     // Unified sheet state (swap / recap / history / note / add)
     @State private var activeSheet: ActiveSheet?
-    @State private var pendingSwapForPropagation: (from: String, to: String, name: String)?
-    @State private var showSwapPropagationDialog = false
     @State private var pendingAddedExerciseForPropagation: (exerciseId: String, exerciseName: String)?
     @State private var showAddExercisePropagationDialog = false
     /// "Last A: 315 x 5, 6, 5, 5" per exerciseId — computed once when the screen loads.
@@ -267,34 +265,6 @@ struct SessionView: View {
             sheetView(for: sheet)
         }
         .confirmationDialog(
-            "Swapped to \(pendingSwapForPropagation?.name ?? "new exercise")",
-            isPresented: $showSwapPropagationDialog,
-            titleVisibility: .visible
-        ) {
-            if !viewModel.isWaveBasedBlock {
-                Button("Apply to future \(propagationWeekdayName) sessions") {
-                    guard let swap = pendingSwapForPropagation else { return }
-                    ExerciseSwapPropagationService.apply(
-                        fromExerciseId: swap.from,
-                        toExerciseId: swap.to,
-                        sourceSession: viewModel.session,
-                        in: modelContext
-                    )
-                    pendingSwapForPropagation = nil
-                }
-            }
-
-            Button("Keep this session only") {
-                pendingSwapForPropagation = nil
-            }
-
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            if viewModel.isWaveBasedBlock {
-                Text("Changes apply to this session only for wave-based programs.")
-            }
-        }
-        .confirmationDialog(
             "Added \(pendingAddedExerciseForPropagation?.exerciseName ?? "exercise")",
             isPresented: $showAddExercisePropagationDialog,
             titleVisibility: .visible
@@ -344,16 +314,9 @@ struct SessionView: View {
             ExerciseSwapSheet(
                 current: viewModel.exercises[target.exerciseIndex],
                 onSelect: { catalogExercise in
-                    let fromId = viewModel.exercises[target.exerciseIndex].exerciseId
-                    let toId = catalogExercise.id
-                    let toName = catalogExercise.name
-
                     viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise, context: modelContext)
                     viewModel.persist(using: modelContext)
                     activeSheet = nil
-
-                    pendingSwapForPropagation = (from: fromId, to: toId, name: toName)
-                    showSwapPropagationDialog = true
                 },
                 onCancel: { activeSheet = nil }
             )
@@ -1252,6 +1215,8 @@ private struct ExerciseSwapSheet: View {
                     }
                 } header: {
                     Text("Choose a replacement for \(current.name)")
+                } footer: {
+                    Text(ReplaceExerciseModel.todayInSessionNote)
                 }
             }
             .navigationTitle("Swap Exercise")
@@ -1272,10 +1237,6 @@ private struct ExerciseSwapSheet: View {
 final class SessionScreenViewModel: ObservableObject {
     // Backing SwiftData model (what we persist to)
     let session: Session
-
-    /// True when this session's block undulates by wave (DUP A/B/C); future-session propagation
-    /// is unavailable there.
-    var isWaveBasedBlock: Bool { WavePrescriptionGuard.isWaveBasedBlock(session) }
 
     // UI state
     @Published var title: String
@@ -1698,10 +1659,14 @@ final class SessionScreenViewModel: ObservableObject {
     
     // MARK: - Swap Logic
 
+    /// The SwiftData item behind a UI row, by identity. Nil when the row has no item yet.
+    static func sessionItem(for exercise: UISessionExercise, in session: Session) -> SessionItem? {
+        guard let itemID = exercise.itemID else { return nil }
+        return session.items.first { $0.id == itemID }
+    }
+
     func swapExercise(at index: Int, with catalogExercise: CatalogExercise, context: ModelContext) {
         guard exercises.indices.contains(index) else { return }
-        
-        let oldExerciseId = exercises[index].exerciseId  // capture before mutation
         
         var exercise = exercises[index]
         exercise.exerciseId = catalogExercise.id
@@ -1747,13 +1712,14 @@ final class SessionScreenViewModel: ObservableObject {
 
         exercises[index] = exercise
 
-        // Write back to SwiftData immediately using old ID to find the right item
-            if let item = session.items.first(where: { $0.exerciseId == oldExerciseId }) {
-                item.exerciseId = catalogExercise.id
-                item.exerciseNameSnapshot = catalogExercise.name
-                item.prescriptionNotes = nil
-                item.intensifierNotes = nil
-            }
+        // Write back to the swapped item by identity — never by exerciseId, which can match another
+        // item of the same exercise earlier in the session.
+        if let item = Self.sessionItem(for: exercise, in: session) {
+            item.exerciseId = catalogExercise.id
+            item.exerciseNameSnapshot = catalogExercise.name
+            item.prescriptionNotes = nil
+            item.intensifierNotes = nil
+        }
     }
 
     func addExercise(_ catalogExercise: CatalogExercise, context: ModelContext) {
@@ -1876,7 +1842,8 @@ final class SessionScreenViewModel: ObservableObject {
 
             targetSets: defaultSets,
             sets: uiSets,
-            coachMessage: ""
+            coachMessage: "",
+            itemID: newItem.id
         )
 
         exercises.append(uiExercise)
@@ -1985,7 +1952,8 @@ final class SessionScreenViewModel: ObservableObject {
     /// Push current UI state into the underlying `Session` / `SessionItem`s.
     func persist(using context: ModelContext) {
         for uiExercise in exercises {
-                    guard let item = session.items.first(where: { $0.exerciseId == uiExercise.exerciseId }) else {
+                    guard let item = Self.sessionItem(for: uiExercise, in: session)
+                    ?? session.items.first(where: { $0.exerciseId == uiExercise.exerciseId }) else {
                         continue
                     }
 
@@ -2389,6 +2357,9 @@ extension SessionScreenViewModel {
         let subtitle = session.weekDayLabel
         let items = session.items.sorted { $0.order < $1.order }
 
+        // Legacy items may predate SessionItem.id; the UI rows key on it, so backfill (saved with the next persist).
+        for item in items where item.id == nil { item.id = UUID() }
+
         let exercises: [UISessionExercise] = items.map { item in
             let catalogExercise = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
             let name = {
@@ -2574,7 +2545,8 @@ extension SessionScreenViewModel {
 
                 targetSets: item.targetSets,
                 sets: uiSets,
-                coachMessage: item.coachNote ?? ""
+                coachMessage: item.coachNote ?? "",
+                itemID: item.id
             )
         }
 
@@ -2671,6 +2643,9 @@ struct UISessionExercise: Identifiable {
     var sets: [UISessionSet]
     var coachMessage: String
 
+    /// Identity of the SwiftData item this row shows (`SessionItem.id`). Survives swaps, which change `exerciseId`.
+    var itemID: UUID?
+
     var setsText: String {
         if let min = setMin, let max = setMax {
             return min == max ? "\(min) sets" : "\(min)–\(max) sets"
@@ -2722,7 +2697,8 @@ struct UISessionExercise: Identifiable {
         prescriptionNotes: String? = nil,
         targetSets: Int,
         sets: [UISessionSet],
-        coachMessage: String = ""
+        coachMessage: String = "",
+        itemID: UUID? = nil
     ) {
         // Derive a stable UUID from exerciseId so ForEach identity is consistent
         // across republishes of viewModel.exercises.
@@ -2762,6 +2738,7 @@ struct UISessionExercise: Identifiable {
         self.targetSets = max(1, min(targetSets, 6))
         self.sets = sets.sorted { $0.index < $1.index }
         self.coachMessage = coachMessage
+        self.itemID = itemID
     }
 }
 

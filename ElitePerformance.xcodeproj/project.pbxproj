@@ -30,13 +30,13 @@
 		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
 		D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548927E2F8E7F1A00F2C30A /* AppState.swift */; };
 		D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */; };
-		D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */; };
 		D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */; };
 		D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */; };
 		D55002072F43883F00908F53 /* MesoBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55002062F43883B00908F53 /* MesoBlock.swift */; };
 		D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020A2F43D6E000908F53 /* ProgramState.swift */; };
 		D550020F2F43E56F00908F53 /* LoadDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550020E2F43E56D00908F53 /* LoadDisplay.swift */; };
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
+		D5E28481827B62430DFE68AB /* ReplaceExerciseFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
 		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
 		D5603BD82F9FF3DC00664B58 /* ProgressionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5603BD72F9FF3DC00664B58 /* ProgressionEngine.swift */; };
@@ -55,6 +55,7 @@
 		D588C08A2FE3670400B019A7 /* MechanicalLoadSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */; };
 		D588C08C2FE3670400B019A8 /* MechanicalLoadProjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */; };
 		D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */; };
+		D5E2E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */; };
 		D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */; };
 		D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */; };
 		D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */; };
@@ -143,7 +144,6 @@
 		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
 		D548927E2F8E7F1A00F2C30A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		D548928F2F8EC5C000F2C30A /* WaveAwareComparisonEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveAwareComparisonEngine.swift; sourceTree = "<group>"; };
-		D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapPropagationService.swift; sourceTree = "<group>"; };
 		D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanPropagationService.swift; sourceTree = "<group>"; };
 		D54A94A72F93044000EFBF25 /* ProgramApplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramApplicationService.swift; sourceTree = "<group>"; };
 		D55002062F43883B00908F53 /* MesoBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoBlock.swift; sourceTree = "<group>"; };
@@ -151,6 +151,7 @@
 		D550020A2F43D6E000908F53 /* ProgramState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramState.swift; sourceTree = "<group>"; };
 		D550020E2F43E56D00908F53 /* LoadDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadDisplay.swift; sourceTree = "<group>"; };
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
+		D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceExerciseFlow.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
 		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
 		D5603BD72F9FF3DC00664B58 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
@@ -167,6 +168,7 @@
 		D588C0892FE3670400B019A7 /* MechanicalLoadSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadSharedStore.swift; sourceTree = "<group>"; };
 		D588C08B2FE3670400B019A8 /* MechanicalLoadProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MechanicalLoadProjector.swift; sourceTree = "<group>"; };
 		D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerLetterTargetSelectionTests.swift; sourceTree = "<group>"; };
+		D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceExerciseFlowTests.swift; sourceTree = "<group>"; };
 		D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionItemEditServiceTests.swift; sourceTree = "<group>"; };
 		D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySeedLoadTests.swift; sourceTree = "<group>"; };
 		D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEditSafetyTests.swift; sourceTree = "<group>"; };
@@ -401,7 +403,6 @@
 				D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */,
 				D5E174D80F395AF82536120C /* SessionItemEditService.swift */,
 				D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */,
-				D54A30DB2EEDFBBB005967AA /* ExerciseSwapPropagationService.swift */,
 				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
 				D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */,
 				D58618272ECCA95F006EF818 /* ProgramCatalog.swift */,
@@ -477,6 +478,7 @@
 			isa = PBXGroup;
 			children = (
 				D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */,
+				D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */,
 				D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */,
 				D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */,
 				D5E293562EC410DD00034D78 /* HomeView.swift */,
@@ -550,6 +552,7 @@
 				D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */,
 				D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */,
 				D5AA00012F99900100AA0001 /* PerLetterTargetSelectionTests.swift */,
+				D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
@@ -737,6 +740,7 @@
 				D5603BD82F9FF3DC00664B58 /* ProgressionEngine.swift in Sources */,
 				D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
+				D5E28481827B62430DFE68AB /* ReplaceExerciseFlow.swift in Sources */,
 				D5C48EFC2F1C0F6E00495C46 /* ExerciseHistorySheet.swift in Sources */,
 				D58476EE2F410AD000FE3F46 /* SetsV1CSVExporter.swift in Sources */,
 				D58618282ECCA962006EF818 /* ProgramCatalog.swift in Sources */,
@@ -772,7 +776,6 @@
 				D58477132F42842000FE3F46 /* MesoLifecycle.swift in Sources */,
 				D5EC0F5B2FB8B97500C9E38C /* LoadProjectionService.swift in Sources */,
 				D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */,
-				D54A30DC2EEDFBBD005967AA /* ExerciseSwapPropagationService.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */,
 				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
@@ -808,6 +811,7 @@
 				D5AA0B042F99900700AA0001 /* CarryForwardAuditTests.swift in Sources */,
 				D5AA00092F99900900AA0009 /* E1RMFloorCapTests.swift in Sources */,
 				D5AA00022F99900200AA0002 /* PerLetterTargetSelectionTests.swift in Sources */,
+				D5E2E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,

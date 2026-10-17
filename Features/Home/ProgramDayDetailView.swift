@@ -154,18 +154,11 @@ struct ProgramDayDetailView: View {
             )
         }
         .sheet(item: $swapTarget) { target in
-            ProgramExerciseSwapSheet(
-                currentExerciseId: target.item.exerciseId,
-                currentExerciseName: ExerciseCatalog.displayName(
-                    for: ExerciseCatalog.canonicalExerciseId(for: target.item.exerciseId)
-                ),
-                onSelect: { catalogExercise in
-                    swapExercise(target.item, to: catalogExercise)
-                    swapTarget = nil
-                },
-                onCancel: {
-                    swapTarget = nil
-                }
+            ReplaceExerciseFlow(
+                session: session,
+                item: target.item,
+                surface: .programTab,
+                onFinish: { swapTarget = nil }
             )
         }
     }
@@ -627,51 +620,6 @@ struct ProgramDayDetailView: View {
             try modelContext.save()
         } catch {
             print("⚠️ Failed to add exercise: \(error)")
-        }
-    }
-
-    private func swapExercise(_ item: SessionItem, to catalogExercise: CatalogExercise) {
-        let fromExerciseId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-
-        // Identity changes; the prescription shape (sets/reps/RIR/wave/priority/etc.)
-        // stays — only the exercise filling this slot changes.
-        item.exerciseId = catalogExercise.id
-        item.exerciseNameSnapshot = catalogExercise.name
-        item.suggestedLoad = 0
-        item.plannedLoadsBySet = Array(repeating: 0.0, count: item.plannedLoadsBySet.count)
-        item.actualLoads = Array(repeating: 0.0, count: item.actualLoads.count)
-        item.actualReps = Array(repeating: 0, count: item.actualReps.count)
-        item.actualRIRs = Array(repeating: 0, count: item.actualRIRs.count)
-        item.coachNote = nil
-        item.prescriptionNotes = nil
-        item.intensifierNotes = nil
-
-        // Re-seed load from history so coaching resolves on the swapped exercise.
-        // BW guard is inside lastKnownLoad — bodyweight exercises return 0, preventing
-        // re-manufacture of phantom loads Fix B eliminated.
-        let recentLoad = LoadProjectionService.lastKnownLoad(
-            for: catalogExercise.id,
-            currentSession: session,
-            context: modelContext
-        )
-        if recentLoad > 0 {
-            item.suggestedLoad = recentLoad
-            item.plannedLoadsBySet = Array(repeating: recentLoad, count: item.plannedLoadsBySet.count)
-        }
-
-        if propagatesToFutureSessions {
-            ExerciseSwapPropagationService.apply(
-                fromExerciseId: fromExerciseId,
-                toExerciseId: catalogExercise.id,
-                sourceSession: session,
-                in: modelContext
-            )
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("⚠️ Failed to swap exercise: \(error)")
         }
     }
 
