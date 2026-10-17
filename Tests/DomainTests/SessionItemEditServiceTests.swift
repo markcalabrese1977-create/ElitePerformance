@@ -94,7 +94,7 @@ final class SessionItemEditServiceTests: XCTestCase {
         let result = plan(block, ctx, p, now: now)
 
         let expected = sessions(block).filter {
-            $0.dayLabel == p.day && $0.date > now && item($0, p.x) != nil
+            $0.dayLabel == p.day && $0.date >= Calendar.current.startOfDay(for: now) && item($0, p.x) != nil
         }
         XCTAssertFalse(expected.isEmpty)
         XCTAssertEqual(result.targets.map { $0.session.persistentModelID }, expected.map(\.persistentModelID))
@@ -280,8 +280,7 @@ final class SessionItemEditServiceTests: XCTestCase {
 
         // Between preview and apply the lifter starts one of the target sessions.
         let victim = result.targets[1]
-        victim.item.actualLoads = [135]; victim.item.actualReps = [5]
-        victim.session.status = .inProgress
+        victim.item.actualLoads = [135]; victim.item.actualReps = [5]   // logged -> no longer safe to edit
         let snapshot = result.targets.map { "\($0.item.exerciseId)|\($0.item.suggestedLoad)" }
 
         XCTAssertThrowsError(try Service.apply(result, in: ctx)) {
@@ -354,5 +353,166 @@ final class SessionItemEditServiceTests: XCTestCase {
                           "no wave -> next chronological occurrence")
         }
         XCTAssertEqual(sess[3].items[0].plannedRepsBySet, [10, 10])
+    }
+
+    // MARK: - C4b: rollback, today boundary, in-progress
+
+    /// Every stored field of every session and item in the store, as one comparable string.
+    private func fullSnapshot(_ ctx: ModelContext) throws -> [String] {
+        var out: [String] = []
+        let all = try ctx.fetch(FetchDescriptor<Session>()).sorted { ($0.date, $0.weekIndex, $0.dayLabel ?? "") < ($1.date, $1.weekIndex, $1.dayLabel ?? "") }
+        for s in all {
+            out.append("S|\(s.date.timeIntervalSince1970)|\(s.status.rawValue)|\(s.weekIndex)|\(s.dayLabel ?? "")|\(s.programIndex.map(String.init) ?? "")|\(s.sessionNotes ?? "")|\(s.items.count)")
+            for i in s.items.sorted(by: { ($0.order, $0.exerciseId) < ($1.order, $1.exerciseId) }) {
+                let opt: (Int?) -> String = { $0.map(String.init) ?? "-" }
+                out.append([
+                    "I", i.id?.uuidString ?? "", "\(i.order)", i.exerciseId, i.exerciseNameSnapshot ?? "-",
+                    "\(i.targetReps)", "\(i.targetSets)", "\(i.targetRIR)", "\(i.suggestedLoad)",
+                    i.waveRaw ?? "-", i.priorityRaw ?? "-", opt(i.setMin), opt(i.setMax), opt(i.repMin), opt(i.repMax),
+                    opt(i.targetRIRMin), opt(i.targetRIRMax), i.intensifierRaw ?? "-", i.intensifierNotes ?? "-", i.prescriptionNotes ?? "-",
+                    "\(i.logs.count)", "\(i.plannedRepsBySet)", "\(i.plannedLoadsBySet)", "\(i.plannedRIRsBySet)", "\(i.planEdited)",
+                    "\(i.actualReps)", "\(i.actualLoads)", "\(i.actualRIRs)", "\(i.usedRestPauseFlags)", "\(i.restPausePatternsBySet)",
+                    "\(i.dropSetPatternsBySet)", "\(i.setFeedbackBySet)", "\(i.pumpRatingsBySet)", "\(i.isCompleted)", "\(i.isPR)",
+                    i.coachNote ?? "-", i.loadOverrideReasonRaw ?? "-", i.nextSuggestedLoad.map { "\($0)" } ?? "-",
+                ].joined(separator: "|"))
+            }
+        }
+        return out
+    }
+
+    /// Dirties the planned targets with state the replace is supposed to reset, without making them "logged".
+    private func dirty(_ result: Service.ReplacePlan) {
+        for t in result.targets {
+            t.item.planEdited = true; t.item.isPR = true; t.item.coachNote = "keep"; t.item.prescriptionNotes = "note"
+            t.item.intensifierNotes = "int"; t.item.nextSuggestedLoad = 321; t.item.suggestedLoad = 150
+            t.item.plannedLoadsBySet = Array(repeating: 150, count: t.item.targetSets + 1)
+            t.item.loadOverrideReasonRaw = LoadOverrideReason.allCases.first?.rawValue
+        }
+    }
+
+    func test_forcedVerificationFailure_throwsAndLeavesEveryFieldUnchanged() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let result = plan(block, ctx, p, now: date(2026, 9, 1))
+        dirty(result)
+        try ctx.save()
+        let before = try fullSnapshot(ctx)
+
+        XCTAssertThrowsError(try Service.apply(result, in: ctx, hooks: .init(forceVerificationFailure: true))) {
+            guard case Service.ReplaceError.verificationFailed(let problems) = $0 else { return XCTFail("\($0)") }
+            XCTAssertTrue(problems.contains { $0.contains("forced") }, "\(problems)")
+        }
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(try fullSnapshot(ctx), before)
+        XCTAssertTrue(result.targets.allSatisfy { $0.item.exerciseId == p.x })
+
+        // The store is still usable: the same plan applies cleanly afterwards.
+        XCTAssertNoThrow(try Service.apply(result, in: ctx))
+        XCTAssertTrue(result.targets.allSatisfy { $0.item.exerciseId == p.y })
+    }
+
+    func test_forcedSaveFailure_throwsAndLeavesEveryFieldUnchanged() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let result = plan(block, ctx, p, now: date(2026, 9, 1))
+        dirty(result)
+        try ctx.save()
+        let before = try fullSnapshot(ctx)
+
+        XCTAssertThrowsError(try Service.apply(result, in: ctx, hooks: .init(forceSaveFailure: true))) {
+            guard case Service.ReplaceError.saveFailed = $0 else { return XCTFail("\($0)") }
+        }
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(try fullSnapshot(ctx), before)
+    }
+
+    func test_pendingCallerChanges_areSavedBeforeApply_soARollbackIsExact() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let result = plan(block, ctx, p, now: date(2026, 9, 1))
+        let bystander = try XCTUnwrap(sessions(block).first { $0.dayLabel != p.day }?.items.first)
+        bystander.coachNote = "unsaved caller edit"
+        XCTAssertTrue(ctx.hasChanges)
+
+        XCTAssertThrowsError(try Service.apply(result, in: ctx, hooks: .init(forceVerificationFailure: true)))
+        XCTAssertEqual(bystander.coachNote, "unsaved caller edit", "the caller's pending edit survives the rollback")
+        XCTAssertTrue(result.targets.allSatisfy { $0.item.exerciseId == p.x })
+    }
+
+    func test_apply_refusesWhileAnySessionInTheMesoIsInProgress() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let result = plan(block, ctx, p, now: date(2026, 9, 1))
+        let other = try XCTUnwrap(sessions(block).first { $0.dayLabel != p.day })
+        other.status = .inProgress
+        try ctx.save()
+        let before = try fullSnapshot(ctx)
+
+        XCTAssertThrowsError(try Service.apply(result, in: ctx)) { XCTAssertEqual($0 as? Service.ReplaceError, .sessionInProgress) }
+        XCTAssertEqual(try fullSnapshot(ctx), before)
+
+        other.status = .planned
+        XCTAssertNoThrow(try Service.apply(result, in: ctx))
+    }
+
+    func test_remaining_includesAPlannedSessionDatedEarlierTodayButNotYesterday() throws {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                             UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: "Block", startDate: Date(), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        func at(dayOffset: Int, hour: Int) -> Date {
+            calendar.date(byAdding: .hour, value: hour, to: calendar.date(byAdding: .day, value: dayOffset, to: today)!)!
+        }
+        func make(_ date: Date) -> Session {
+            let it = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0,
+                                 plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [0, 0, 0], plannedRIRsBySet: [2, 2, 2])
+            let s = Session(date: date, status: .planned, weekIndex: 1, dayLabel: "Day A", items: [it])
+            s.meso = meso
+            ctx.insert(s)
+            return s
+        }
+        let yesterday = make(at(dayOffset: -1, hour: 6))
+        let earlierToday = make(at(dayOffset: 0, hour: 6))
+        let tomorrow = make(at(dayOffset: 1, hour: 6))
+        try ctx.save()
+
+        let result = Service.planReplace(meso: meso, dayLabel: "Day A", from: "bench_press", to: "machine_chest_press",
+                                         scope: .allRemaining, context: ctx, now: at(dayOffset: 0, hour: 15))
+        let ids = Set(result.targets.map { $0.session.persistentModelID })
+        XCTAssertTrue(ids.contains(earlierToday.persistentModelID), "today 06:00 is remaining at 15:00")
+        XCTAssertTrue(ids.contains(tomorrow.persistentModelID))
+        XCTAssertFalse(ids.contains(yesterday.persistentModelID), "a missed session from before today is history")
+    }
+
+    /// Prints the 12-week-fixture seed for a lift with RIR-2 history, before (reps only) and after (C3b).
+    func test_report_12weekSeed_forRIR2History_beforeVsAfter() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let all = sessions(block)
+        let other = try XCTUnwrap(all.first { $0.dayLabel != p.day })
+        other.items.append(SessionItem(order: 99, exerciseId: p.y, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0,
+                                       actualReps: [9, 9, 9], actualLoads: [130, 130, 130], actualRIRs: [2, 2, 2]))
+        other.status = .completed
+        try ctx.save()
+        let now = other.date.addingTimeInterval(86400)
+        let result = plan(block, ctx, p, now: now)
+
+        var lines: [String] = []
+        for letter in ["a", "b", "c"] {
+            let t = try XCTUnwrap(result.targets.first { $0.waveRaw?.lowercased() == letter })
+            let reps = t.item.targetReps, rir = t.item.targetRIR
+            // C3 formula: e1RM from reps only.
+            let oldE1 = E1RMCalculator.e1RM(load: 130, reps: 9)
+            let old = E1RMCalculator.rounded(E1RMCalculator.load(for: oldE1, reps: reps, targetRIR: rir), increment: 2.5)
+            let new = try XCTUnwrap(t.seedLoad)
+            lines.append("wave \(letter.uppercased()) (\(reps) reps @ RIR \(rir)): C3 \(old) -> C3b \(new)")
+            XCTAssertGreaterThan(new, old)
+        }
+        print("SEED_COMPARE 130x9@RIR2 history, 12-week fixture\n" + lines.joined(separator: "\n"))
     }
 }

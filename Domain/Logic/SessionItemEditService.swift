@@ -68,11 +68,25 @@ enum SessionItemEditService {
 
     enum ReplaceError: Error, Equatable {
         case nothingToReplace
+        /// A session in the block is being trained; nothing is edited underneath it.
+        case sessionInProgress
         /// The live set of target sessions no longer matches the plan.
         case planStale(planned: Int, live: Int)
         case verificationFailed([String])
         case saveFailed(String)
     }
+
+    /// Test seams (same pattern as `DUPMesoLengthConversion.ApplyHooks`): force the two rollback paths.
+    struct ApplyHooks {
+        var forceVerificationFailure = false
+        var forceSaveFailure = false
+        init(forceVerificationFailure: Bool = false, forceSaveFailure: Bool = false) {
+            self.forceVerificationFailure = forceVerificationFailure
+            self.forceSaveFailure = forceSaveFailure
+        }
+    }
+
+    private struct ForcedSaveFailure: Error {}
 
     struct ApplyResult {
         let sessionsChanged: Int
@@ -93,6 +107,7 @@ enum SessionItemEditService {
     ) -> ReplacePlan {
         let from = ExerciseCatalog.canonicalExerciseId(for: fromExerciseId)
         let to = ExerciseCatalog.canonicalExerciseId(for: toExerciseId)
+        let startOfToday = Calendar.current.startOfDay(for: now)
 
         func plan(_ targets: [Target], _ refusals: [Refusal]) -> ReplacePlan {
             var seeds: [String: Double?] = [:]
@@ -126,10 +141,11 @@ enum SessionItemEditService {
             for s in meso.sessions.sorted(by: { $0.date < $1.date })
             where SessionDayLabelMatcher.matches(s.dayLabel, dayLabel) {
                 guard let item = fromItem(in: s) else { continue }
-                // History is not "remaining": completed sessions, and planned ones whose date has
-                // passed without anything logged (missed), are simply left alone.
+                // History is not "remaining": completed sessions, and planned ones from before today
+                // with nothing logged (missed), are simply left alone. Today's session is remaining
+                // whatever time of day it is dated.
                 if s.status == .completed { continue }
-                if s.status == .planned && s.date <= now && !SessionEditSafety.hasLoggedData(s) { continue }
+                if s.status == .planned && s.date < startOfToday && !SessionEditSafety.hasLoggedData(s) { continue }
                 candidates.append((s, item))
             }
         }
@@ -169,8 +185,16 @@ enum SessionItemEditService {
     // MARK: - Apply
 
     @discardableResult
-    static func apply(_ plan: ReplacePlan, in context: ModelContext) throws -> ApplyResult {
+    static func apply(_ plan: ReplacePlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> ApplyResult {
         guard plan.isApplicable else { throw ReplaceError.nothingToReplace }
+        guard !plan.meso.sessions.contains(where: { $0.status == .inProgress }) else {
+            throw ReplaceError.sessionInProgress
+        }
+
+        // rollback() discards every unsaved change, so nothing may be pending when the writes start.
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
 
         // The plan is a preview; trust only live state. Same inputs, same `now`.
         let live = planReplace(
@@ -184,15 +208,28 @@ enum SessionItemEditService {
         }
 
         // Anything pending belongs to the caller; commit it so a rollback below is exact.
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
 
         let toName = ExerciseCatalog.displayName(for: plan.toExerciseId)
         var before: [PrescriptionSnapshot] = []
+        var restorePoints: [ItemRestorePoint] = []
         var summary: [String] = []
+
+        /// `ModelContext.rollback()` discards inserts and deletes but does NOT revert property edits
+        /// on live objects (see DUPMesoLengthConversion.Snapshot), so every field this method
+        /// overwrites is recorded first and put back by hand before rolling back.
+        func abandon() {
+            for point in restorePoints { point.restore() }
+            context.rollback()
+        }
 
         for target in live.targets {
             let item = target.item
             before.append(PrescriptionSnapshot(item))
+            restorePoints.append(ItemRestorePoint(item))
 
             item.exerciseId = plan.toExerciseId
             item.exerciseNameSnapshot = toName
@@ -234,15 +271,17 @@ enum SessionItemEditService {
             problems += snap.differences(from: target.item)
         }
         problems += chainProblems(live.targets, meso: plan.meso, context: context)
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
 
         guard problems.isEmpty else {
-            context.rollback()
+            abandon()
             throw ReplaceError.verificationFailed(problems)
         }
         do {
+            if hooks.forceSaveFailure { throw ForcedSaveFailure() }
             try context.save()
         } catch {
-            context.rollback()
+            abandon()
             throw ReplaceError.saveFailed("\(error)")
         }
         return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
@@ -305,6 +344,45 @@ enum SessionItemEditService {
             let n = max(0, i.targetSets)
             if i.plannedLoadsBySet.count != n { d.append("plannedLoadsBySet not sized to targetSets") }
             return d.map { "\(i.exerciseId): \($0)" }
+        }
+    }
+
+    /// Every field `apply` overwrites, as it was before the write.
+    private struct ItemRestorePoint {
+        let item: SessionItem
+        let exerciseId: String, name: String?
+        let suggestedLoad: Double, plannedLoads: [Double]
+        let actualLoads: [Double], actualReps: [Int], actualRIRs: [Int]
+        let restPauseFlags: [Bool], restPausePatterns: [String], dropSetPatterns: [String]
+        let setFeedback: [String], pumpRatings: [Int]
+        let logs: [SetLog]
+        let isPR: Bool, isCompleted: Bool, planEdited: Bool
+        let loadOverrideReasonRaw: String?, nextSuggestedLoad: Double?
+        let coachNote: String?, prescriptionNotes: String?, intensifierNotes: String?
+
+        init(_ i: SessionItem) {
+            item = i
+            exerciseId = i.exerciseId; name = i.exerciseNameSnapshot
+            suggestedLoad = i.suggestedLoad; plannedLoads = i.plannedLoadsBySet
+            actualLoads = i.actualLoads; actualReps = i.actualReps; actualRIRs = i.actualRIRs
+            restPauseFlags = i.usedRestPauseFlags; restPausePatterns = i.restPausePatternsBySet
+            dropSetPatterns = i.dropSetPatternsBySet; setFeedback = i.setFeedbackBySet; pumpRatings = i.pumpRatingsBySet
+            logs = i.logs
+            isPR = i.isPR; isCompleted = i.isCompleted; planEdited = i.planEdited
+            loadOverrideReasonRaw = i.loadOverrideReasonRaw; nextSuggestedLoad = i.nextSuggestedLoad
+            coachNote = i.coachNote; prescriptionNotes = i.prescriptionNotes; intensifierNotes = i.intensifierNotes
+        }
+
+        func restore() {
+            item.exerciseId = exerciseId; item.exerciseNameSnapshot = name
+            item.suggestedLoad = suggestedLoad; item.plannedLoadsBySet = plannedLoads
+            item.actualLoads = actualLoads; item.actualReps = actualReps; item.actualRIRs = actualRIRs
+            item.usedRestPauseFlags = restPauseFlags; item.restPausePatternsBySet = restPausePatterns
+            item.dropSetPatternsBySet = dropSetPatterns; item.setFeedbackBySet = setFeedback; item.pumpRatingsBySet = pumpRatings
+            item.logs = logs
+            item.isPR = isPR; item.isCompleted = isCompleted; item.planEdited = planEdited
+            item.loadOverrideReasonRaw = loadOverrideReasonRaw; item.nextSuggestedLoad = nextSuggestedLoad
+            item.coachNote = coachNote; item.prescriptionNotes = prescriptionNotes; item.intensifierNotes = intensifierNotes
         }
     }
 
