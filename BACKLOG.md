@@ -17,3 +17,5 @@ One line per item; dates are 2026.
 - Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; bench top set as a feature; isCleanSession vs deliberateDeload; onChange deprecations.
 - Hack squat re-entry after Dr. Alexander clears (sled + 135 at W1 stance pain-free -> fresh anchors per letter); cable hip adduction returns only after hips clear.
 - E1RM RIR model (low priority): HistorySeedLoad credits RIR additively on input (reps+RIR); load(for:reps:targetRIR:) applies 2.5%/RIR on output. Within ~1% at RIR<=2, ~2% at RIR 4 / low reps. Unify into one E1RMCalculator RIR function used by both; run a C3b-style before/after seed comparison.
+- Replace: optional prescription override (e.g. RIR) applied by the service without
+  setting planEdited (planEdited blocks carry-forward writes into the item).
