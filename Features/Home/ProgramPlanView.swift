@@ -203,9 +203,6 @@ struct ProgramPlanView: View {
                     Button("Tomorrow") {
                         newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     }
-                    Button("Thursday (next occurrence)") {
-                        newSessionDate = nextWeekday(.thursday)
-                    }
                 }
 
                 Section {
@@ -233,7 +230,7 @@ struct ProgramPlanView: View {
 
     // MARK: - Week math
 
-    // MARK: - Week math (MesoLabel)
+    // MARK: - Week math
 
     private func weekIndex(for date: Date) -> Int {
         if let exact = visibleSessions.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
@@ -242,7 +239,7 @@ struct ProgramPlanView: View {
         return 1
     }
 
-    /// 1–6 training day within a training week (Thu rest is skipped by lift-day counting)
+    /// 1-based training day within a training week (the week's non-completed sessions in date order)
     private func dayIndexInWeek(for date: Date) -> Int {
         let day = Calendar.current.startOfDay(for: date)
 
@@ -310,30 +307,6 @@ struct ProgramPlanView: View {
             showAddSessionError = true
             print("⚠️ Failed to save session: \(error)")
         }
-    }
-
-    private enum Weekday {
-        case thursday
-
-        /// Calendar weekday: 1=Sunday ... 7=Saturday
-        var calendarValue: Int {
-            switch self {
-            case .thursday: return 5
-            }
-        }
-    }
-
-    private func nextWeekday(_ weekday: Weekday) -> Date {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-
-        let target = weekday.calendarValue
-        let current = cal.component(.weekday, from: today)
-
-        var delta = target - current
-        if delta <= 0 { delta += 7 } // next occurrence (not today)
-
-        return cal.date(byAdding: .day, value: delta, to: today) ?? today
     }
 
     // MARK: - Legacy: Extra Session (append-to-end)

@@ -65,7 +65,7 @@ enum ProgramApplicationService {
             case (_, 6):
                         return "Six days a week is serious training. The 10-Week DUP Meso is the best fit — Daily Undulating Periodization rotates strength, hypertrophy, and intensification waves across the week, giving every muscle group multiple quality stimuli while keeping fatigue manageable. This is the most sophisticated program in the app."
             case (_, 5):
-                return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The two heavy upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
+                return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The four upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
             case (_, 4):
                 return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size without joint stress."
             case (_, 3):

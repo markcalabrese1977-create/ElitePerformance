@@ -162,3 +162,14 @@ final class ReplaceExerciseFlowTests: XCTestCase {
         XCTAssertNil(SessionScreenViewModel.sessionItem(for: anonymous, in: session))
     }
 }
+
+final class LoadFormatterTests: XCTestCase {
+    func test_numberAndText_dropTrailingZero_andShareOneUnitLabel() {
+        XCTAssertEqual(LoadFormatter.number(135), "135")
+        XCTAssertEqual(LoadFormatter.number(132.5), "132.5")
+        XCTAssertEqual(LoadFormatter.text(135), "135 lb")
+        XCTAssertEqual(LoadFormatter.text(2.5), "2.5 lb")
+        XCTAssertEqual(LoadFormatter.unitLabel, "lb")
+        XCTAssertEqual(ReplaceExerciseModel.loadText(132.5), "Starts at \(LoadFormatter.text(132.5))")
+    }
+}

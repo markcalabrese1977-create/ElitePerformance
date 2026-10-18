@@ -64,14 +64,14 @@ struct SettingsView: View {
                                 HStack {
                                     Text("Min Load Increment")
                                     Spacer()
-                                    TextField("lbs", value: Binding(
+                                    TextField(LoadFormatter.unitLabel, value: Binding(
                                         get: { profile.minLoadIncrement },
                                         set: { profile.minLoadIncrement = $0 }
                                     ), format: .number)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text("lbs")
+                                    Text(LoadFormatter.unitLabel)
                                         .foregroundStyle(.secondary)
                                 }
 
@@ -85,7 +85,7 @@ struct SettingsView: View {
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text("lbs")
+                                    Text(LoadFormatter.unitLabel)
                                         .foregroundStyle(.secondary)
                                 }
 

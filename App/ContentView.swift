@@ -35,9 +35,6 @@ struct ContentView: View {
                 AppStateBridge.importFromUserDefaultsIfNeeded(in: modelContext)
                 AppStateBridge.restoreUserDefaultsFromAppStateIfAvailable(in: modelContext)
 
-                // ✅ Anchor meso labeling once (today is W2D2)
-                MesoLabel.ensureAnchor(week: 2, day: 2, on: Date())
-
                 // First launch behavior: if there are no sessions yet, show onboarding
                 if sessions.isEmpty {
                     showFirstRunOnboarding = true

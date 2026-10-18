@@ -194,7 +194,7 @@ final class CrossBlockContinuityTests: XCTestCase {
         // never call MesoLifecycle.setActiveStartDate or .confirmStartNewMeso. The only
         // call site of confirmStartNewMeso is Features/Settings/MesoRolloverGuardSheet.swift
         // (a UI confirmation sheet), and confirmStartNewMeso itself touches no SwiftData
-        // state at all (MesoLabel.startNewMeso + 2 UserDefaults writes). Exercising it
+        // state at all (UserDefaults writes only). Exercising it
         // here would mean mutating real, unscoped UserDefaults.standard from an automated
         // in-memory test — a test-isolation hazard, not a meaningful read on seeder
         // behavior. Flag for product discussion: should the seeding functions themselves

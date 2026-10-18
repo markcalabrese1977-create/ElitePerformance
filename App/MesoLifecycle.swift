@@ -76,10 +76,9 @@ enum MesoLifecycle {
         return today0 >= scheduled0
     }
 
-    /// Performs the rollover: sets the labeling anchor + updates active start date + clears the scheduled date.
+    /// Performs the rollover: updates the active start date + clears the scheduled date.
     static func confirmStartNewMeso(on date: Date = Date()) {
         let d0 = calendar.startOfDay(for: date)
-        MesoLabel.startNewMeso(on: d0)
         setActiveStartDate(d0)
         clearScheduledNextMeso()
     }
@@ -99,14 +98,13 @@ enum MesoLifecycle {
 }
 
 
-/// App-layer seam between program seeding (Domain) and meso labeling (App).
+/// App-layer seam between program seeding (Domain) and the meso lifecycle (App).
 ///
-/// The Domain seeders deliberately know nothing about MesoLifecycle or
-/// MesoLabel — they only write SwiftData. Something still has to move the
-/// labeling anchor when a new regular meso is seeded, or W/D labels keep
-/// counting from the previous block's start date. Both maintenance seeding
-/// sites already do this at their call site; this type is the same step for
-/// the two hypertrophy-seeding sites, in one place instead of two.
+/// The Domain seeders deliberately know nothing about MesoLifecycle — they only
+/// write SwiftData. Something still has to move the lifecycle's active start date
+/// when a new regular meso is seeded. Both maintenance seeding sites already do
+/// this at their call site; this type is the same step for the two
+/// hypertrophy-seeding sites, in one place instead of two.
 enum MesoSeedingCoordinator {
 
     /// Seeds the program described by `result`, then anchors meso labeling to

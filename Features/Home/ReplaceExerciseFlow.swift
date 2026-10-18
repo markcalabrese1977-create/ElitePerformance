@@ -93,8 +93,7 @@ struct ReplaceExerciseModel {
 
     static func loadText(_ seed: Double?) -> String {
         guard let seed else { return enterOnTheDay }
-        let lb = seed == seed.rounded() ? "\(Int(seed)) lb" : String(format: "%g lb", seed)
-        return "Starts at \(lb)"
+        return "Starts at \(LoadFormatter.text(seed))"
     }
 
     struct Row: Equatable {

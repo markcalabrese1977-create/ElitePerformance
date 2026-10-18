@@ -24,7 +24,6 @@
 		D53213A12FBCFA5600E01E39 /* MesoSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */; };
 		D53214212FC218EB00E01E39 /* StringExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53214202FC2184500E01E39 /* StringExtensions.swift */; };
 		D53214222FC218F100E01E39 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D532141F2FC2183000E01E39 /* FlowLayout.swift */; };
-		D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D536A6A12EF7265F0036BB4E /* MesoLabel.swift */; };
 		D537C68E2EE3A9BC006C16F7 /* PlanMemoryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */; };
 		D53DDCFB2FC2605800439632 /* ProgramGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53DDCFA2FC2605700439632 /* ProgramGenerator.swift */; };
 		D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54892772F8E796900F2C30A /* ExerciseNote.swift */; };
@@ -38,7 +37,6 @@
 		D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */; };
 		D5E28481827B62430DFE68AB /* ReplaceExerciseFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */; };
 		D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F56E2ED60DA40011D54B /* CoachingModels.swift */; };
-		D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */; };
 		D5603BD82F9FF3DC00664B58 /* ProgressionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5603BD72F9FF3DC00664B58 /* ProgressionEngine.swift */; };
 		D5813F962F48C28700CCE909 /* ExerciseSessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */; };
 		D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293542EC410DD00034D78 /* HistoryView.swift */; };
@@ -102,6 +100,7 @@
 		D5EC0F5B2FB8B97500C9E38C /* LoadProjectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */; };
 		D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */; };
 		D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */; };
+		D5E2847D40E637AB6976F531 /* LoadFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1847D40E637AB6976F531 /* LoadFormatter.swift */; };
 		D5E274D80F395AF82536120C /* SessionItemEditService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E174D80F395AF82536120C /* SessionItemEditService.swift */; };
 		D5E224574895A8DF85FC2A1E /* SessionEditSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */; };
 		E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */; };
@@ -139,7 +138,6 @@
 		D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoSummaryView.swift; sourceTree = "<group>"; };
 		D532141F2FC2183000E01E39 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
 		D53214202FC2184500E01E39 /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
-		D536A6A12EF7265F0036BB4E /* MesoLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MesoLabel.swift; sourceTree = "<group>"; };
 		D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanMemoryEngine.swift; sourceTree = "<group>"; };
 		D53DDCFA2FC2605700439632 /* ProgramGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGenerator.swift; sourceTree = "<group>"; };
 		D54892772F8E796900F2C30A /* ExerciseNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseNote.swift; sourceTree = "<group>"; };
@@ -154,7 +152,6 @@
 		D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailView.swift; sourceTree = "<group>"; };
 		D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceExerciseFlow.swift; sourceTree = "<group>"; };
 		D550F56E2ED60DA40011D54B /* CoachingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingModels.swift; sourceTree = "<group>"; };
-		D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkHypertrophyCoachProfile.swift; sourceTree = "<group>"; };
 		D5603BD72F9FF3DC00664B58 /* ProgressionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionEngine.swift; sourceTree = "<group>"; };
 		D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSessionDetailView.swift; sourceTree = "<group>"; };
 		D5813FE02F49433600CCE909 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
@@ -219,6 +216,7 @@
 		D5EC0F5A2FB8B97400C9E38C /* LoadProjectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadProjectionService.swift; sourceTree = "<group>"; };
 		D5F0CB5B2FE7229200416E76 /* MaintenanceProgramPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceProgramPickerView.swift; sourceTree = "<group>"; };
 		D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavePrescriptionGuard.swift; sourceTree = "<group>"; };
+		D5E1847D40E637AB6976F531 /* LoadFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadFormatter.swift; sourceTree = "<group>"; };
 		D5E174D80F395AF82536120C /* SessionItemEditService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionItemEditService.swift; sourceTree = "<group>"; };
 		D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEditSafety.swift; sourceTree = "<group>"; };
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
@@ -382,7 +380,6 @@
 			isa = PBXGroup;
 			children = (
 				D58477122F42841E00FE3F46 /* MesoLifecycle.swift */,
-				D536A6A12EF7265F0036BB4E /* MesoLabel.swift */,
 				D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */,
 				D5BEBEF92ED207A40035FE70 /* ContentView.swift */,
 			);
@@ -403,10 +400,10 @@
 				D5E02AA82EFCA6DF0035B768 /* RepRangeRulebook.swift */,
 				D54A30DD2EEE23BA005967AA /* ProgramPlanPropagationService.swift */,
 				D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */,
+				D5E1847D40E637AB6976F531 /* LoadFormatter.swift */,
 				D5E174D80F395AF82536120C /* SessionItemEditService.swift */,
 				D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */,
 				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
-				D550F5702ED60DC20011D54B /* MarkHypertrophyCoachProfile.swift */,
 				D58618272ECCA95F006EF818 /* ProgramCatalog.swift */,
 				D5D7DB662EC94F150058D515 /* CoachingEngine.swift */,
 				D5E293872EC6BDB400034D78 /* PRService.swift */,
@@ -752,8 +749,6 @@
 				D54892782F8E796B00F2C30A /* ExerciseNote.swift in Sources */,
 				D5813F962F48C28700CCE909 /* ExerciseSessionDetailView.swift in Sources */,
 				D5E293712EC410DD00034D78 /* HomeView.swift in Sources */,
-				D550F5712ED60DC40011D54B /* MarkHypertrophyCoachProfile.swift in Sources */,
-				D536A6A22EF726610036BB4E /* MesoLabel.swift in Sources */,
 				D550F56F2ED60DA50011D54B /* CoachingModels.swift in Sources */,
 				D5D7DB672EC94F160058D515 /* CoachingEngine.swift in Sources */,
 				D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */,
@@ -786,6 +781,7 @@
 				D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,
 				D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */,
+				D5E2847D40E637AB6976F531 /* LoadFormatter.swift in Sources */,
 				D5E274D80F395AF82536120C /* SessionItemEditService.swift in Sources */,
 				D5E224574895A8DF85FC2A1E /* SessionEditSafety.swift in Sources */,
 				D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */,
