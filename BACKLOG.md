@@ -20,3 +20,5 @@ One line per item; dates are 2026.
 - E1RM RIR model (low priority): HistorySeedLoad credits RIR additively on input (reps+RIR); load(for:reps:targetRIR:) applies 2.5%/RIR on output. Within ~1% at RIR<=2, ~2% at RIR 4 / low reps. Unify into one E1RMCalculator RIR function used by both; run a C3b-style before/after seed comparison.
 - Replace: optional prescription override (e.g. RIR) applied by the service without setting planEdited (planEdited blocks carry-forward writes into the item).
 - kg support: User.units is unused; loads/increments/display/backups.
+- Settings (low priority): 'Use Health date of birth' row next to the Birthdate field, calling requestAuthorizationIfNeeded(), so users grant it in context instead of after a workout. Helper text: Health's date of birth is used when available, otherwise the Birthdate above (iOS can't report whether access was granted). Footer stays as is.
+- HR zones: when age is available, HRR uses 220 - age as max HR even if observed max exists. Prefer observed max (with a sanity floor); 220 - age only as fallback.
