@@ -765,3 +765,207 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         XCTAssertEqual(try snapshot(ctx), before, "keyed by Mark's session UUIDs: nothing matches")
     }
 }
+
+// MARK: - Universality guard (C5)
+
+/// Production code must not hard-code one user's data or training rules. Mark's choices live in his
+/// profile and data; one-shot repairs for his data are unregistered developer tools. This scans the
+/// production sources (never Tests/) for the shapes of user-specific literals.
+///
+/// Comments are stripped first (they don't execute), string contents are kept.
+final class UniversalityGuardTests: XCTestCase {
+
+    /// Unregistered one-shot repairs for one user's data. Nothing else may be listed here.
+    /// Each entry: file name (no extension) -> why it may carry user-specific literals.
+    static let allowlist: [String: String] = [
+        "Apr21SessionHistoryRepairMigration": "unregistered one-shot: restores one user's 2026-04-21 session and its history row",
+        "D5ExerciseIdRepairMigration": "unregistered one-shot: repairs one user's D5 day roster from 2026-04-28",
+        "V52AlignmentRepair": "unregistered one-shot: re-aligns one user's converted block by his custom exercise ids",
+        "V53AlignmentRepair": "unregistered one-shot: second alignment pass over the same user's custom exercise ids",
+        "Week6UpperBCleanupMigration": "unregistered one-shot: repairs one user's Week 6 dates and Upper A/B rosters by his ids",
+    ]
+
+    /// The only names that may ever appear in `allowlist`: unregistered one-shot repairs, plus the catalog's
+    /// legacy alias table.
+    static let permittedForAllowlist: Set<String> = [
+        "SameLetterTargetCatchUpMigration", "TwelveWeekMesoConversionMigration", "V52AlignmentRepair",
+        "V53AlignmentRepair", "ExerciseNameSnapshotRepair", "D5ExerciseIdRepairMigration",
+        "Apr21SessionHistoryRepairMigration", "SessionDayLabelBackfill", "PrescriptionNotesClearMigration",
+        "Week6UpperBCleanupMigration", "ExerciseCatalog",
+    ]
+
+    static let patterns: [(name: String, regex: String)] = [
+        ("custom exercise id", #"custom_[0-9a-fA-F]{8}"#),
+        ("ISO date literal 2025+", #"\b20(2[5-9]|[3-9][0-9])-[01][0-9]-[0-3][0-9]\b"#),
+        // DateComponents(year: 2026, ...) and any labeled `year: 2026` argument.
+        ("date construction, labeled year >= 2025", #"\byear:\s*20(2[5-9]|[3-9][0-9])\b"#),
+        // Helper-style construction: date(2026, 9, 4).
+        ("date construction, helper call", #"\bdate\(\s*20(2[5-9]|[3-9][0-9])\s*,"#),
+        // components.year = 2026
+        ("date construction, .year assignment", #"\.year\s*=\s*20(2[5-9]|[3-9][0-9])\b"#),
+        ("personal name Mark", #"\bMark\b"#),
+        ("personal name Angela", #"\bAngela\b"#),
+        ("birth year", #"\b1977\b"#),
+    ]
+
+    // MARK: Source access
+
+    private func sourceRoot(file: StaticString = #filePath) throws -> URL {
+        var dir = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        let fm = FileManager.default
+        while dir.path != "/" {
+            let hasAll = ["App", "Domain", "Features"].allSatisfy {
+                var isDir: ObjCBool = false
+                return fm.fileExists(atPath: dir.appendingPathComponent($0).path, isDirectory: &isDir) && isDir.boolValue
+            }
+            if hasAll { return dir }
+            dir.deleteLastPathComponent()
+        }
+        XCTFail("source root (the folder containing App/, Domain/, Features/) not found from \(file)")
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    /// Every production .swift file: (path relative to the root, file name without extension, stripped text).
+    private func productionSources() throws -> [(path: String, name: String, text: String)] {
+        let root = try sourceRoot()
+        var out: [(String, String, String)] = []
+        for folder in ["App", "Domain", "Features"] {
+            let base = root.appendingPathComponent(folder)
+            guard let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else {
+                XCTFail("cannot enumerate \(base.path)"); continue
+            }
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                let raw = try String(contentsOf: url, encoding: .utf8)
+                let rel = String(url.path.dropFirst(root.path.count + 1))
+                out.append((rel, url.deletingPathExtension().lastPathComponent, Self.strippingComments(raw)))
+            }
+        }
+        XCTAssertGreaterThan(out.count, 50, "scanned suspiciously few production files")
+        return out.sorted { $0.0 < $1.0 }
+    }
+
+    /// Removes // and /* */ comments (block comments nest), leaving string literals and newlines intact so
+    /// line numbers still match the file. Understands "...", """...""" and #"..."# strings.
+    static func strippingComments(_ source: String) -> String {
+        let s = Array(source.unicodeScalars)
+        var out = String.UnicodeScalarView()
+        var i = 0
+        func peek(_ k: Int) -> Unicode.Scalar? { i + k < s.count ? s[i + k] : nil }
+        while i < s.count {
+            let c = s[i]
+            // Raw / multi-line / plain strings: copy through verbatim.
+            if c == "\"" || (c == "#" && { var k = 0; while peek(k) == "#" { k += 1 }; return peek(k) == "\"" }()) {
+                var hashes = 0
+                while s[i] == "#" { hashes += 1; out.append(s[i]); i += 1 }
+                let multiline = peek(0) == "\"" && peek(1) == "\"" && peek(2) == "\""
+                let quote = multiline ? 3 : 1
+                for _ in 0..<quote { out.append(s[i]); i += 1 }
+                while i < s.count {
+                    if s[i] == "\\" && hashes == 0, i + 1 < s.count { out.append(s[i]); out.append(s[i + 1]); i += 2; continue }
+                    var closes = true
+                    for q in 0..<quote where peek(q) != "\"" { closes = false }
+                    if closes {
+                        var h = 0
+                        while h < hashes, peek(quote + h) == "#" { h += 1 }
+                        if h == hashes {
+                            for _ in 0..<(quote + hashes) { out.append(s[i]); i += 1 }
+                            break
+                        }
+                    }
+                    if !multiline && s[i] == "\n" { break }   // unterminated: bail to avoid swallowing the file
+                    out.append(s[i]); i += 1
+                }
+                continue
+            }
+            if c == "/" && peek(1) == "/" {
+                while i < s.count && s[i] != "\n" { i += 1 }
+                continue
+            }
+            if c == "/" && peek(1) == "*" {
+                var depth = 0
+                while i < s.count {
+                    if s[i] == "/" && peek(1) == "*" { depth += 1; i += 2; continue }
+                    if s[i] == "*" && peek(1) == "/" { depth -= 1; i += 2; if depth == 0 { break }; continue }
+                    if s[i] == "\n" { out.append(s[i]) }
+                    i += 1
+                }
+                continue
+            }
+            out.append(c); i += 1
+        }
+        return String(out)
+    }
+
+    struct Hit: CustomStringConvertible {
+        let file: String, name: String, line: Int, pattern: String, text: String
+        var description: String { "\(file):\(line) [\(pattern)] \(text)" }
+    }
+
+    private func scan() throws -> [Hit] {
+        var hits: [Hit] = []
+        let compiled = try Self.patterns.map { ($0.name, try NSRegularExpression(pattern: $0.regex)) }
+        for src in try productionSources() {
+            for (idx, line) in src.text.components(separatedBy: "\n").enumerated() {
+                let range = NSRange(line.startIndex..., in: line)
+                for (name, re) in compiled {
+                    for m in re.matches(in: line, range: range) {
+                        hits.append(Hit(file: src.path, name: src.name, line: idx + 1, pattern: name,
+                                        text: (line as NSString).substring(with: m.range)))
+                    }
+                }
+            }
+        }
+        return hits
+    }
+
+    // MARK: Tests
+
+    func test_productionCode_containsNoUserSpecificLiterals() throws {
+        let hits = try scan()
+        let offending = hits.filter { Self.allowlist[$0.name] == nil }
+        XCTAssertTrue(offending.isEmpty,
+                      "user-specific literals in production code:\n" + offending.map(\.description).joined(separator: "\n"))
+    }
+
+    func test_allowlist_hasNoStaleEntries_andIsOnlyUnregisteredOneShotRepairs() throws {
+        let matched = Set(try scan().map(\.name))
+        for name in Self.allowlist.keys {
+            XCTAssertTrue(matched.contains(name), "\(name) is allowlisted but no longer matches any pattern: remove it")
+        }
+        let permitted = Self.permittedForAllowlist
+        for name in Self.allowlist.keys {
+            XCTAssertTrue(permitted.contains(name), "\(name) may not be allowlisted")
+            XCTAssertFalse((Self.allowlist[name] ?? "").isEmpty, "\(name) needs a reason")
+        }
+    }
+
+    /// An allowlisted one-shot repair must not run: it is not registered at startup and nothing else in
+    /// production code refers to it (comments excluded).
+    func test_noAllowlistedMigration_isRegisteredOrReferenced() throws {
+        let sources = try productionSources()
+        let app = try XCTUnwrap(sources.first { $0.name == "ElitePerformanceApp" }, "App/ElitePerformanceApp.swift not found")
+        let start = try XCTUnwrap(app.text.range(of: "enum StartupBackfills"), "StartupBackfills not found")
+        let registered = app.text[start.upperBound...]
+        // Every permitted one-shot (allowlisted or not) stays unregistered: registering any of them fails here.
+        for name in Self.permittedForAllowlist where name != "ExerciseCatalog" {
+            XCTAssertFalse(registered.contains(name), "\(name) is a one-shot repair yet registered in StartupBackfills")
+        }
+        for name in Self.allowlist.keys where name != "ExerciseCatalog" {
+            // One-shot repairs may refer to each other (V53 builds on V52); nothing else may refer to them.
+            for src in sources where src.name != name && !(Self.permittedForAllowlist.contains(src.name) && src.name != "ExerciseCatalog") {
+                XCTAssertFalse(src.text.range(of: #"\b\#(name)\b"#, options: .regularExpression) != nil,
+                               "\(name) is allowlisted yet referenced from \(src.path)")
+            }
+        }
+    }
+
+    func test_commentStripper_keepsStringsAndLineNumbers() {
+        let src = "let a = \"https://x.test/custom_1234abcd\" // Mark\nlet b = 1 /* Angela\nstill */ let c = #\"2026-01-01\"#\n"
+        let out = Self.strippingComments(src)
+        XCTAssertTrue(out.contains("https://x.test/custom_1234abcd"), "// inside a string is not a comment")
+        XCTAssertFalse(out.contains("Mark"))
+        XCTAssertFalse(out.contains("Angela"))
+        XCTAssertTrue(out.contains("#\"2026-01-01\"#"), "raw strings are kept")
+        XCTAssertEqual(out.components(separatedBy: "\n").count, src.components(separatedBy: "\n").count, "line count preserved")
+    }
+}

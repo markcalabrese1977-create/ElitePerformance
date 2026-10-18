@@ -14,6 +14,7 @@ One line per item; dates are 2026.
 - Import hardening: atomic import with pre-restore safety copy, tolerant decoding, version check, history order, HealthDashboard rebuild after import, build identity in export, custom-exercise mirror (clear when empty, isBodyweight), tolerant dedup (Dictionary(uniqueKeysWithValues:) trap), idempotent CustomExerciseStoreMigration.
 - Swap/add service: Today "Apply to future <weekday>" is unscoped and zeroes loads (guard or scope it); arrays sized to sets; rep range and wave on adds; lastKnownLoad must not read future plans; custom names from the table.
 - Test infrastructure: J4 flake; synchronized test folder (no hand-edited pbxproj); keep Tests/known_failures.txt set-based.
+- Universality guard (C5): never extend the allowlist except for unregistered one-shot repairs; add new patterns when new user-specific data appears.
 - Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; bench top set as a feature; isCleanSession vs deliberateDeload; onChange deprecations.
 - Hack squat re-entry after Dr. Alexander clears (sled + 135 at W1 stance pain-free -> fresh anchors per letter); cable hip adduction returns only after hips clear.
 - E1RM RIR model (low priority): HistorySeedLoad credits RIR additively on input (reps+RIR); load(for:reps:targetRIR:) applies 2.5%/RIR on output. Within ~1% at RIR<=2, ~2% at RIR 4 / low reps. Unify into one E1RMCalculator RIR function used by both; run a C3b-style before/after seed comparison.
