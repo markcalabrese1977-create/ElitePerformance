@@ -608,3 +608,160 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         return f.string(from: date)
     }
 }
+
+// MARK: - Another user's store: startup repairs must leave it byte-identical
+
+/// A store that is not Mark's but carries every shape the Mark-specific repairs look for. The
+/// registered `StartupBackfills` must leave it untouched; run directly, the retired repairs
+/// (other than the UUID-keyed Week 6 one) demonstrably would not.
+final class OtherUsersStoreStartupTests: XCTestCase {
+
+    private var container: ModelContainer!
+
+    private static let completionKeys = [
+        "exerciseNameSnapshotBackfill.v1.completed", "exerciseNameSnapshotRepair.v6.completed",
+        "canonicalExerciseIdMigration.v1.completed", "customExerciseDedupMigration.v1.completed",
+        "d5ExerciseIdRepairMigration.v3.completed", "apr21SessionHistoryRepairMigration.v3.completed",
+        "sessionHistoryBlockBackfill.v1.completed", "mechanicalLoadRecovery.v1.completed",
+        "sessionDayLabelBackfill.v1.completed", "customExerciseStoreMigration.v1.completed",
+        "customExerciseUserDefaultsSync.v1.completed", "mesoBlockIsMaintenanceBackfill.v1.completed",
+        "bodyweightPhantomLoadMigration.v1.completed", "prescriptionNotesClear.v1.completed",
+        "week6UpperBCleanupMigration.v1.completed", "custom_exercises_v2",
+    ]
+    private var savedDefaults: [String: Any] = [:]
+
+    override func setUp() {
+        super.setUp()
+        for k in Self.completionKeys {
+            if let v = UserDefaults.standard.object(forKey: k) { savedDefaults[k] = v }
+            UserDefaults.standard.removeObject(forKey: k)
+        }
+    }
+
+    override func tearDown() {
+        for k in Self.completionKeys { UserDefaults.standard.removeObject(forKey: k) }
+        for (k, v) in savedDefaults { UserDefaults.standard.set(v, forKey: k) }
+        super.tearDown()
+    }
+
+    private func clearKeys() { for k in Self.completionKeys { UserDefaults.standard.removeObject(forKey: k) } }
+
+    private func day(_ y: Int, _ m: Int, _ d: Int, hour: Int = 9) -> Date {
+        Calendar.current.date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
+    }
+
+    private func item(_ order: Int, _ id: String, name: String, notes: String? = nil) -> SessionItem {
+        let i = SessionItem(order: order, exerciseId: id, exerciseNameSnapshot: name, targetReps: 8, targetSets: 3,
+                            targetRIR: 2, suggestedLoad: 0, prescriptionNotes: notes,
+                            plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [0, 0, 0], plannedRIRsBySet: [2, 2, 2])
+        return i
+    }
+
+    /// Fresh in-memory store holding the synthetic non-Mark user.
+    private func makeStore() throws -> ModelContext {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        ctx.insert(UserProfile())
+        let meso = MesoBlock(name: "Jess's Upper/Lower", startDate: day(2026, 3, 30), status: .active, totalWeeks: 8)
+        ctx.insert(meso)
+
+        // A finished session on 2026-04-21 with its history row (already linked to the block).
+        let apr21Items = [item(1, "bench_press", name: "Bench Press"), item(2, "barbell_row", name: "Barbell Row")]
+        apr21Items.forEach { $0.actualReps = [8, 8, 8]; $0.actualLoads = [135, 135, 135]; $0.isCompleted = true }
+        let apr21 = Session(date: day(2026, 4, 21), status: .completed, weekIndex: 4, dayLabel: "Upper", items: apr21Items)
+        apr21.meso = meso
+        ctx.insert(apr21)
+        let hist = SessionHistory(
+            date: day(2026, 4, 21), weekIndex: 4, title: "Upper", subtitle: "Week 4", totalExercises: 2, totalSets: 6,
+            totalVolume: 6480, sessionId: apr21.id, dayLabelSnapshot: "Upper", mechanicalLoad: 6480,
+            mesoBlockId: meso.id, mesoBlockNameSnapshot: meso.name,
+            exercises: [SessionHistoryExercise(name: "Bench Press", primaryMuscle: "Chest", sets: 3, reps: 24, volume: 3240),
+                        SessionHistoryExercise(name: "Barbell Row", primaryMuscle: "Back", sets: 3, reps: 24, volume: 3240)]
+        )
+        ctx.insert(hist)
+
+        // A planned session after 2026-04-28 whose first item is a hip thrust (D5's trigger), six items,
+        // one with a template note (the notes-wipe trigger) and one with a long spaced snapshot name (Repair's trigger).
+        let d5Items = [
+            item(1, "machine_hip_thrust", name: "Machine Hip Thrust", notes: "Primary glute work."),
+            item(2, "leg_press", name: "Leg Press"),
+            item(3, "lying_leg_curl", name: "Lying Leg Curl"),
+            item(4, "bench_press", name: "Barbell Bench Press With Long Paused Variation Name"),
+            item(5, "cable_crunch", name: "Cable Crunch"),
+            item(6, "plank", name: "Plank"),
+        ]
+        let d5 = Session(date: day(2026, 5, 12), status: .planned, weekIndex: 7, dayLabel: "Lower", items: d5Items)
+        d5.meso = meso
+        ctx.insert(d5)
+
+        // A session with no dayLabel but free-text notes (the dayLabel backfill's trigger).
+        let noLabel = Session(date: day(2026, 5, 14), status: .planned,
+                              sessionNotes: "Felt strong · heavy day", weekIndex: 7, items: [item(1, "bench_press", name: "Bench Press")])
+        noLabel.meso = meso
+        ctx.insert(noLabel)
+
+        // A week-6 "Upper B" day (Week 6's names, but not its UUIDs).
+        let upperB = Session(date: day(2026, 5, 5), status: .planned, weekIndex: 6, dayLabel: "Upper B",
+                             items: [item(1, "pull_up", name: "Pull-Up"), item(2, "seated_cable_row", name: "Seated Cable Row")])
+        upperB.meso = meso
+        ctx.insert(upperB)
+
+        // A custom exercise with a long spaced name.
+        ctx.insert(CustomExercise(id: "custom_\(UUID().uuidString.lowercased())",
+                                  name: "Single Arm Overhead Dumbbell Triceps Extension", primaryMuscleRaw: "triceps", isCompound: false))
+        try ctx.save()
+        return ctx
+    }
+
+    /// The whole store, as the backup exporter sees it, without its export timestamp.
+    private func snapshot(_ ctx: ModelContext) throws -> Data {
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        object.removeValue(forKey: "exportedAt")
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    func test_registeredStartupBackfills_leaveAnotherUsersStoreByteIdentical() throws {
+        let ctx = try makeStore()
+        let before = try snapshot(ctx)
+
+        clearKeys()
+        StartupBackfills.run(using: container)
+
+        ctx.rollback()
+        XCTAssertEqual(try snapshot(ModelContext(container)), before, "no model changed")
+    }
+
+    func test_sensitivity_theRetiredRepairsWouldHaveChangedThatStore() throws {
+        let runs: [(String, (ModelContext) -> Void)] = [
+            ("ExerciseNameSnapshotRepair", { ExerciseNameSnapshotRepair.runIfNeeded(in: $0) }),
+            ("D5ExerciseIdRepair", { D5ExerciseIdRepairMigration.runIfNeeded(in: $0) }),
+            ("Apr21SessionHistoryRepair", { Apr21SessionHistoryRepairMigration.runIfNeeded(in: $0) }),
+            ("SessionDayLabelBackfill", { SessionDayLabelBackfill.runIfNeeded(in: $0) }),
+            ("PrescriptionNotesClear", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
+        ]
+        for (name, run) in runs {
+            let ctx = try makeStore()
+            let before = try snapshot(ctx)
+            clearKeys()
+            run(ctx)
+            XCTAssertNotEqual(try snapshot(ctx), before, "\(name) fires on this store, so the test above is not vacuous")
+        }
+    }
+
+    func test_week6Cleanup_isInertOnAnotherUsersStore_evenWhenRunDirectly() throws {
+        let ctx = try makeStore()
+        let before = try snapshot(ctx)
+        clearKeys()
+        Week6UpperBCleanupMigration.runIfNeeded(in: ctx)
+        XCTAssertEqual(try snapshot(ctx), before, "keyed by Mark's session UUIDs: nothing matches")
+    }
+}

@@ -205,26 +205,22 @@ struct ElitePerformanceApp: App {
     }
 }
 
-/// The startup migration list, in app order. The one-shot catch-up, 12-week conversion, V52 alignment (release/oct11
-/// at 7537f8c) and V53 alignment (492b7fa) were applied on the device and are no longer registered; their types,
-/// completion keys and tests stay in the tree.
+/// The startup migration list, in app order. Only repairs that are safe on any user's store are registered.
+/// The one-shot catch-up, 12-week conversion, V52 and V53 alignment repairs were applied on the device and
+/// are no longer registered; neither are the Mark-specific repairs (ExerciseNameSnapshotRepair, D5 and Apr 21
+/// repairs, SessionDayLabelBackfill, PrescriptionNotesClear, Week6UpperBCleanup), which read another user's
+/// data as if it were his. Their types, completion keys and tests stay in the tree.
 enum StartupBackfills {
     static func run(using container: ModelContainer) {
         let context = ModelContext(container)
         ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
-        ExerciseNameSnapshotRepair.runIfNeeded(in: context)
         CanonicalExerciseIdMigration.runIfNeeded(in: context)
         CustomExerciseDedupMigration.runIfNeeded(in: context)
-        D5ExerciseIdRepairMigration.runIfNeeded(in: context)
-        Apr21SessionHistoryRepairMigration.runIfNeeded(in: context)
         SessionHistoryBlockBackfill.runIfNeeded(in: context)
         MechanicalLoadRecoveryMigration.runIfNeeded(in: context)
-        SessionDayLabelBackfill.runIfNeeded(in: context)
         CustomExerciseStoreMigration.runIfNeeded(in: context)
         CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
         MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
         BodyweightPhantomLoadMigration.runIfNeeded(in: context)
-        PrescriptionNotesClearMigration.runIfNeeded(in: context)
-        Week6UpperBCleanupMigration.runIfNeeded(in: context)
     }
 }
