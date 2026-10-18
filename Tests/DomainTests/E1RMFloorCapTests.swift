@@ -471,10 +471,13 @@ final class FixedLoadExemptTests: XCTestCase {
 
     // MARK: Membership / profile
 
-    func test_profileDefault_isPushdown_andAliasAndCaseResolve() {
+    func test_freshProfile_hasNoExemptExercises_andAliasAndCaseResolve() {
         let p = UserProfile()
         XCTAssertNil(p.exemptExerciseIdsStored)
-        XCTAssertEqual(p.exemptExerciseIds, ["cable_tricep_rope_pushdown"])
+        XCTAssertEqual(p.exemptExerciseIds, [], "nothing is fixed-load by default")
+        XCTAssertFalse(p.isProgressionExempt(exerciseId: pushdown))
+        p.setProgressionExempt(true, exerciseId: pushdown)
+        XCTAssertEqual(p.exemptExerciseIdsStored, [pushdown])
         XCTAssertTrue(p.isProgressionExempt(exerciseId: pushdown))
         XCTAssertTrue(p.isProgressionExempt(exerciseId: "CABLE_TRICEP_ROPE_PUSHDOWN"))
         XCTAssertFalse(p.isProgressionExempt(exerciseId: "leg_extension"))
@@ -486,13 +489,20 @@ final class FixedLoadExemptTests: XCTestCase {
         p.setProgressionExempt(false, exerciseId: "31c44a80-6c56-4e9d-aca1-ee754cd157b6")
         XCTAssertFalse(p.isProgressionExempt(exerciseId: "arnold_press"))
 
-        // Turning everything off is an explicit [], NOT the default.
+        // Turning everything off leaves an explicit [].
         p.setProgressionExempt(false, exerciseId: pushdown)
-        XCTAssertEqual(p.exemptExerciseIds, [])
+        XCTAssertEqual(p.exemptExerciseIdsStored, [])
         XCTAssertFalse(p.isProgressionExempt(exerciseId: pushdown))
 
-        // No profile at all → default list.
-        XCTAssertTrue(UserProfile.isProgressionExempt(exerciseId: pushdown, profile: nil))
+        // No profile at all → nothing exempt.
+        XCTAssertFalse(UserProfile.isProgressionExempt(exerciseId: pushdown, profile: nil))
+        XCTAssertEqual(UserProfile.defaultExemptExerciseIds, [])
+
+        // An explicit stored list is read back unchanged.
+        let stored = UserProfile()
+        stored.exemptExerciseIds = [pushdown, "hammer_curl"]
+        XCTAssertEqual(stored.exemptExerciseIds, [pushdown, "hammer_curl"])
+        XCTAssertTrue(UserProfile.isProgressionExempt(exerciseId: "hammer_curl", profile: stored))
     }
 
     // MARK: PlanMemoryEngine
@@ -523,6 +533,9 @@ final class FixedLoadExemptTests: XCTestCase {
     func test_exempt_materializedTarget_unchanged_nonExemptControlStillWrites() throws {
         for (exerciseId, exempt) in [(pushdown, true), ("leg_extension", false)] {
             let context = try makeContext()
+            let profile = UserProfile()
+            profile.setProgressionExempt(true, exerciseId: pushdown)   // nothing is exempt by default
+            context.insert(profile)
             let d = { (n: Int) in self.cal.date(byAdding: .day, value: n, to: Date())! }
             let src = planItem(exerciseId, reps: [12, 12, 12], load: 60, suggested: 60, planned: [60, 60, 60])
             let srcSession = Session(date: d(-1), status: .completed, weekIndex: 2, items: [src])
@@ -548,6 +561,9 @@ final class FixedLoadExemptTests: XCTestCase {
     func test_exempt_emptyTarget_seededAtExactlyLastLoad() throws {
         for (exerciseId, exempt) in [(pushdown, true), ("leg_extension", false)] {
             let context = try makeContext()
+            let profile = UserProfile()
+            profile.setProgressionExempt(true, exerciseId: pushdown)   // nothing is exempt by default
+            context.insert(profile)
             let d = { (n: Int) in self.cal.date(byAdding: .day, value: n, to: Date())! }
             let hist = planItem(exerciseId, reps: [12, 12, 12], load: 100, suggested: 100, planned: [100, 100, 100])
             let histSession = Session(date: d(-14), status: .completed, weekIndex: 1, items: [hist])
@@ -574,6 +590,7 @@ final class FixedLoadExemptTests: XCTestCase {
     func test_exemptOffInProfile_progressesNormally() throws {
         let context = try makeContext()
         let profile = UserProfile()
+        profile.setProgressionExempt(true, exerciseId: pushdown)
         profile.setProgressionExempt(false, exerciseId: pushdown)
         context.insert(profile)
         let d = { (n: Int) in self.cal.date(byAdding: .day, value: n, to: Date())! }
@@ -622,10 +639,10 @@ final class FixedLoadExemptTests: XCTestCase {
         XCTAssertEqual(empty.exemptExerciseIds, [], "an explicit empty list must survive, not revert to the default")
 
         let untouched = try exportImport { _ in }
-        XCTAssertEqual(untouched.exemptExerciseIds, ["cable_tricep_rope_pushdown"])
+        XCTAssertEqual(untouched.exemptExerciseIds, [])
     }
 
-    func test_backup_oldBackupWithoutField_restoresToDefault() throws {
+    func test_backup_oldBackupWithoutField_restoresToEmpty() throws {
         let json = """
         {"version":1,"exportedAt":"2026-01-01T00:00:00Z","mesoBlocks":[],"sessions":[],
          "sessionHistory":[],"exerciseNotes":[],"customExercises":[],
@@ -639,8 +656,7 @@ final class FixedLoadExemptTests: XCTestCase {
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container)
         let profile = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<UserProfile>()).first)
         XCTAssertEqual(profile.daysPerWeek, 5)
-        XCTAssertEqual(profile.exemptExerciseIds, ["cable_tricep_rope_pushdown"],
-                       "a backup without the field restores to the default, not empty")
+        XCTAssertEqual(profile.exemptExerciseIds, [], "a backup without the field restores to empty")
     }
 
     // MARK: Coach text: exempt variants drop progression language

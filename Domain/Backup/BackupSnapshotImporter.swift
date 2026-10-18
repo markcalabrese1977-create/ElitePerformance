@@ -39,7 +39,7 @@ enum BackupSnapshotImporter {
                 bodyWeight: dto.bodyWeight
             )
             // Fixed-load exemptions. An old backup without the key decodes to nil and
-            // must restore to the DEFAULT list (not empty), so assign explicitly.
+            // restores to the default (empty), so assign explicitly.
             profile.exemptExerciseIds = dto.exemptExerciseIds ?? UserProfile.defaultExemptExerciseIds
             modelContext.insert(profile)
         }

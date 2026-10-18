@@ -56,6 +56,15 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
 
     /// source in `day(-1)`, one target in `day(1)`. Returns the sessions' items for assertions.
     @discardableResult
+    /// A context whose profile lists `exerciseId` as fixed-load (nothing is exempt by default).
+    private func fixedLoadContext(_ exerciseId: String) throws -> ModelContext {
+        let context = try makeContext()
+        let profile = UserProfile()
+        profile.setProgressionExempt(true, exerciseId: exerciseId)
+        context.insert(profile)
+        return context
+    }
+
     private func run(
         _ src: SessionItem, _ tgt: SessionItem, context: ModelContext? = nil
     ) throws -> (ctx: ModelContext, srcSession: Session, tgtSession: Session) {
@@ -154,7 +163,7 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         let pushdown = "cable_tricep_rope_pushdown"
         for reps in [[12, 12, 10], [6, 6, 6]] {
             let tgt = target(pushdown, seed: 70)
-            try run(source(pushdown, load: 60, reps: reps), tgt)
+            try run(source(pushdown, load: 60, reps: reps), tgt, context: try fixedLoadContext(pushdown))
             XCTAssertEqual(tgt.suggestedLoad, 70, accuracy: 0.001, "\(reps)")
         }
     }
@@ -298,10 +307,11 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         return t.planEdited && hasPlan ? .existsEdited : .exists
     }
 
-    private func message(_ src: SessionItem, _ state: CoachingEngine.CarryForwardTarget) throws -> String {
+    private func message(_ src: SessionItem, _ state: CoachingEngine.CarryForwardTarget,
+                         profile: UserProfile? = nil) throws -> String {
         try XCTUnwrap(CoachingEngine.recommend(
             for: src, minLoadIncrement: 2.5, carryForwardTarget: state,
-            isProgressionExempt: UserProfile.isProgressionExempt(exerciseId: src.exerciseId, profile: nil)
+            isProgressionExempt: UserProfile.isProgressionExempt(exerciseId: src.exerciseId, profile: profile)
         )).message
     }
 
@@ -375,9 +385,10 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         let pushdown = "cable_tricep_rope_pushdown"
         for reps in [[12, 12, 10], [6, 6, 6]] {
             let tgt = target(pushdown, seed: 70)
-            let r = try run(source(pushdown, load: 60, reps: reps), tgt)
+            let r = try run(source(pushdown, load: 60, reps: reps), tgt, context: try fixedLoadContext(pushdown))
             let src = r.srcSession.items[0]
-            let msg = try message(src, try target(for: r.srcSession, src, in: r.ctx))
+            let profile = try r.ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let msg = try message(src, try target(for: r.srcSession, src, in: r.ctx), profile: profile)
             let lower = msg.lowercased()
             for banned in ["next week", "next session", "lowered", "same load", "stays as set"] {
                 XCTAssertFalse(lower.contains(banned), "\(reps): \(msg)")

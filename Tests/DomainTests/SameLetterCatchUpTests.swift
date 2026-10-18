@@ -124,6 +124,9 @@ final class SameLetterCatchUpTests: XCTestCase {
         ]
         for c in cases {
             let ctx = try makeContext()
+            let profile = UserProfile()
+            profile.setProgressionExempt(true, exerciseId: "cable_tricep_rope_pushdown")   // nothing is exempt by default
+            ctx.insert(profile)
             let seedBefore = c.tgt.suggestedLoad
             let (blk, _, _) = try block(ctx, src: c.src, tgt: c.tgt, targetStatus: c.status)
             let plan = M.plan(block: blk, context: ctx)

@@ -71,15 +71,13 @@ final class UserProfile {
     /// Per-exercise "fixed load" exemptions: canonical exerciseIds whose load never
     /// auto-progresses (tendon-rehab track — the lifter raises it himself).
     ///
-    /// Stored OPTIONAL on purpose: nil means "never customised" and reads as
-    /// `defaultExemptExerciseIds`, so the additive SwiftData lightweight migration
-    /// (existing rows get nil) and an old backup without the field both resolve to the
-    /// default without any backfill, while an explicit empty array still means
-    /// "the lifter turned every exemption off". Use `exemptExerciseIds` /
-    /// `isProgressionExempt`, never this raw column.
+    /// Nothing is exempt by default. Stored OPTIONAL so the additive SwiftData lightweight
+    /// migration (existing rows get nil) and an old backup without the field both read as the
+    /// default (empty) without any backfill. Use `exemptExerciseIds` / `isProgressionExempt`,
+    /// never this raw column.
     var exemptExerciseIdsStored: [String]? = nil
 
-    static let defaultExemptExerciseIds: [String] = ["cable_tricep_rope_pushdown"]
+    static let defaultExemptExerciseIds: [String] = []
 
     var exemptExerciseIds: [String] {
         get { exemptExerciseIdsStored ?? Self.defaultExemptExerciseIds }

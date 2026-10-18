@@ -46,7 +46,7 @@ struct UserProfileBackupDTO: Codable {
     let bodyWeight: Double?
     // Added (fixed-load exemptions). Optional so OLD backups that predate this key
     // still decode (synthesized Codable maps an absent key to nil); the importer
-    // maps nil to UserProfile.defaultExemptExerciseIds, never to an empty list.
+    // maps nil to UserProfile.defaultExemptExerciseIds (empty: nothing is fixed-load by default).
     var exemptExerciseIds: [String]? = nil
 }
 
