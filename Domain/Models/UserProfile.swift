@@ -79,6 +79,10 @@ final class UserProfile {
 
     static let defaultExemptExerciseIds: [String] = []
 
+    /// Optional birthdate the lifter enters when HealthKit has no date of birth; HealthKit's wins when
+    /// both exist. Only used for age-based heart-rate zones; nil means no age is assumed.
+    var birthDateOverride: Date? = nil
+
     var exemptExerciseIds: [String] {
         get { exemptExerciseIdsStored ?? Self.defaultExemptExerciseIds }
         set { exemptExerciseIdsStored = newValue }

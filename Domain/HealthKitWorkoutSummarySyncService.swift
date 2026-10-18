@@ -8,9 +8,6 @@ enum HealthKitWorkoutSummarySyncService {
 
     // MARK: - HR Zone Model (v2)
 
-    /// NOTE: MVP hardcode for Mark. Move into UserProfile/Settings later.
-    private static let markBirthDateComponents = DateComponents(year: 1977, month: 6, day: 7)
-
     /// Apple-like zoning works best with HR Reserve (HRR / Karvonen).
     /// We still need an HRmax estimate; "Fox" (220-age) tends to mirror Apple thresholds more closely for many users.
     private enum HRMaxFormula {
@@ -44,6 +41,12 @@ enum HealthKitWorkoutSummarySyncService {
         // ✅ Needed for HRR zones (30-day average resting HR)
         if let rhr = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
             toRead.insert(rhr)
+        }
+
+        // Date of birth (age for HRR zones). Without it the zones fall back to the %-of-max model,
+        // or a birthdate the lifter enters in Settings.
+        if let dob = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) {
+            toRead.insert(dob)
         }
 
         try await store.requestAuthorization(toShare: [], read: toRead)
@@ -167,11 +170,13 @@ enum HealthKitWorkoutSummarySyncService {
             session.hkMaxHeartRate = maxHR
 
             // Zones + sparkline series + post-workout HR
+            let profileBirthDate = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first?.birthDateOverride
             await syncHeartRateUIFields(
                 into: session,
                 workoutStart: workout.startDate,
                 workoutEnd: workout.endDate,
-                maxHR: maxHR
+                maxHR: maxHR,
+                profileBirthDate: profileBirthDate
             )
 
             try context.save()
@@ -343,7 +348,7 @@ enum HealthKitWorkoutSummarySyncService {
     /// Writes UI-friendly HR fields onto Session.
     /// Safe behavior: if we can’t get samples, we just leave series empty + zones at 0.
     @MainActor
-    private static func syncHeartRateUIFields(into session: Session, workoutStart: Date, workoutEnd: Date, maxHR: Double) async {
+    private static func syncHeartRateUIFields(into session: Session, workoutStart: Date, workoutEnd: Date, maxHR: Double, profileBirthDate: Date?) async {
         do {
             let samples = try await fetchHeartRateSamples(from: workoutStart, to: workoutEnd)
             guard samples.count >= 2 else {
@@ -364,14 +369,19 @@ enum HealthKitWorkoutSummarySyncService {
             session.hkHeartRateSeriesBPM = series
             session.hkHeartRateSeriesStepSeconds = step
 
-            // ✅ v2 Zones: HRR (Karvonen) using 30-day resting HR average.
-            // If we fail to fetch RHR, we fall back to legacy %max model.
-            if let rhr30 = try await restingHeartRateAverageBPM(endingAt: workoutStart, lookbackDays: 30),
-               rhr30 > 0 {
+            // ✅ v2 Zones: HRR (Karvonen) using 30-day resting HR average and an age from
+            // HealthKit (or the Settings birthdate). With no age there is no HRR model: the
+            // legacy %-of-max zones are used instead, never an assumed age.
+            let rhr30 = try await restingHeartRateAverageBPM(endingAt: workoutStart, lookbackDays: 30)
+            let ageYears = HeartRateAge.ageYears(
+                healthKitBirth: try? store.dateOfBirthComponents(),
+                profileOverride: profileBirthDate,
+                at: workoutStart
+            )
 
-                let ageYears = markAgeYears(at: workoutStart) ?? 48
-                let hrMax = hrMaxFormula.estimate(ageYears: ageYears)
-                let zones = computeZoneDurationsHRR(samples: samples, hrMax: hrMax, restingHR: rhr30)
+            if case .hrr(let age, let restingHR) = HeartRateAge.zoneModel(ageYears: ageYears, restingHR: rhr30) {
+                let hrMax = hrMaxFormula.estimate(ageYears: age)
+                let zones = computeZoneDurationsHRR(samples: samples, hrMax: hrMax, restingHR: restingHR)
 
                 session.hkZone1Seconds = zones.z1
                 session.hkZone2Seconds = zones.z2
@@ -450,11 +460,6 @@ enum HealthKitWorkoutSummarySyncService {
 
             store.execute(query)
         }
-    }
-
-    private static func markAgeYears(at date: Date) -> Int? {
-        guard let birth = Calendar.current.date(from: markBirthDateComponents) else { return nil }
-        return Calendar.current.dateComponents([.year], from: birth, to: date).year
     }
 
     /// Downsample heart rate to <= maxPoints evenly spaced points.
@@ -592,5 +597,45 @@ enum HealthKitWorkoutSummarySyncService {
         }
 
         return (z1, z2, z3, z4, z5)
+    }
+}
+
+
+// MARK: - Age for heart-rate zones
+
+/// Where the age behind the HRR zones comes from, and which zone model that allows.
+/// Nothing is assumed: no age means no HRR zones.
+enum HeartRateAge {
+
+    enum ZoneModel: Equatable {
+        case hrr(ageYears: Int, restingHR: Double)
+        case percentMax
+    }
+
+    /// HealthKit's date of birth wins; otherwise the birthdate entered in Settings; otherwise nil.
+    /// A birth date in the future, or an age outside 5...110, is treated as missing.
+    static func ageYears(
+        healthKitBirth: DateComponents?,
+        profileOverride: Date?,
+        at date: Date,
+        calendar: Calendar = .current
+    ) -> Int? {
+        func age(from birth: Date) -> Int? {
+            guard birth <= date,
+                  let years = calendar.dateComponents([.year], from: birth, to: date).year,
+                  (5...110).contains(years) else { return nil }
+            return years
+        }
+        if let comps = healthKitBirth, comps.year != nil,
+           let birth = calendar.date(from: comps), let years = age(from: birth) {
+            return years
+        }
+        if let override = profileOverride { return age(from: override) }
+        return nil
+    }
+
+    static func zoneModel(ageYears: Int?, restingHR: Double?) -> ZoneModel {
+        guard let ageYears, let restingHR, restingHR > 0 else { return .percentMax }
+        return .hrr(ageYears: ageYears, restingHR: restingHR)
     }
 }

@@ -70,7 +70,8 @@ enum BackupSnapshotExporter {
                     // app versions importing a new export still decode fine.
                     unitPreferenceRaw: nil,
                     bodyWeight: $0.bodyWeight,
-                    exemptExerciseIds: $0.exemptExerciseIds
+                    exemptExerciseIds: $0.exemptExerciseIds,
+                    birthDateOverride: $0.birthDateOverride
                 )
             },
             mesoBlocks: mesoBlocks.map { block in

@@ -89,6 +89,33 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                 }
 
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("Birthdate")
+                                        Spacer()
+                                        if let birth = profile.birthDateOverride {
+                                            DatePicker(
+                                                "Birthdate",
+                                                selection: Binding(
+                                                    get: { birth },
+                                                    set: { profile.birthDateOverride = $0 }
+                                                ),
+                                                in: ...Date(),
+                                                displayedComponents: .date
+                                            )
+                                            .labelsHidden()
+                                            Button("Clear") { profile.birthDateOverride = nil }
+                                        } else {
+                                            Button("Set") {
+                                                profile.birthDateOverride = Calendar.current.date(byAdding: .year, value: -30, to: Date())
+                                            }
+                                        }
+                                    }
+                                    Text("Only used for heart-rate zones, when Health doesn't have your date of birth.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
                                 HStack {
                                     Text("Session Length")
                                     Spacer()
