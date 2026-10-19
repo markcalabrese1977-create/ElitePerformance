@@ -979,8 +979,11 @@ extension SessionItemEditService {
             return ((try? context.fetch(FetchDescriptor<Session>())) ?? []).filter { seen.insert($0.persistentModelID).inserted }
                 + meso.sessions.filter { seen.insert($0.persistentModelID).inserted }
         }
+        // A deload-wave source carries nothing forward (propagation skips deload targets), and its
+        // deload -> next-deload link legitimately gains the inserted week, so only working items are checked.
         let chainSources: [(session: Session, item: SessionItem)] =
-            meso.sessions.sorted { $0.date < $1.date }.flatMap { s in s.items.map { (s, $0) } }
+            meso.sessions.sorted { $0.date < $1.date }
+                .flatMap { s in s.items.filter { $0.waveRaw?.lowercased() != deloadWaveRaw }.map { (s, $0) } }
         func chainTargets(_ sessions: [Session]) -> [ObjectIdentifier?] {
             chainSources.map { PlanMemoryEngine.nextTargetItem(for: $0.item, after: $0.session, in: sessions).map(ObjectIdentifier.init) }
         }

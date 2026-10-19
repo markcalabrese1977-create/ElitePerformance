@@ -253,6 +253,20 @@ final class InsertDeloadWeekTests: XCTestCase {
         XCTAssertNotEqual(after.waveRaw, "deload")
     }
 
+    func test_apply_earlierOriginalDeload_doesNotBlockTheInsert() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let block = try makeSimpleBlock(ctx, weeks: 6, start: start)
+        // Weeks 2 and 5 were generated as deloads; the lifter inserts another at week 3.
+        for w in [2, 5] { for i in week(block, w).flatMap(\.items) { i.waveRaw = "deload" } }
+        try ctx.save()
+        let plan = Service.planInsertDeloadWeek(meso: block, context: ctx, now: plus(start, 14))
+        XCTAssertEqual(plan.weekIndex, 3)
+        XCTAssertNoThrow(try Service.insertDeloadWeek(plan, in: ctx), "the week-2 deload now chains to the inserted deload; that is not a problem")
+        XCTAssertEqual(block.totalWeeks, 7)
+        XCTAssertEqual(week(block, 3).first?.insertedDeload, true)
+    }
+
     func test_apply_fixedLoadExercise_holdsLastCompletedLoad() throws {
         let ctx = try makeContext()
         let profile = UserProfile()
