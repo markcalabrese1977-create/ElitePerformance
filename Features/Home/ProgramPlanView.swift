@@ -15,6 +15,9 @@ struct ProgramPlanView: View {
     @State private var sessionPendingDelete: Session?
     @State private var showDeleteConfirm = false
 
+    // Insert deload week
+    @State private var showInsertDeload = false
+
     // Add session (date-targeted)
     @State private var showAddSessionSheet = false
     @State private var newSessionDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
@@ -94,6 +97,17 @@ struct ProgramPlanView: View {
                         }
                         .padding(.top, 2)
                     }
+
+                    if activeMesoBlock != nil {
+                        Button {
+                            showInsertDeload = true
+                        } label: {
+                            Label("Insert deload week", systemImage: "arrow.down.to.line")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.top, 2)
+                    }
                 }
                 .padding(.vertical, 4)
             }
@@ -153,6 +167,11 @@ struct ProgramPlanView: View {
                 } label: {
                     Label("Add Session", systemImage: "plus")
                 }
+            }
+        }
+        .sheet(isPresented: $showInsertDeload) {
+            if let block = activeMesoBlock {
+                InsertDeloadFlow(meso: block, onFinish: { showInsertDeload = false })
             }
         }
         .sheet(isPresented: $showAddSessionSheet) {

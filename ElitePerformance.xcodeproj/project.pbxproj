@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DFAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */; };
+		DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */; };
 		DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */; };
 		DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */; };
 		DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */; };
@@ -126,6 +128,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlow.swift; sourceTree = "<group>"; };
+		DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlowTests.swift; sourceTree = "<group>"; };
 		DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadWeekTests.swift; sourceTree = "<group>"; };
 		DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertedDeloadMarkerTests.swift; sourceTree = "<group>"; };
 		DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekDayNumberingTests.swift; sourceTree = "<group>"; };
@@ -492,6 +496,7 @@
 			isa = PBXGroup;
 			children = (
 				D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */,
+				DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */,
 				D5E11680BAB57C164FE1C4EA /* ChangePrescriptionFlow.swift */,
 				D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */,
 				D5BEBEF62ED1ECD40035FE70 /* ProgramPickerView.swift */,
@@ -574,6 +579,7 @@
 				DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */,
 				DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */,
 				DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */,
+				DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
@@ -761,6 +767,7 @@
 				D5603BD82F9FF3DC00664B58 /* ProgressionEngine.swift in Sources */,
 				D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
+				DFAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift in Sources */,
 				D5E21680BAB57C164FE1C4EA /* ChangePrescriptionFlow.swift in Sources */,
 				D5E28481827B62430DFE68AB /* ReplaceExerciseFlow.swift in Sources */,
 				D5C48EFC2F1C0F6E00495C46 /* ExerciseHistorySheet.swift in Sources */,
@@ -840,6 +847,7 @@
 				DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */,
 				DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */,
 				DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */,
+				DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,
