@@ -768,6 +768,8 @@ extension SessionItemEditService {
         case sessionInProgress
         /// No week is entirely planned, untouched and dated today or later.
         case noEligibleWeek
+        /// The week asked for is started, logged, in the past, already a deload, or not in the block.
+        case weekNotEligible
         /// A session in or after the insertion week is already completed, so the weeks cannot shift cleanly.
         case laterSessionCompleted
         /// A shifted session would land on a day another session already occupies (see `collisions`).
@@ -844,9 +846,21 @@ extension SessionItemEditService {
 
     // MARK: Plan (no writes)
 
-    static func planInsertDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date()) -> InsertDeloadPlan {
+    /// Weeks a deload can go in front of: every session planned, untouched, dated today or later, and not a deload.
+    static func eligibleDeloadWeeks(meso: MesoBlock, now: Date = Date()) -> [Int] {
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        func isDeloadSession(_ s: Session) -> Bool {
+            s.insertedDeload == true || s.items.contains { $0.waveRaw?.lowercased() == deloadWaveRaw }
+        }
+        let byWeek = Dictionary(grouping: meso.sessions, by: \.weekIndex)
+        return byWeek.keys.sorted().filter { w in
+            byWeek[w]!.allSatisfy { SessionEditSafety.isSafeToModify($0) && $0.date >= startOfToday && !isDeloadSession($0) }
+        }
+    }
+
+    /// `week` nil = the first eligible week; an explicit week must be one of `eligibleDeloadWeeks`.
+    static func planInsertDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date(), week requested: Int? = nil) -> InsertDeloadPlan {
         let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: now)
         let all = meso.sessions
         let blockEndBefore = all.map(\.date).max()
 
@@ -859,14 +873,16 @@ extension SessionItemEditService {
         if meso.status != .active { return refused(.inactiveMeso) }
         if all.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
 
+        let eligible = eligibleDeloadWeeks(meso: meso, now: now)
         let byWeek = Dictionary(grouping: all, by: \.weekIndex)
-        // A week that is already a deload (generated or inserted) is never the one a deload goes in front of.
-        func isDeloadSession(_ s: Session) -> Bool {
-            s.insertedDeload == true || s.items.contains { $0.waveRaw?.lowercased() == deloadWaveRaw }
+        let chosen: Int?
+        if let requested {
+            guard eligible.contains(requested) else { return refused(.weekNotEligible, week: requested) }
+            chosen = requested
+        } else {
+            chosen = eligible.first
         }
-        guard let week = byWeek.keys.sorted().first(where: { w in
-            byWeek[w]!.allSatisfy { SessionEditSafety.isSafeToModify($0) && $0.date >= startOfToday && !isDeloadSession($0) }
-        }) else { return refused(.noEligibleWeek) }
+        guard let week = chosen else { return refused(.noEligibleWeek) }
 
         if all.contains(where: { $0.weekIndex >= week && $0.status != .planned }) {
             return refused(.laterSessionCompleted, week: week)
@@ -961,7 +977,9 @@ extension SessionItemEditService {
         defer { context.autosaveEnabled = priorAutosave }
 
         // The plan is a preview; trust only live state.
-        let live = planInsertDeloadWeek(meso: meso, context: context, now: plan.now)
+        let live = planInsertDeloadWeek(meso: meso, context: context, now: plan.now, week: plan.weekIndex)
+        // The week the preview showed is no longer eligible: the schedule moved under it.
+        if live.refusal == .weekNotEligible { throw InsertDeloadError.planStale }
         guard live.isApplicable, let week = live.weekIndex else {
             throw InsertDeloadError.refused(live.refusal ?? .noEligibleWeek)
         }
@@ -1218,7 +1236,8 @@ extension SessionItemEditService {
 
     // MARK: Plan (no writes)
 
-    static func planRemoveInsertedDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date()) -> RemoveDeloadPlan {
+    /// `week` nil = the first inserted week that can go; an explicit week must be an inserted one.
+    static func planRemoveInsertedDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date(), week requested: Int? = nil) -> RemoveDeloadPlan {
         let calendar = Calendar.current
         let all = meso.sessions
         let blockEndBefore = all.map(\.date).max()
@@ -1243,9 +1262,17 @@ extension SessionItemEditService {
             return nil
         }
         let weeks = insertedWeeks.keys.sorted()
-        guard let week = weeks.first(where: { blocker($0) == nil }) else {
+        let chosen: Int
+        if let requested {
+            guard insertedWeeks[requested] != nil else { return refused(.noInsertedDeload, week: requested) }
+            if let reason = blocker(requested) { return refused(reason, week: requested) }
+            chosen = requested
+        } else if let first = weeks.first(where: { blocker($0) == nil }) {
+            chosen = first
+        } else {
             return refused(blocker(weeks[0]) ?? .deloadStarted, week: weeks[0])
         }
+        let week = chosen
 
         let removals = (insertedWeeks[week] ?? []).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
         let moving = all.filter { $0.weekIndex > week }
@@ -1281,7 +1308,7 @@ extension SessionItemEditService {
         context.autosaveEnabled = false
         defer { context.autosaveEnabled = priorAutosave }
 
-        let live = planRemoveInsertedDeloadWeek(meso: meso, context: context, now: plan.now)
+        let live = planRemoveInsertedDeloadWeek(meso: meso, context: context, now: plan.now, week: plan.weekIndex)
         guard live.isApplicable, let week = live.weekIndex else {
             throw RemoveDeloadError.refused(live.refusal ?? .noInsertedDeload)
         }

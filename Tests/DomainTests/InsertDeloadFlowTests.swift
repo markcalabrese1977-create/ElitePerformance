@@ -114,4 +114,74 @@ final class InsertDeloadFlowTests: XCTestCase {
         XCTAssertEqual(block.totalWeeks, 11)
         XCTAssertEqual(block.sessions.filter { $0.insertedDeload == true }.count, 6)
     }
+
+    // MARK: - Week picker
+
+    func test_picker_listsEligibleWeeks_defaultsToFirst_andPreviewFollowsTheChoice() throws {
+        let (ctx, block) = try makeBlock()
+        let now = Calendar.current.startOfDay(for: week(block, 3).map(\.date).min()!)
+        var model = Model(meso: block, context: ctx, now: now)
+        XCTAssertEqual(model.eligibleWeeks.first, 3)
+        XCTAssertFalse(model.eligibleWeeks.contains(10), "the generated deload week isn't offered")
+        XCTAssertEqual(model.effectiveWeek, 3)
+        XCTAssertEqual(model.plan().weekIndex, 3)
+        XCTAssertTrue(model.weekLabel(3).hasPrefix("Week 3 · "))
+
+        model.week = 6
+        let plan = model.plan()
+        XCTAssertEqual(plan.weekIndex, 6)
+        XCTAssertEqual(Model.rows(plan).map(\.date), week(block, 6).map(\.date))
+        XCTAssertEqual(plan.shifted.count, block.sessions.filter { $0.weekIndex >= 6 }.count)
+
+        model.week = 1                                  // no longer eligible -> falls back to the first eligible
+        XCTAssertEqual(model.plan().weekIndex, 3)
+        XCTAssertEqual(Model.refusalText(.weekNotEligible).isEmpty, false)
+    }
+
+    // MARK: - Remove model
+
+    func test_removeModel_previewMoveTextEndDate_refusals_andApply() throws {
+        typealias RModel = RemoveDeloadModel
+        let (ctx, block) = try makeBlock()
+        let now = Calendar.current.startOfDay(for: week(block, 3).map(\.date).min()!)
+        let refused = RModel(meso: block, context: ctx, now: now).plan()
+        XCTAssertEqual(refused.refusal, .noInsertedDeload)
+        XCTAssertEqual(RModel.refusalText(.noInsertedDeload), "This block has no inserted deload week.")
+
+        let endBefore = block.sessions.map(\.date).max()!
+        XCTAssertEqual(Model(meso: block, context: ctx, now: now).apply(Model(meso: block, context: ctx, now: now).plan()).isSuccess, true)
+
+        let model = RModel(meso: block, context: ctx, now: now)
+        let plan = model.plan()
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.weekIndex, 3)
+        let moved = plan.shifted.count
+        XCTAssertEqual(RModel.moveText(count: moved), "\(moved) sessions move one week earlier")
+        XCTAssertEqual(RModel.moveText(count: 1), "1 session moves one week earlier")
+        XCTAssertEqual(RModel.removalText(plan), "6 deload sessions removed")
+        XCTAssertTrue(try XCTUnwrap(RModel.endDateText(plan)).hasPrefix("Block ends "))
+        XCTAssertEqual(plan.blockEndAfter, endBefore)
+        XCTAssertFalse(ctx.hasChanges, "previewing writes nothing")
+
+        // A logged deload session refuses, with copy, and writes nothing.
+        week(block, 3)[0].items[0].actualLoads = [40]
+        try ctx.save()
+        let before = try fingerprint(ctx)
+        let blocked = model.plan()
+        XCTAssertEqual(blocked.refusal, .deloadStarted)
+        guard case .failure(let failure) = model.apply(blocked) else { return XCTFail("refused plan must not apply") }
+        XCTAssertTrue(failure.message.hasSuffix("Nothing was changed."))
+        XCTAssertEqual(try fingerprint(ctx), before)
+
+        // Cleared, it applies.
+        week(block, 3)[0].items[0].actualLoads = [0]
+        try ctx.save()
+        guard case .success(let result) = model.apply(model.plan()) else { return XCTFail("should apply") }
+        XCTAssertEqual(result.deloadSessionsRemoved, 6)
+        XCTAssertEqual(block.totalWeeks, 10)
+    }
+}
+
+private extension Result {
+    var isSuccess: Bool { if case .success = self { return true } else { return false } }
 }

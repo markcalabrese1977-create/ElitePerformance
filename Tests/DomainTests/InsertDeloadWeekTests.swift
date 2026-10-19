@@ -435,4 +435,58 @@ final class InsertDeloadWeekTests: XCTestCase {
         try Service.insertDeloadWeek(Service.planInsertDeloadWeek(meso: b2, context: ctx2, now: start), in: ctx2)
         XCTAssertNil(MesoLifecycle.scheduledStartDate)
     }
+
+    // MARK: - Choosing the week
+
+    func test_explicitWeek_planFollowsTheChoice_andNilIsTheFirstEligible() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let block = try makeSimpleBlock(ctx, weeks: 5, start: start)
+        let now = plus(start, 7)                       // week 1 is past
+        XCTAssertEqual(Service.eligibleDeloadWeeks(meso: block, now: now), [2, 3, 4, 5])
+        XCTAssertEqual(Service.planInsertDeloadWeek(meso: block, context: ctx, now: now).weekIndex, 2)
+
+        let plan = Service.planInsertDeloadWeek(meso: block, context: ctx, now: now, week: 4)
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.weekIndex, 4)
+        XCTAssertEqual(plan.deloadSessions.map(\.date), week(block, 4).map(\.date))
+        XCTAssertEqual(plan.shifted.count, 2, "weeks 4 and 5 move")
+
+        try Service.insertDeloadWeek(plan, in: ctx)
+        XCTAssertEqual(block.totalWeeks, 6)
+        XCTAssertEqual(week(block, 4).first?.insertedDeload, true)
+        XCTAssertNil(week(block, 3).first?.insertedDeload, "earlier weeks untouched")
+        XCTAssertEqual(week(block, 3).first?.date, plus(start, 14))
+        XCTAssertEqual(week(block, 5).first?.date, plus(start, 28))
+        XCTAssertEqual(week(block, 6).first?.date, plus(start, 35))
+    }
+
+    func test_explicitIneligibleWeek_isRefusedWithAReason() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let block = try makeSimpleBlock(ctx, weeks: 4, start: start)
+        week(block, 3).first?.items[0].waveRaw = "deload"
+        week(block, 4).first?.items[0].actualLoads = [50]
+        let now = plus(start, 7)
+        for w in [1, 3, 4, 9] {
+            let plan = Service.planInsertDeloadWeek(meso: block, context: ctx, now: now, week: w)
+            XCTAssertEqual(plan.refusal, .weekNotEligible, "week \(w)")
+            XCTAssertFalse(plan.isApplicable)
+        }
+        XCTAssertEqual(Service.eligibleDeloadWeeks(meso: block, now: now), [2])
+    }
+
+    func test_removeCanTargetASpecificInsertedWeek() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let block = try makeSimpleBlock(ctx, weeks: 5, start: start)
+        try Service.insertDeloadWeek(Service.planInsertDeloadWeek(meso: block, context: ctx, now: start, week: 2), in: ctx)
+        try Service.insertDeloadWeek(Service.planInsertDeloadWeek(meso: block, context: ctx, now: start, week: 5), in: ctx)
+        XCTAssertEqual(block.sessions.filter { $0.insertedDeload == true }.map(\.weekIndex).sorted(), [2, 5])
+        let plan = Service.planRemoveInsertedDeloadWeek(meso: block, context: ctx, now: start, week: 5)
+        XCTAssertEqual(plan.weekIndex, 5)
+        try Service.removeInsertedDeloadWeek(plan, in: ctx)
+        XCTAssertEqual(block.sessions.filter { $0.insertedDeload == true }.map(\.weekIndex), [2])
+        XCTAssertEqual(Service.planRemoveInsertedDeloadWeek(meso: block, context: ctx, now: start, week: 3).refusal, .noInsertedDeload)
+    }
 }

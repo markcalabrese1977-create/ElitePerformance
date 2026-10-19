@@ -17,6 +17,8 @@ struct ProgramPlanView: View {
 
     // Insert deload week
     @State private var showInsertDeload = false
+    @State private var showRemoveDeload = false
+    @State private var removeDeloadWeek: Int?
 
     // Add session (date-targeted)
     @State private var showAddSessionSheet = false
@@ -128,6 +130,14 @@ struct ProgramPlanView: View {
                             Text("Week \(weekGroup.weekIndex)")
                                 .font(.headline)
 
+                            InsertedDeloadHeader(
+                                isInserted: weekGroup.sessions.contains(where: { $0.insertedDeload == true }),
+                                onRemove: {
+                                    removeDeloadWeek = weekGroup.weekIndex
+                                    showRemoveDeload = true
+                                }
+                            )
+
 
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -167,6 +177,11 @@ struct ProgramPlanView: View {
                 } label: {
                     Label("Add Session", systemImage: "plus")
                 }
+            }
+        }
+        .sheet(isPresented: $showRemoveDeload) {
+            if let block = activeMesoBlock {
+                RemoveDeloadFlow(meso: block, week: removeDeloadWeek, onFinish: { showRemoveDeload = false })
             }
         }
         .sheet(isPresented: $showInsertDeload) {
@@ -518,6 +533,26 @@ struct ProgramPlanView: View {
         case .planned:     return .secondary
         case .inProgress:  return .blue
         case .completed:   return .green
+        }
+    }
+}
+
+
+/// "Inserted deload" tag and its remove action, shown in the header of a week the lifter inserted.
+private struct InsertedDeloadHeader: View {
+    let isInserted: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        if isInserted {
+            Text("Inserted deload")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Button(action: onRemove) {
+                Label("Remove inserted deload week", systemImage: "minus.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
         }
     }
 }
