@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */; };
 		DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */; };
 		DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */; };
 		021FF3D2910B6E203105D029 /* JourneyHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */; };
@@ -125,6 +126,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadWeekTests.swift; sourceTree = "<group>"; };
 		DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertedDeloadMarkerTests.swift; sourceTree = "<group>"; };
 		DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekDayNumberingTests.swift; sourceTree = "<group>"; };
 		01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculatorTests.swift; sourceTree = "<group>"; };
@@ -571,6 +573,7 @@
 				D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */,
 				DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */,
 				DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */,
+				DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
@@ -836,6 +839,7 @@
 				D5E2E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift in Sources */,
 				DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */,
 				DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */,
+				DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,

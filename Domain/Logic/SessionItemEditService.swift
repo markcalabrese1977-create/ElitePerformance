@@ -747,3 +747,413 @@ extension SessionItemEditService {
         return d.map { "\(i.exerciseId) wk\(target.weekIndex): \($0)" }
     }
 }
+
+
+// MARK: - Insert a deload week
+
+/// Inserts a deload week into the active block at the first week that has not started, and pushes
+/// every later planned session back one week. Same shape as the other edits: a pure `plan…` for the
+/// preview, then `insertDeloadWeek`, which re-plans against live state, writes, verifies the
+/// carry-forward chains and the shifted schedule, and saves once (or restores every field and throws).
+extension SessionItemEditService {
+
+    /// Deload prescription: half the sets (at least one), the same rep range, 3-4 RIR.
+    static let deloadRIRRange = 3...4
+    static let deloadWaveRaw = "deload"
+
+    enum InsertDeloadRefusal: Equatable {
+        /// The block is not the active one.
+        case inactiveMeso
+        /// A session in the block is being trained.
+        case sessionInProgress
+        /// No week is entirely planned, untouched and dated today or later.
+        case noEligibleWeek
+        /// A session in or after the insertion week is already completed, so the weeks cannot shift cleanly.
+        case laterSessionCompleted
+        /// A shifted session would land on a day another session already occupies (see `collisions`).
+        case dateCollision
+    }
+
+    enum InsertDeloadError: Error, Equatable {
+        case refused(InsertDeloadRefusal)
+        /// The live schedule no longer matches the plan.
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    struct DeloadItemPlan {
+        let source: SessionItem
+        let order: Int
+        let exerciseId: String
+        let sets: Int
+        let repMin: Int
+        let repMax: Int
+        let load: Double
+        /// "2 x 8-10 @ RIR 3-4"
+        var prescription: String {
+            "\(sets) x \(repMin == repMax ? "\(repMin)" : "\(repMin)-\(repMax)") @ RIR \(deloadRIRRange.lowerBound)-\(deloadRIRRange.upperBound)"
+        }
+    }
+
+    struct DeloadSessionPlan {
+        let source: Session
+        let date: Date
+        let dayLabel: String?
+        let items: [DeloadItemPlan]
+    }
+
+    struct ShiftedSession {
+        let session: Session
+        let oldDate: Date
+        let newDate: Date
+        let oldWeek: Int
+        let newWeek: Int
+    }
+
+    struct DateCollision {
+        /// The session that would move.
+        let moved: Session
+        /// The session already on the destination day.
+        let occupant: Session
+        let date: Date
+    }
+
+    struct InsertDeloadPlan {
+        let meso: MesoBlock
+        let now: Date
+        /// The week the deload takes (the first week that has not started). Nil when refused for lack of one.
+        let weekIndex: Int?
+        let deloadSessions: [DeloadSessionPlan]
+        let shifted: [ShiftedSession]
+        let collisions: [DateCollision]
+        let refusal: InsertDeloadRefusal?
+        let blockEndBefore: Date?
+        let blockEndAfter: Date?
+
+        var isApplicable: Bool { refusal == nil && weekIndex != nil && !deloadSessions.isEmpty }
+    }
+
+    struct InsertDeloadResult {
+        let deloadSessionsCreated: Int
+        let sessionsShifted: Int
+        let summary: [String]
+    }
+
+    private struct ForcedInsertSaveFailure: Error {}
+
+    // MARK: Plan (no writes)
+
+    static func planInsertDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date()) -> InsertDeloadPlan {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        let all = meso.sessions
+        let blockEndBefore = all.map(\.date).max()
+
+        func refused(_ reason: InsertDeloadRefusal, week: Int? = nil, collisions: [DateCollision] = []) -> InsertDeloadPlan {
+            InsertDeloadPlan(meso: meso, now: now, weekIndex: week, deloadSessions: [], shifted: [],
+                             collisions: collisions, refusal: reason,
+                             blockEndBefore: blockEndBefore, blockEndAfter: blockEndBefore)
+        }
+
+        if meso.status != .active { return refused(.inactiveMeso) }
+        if all.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
+
+        let byWeek = Dictionary(grouping: all, by: \.weekIndex)
+        guard let week = byWeek.keys.sorted().first(where: { w in
+            byWeek[w]!.allSatisfy { SessionEditSafety.isSafeToModify($0) && $0.date >= startOfToday }
+        }) else { return refused(.noEligibleWeek) }
+
+        if all.contains(where: { $0.weekIndex >= week && $0.status != .planned }) {
+            return refused(.laterSessionCompleted, week: week)
+        }
+
+        // Every planned session from the insertion week on moves one week later.
+        let moving = all.filter { $0.weekIndex >= week }
+            .sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        let shifted: [ShiftedSession] = moving.map { s in
+            ShiftedSession(session: s, oldDate: s.date,
+                           newDate: calendar.date(byAdding: .day, value: 7, to: s.date) ?? s.date,
+                           oldWeek: s.weekIndex, newWeek: s.weekIndex + 1)
+        }
+
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let collisions = shiftCollisions(shifted, among: allSessions, calendar: calendar)
+        if !collisions.isEmpty { return refused(.dateCollision, week: week, collisions: collisions) }
+
+        // The deload week: W's sessions, same dates, half the volume.
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        let increment = profile?.minLoadIncrement ?? 2.5
+        let sources = (byWeek[week] ?? []).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        let deloadSessions: [DeloadSessionPlan] = sources.map { s in
+            let items: [DeloadItemPlan] = s.items.sorted { $0.order < $1.order }.map { i in
+                let repMin = i.repMin ?? i.targetReps
+                let repMax = i.repMax ?? i.targetReps
+                let load: Double
+                if ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: custom) {
+                    load = 0
+                } else if UserProfile.isProgressionExempt(exerciseId: i.exerciseId, profile: profile) {
+                    load = lastCompletedLoad(for: i.exerciseId, in: allSessions) ?? 0
+                } else {
+                    load = HistorySeedLoad.load(
+                        for: i.exerciseId, goalReps: repMin, targetRIR: deloadRIRRange.upperBound, in: allSessions,
+                        loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom,
+                        referenceDate: now
+                    ) ?? 0
+                }
+                return DeloadItemPlan(source: i, order: i.order, exerciseId: i.exerciseId,
+                                      sets: max(1, (i.targetSets + 1) / 2), repMin: repMin, repMax: repMax, load: load)
+            }
+            return DeloadSessionPlan(source: s, date: s.date, dayLabel: s.dayLabel, items: items)
+        }
+
+        let blockEndAfter = (all.map(\.date) + shifted.map(\.newDate)).max()
+        return InsertDeloadPlan(
+            meso: meso, now: now, weekIndex: week, deloadSessions: deloadSessions, shifted: shifted,
+            collisions: [], refusal: nil, blockEndBefore: blockEndBefore,
+            blockEndAfter: moving.isEmpty ? blockEndBefore : blockEndAfter
+        )
+    }
+
+    /// Sessions already on a day a moving session is headed to (other than the moving sessions themselves).
+    private static func shiftCollisions(_ shifted: [ShiftedSession], among all: [Session], calendar: Calendar) -> [DateCollision] {
+        let movingIDs = Set(shifted.map { $0.session.persistentModelID })
+        let occupied = Dictionary(grouping: all.filter { !movingIDs.contains($0.persistentModelID) },
+                                  by: { calendar.startOfDay(for: $0.date) })
+        var out: [DateCollision] = []
+        for move in shifted {
+            for other in occupied[calendar.startOfDay(for: move.newDate)] ?? [] {
+                out.append(DateCollision(moved: move.session, occupant: other, date: move.newDate))
+            }
+        }
+        return out
+    }
+
+    /// The most recent logged working load of a fixed-load exercise (deload items excluded), if any.
+    private static func lastCompletedLoad(for exerciseId: String, in sessions: [Session]) -> Double? {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        for s in sessions.filter({ $0.status == .completed }).sorted(by: { $0.date > $1.date }) {
+            guard let item = s.items.first(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
+                    && $0.waveRaw?.lowercased() != deloadWaveRaw
+            }) else { continue }
+            if let load = item.actualLoads.last(where: { $0 > 0 }) { return load }
+        }
+        return nil
+    }
+
+    // MARK: Apply
+
+    @discardableResult
+    static func insertDeloadWeek(_ plan: InsertDeloadPlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> InsertDeloadResult {
+        guard plan.isApplicable, plan.weekIndex != nil else {
+            throw InsertDeloadError.refused(plan.refusal ?? .noEligibleWeek)
+        }
+        let meso = plan.meso
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        // The plan is a preview; trust only live state.
+        let live = planInsertDeloadWeek(meso: meso, context: context, now: plan.now)
+        guard live.isApplicable, let week = live.weekIndex else {
+            throw InsertDeloadError.refused(live.refusal ?? .noEligibleWeek)
+        }
+        guard week == plan.weekIndex,
+              live.shifted.map({ $0.session.persistentModelID }) == plan.shifted.map({ $0.session.persistentModelID }),
+              live.deloadSessions.map({ $0.source.persistentModelID }) == plan.deloadSessions.map({ $0.source.persistentModelID })
+        else { throw InsertDeloadError.planStale }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let calendar = Calendar.current
+
+        // Carry-forward chains before: every item already in the block, and where its result flows.
+        func everySession() -> [Session] {
+            var seen = Set<PersistentIdentifier>()
+            return ((try? context.fetch(FetchDescriptor<Session>())) ?? []).filter { seen.insert($0.persistentModelID).inserted }
+                + meso.sessions.filter { seen.insert($0.persistentModelID).inserted }
+        }
+        let chainSources: [(session: Session, item: SessionItem)] =
+            meso.sessions.sorted { $0.date < $1.date }.flatMap { s in s.items.map { (s, $0) } }
+        func chainTargets(_ sessions: [Session]) -> [ObjectIdentifier?] {
+            chainSources.map { PlanMemoryEngine.nextTargetItem(for: $0.item, after: $0.session, in: sessions).map(ObjectIdentifier.init) }
+        }
+        let chainsBefore = chainTargets(everySession())
+        let weeksBefore = Set(meso.sessions.map(\.weekIndex))
+
+        // Everything this method overwrites on live objects, so a failure can put it back by hand
+        // (rollback() drops inserts but does not revert property edits).
+        struct SessionRestore {
+            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+        }
+        let otherSessions = meso.sessions.filter { s in !live.shifted.contains { $0.session === s } }
+        let restores = (otherSessions + live.shifted.map(\.session)).map(SessionRestore.init)
+        let totalWeeksBefore = meso.totalWeeks
+        let mesoSessionsBefore = meso.sessions
+        var created: [Session] = []
+        func abandon() {
+            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            meso.totalWeeks = totalWeeksBefore
+            meso.sessions = mesoSessionsBefore
+            for s in created { context.delete(s) }
+            context.rollback()
+        }
+
+        // 1. The deload sessions, on the insertion week's own dates.
+        for dp in live.deloadSessions {
+            let items: [SessionItem] = dp.items.map { ip in
+                let src = ip.source
+                let n = ip.sets
+                let item = SessionItem(
+                    order: ip.order, exerciseId: ip.exerciseId,
+                    exerciseNameSnapshot: src.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: ip.exerciseId),
+                    targetReps: ip.repMin, targetSets: n, targetRIR: deloadRIRRange.upperBound, suggestedLoad: ip.load,
+                    waveRaw: deloadWaveRaw, priorityRaw: src.priorityRaw,
+                    setMin: src.setMin.map { min($0, n) }, setMax: src.setMax.map { max($0, n) },
+                    repMin: ip.repMin, repMax: ip.repMax,
+                    targetRIRMin: deloadRIRRange.lowerBound, targetRIRMax: deloadRIRRange.upperBound,
+                    intensifierRaw: IntensifierType.none.rawValue,
+                    plannedRepsBySet: Array(repeating: ip.repMin, count: n),
+                    plannedLoadsBySet: Array(repeating: ip.load, count: n),
+                    plannedRIRsBySet: Array(repeating: deloadRIRRange.upperBound, count: n),
+                    actualReps: Array(repeating: 0, count: n),
+                    actualLoads: Array(repeating: 0.0, count: n),
+                    actualRIRs: Array(repeating: 0, count: n),
+                    usedRestPauseFlags: Array(repeating: false, count: n),
+                    restPausePatternsBySet: Array(repeating: "", count: n),
+                    dropSetPatternsBySet: Array(repeating: "", count: n),
+                    setFeedbackBySet: Array(repeating: "", count: n),
+                    pumpRatingsBySet: Array(repeating: 0, count: n)
+                )
+                return item
+            }
+            let session = Session(
+                date: dp.date, status: .planned,
+                sessionNotes: "\(dp.dayLabel ?? "Session") · Deload wave (inserted)",
+                weekIndex: week, dayLabel: dp.dayLabel, items: items, programIndex: dp.source.programIndex
+            )
+            session.insertedDeload = true
+            session.meso = meso
+            context.insert(session)
+            meso.sessions.append(session)
+            created.append(session)
+        }
+
+        // 2. Everything from that week on moves a week later.
+        for move in live.shifted {
+            move.session.date = move.newDate
+            move.session.weekInMeso = move.newWeek
+        }
+        if let total = totalWeeksBefore { meso.totalWeeks = total + 1 }
+
+        // 3. programIndex follows date order across the new and moved sessions.
+        let affected = (created + live.shifted.map(\.session))
+        var renumbered = false
+        if let base = (live.shifted.map(\.session) + live.deloadSessions.map(\.source)).compactMap(\.programIndex).min(),
+           affected.allSatisfy({ $0.programIndex != nil }) {
+            let order = affected.sorted {
+                ($0.date, $0.programIndex ?? 0, $0.insertedDeload == true ? 0 : 1)
+                    < ($1.date, $1.programIndex ?? 0, $1.insertedDeload == true ? 0 : 1)
+            }
+            for (offset, s) in order.enumerated() { s.programIndex = base + offset }
+            renumbered = true
+        }
+
+        // 4. Verify before anything is saved.
+        var problems: [String] = []
+        func check<T: Equatable>(_ what: String, _ expected: T, _ actual: T) {
+            if expected != actual { problems.append("\(what): expected \(expected), found \(actual)") }
+        }
+        let after = everySession()
+
+        for (dp, s) in zip(live.deloadSessions, created) {
+            let tag = "\(isoDay(dp.date)) \(dp.dayLabel ?? "?")"
+            check("\(tag) date", dp.date, s.date)
+            check("\(tag) week", week, s.weekIndex)
+            check("\(tag) insertedDeload", true, s.insertedDeload == true)
+            check("\(tag) status", SessionStatus.planned, s.status)
+            check("\(tag) item count", dp.items.count, s.items.count)
+            for (ip, i) in zip(dp.items, s.items.sorted { $0.order < $1.order }) {
+                let t = "\(tag) \(ip.exerciseId)"
+                check("\(t) wave", deloadWaveRaw, i.waveRaw?.lowercased() ?? "")
+                check("\(t) sets", ip.sets, i.targetSets)
+                check("\(t) reps", [ip.repMin, ip.repMax, ip.repMin], [i.repMin ?? -1, i.repMax ?? -1, i.targetReps])
+                check("\(t) RIR", [3, 4, 4], [i.targetRIRMin ?? -1, i.targetRIRMax ?? -1, i.targetRIR])
+                check("\(t) load", ip.load, i.suggestedLoad)
+                check("\(t) planned loads", Array(repeating: ip.load, count: ip.sets), i.plannedLoadsBySet)
+                check("\(t) array sizes", [ip.sets, ip.sets, ip.sets, ip.sets, ip.sets, ip.sets],
+                      [i.plannedRepsBySet.count, i.plannedRIRsBySet.count, i.actualLoads.count,
+                       i.actualReps.count, i.actualRIRs.count, i.setFeedbackBySet.count])
+                if let lo = i.setMin, lo > ip.sets { problems.append("\(t): setMin \(lo) above sets \(ip.sets)") }
+                if let hi = i.setMax, hi < ip.sets { problems.append("\(t): setMax \(hi) below sets \(ip.sets)") }
+            }
+        }
+        for move in live.shifted {
+            check("\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?") new date", move.newDate, move.session.date)
+            check("\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?") new week", move.newWeek, move.session.weekIndex)
+        }
+        // Weeks: the old set, with the inserted week added and the later ones moved up by one.
+        let expectedWeeks = Set(weeksBefore.filter { $0 < week } + [week] + weeksBefore.filter { $0 >= week }.map { $0 + 1 })
+        check("weeks", expectedWeeks.sorted(), Set(meso.sessions.map(\.weekIndex)).sorted())
+        if let before = totalWeeksBefore { check("totalWeeks", before + 1, meso.totalWeeks ?? -1) }
+        // Nothing that was not a planned session at or after the insertion week was touched.
+        for r in restores where !live.shifted.contains(where: { $0.session === r.session }) {
+            if r.session.date != r.date || r.session.weekInMeso != r.week || r.session.programIndex != r.programIndex {
+                problems.append("\(isoDay(r.date)) \(r.session.dayLabel ?? "?"): an untouched session changed")
+            }
+        }
+        // Dates: no moved or new session shares a day with anyone else's.
+        for c in shiftCollisions(live.shifted, among: after, calendar: calendar).filter({ c in !created.contains { $0 === c.occupant } }) {
+            problems.append("date collision on \(isoDay(c.date)): \(c.moved.dayLabel ?? "?") vs \(c.occupant.dayLabel ?? "?")")
+        }
+        if renumbered {
+            let indices = affected.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }.compactMap(\.programIndex)
+            check("programIndex contiguous in date order", Array(indices.first.map { $0..<($0 + indices.count) } ?? 0..<0), indices)
+        }
+        // Chains: every existing result still flows to the same target, and never into a deload item.
+        let insertedItems = Set(created.flatMap(\.items).map(ObjectIdentifier.init))
+        let chainsAfter = chainTargets(after)
+        for (idx, (b, a)) in zip(chainsBefore, chainsAfter).enumerated() {
+            let src = chainSources[idx]
+            if b != a {
+                problems.append("carry-forward chain changed for \(src.item.exerciseId) \(isoDay(src.session.date)) \(src.session.dayLabel ?? "?")")
+            } else if let a, insertedItems.contains(a) {
+                problems.append("carry-forward lands on an inserted deload item for \(src.item.exerciseId)")
+            }
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw InsertDeloadError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedInsertSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw InsertDeloadError.saveFailed("\(error)")
+        }
+
+        // The saved schedule moved a week, so a scheduled next block moves with it.
+        if let next = MesoLifecycle.scheduledStartDate,
+           let moved = calendar.date(byAdding: .day, value: 7, to: next) {
+            MesoLifecycle.scheduleNextMeso(on: moved)
+        }
+
+        var summary = live.deloadSessions.map { dp in
+            "SessionItemEdit: insert deload wk\(week) \(isoDay(dp.date)) \(dp.dayLabel ?? "?") "
+                + dp.items.map { "\($0.exerciseId) \($0.prescription) @ \($0.load)" }.joined(separator: "; ")
+        }
+        summary.append("SessionItemEdit: \(live.shifted.count) sessions moved one week later")
+        summary.forEach { print($0) }
+        return InsertDeloadResult(deloadSessionsCreated: created.count, sessionsShifted: live.shifted.count, summary: summary)
+    }
+}
