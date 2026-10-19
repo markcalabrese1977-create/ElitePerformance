@@ -34,7 +34,7 @@ struct InsertDeloadModel {
         switch refusal {
         case .inactiveMeso: return "This block isn't the active one."
         case .sessionInProgress: return "A session in this block is in progress. Finish it, then try again."
-        case .noEligibleWeek: return "Every remaining week has already started or has logged work, so there's no clean week to insert before."
+        case .noEligibleWeek: return "Every remaining week has already started, has logged work, or is already a deload, so there's no clean week to insert before."
         case .laterSessionCompleted: return "A later week already has a completed session, so the weeks can't shift cleanly."
         case .dateCollision: return "Moving the schedule a week would put sessions on days that are already taken."
         }

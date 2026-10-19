@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DF56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */; };
 		DFAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */; };
 		DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */; };
 		DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */; };
@@ -128,6 +129,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoveInsertedDeloadTests.swift; sourceTree = "<group>"; };
 		DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlow.swift; sourceTree = "<group>"; };
 		DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlowTests.swift; sourceTree = "<group>"; };
 		DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadWeekTests.swift; sourceTree = "<group>"; };
@@ -580,6 +582,7 @@
 				DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */,
 				DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */,
 				DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */,
+				DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
@@ -848,6 +851,7 @@
 				DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */,
 				DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */,
 				DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */,
+				DF56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,

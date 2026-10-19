@@ -860,8 +860,12 @@ extension SessionItemEditService {
         if all.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
 
         let byWeek = Dictionary(grouping: all, by: \.weekIndex)
+        // A week that is already a deload (generated or inserted) is never the one a deload goes in front of.
+        func isDeloadSession(_ s: Session) -> Bool {
+            s.insertedDeload == true || s.items.contains { $0.waveRaw?.lowercased() == deloadWaveRaw }
+        }
         guard let week = byWeek.keys.sorted().first(where: { w in
-            byWeek[w]!.allSatisfy { SessionEditSafety.isSafeToModify($0) && $0.date >= startOfToday }
+            byWeek[w]!.allSatisfy { SessionEditSafety.isSafeToModify($0) && $0.date >= startOfToday && !isDeloadSession($0) }
         }) else { return refused(.noEligibleWeek) }
 
         if all.contains(where: { $0.weekIndex >= week && $0.status != .planned }) {
@@ -1158,5 +1162,251 @@ extension SessionItemEditService {
         summary.append("SessionItemEdit: \(live.shifted.count) sessions moved one week later")
         summary.forEach { print($0) }
         return InsertDeloadResult(deloadSessionsCreated: created.count, sessionsShifted: live.shifted.count, summary: summary)
+    }
+}
+
+// MARK: - Remove an inserted deload week
+
+/// The inverse of `insertDeloadWeek`: deletes the sessions that carry `insertedDeload == true` for one
+/// week and pulls every later planned session back a week. Generated deloads (no marker) are never touched.
+extension SessionItemEditService {
+
+    enum RemoveDeloadRefusal: Equatable {
+        case inactiveMeso
+        case sessionInProgress
+        /// The block has no inserted deload week.
+        case noInsertedDeload
+        /// An inserted deload session is started, logged or completed — it stays.
+        case deloadStarted
+        /// Something other than the inserted deload sits in that week, so removing it would merge weeks.
+        case mixedWeek
+        /// A session after the deload is already completed, so the weeks cannot shift back cleanly.
+        case laterSessionCompleted
+        /// A shifted session would land on a day another session already occupies.
+        case dateCollision
+    }
+
+    enum RemoveDeloadError: Error, Equatable {
+        case refused(RemoveDeloadRefusal)
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    struct RemoveDeloadPlan {
+        let meso: MesoBlock
+        let now: Date
+        /// The inserted week that goes. Nil when there is none.
+        let weekIndex: Int?
+        let removals: [Session]
+        let shifted: [ShiftedSession]
+        let collisions: [DateCollision]
+        let refusal: RemoveDeloadRefusal?
+        let blockEndBefore: Date?
+        let blockEndAfter: Date?
+
+        var isApplicable: Bool { refusal == nil && weekIndex != nil && !removals.isEmpty }
+    }
+
+    struct RemoveDeloadResult {
+        let deloadSessionsRemoved: Int
+        let sessionsShifted: Int
+        let summary: [String]
+    }
+
+    private struct ForcedRemoveSaveFailure: Error {}
+
+    // MARK: Plan (no writes)
+
+    static func planRemoveInsertedDeloadWeek(meso: MesoBlock, context: ModelContext, now: Date = Date()) -> RemoveDeloadPlan {
+        let calendar = Calendar.current
+        let all = meso.sessions
+        let blockEndBefore = all.map(\.date).max()
+
+        func refused(_ reason: RemoveDeloadRefusal, week: Int? = nil, collisions: [DateCollision] = []) -> RemoveDeloadPlan {
+            RemoveDeloadPlan(meso: meso, now: now, weekIndex: week, removals: [], shifted: [], collisions: collisions,
+                             refusal: reason, blockEndBefore: blockEndBefore, blockEndAfter: blockEndBefore)
+        }
+
+        if meso.status != .active { return refused(.inactiveMeso) }
+        if all.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
+
+        let insertedWeeks = Dictionary(grouping: all.filter { $0.insertedDeload == true }, by: \.weekIndex)
+        guard !insertedWeeks.isEmpty else { return refused(.noInsertedDeload) }
+
+        // The first inserted week that can go; if none can, report why the first one cannot.
+        func blocker(_ week: Int) -> RemoveDeloadRefusal? {
+            let inserted = insertedWeeks[week] ?? []
+            if inserted.contains(where: { !SessionEditSafety.isSafeToModify($0) }) { return .deloadStarted }
+            if all.contains(where: { $0.weekIndex == week && $0.insertedDeload != true }) { return .mixedWeek }
+            if all.contains(where: { $0.weekIndex > week && $0.status != .planned }) { return .laterSessionCompleted }
+            return nil
+        }
+        let weeks = insertedWeeks.keys.sorted()
+        guard let week = weeks.first(where: { blocker($0) == nil }) else {
+            return refused(blocker(weeks[0]) ?? .deloadStarted, week: weeks[0])
+        }
+
+        let removals = (insertedWeeks[week] ?? []).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        let moving = all.filter { $0.weekIndex > week }
+            .sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        let shifted: [ShiftedSession] = moving.map { s in
+            ShiftedSession(session: s, oldDate: s.date,
+                           newDate: calendar.date(byAdding: .day, value: -7, to: s.date) ?? s.date,
+                           oldWeek: s.weekIndex, newWeek: s.weekIndex - 1)
+        }
+
+        let removedIDs = Set(removals.map(\.persistentModelID))
+        let remaining = ((try? context.fetch(FetchDescriptor<Session>())) ?? []).filter { !removedIDs.contains($0.persistentModelID) }
+        let collisions = shiftCollisions(shifted, among: remaining, calendar: calendar)
+        if !collisions.isEmpty { return refused(.dateCollision, week: week, collisions: collisions) }
+
+        let survivors = all.filter { !removedIDs.contains($0.persistentModelID) }
+        let shiftedByID = Dictionary(uniqueKeysWithValues: shifted.map { ($0.session.persistentModelID, $0.newDate) })
+        let blockEndAfter = survivors.map { shiftedByID[$0.persistentModelID] ?? $0.date }.max()
+        return RemoveDeloadPlan(meso: meso, now: now, weekIndex: week, removals: removals, shifted: shifted,
+                                collisions: [], refusal: nil, blockEndBefore: blockEndBefore, blockEndAfter: blockEndAfter)
+    }
+
+    // MARK: Apply
+
+    @discardableResult
+    static func removeInsertedDeloadWeek(_ plan: RemoveDeloadPlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> RemoveDeloadResult {
+        guard plan.isApplicable, plan.weekIndex != nil else {
+            throw RemoveDeloadError.refused(plan.refusal ?? .noInsertedDeload)
+        }
+        let meso = plan.meso
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let live = planRemoveInsertedDeloadWeek(meso: meso, context: context, now: plan.now)
+        guard live.isApplicable, let week = live.weekIndex else {
+            throw RemoveDeloadError.refused(live.refusal ?? .noInsertedDeload)
+        }
+        guard week == plan.weekIndex,
+              live.removals.map({ $0.persistentModelID }) == plan.removals.map({ $0.persistentModelID }),
+              live.shifted.map({ $0.session.persistentModelID }) == plan.shifted.map({ $0.session.persistentModelID })
+        else { throw RemoveDeloadError.planStale }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let calendar = Calendar.current
+        let removedIDs = Set(live.removals.map(\.persistentModelID))
+
+        func survivingSessions() -> [Session] {
+            var seen = Set<PersistentIdentifier>()
+            return (((try? context.fetch(FetchDescriptor<Session>())) ?? []) + meso.sessions)
+                .filter { !removedIDs.contains($0.persistentModelID) && seen.insert($0.persistentModelID).inserted }
+        }
+        let chainSources: [(session: Session, item: SessionItem)] =
+            meso.sessions.sorted { $0.date < $1.date }.filter { !removedIDs.contains($0.persistentModelID) }
+                .flatMap { s in s.items.filter { $0.waveRaw?.lowercased() != deloadWaveRaw }.map { (s, $0) } }
+        func chainTargets(_ sessions: [Session]) -> [ObjectIdentifier?] {
+            chainSources.map { PlanMemoryEngine.nextTargetItem(for: $0.item, after: $0.session, in: sessions).map(ObjectIdentifier.init) }
+        }
+        let chainsBefore = chainTargets(survivingSessions())
+        let weeksBefore = Set(meso.sessions.map(\.weekIndex))
+        let insertedBefore = meso.sessions.filter { $0.insertedDeload == true }.count
+
+        struct SessionRestore {
+            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+        }
+        let untouched = meso.sessions.filter { s in
+            !removedIDs.contains(s.persistentModelID) && !live.shifted.contains { $0.session === s }
+        }
+        let restores = (untouched + live.shifted.map(\.session)).map(SessionRestore.init)
+        let totalWeeksBefore = meso.totalWeeks
+        let mesoSessionsBefore = meso.sessions
+        func abandon() {
+            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            meso.totalWeeks = totalWeeksBefore
+            meso.sessions = mesoSessionsBefore
+            context.rollback()
+        }
+
+        // programIndex base: the lowest index in the removed + moved block, taken before anything moves.
+        let base = (live.removals + live.shifted.map(\.session)).compactMap(\.programIndex).min()
+        let canRenumber = live.shifted.allSatisfy { $0.session.programIndex != nil }
+
+        // 1. Delete the inserted sessions.
+        meso.sessions.removeAll { removedIDs.contains($0.persistentModelID) }
+        for s in live.removals { context.delete(s) }
+
+        // 2. Later sessions come back a week.
+        for move in live.shifted {
+            move.session.date = move.newDate
+            move.session.weekInMeso = move.newWeek
+        }
+        if let total = totalWeeksBefore { meso.totalWeeks = max(1, total - 1) }
+
+        // 3. programIndex follows date order across the moved sessions.
+        var renumbered = false
+        if let base, canRenumber {
+            let order = live.shifted.map(\.session).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+            for (offset, s) in order.enumerated() { s.programIndex = base + offset }
+            renumbered = true
+        }
+
+        // 4. Verify before anything is saved.
+        var problems: [String] = []
+        func check<T: Equatable>(_ what: String, _ expected: T, _ actual: T) {
+            if expected != actual { problems.append("\(what): expected \(expected), found \(actual)") }
+        }
+        let after = survivingSessions()
+
+        check("inserted sessions left in the block", 0, meso.sessions.filter { removedIDs.contains($0.persistentModelID) }.count)
+        check("inserted sessions remaining", insertedBefore - live.removals.count, meso.sessions.filter { $0.insertedDeload == true }.count)
+        for move in live.shifted {
+            check("\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?") new date", move.newDate, move.session.date)
+            check("\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?") new week", move.newWeek, move.session.weekIndex)
+        }
+        let expectedWeeks = Set(weeksBefore.filter { $0 < week } + weeksBefore.filter { $0 > week }.map { $0 - 1 })
+        check("weeks", expectedWeeks.sorted(), Set(meso.sessions.map(\.weekIndex)).sorted())
+        if let before = totalWeeksBefore { check("totalWeeks", max(1, before - 1), meso.totalWeeks ?? -1) }
+        for r in restores where !live.shifted.contains(where: { $0.session === r.session }) {
+            if r.session.date != r.date || r.session.weekInMeso != r.week || r.session.programIndex != r.programIndex {
+                problems.append("\(isoDay(r.date)) \(r.session.dayLabel ?? "?"): an untouched session changed")
+            }
+        }
+        for c in shiftCollisions(live.shifted, among: after, calendar: calendar) {
+            problems.append("date collision on \(isoDay(c.date)): \(c.moved.dayLabel ?? "?") vs \(c.occupant.dayLabel ?? "?")")
+        }
+        if renumbered {
+            let indices = live.shifted.map(\.session).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }.compactMap(\.programIndex)
+            check("programIndex contiguous in date order", Array(indices.first.map { $0..<($0 + indices.count) } ?? 0..<0), indices)
+        }
+        for (idx, (b, a)) in zip(chainsBefore, chainTargets(after)).enumerated() where b != a {
+            let src = chainSources[idx]
+            problems.append("carry-forward chain changed for \(src.item.exerciseId) \(isoDay(src.session.date)) \(src.session.dayLabel ?? "?")")
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw RemoveDeloadError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedRemoveSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw RemoveDeloadError.saveFailed("\(error)")
+        }
+
+        if let next = MesoLifecycle.scheduledStartDate,
+           let moved = calendar.date(byAdding: .day, value: -7, to: next) {
+            MesoLifecycle.scheduleNextMeso(on: moved)
+        }
+
+        var summary = live.removals.map { "SessionItemEdit: removed inserted deload wk\(week) \(isoDay($0.date)) \($0.dayLabel ?? "?")" }
+        summary.append("SessionItemEdit: \(live.shifted.count) sessions moved one week earlier")
+        summary.forEach { print($0) }
+        return RemoveDeloadResult(deloadSessionsRemoved: live.removals.count, sessionsShifted: live.shifted.count, summary: summary)
     }
 }
