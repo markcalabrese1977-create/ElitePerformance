@@ -128,4 +128,51 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         XCTAssertTrue(failure.message.contains("Nothing was changed"))
         XCTAssertTrue(plan.targets.allSatisfy { $0.item.targetSets == $0.before.sets })
     }
+
+    // MARK: P3: labels match, and only a load edit freezes carry-forward
+
+    private func bandItem(sets: Int, setMin: Int?, setMax: Int?) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: sets, targetRIR: 2, suggestedLoad: 100,
+                            setMin: setMin, setMax: setMax)
+        i.plannedLoadsBySet = Array(repeating: 100.0, count: sets)
+        return i
+    }
+
+    func test_setsStepper_widensTheSetBand_neverNarrowsIt() {
+        let i = bandItem(sets: 3, setMin: 3, setMax: 4)
+        PlanStepperEdits.setSets(i, to: 4)
+        XCTAssertEqual(i.setMin, 3); XCTAssertEqual(i.setMax, 4, "inside the band: unchanged")
+        PlanStepperEdits.setSets(i, to: 5)
+        XCTAssertEqual(i.setMin, 3); XCTAssertEqual(i.setMax, 5, "above the band: setMax follows")
+        PlanStepperEdits.setSets(i, to: 2)
+        XCTAssertEqual(i.setMin, 2, "below the band: setMin follows"); XCTAssertEqual(i.setMax, 5, "setMax never narrows")
+        PlanStepperEdits.setSets(i, to: 4)
+        XCTAssertEqual(i.setMin, 2); XCTAssertEqual(i.setMax, 5)
+
+        let noBand = bandItem(sets: 3, setMin: nil, setMax: nil)
+        PlanStepperEdits.setSets(noBand, to: 5)
+        XCTAssertNil(noBand.setMin); XCTAssertNil(noBand.setMax, "no band stays no band")
+    }
+
+    func test_rirStepper_collapsesTheRangeToTheChosenNumber() {
+        let i = bandItem(sets: 3, setMin: nil, setMax: nil)
+        i.targetRIRMin = 2; i.targetRIRMax = 3; i.targetRIR = 3
+        PlanStepperEdits.setRIR(i, to: 1)
+        XCTAssertEqual(i.targetRIR, 1); XCTAssertEqual(i.targetRIRMin, 1); XCTAssertEqual(i.targetRIRMax, 1)
+        XCTAssertFalse(i.planEdited)
+    }
+
+    func test_onlyALoadEditSetsPlanEdited_perSetRepsAndRIRDoNot() {
+        let i = bandItem(sets: 3, setMin: nil, setMax: nil)
+        i.plannedRepsBySet = [8, 8, 8]; i.plannedRIRsBySet = [2, 2, 2]
+        PlanStepperEdits.setPlannedReps(i, at: 1, to: 10)
+        PlanStepperEdits.setPlannedRIR(i, at: 2, to: 1)
+        PlanStepperEdits.setPlannedReps(i, at: 4, to: 6)      // grows the array like the field does
+        XCTAssertEqual(i.plannedRepsBySet, [8, 10, 8, 0, 6]); XCTAssertEqual(i.plannedRIRsBySet, [2, 2, 1])
+        XCTAssertFalse(i.planEdited, "per-set reps and RIR edits leave carry-forward free to write loads")
+
+        PlanStepperEdits.setPlannedLoad(i, at: 1, to: 105)
+        XCTAssertEqual(i.plannedLoadsBySet, [100, 105, 100])
+        XCTAssertTrue(i.planEdited, "a hand-set load is protected")
+    }
 }

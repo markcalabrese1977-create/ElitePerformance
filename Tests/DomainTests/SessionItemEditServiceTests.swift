@@ -741,4 +741,32 @@ final class SessionItemEditServiceTests: XCTestCase {
         XCTAssertGreaterThan(next.item.suggestedLoad, 0, "the result reaches the resized next A")
         XCTAssertEqual(next.item.plannedLoadsBySet.count, next.item.targetSets, "carried loads follow the new set count")
     }
+
+    func test_change_setBand_widensToIncludeTheNewCount_andNeverNarrows() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let days = sessions(block).filter { $0.dayLabel == p.day && item($0, p.x) != nil }
+        let a = try XCTUnwrap(item(days[0], p.x)), b = try XCTUnwrap(item(days[1], p.x)), c = try XCTUnwrap(item(days[2], p.x))
+        for (it, sets) in [(a, 3), (b, 4), (c, 3)] {
+            it.targetSets = sets; it.plannedLoadsBySet = Array(repeating: 50.0, count: sets)
+        }
+        a.setMin = 3; a.setMax = 4        // +1 -> 4: inside the band, unchanged
+        b.setMin = 3; b.setMax = 4        // +1 -> 5: setMax follows
+        c.setMin = 3; c.setMax = 4        // -1 -> 2: setMin follows, setMax stays
+        try ctx.save()
+
+        func run(_ session: Session, _ delta: Int) throws {
+            let plan = planChange(block, ctx, day: p.day, exercise: p.x, scope: .thisSession(session), change: PrescriptionChange(setDelta: delta))
+            try Service.applyChange(plan, in: ctx)
+        }
+        try run(days[0], 1); try run(days[1], 1); try run(days[2], -1)
+        XCTAssertEqual([a.targetSets, a.setMin, a.setMax].compactMap { $0 }, [4, 3, 4])
+        XCTAssertEqual([b.targetSets, b.setMin, b.setMax].compactMap { $0 }, [5, 3, 5])
+        XCTAssertEqual([c.targetSets, c.setMin, c.setMax].compactMap { $0 }, [2, 2, 4])
+
+        // A reps-only change leaves the band alone.
+        let reps = planChange(block, ctx, day: p.day, exercise: p.x, scope: .thisSession(days[0]), change: PrescriptionChange(repRange: 5...6))
+        try Service.applyChange(reps, in: ctx)
+        XCTAssertEqual(a.setMin, 3); XCTAssertEqual(a.setMax, 4)
+    }
 }

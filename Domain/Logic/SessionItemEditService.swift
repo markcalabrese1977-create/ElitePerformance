@@ -649,6 +649,9 @@ extension SessionItemEditService {
 
             if change.setDelta != nil {
                 item.targetSets = sets
+                // The wave's set band widens to include the new count and never narrows.
+                if let lo = item.setMin { item.setMin = min(lo, sets) }
+                if let hi = item.setMax { item.setMax = max(hi, sets) }
                 // Grow = repeat the last set's load, shrink = first N, empty = zeros (as carry-forward does).
                 item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: sets, fallback: 0)
             }
@@ -728,7 +731,11 @@ extension SessionItemEditService {
         check("actualRIRs", b.actualRIRs, i.actualRIRs)
         check("isCompleted", b.isCompleted, i.isCompleted); check("isPR", b.isPR, i.isPR)
         check("coachNote", b.coachNote, i.coachNote); check("logs", b.logs.count, i.logs.count)
-        check("setMin", b.setMin, i.setMin); check("setMax", b.setMax, i.setMax)
+        // The set band only widens to include the new count (never narrows) when sets changed.
+        let newSets = target.after.sets
+        let widenSets = target.after.sets != target.before.sets
+        check("setMin", widenSets ? b.setMin.map { min($0, newSets) } : b.setMin, i.setMin)
+        check("setMax", widenSets ? b.setMax.map { max($0, newSets) } : b.setMax, i.setMax)
         // Load values: the surviving prefix is unchanged, and the array is sized to the new set count when sets changed.
         let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count)
         check("plannedLoads prefix", Array(b.plannedLoads.prefix(kept)), Array(i.plannedLoadsBySet.prefix(kept)))

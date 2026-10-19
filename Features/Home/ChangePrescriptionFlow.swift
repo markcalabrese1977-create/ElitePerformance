@@ -3,12 +3,55 @@ import SwiftData
 
 // MARK: - Plan steppers
 
-/// What the Program tab's work-set and RIR steppers write. They change this session's plan and
-/// nothing else: in particular they do NOT set `planEdited`, which would freeze carry-forward's
-/// earned-load write into the item for the rest of the block. Only editing a load does that.
+/// What the Program tab's plan editors write. Only editing a LOAD freezes carry-forward's earned-load
+/// write into the item (`planEdited`); sets, reps and RIR edits do not, because carry-forward only ever
+/// writes loads.
 enum PlanStepperEdits {
-    static func setSets(_ item: SessionItem, to value: Int) { item.targetSets = value }
-    static func setRIR(_ item: SessionItem, to value: Int) { item.targetRIR = value }
+
+    /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
+    /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
+    static func setSets(_ item: SessionItem, to value: Int) {
+        item.targetSets = value
+        widenSetBand(item, toInclude: value)
+    }
+
+    /// RIR stepper: the lifter picked one number, so the displayed range collapses to it as well.
+    static func setRIR(_ item: SessionItem, to value: Int) {
+        item.targetRIR = value
+        item.targetRIRMin = value
+        item.targetRIRMax = value
+    }
+
+    /// `setMin = min(setMin, sets)`, `setMax = max(setMax, sets)`; untouched when the item has no band.
+    static func widenSetBand(_ item: SessionItem, toInclude sets: Int) {
+        if let lo = item.setMin { item.setMin = min(lo, sets) }
+        if let hi = item.setMax { item.setMax = max(hi, sets) }
+    }
+
+    /// Per-set load field: the one edit that marks the plan as hand-set.
+    static func setPlannedLoad(_ item: SessionItem, at index: Int, to value: Double) {
+        if index >= item.plannedLoadsBySet.count {
+            item.plannedLoadsBySet.append(contentsOf: repeatElement(0.0, count: index + 1 - item.plannedLoadsBySet.count))
+        }
+        item.plannedLoadsBySet[index] = value
+        item.planEdited = true
+    }
+
+    /// Per-set reps field: does not touch `planEdited`.
+    static func setPlannedReps(_ item: SessionItem, at index: Int, to value: Int) {
+        if index >= item.plannedRepsBySet.count {
+            item.plannedRepsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRepsBySet.count))
+        }
+        item.plannedRepsBySet[index] = value
+    }
+
+    /// Per-set RIR field: does not touch `planEdited`.
+    static func setPlannedRIR(_ item: SessionItem, at index: Int, to value: Int) {
+        if index >= item.plannedRIRsBySet.count {
+            item.plannedRIRsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRIRsBySet.count))
+        }
+        item.plannedRIRsBySet[index] = value
+    }
 }
 
 // MARK: - Model (no SwiftUI; the preview and the write both come from SessionItemEditService)

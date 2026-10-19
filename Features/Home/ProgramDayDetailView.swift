@@ -1452,13 +1452,8 @@ private struct ProgramExercisePlanRow: View {
                 let trimmed = newValue.trimmingCharacters(in: .whitespaces)
                 let doubleValue = Double(trimmed) ?? 0
 
-                if index >= item.plannedLoadsBySet.count {
-                    let extra = index + 1 - item.plannedLoadsBySet.count
-                    item.plannedLoadsBySet.append(contentsOf: repeatElement(0.0, count: extra))
-                }
-
-                item.plannedLoadsBySet[index] = doubleValue
-                item.planEdited = true   // user manually set a load — protect from auto write-back
+                // The one plan edit that sets planEdited: a hand-set load must not be overwritten.
+                PlanStepperEdits.setPlannedLoad(item, at: index, to: doubleValue)
                 save()
             }
         )
@@ -1473,13 +1468,7 @@ private struct ProgramExercisePlanRow: View {
                 return item.plannedRepsBySet[index]
             },
             set: { newValue in
-                if index >= item.plannedRepsBySet.count {
-                    let extra = index + 1 - item.plannedRepsBySet.count
-                    item.plannedRepsBySet.append(contentsOf: repeatElement(0, count: extra))
-                }
-
-                item.plannedRepsBySet[index] = newValue
-                item.planEdited = true   // user manually set reps — protect from auto write-back
+                PlanStepperEdits.setPlannedReps(item, at: index, to: newValue)
                 save()
             }
         )
@@ -1496,13 +1485,7 @@ private struct ProgramExercisePlanRow: View {
                 return stored == 0 ? item.targetRIR : stored
             },
             set: { newValue in
-                if index >= item.plannedRIRsBySet.count {
-                    let extra = index + 1 - item.plannedRIRsBySet.count
-                    item.plannedRIRsBySet.append(contentsOf: repeatElement(0, count: extra))
-                }
-
-                item.plannedRIRsBySet[index] = newValue
-                item.planEdited = true   // user manually set RIR — protect from auto write-back
+                PlanStepperEdits.setPlannedRIR(item, at: index, to: newValue)
                 save()
             }
         )
