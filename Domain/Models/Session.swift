@@ -409,19 +409,34 @@ extension SessionStatus {
     }
 }
 extension Session {
-    /// Day number within the training week (1–6), derived from programIndex.
-    var dayNumberInWeek: Int {
-        guard let pi = programIndex, pi > 0 else { return 1 }
-        return ((pi - 1) % 6) + 1
+    /// Day number within the training week (1...N), derived from this session's position
+    /// among the sessions of the same meso and `weekInMeso`, in date order. Works for any
+    /// block shape (2-, 3-, 4-, 6-day weeks) — no assumption about days per week.
+    /// nil when the session has no meso to count within.
+    var positionInWeek: Int? {
+        guard let meso else { return nil }
+        let week = weekIndex
+        let sameWeek = meso.sessions
+            .filter { $0.weekIndex == week }
+            .sorted {
+                if $0.date != $1.date { return $0.date < $1.date }
+                if ($0.programIndex ?? 0) != ($1.programIndex ?? 0) { return ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }
+                return ($0.id?.uuidString ?? "") < ($1.id?.uuidString ?? "")
+            }
+        guard let idx = sameWeek.firstIndex(where: { $0 === self }) else { return nil }
+        return idx + 1
     }
-    
+
+    var dayNumberInWeek: Int {
+        positionInWeek ?? 1
+    }
+
     var weekDayLabel: String {
         let week = weekIndex
 
         let dayText: String = {
-            if let programIndex {
-                let day = ((programIndex - 1) % 6) + 1
-                return "D\(day)"
+            if let position = positionInWeek {
+                return "D\(position)"
             }
 
             let weekdayName = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .none)

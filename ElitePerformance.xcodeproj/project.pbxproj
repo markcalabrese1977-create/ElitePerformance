@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */; };
 		021FF3D2910B6E203105D029 /* JourneyHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */; };
 		1299BEF5D0CC4CACA24CC301 /* InvariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */; };
 		1983FD96D3E2298656699395 /* JourneyFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */; };
@@ -123,6 +124,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekDayNumberingTests.swift; sourceTree = "<group>"; };
 		01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculatorTests.swift; sourceTree = "<group>"; };
 		066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubTests.swift; sourceTree = "<group>"; };
 		0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyAssertions.swift; sourceTree = "<group>"; };
@@ -565,6 +567,7 @@
 				D5E1624790F1073D51C739B3 /* ChangePrescriptionFlowTests.swift */,
 				D5E12AF63FADD6AF8947F2BB /* HeartRateAgeTests.swift */,
 				D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */,
+				DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
@@ -828,6 +831,7 @@
 				D5E2624790F1073D51C739B3 /* ChangePrescriptionFlowTests.swift in Sources */,
 				D5E22AF63FADD6AF8947F2BB /* HeartRateAgeTests.swift in Sources */,
 				D5E2E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift in Sources */,
+				DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,

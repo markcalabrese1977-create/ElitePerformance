@@ -368,8 +368,14 @@ struct PlanMemoryEngine {
         }
 
         // No wave on the source → not in a letter rotation; legacy chronological path.
+        // Deload items never anchor a working session's result: skip them so the next
+        // working occurrence (past the deload) is the target.
         guard let sourceWave = sourceItem.waveRaw?.lowercased(), !sourceWave.isEmpty else {
-            return future.lazy.compactMap(matchingItem).first
+            return future.lazy.compactMap { candidate -> SessionItem? in
+                guard let item = matchingItem(in: candidate),
+                      item.waveRaw?.lowercased() != "deload" else { return nil }
+                return item
+            }.first
         }
 
         // Block identity by persistent id so a nil meso matches only another nil
