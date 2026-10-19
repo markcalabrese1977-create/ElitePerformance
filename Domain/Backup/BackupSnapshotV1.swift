@@ -107,6 +107,8 @@ struct SessionBackupDTO: Codable {
     let weekInMeso: Int?
     let dayLabel: String?
     let programIndex: Int?
+    // Added with the insert-deload feature. Optional so OLD backups decode with nil.
+    var insertedDeload: Bool? = nil
 
     let hkWorkoutUUID: String?
     let hkWorkoutStart: Date?

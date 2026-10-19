@@ -101,6 +101,7 @@ enum BackupSnapshotExporter {
                     sessionNotes: session.sessionNotes,
                     weekInMeso: session.weekInMeso,
                     dayLabel: session.dayLabel, programIndex: session.programIndex,
+                    insertedDeload: session.insertedDeload,
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
                     hkWorkoutEnd: session.hkWorkoutEnd,

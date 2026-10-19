@@ -56,7 +56,11 @@ final class Session {
     var programIndex: Int?
 
     var dayLabel: String?
-    
+
+    /// True on the sessions of a deload week the user inserted into the block (as opposed to one
+    /// the program generated). Optional for lightweight migration; nil and false both mean "not inserted".
+    var insertedDeload: Bool?
+
     /// Alias used throughout the app.
     var weekIndex: Int {
         get { weekInMeso ?? 1 }

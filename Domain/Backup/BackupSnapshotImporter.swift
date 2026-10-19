@@ -128,6 +128,8 @@ enum BackupSnapshotImporter {
             // directly. Old backups predate this key → nil falls back to "normal"
             // (the model's own default for readinessRaw).
             session.readinessRaw = sessionDTO.readinessRaw ?? "normal"
+            // Old backups predate this key → nil (not an inserted deload).
+            session.insertedDeload = sessionDTO.insertedDeload
 
             if let mesoBlockId = sessionDTO.mesoBlockId,
                let meso = mesoById[mesoBlockId] {
