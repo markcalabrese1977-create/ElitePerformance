@@ -15,6 +15,7 @@ struct ProgramDayDetailView: View {
     @State private var historyTarget: HistoryTarget?
     @State private var noteTarget: NoteTarget?
     @State private var swapTarget: SwapTarget?
+    @State private var changeTarget: ChangeTarget?
     @State private var propagateAddToFutureSessions: Bool = true
     @State private var propagateChangesToFutureSessions: Bool = true
     @State private var showDayLabelEditor: Bool = false
@@ -65,6 +66,7 @@ struct ProgramDayDetailView: View {
                             onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { delete(item) },
                             onSwapTapped: { swapTarget = SwapTarget(item: item) },
+                            onChangePrescriptionTapped: { scope in changeTarget = ChangeTarget(item: item, scope: scope) },
                             onHistoryTapped: { exerciseId, exerciseName in
                                                             let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
                                                             historyTarget = HistoryTarget(
@@ -151,6 +153,14 @@ struct ProgramDayDetailView: View {
                 exerciseId: target.exerciseId,
                 exerciseName: target.exerciseName,
                 onClose: { noteTarget = nil }
+            )
+        }
+        .sheet(item: $changeTarget) { target in
+            ChangePrescriptionFlow(
+                session: session,
+                item: target.item,
+                initialScope: target.scope,
+                onFinish: { changeTarget = nil }
             )
         }
         .sheet(item: $swapTarget) { target in
@@ -862,6 +872,11 @@ private struct NoteTarget: Identifiable {
     let exerciseId: String
     let exerciseName: String
 }
+private struct ChangeTarget: Identifiable {
+    let id = UUID()
+    let item: SessionItem
+    let scope: ReplaceScopeChoice
+}
 private struct SwapTarget: Identifiable {
     let id = UUID()
     let item: SessionItem
@@ -959,6 +974,7 @@ private struct ProgramExercisePlanRow: View {
     let onMoveDown: () -> Void
     let onDelete: () -> Void
     let onSwapTapped: () -> Void
+    let onChangePrescriptionTapped: (_ scope: ReplaceScopeChoice) -> Void
     let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
         var isMaintenance: Bool = false
@@ -971,6 +987,13 @@ private struct ProgramExercisePlanRow: View {
             headerRow
             prescriptionSummaryRow
             planRow
+            Button {
+                onChangePrescriptionTapped(.allRemaining)
+            } label: {
+                Label("Change for remaining sessions", systemImage: "slider.horizontal.3")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
             perSetPlanEditor
         }
         .padding(.vertical, 8)
@@ -1125,6 +1148,11 @@ private struct ProgramExercisePlanRow: View {
         return "\(setsText) · \(repsText) · \(rirText)"
     }
     
+    private var repsRangeText: String {
+        let v = SessionItemEditService.PrescriptionValues(item)
+        return v.repMin == v.repMax ? "\(v.repMin)" : "\(v.repMin)–\(v.repMax)"
+    }
+
     private var planRow: some View {
         HStack(alignment: .top, spacing: 12) {
 
@@ -1134,7 +1162,7 @@ private struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: Binding(get: { item.targetSets }, set: { item.targetSets = $0; item.planEdited = true }), in: 1...6) {
+                Stepper(value: Binding(get: { item.targetSets }, set: { PlanStepperEdits.setSets(item, to: $0) }), in: 1...6) {
                     Text("\(item.targetSets)")
                         .font(.body)
                         .monospacedDigit()
@@ -1145,20 +1173,27 @@ private struct ProgramExercisePlanRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Reps (clean option: show ONLY the editable number here)
+            // Reps: the rep range is what coaching reads, so it is edited through the change flow
+            // (scoped to this session), not a stepper on the flattened default.
             VStack(alignment: .leading, spacing: 4) {
-                Text("Default reps")
+                Text("Reps")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: Binding(get: { item.targetReps }, set: { item.targetReps = $0; item.planEdited = true }), in: 4...30, step: 1) {
-                    Text("\(item.targetReps)")
-                        .font(.body)
-                        .monospacedDigit()
-                        .frame(minWidth: 34, alignment: .leading) // prevents "1" of "12"
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                Button {
+                    onChangePrescriptionTapped(.thisSession)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(repsRangeText)
+                            .font(.body)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.borderless)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1168,7 +1203,7 @@ private struct ProgramExercisePlanRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Stepper(value: Binding(get: { item.targetRIR }, set: { item.targetRIR = $0; item.planEdited = true }), in: 0...5) {
+                Stepper(value: Binding(get: { item.targetRIR }, set: { PlanStepperEdits.setRIR(item, to: $0) }), in: 0...5) {
                     Text("\(item.targetRIR)")
                         .font(.body)
                         .monospacedDigit()
