@@ -2,6 +2,19 @@ import Foundation
 import HealthKit
 import SwiftData
 
+/// Everything the workout sync reads from HealthKit, so it can be driven without a device.
+/// Authorization is deliberately not part of this: the sync never asks for it and works with
+/// whatever is already granted (see `HealthKitAuthorizationCoordinator`).
+protocol HealthKitDataSource {
+    func workoutCandidates(from start: Date, to end: Date) async throws -> [HKWorkout]
+    func basalCalories(from start: Date, to end: Date) async throws -> Double
+    func heartRateStats(from start: Date, to end: Date) async throws -> (avg: Double, max: Double)
+    func heartRateSamples(from start: Date, to end: Date) async throws -> [HKQuantitySample]
+    func restingHeartRateAverage(endingAt end: Date, lookbackDays: Int) async throws -> Double?
+    /// Throws when Health has no date of birth or access is denied.
+    func dateOfBirthComponents() throws -> DateComponents
+}
+
 enum HealthKitWorkoutSummarySyncService {
 
     private static let store = HKHealthStore()
@@ -26,30 +39,28 @@ enum HealthKitWorkoutSummarySyncService {
 
     private static let hrMaxFormula: HRMaxFormula = .fox
 
-    // MARK: - Auth
+    // MARK: - Live data source
 
-    static func requestAuthorizationIfNeeded() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-
-        var toRead: Set<HKObjectType> = [
-            HKObjectType.workoutType(),
-            HKObjectType.quantityType(forIdentifier: .heartRate)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
-            HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)!
-        ]
-
-        // ✅ Needed for HRR zones (30-day average resting HR)
-        if let rhr = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
-            toRead.insert(rhr)
+    /// The real HealthKit queries, behind `HealthKitDataSource`.
+    struct LiveDataSource: HealthKitDataSource {
+        func workoutCandidates(from start: Date, to end: Date) async throws -> [HKWorkout] {
+            try await HealthKitWorkoutSummarySyncService.fetchWorkoutCandidates(from: start, to: end)
         }
-
-        // Date of birth (age for HRR zones). Without it the zones fall back to the %-of-max model,
-        // or a birthdate the lifter enters in Settings.
-        if let dob = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) {
-            toRead.insert(dob)
+        func basalCalories(from start: Date, to end: Date) async throws -> Double {
+            try await HealthKitWorkoutSummarySyncService.sumBasalCalories(from: start, to: end)
         }
-
-        try await store.requestAuthorization(toShare: [], read: toRead)
+        func heartRateStats(from start: Date, to end: Date) async throws -> (avg: Double, max: Double) {
+            try await HealthKitWorkoutSummarySyncService.heartRateStats(from: start, to: end)
+        }
+        func heartRateSamples(from start: Date, to end: Date) async throws -> [HKQuantitySample] {
+            try await HealthKitWorkoutSummarySyncService.fetchHeartRateSamples(from: start, to: end)
+        }
+        func restingHeartRateAverage(endingAt end: Date, lookbackDays: Int) async throws -> Double? {
+            try await HealthKitWorkoutSummarySyncService.restingHeartRateAverageBPM(endingAt: end, lookbackDays: lookbackDays)
+        }
+        func dateOfBirthComponents() throws -> DateComponents {
+            try HealthKitWorkoutSummarySyncService.store.dateOfBirthComponents()
+        }
     }
 
     // MARK: - Public API
@@ -60,9 +71,16 @@ enum HealthKitWorkoutSummarySyncService {
     /// - If multiple workouts exist, we score candidates and pick the best.
     /// - We use a non-strict predicate so workouts that overlap the window are still returned.
     @MainActor
-    static func syncForCompletedSession(_ session: Session, in context: ModelContext) async {
+    static func syncForCompletedSession(
+        _ session: Session,
+        in context: ModelContext,
+        source: HealthKitDataSource = LiveDataSource()
+    ) async {
         do {
-            try await requestAuthorizationIfNeeded()
+            // Never waits on authorization: a pending permission sheet must not stall the sync.
+            // It reads what is already granted; new permissions are requested elsewhere, from a
+            // foreground moment with nothing presented.
+            print("ℹ️ HK sync: using existing grants (authorization is not requested here)")
 
             // TEMP: Force recompute so existing sessions pick up the new HRR zone model.
             // TODO: store a zone-model version on Session once we add user-configurable settings.
@@ -122,7 +140,7 @@ enum HealthKitWorkoutSummarySyncService {
             var lastCounts: [String: Int] = [:]
 
             for w in windows {
-                let list = try await fetchWorkoutCandidates(from: w.start, to: w.end)
+                let list = try await source.workoutCandidates(from: w.start, to: w.end)
                 print("🔎 HK candidates [\(w.label)] = \(list.count)")
                 for wk in list {
                     let type = wk.workoutActivityType.rawValue
@@ -161,11 +179,11 @@ enum HealthKitWorkoutSummarySyncService {
             session.hkActiveCalories = active
 
             // v1: “Total Calories” approximation (active + basal in interval)
-            let basal = try await sumBasalCalories(from: workout.startDate, to: workout.endDate)
+            let basal = try await source.basalCalories(from: workout.startDate, to: workout.endDate)
             session.hkTotalCalories = active + basal
 
             // HR metrics
-            let (avgHR, maxHR) = try await heartRateStats(from: workout.startDate, to: workout.endDate)
+            let (avgHR, maxHR) = try await source.heartRateStats(from: workout.startDate, to: workout.endDate)
             session.hkAvgHeartRate = avgHR
             session.hkMaxHeartRate = maxHR
 
@@ -176,7 +194,8 @@ enum HealthKitWorkoutSummarySyncService {
                 workoutStart: workout.startDate,
                 workoutEnd: workout.endDate,
                 maxHR: maxHR,
-                profileBirthDate: profileBirthDate
+                profileBirthDate: profileBirthDate,
+                source: source
             )
 
             try context.save()
@@ -348,9 +367,9 @@ enum HealthKitWorkoutSummarySyncService {
     /// Writes UI-friendly HR fields onto Session.
     /// Safe behavior: if we can’t get samples, we just leave series empty + zones at 0.
     @MainActor
-    private static func syncHeartRateUIFields(into session: Session, workoutStart: Date, workoutEnd: Date, maxHR: Double, profileBirthDate: Date?) async {
+    private static func syncHeartRateUIFields(into session: Session, workoutStart: Date, workoutEnd: Date, maxHR: Double, profileBirthDate: Date?, source: HealthKitDataSource) async {
         do {
-            let samples = try await fetchHeartRateSamples(from: workoutStart, to: workoutEnd)
+            let samples = try await source.heartRateSamples(from: workoutStart, to: workoutEnd)
             guard samples.count >= 2 else {
                 session.hkHeartRateSeriesBPM = []
                 session.hkHeartRateSeriesStepSeconds = 0
@@ -372,9 +391,9 @@ enum HealthKitWorkoutSummarySyncService {
             // ✅ v2 Zones: HRR (Karvonen) using 30-day resting HR average and an age from
             // HealthKit (or the Settings birthdate). With no age there is no HRR model: the
             // legacy %-of-max zones are used instead, never an assumed age.
-            let rhr30 = try await restingHeartRateAverageBPM(endingAt: workoutStart, lookbackDays: 30)
+            let rhr30 = try await source.restingHeartRateAverage(endingAt: workoutStart, lookbackDays: 30)
             let ageYears = HeartRateAge.ageYears(
-                healthKitBirth: try? store.dateOfBirthComponents(),
+                healthKitBirth: try? source.dateOfBirthComponents(),
                 profileOverride: profileBirthDate,
                 at: workoutStart
             )
@@ -403,7 +422,7 @@ enum HealthKitWorkoutSummarySyncService {
             let postStart = workoutEnd
             let postEnd = workoutEnd.addingTimeInterval(120)
 
-            let postSamples = try await fetchHeartRateSamples(from: postStart, to: postEnd)
+            let postSamples = try await source.heartRateSamples(from: postStart, to: postEnd)
             if postSamples.count >= 2 {
                 let (postSeries, postStep) = downsampleHRSeries(samples: postSamples, start: postStart, end: postEnd, maxPoints: 24)
                 session.hkPostWorkoutHeartRateBPM = postSeries

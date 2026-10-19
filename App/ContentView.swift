@@ -7,6 +7,7 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showFirstRunOnboarding = false
 
     var body: some View {
@@ -39,7 +40,29 @@ struct ContentView: View {
                 if sessions.isEmpty {
                     showFirstRunOnboarding = true
                 }
+
+                requestHealthKitAccessIfNeeded()
             }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { requestHealthKitAccessIfNeeded() }
+            }
+            .onChange(of: showFirstRunOnboarding) { showing in
+                if !showing { requestHealthKitAccessIfNeeded() }
+            }
+    }
+
+    /// HealthKit permissions are requested from here (never from workout completion): after
+    /// onboarding, with nothing presented, once per launch. If something is presented the coordinator
+    /// defers, and the next active moment tries again.
+    private func requestHealthKitAccessIfNeeded() {
+        Task { @MainActor in
+            // Let sheet transitions settle before probing for presented controllers.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            await HealthKitAuthorizationCoordinator.shared.attemptIfNeeded(
+                onboardingComplete: !showFirstRunOnboarding && !sessions.isEmpty,
+                isNothingPresented: { PresentationProbe.nothingPresented() }
+            )
+        }
     }
 }
 
