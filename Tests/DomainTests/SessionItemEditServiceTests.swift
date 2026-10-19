@@ -515,4 +515,230 @@ final class SessionItemEditServiceTests: XCTestCase {
         }
         print("SEED_COMPARE 130x9@RIR2 history, 12-week fixture\n" + lines.joined(separator: "\n"))
     }
+
+    // MARK: - Change prescription (P1)
+
+    private func planChange(
+        _ block: MesoBlock, _ ctx: ModelContext, day: String, exercise: String,
+        letters: Set<String>? = nil, includeDeload: Bool = false,
+        scope: Service.ReplaceScope = .allRemaining, change: PrescriptionChange, now: Date = Date(timeIntervalSince1970: 0)
+    ) -> Service.ChangePlan {
+        Service.planChangePrescription(meso: block, dayLabel: day, exerciseId: exercise, letters: letters,
+                                       includeDeload: includeDeload, scope: scope, change: change, now: now)
+    }
+
+    private func letter(_ i: SessionItem) -> String { i.waveRaw?.lowercased() ?? "" }
+
+    func test_change_aOnly_leavesBAndCUntouched() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let before = Dictionary(uniqueKeysWithValues: block.sessions.flatMap(\.items).map { ($0.persistentModelID, prescriptionFingerprint($0)) })
+
+        let result = planChange(block, ctx, day: p.day, exercise: p.x, letters: ["a"], change: PrescriptionChange(setDelta: 1))
+        XCTAssertFalse(result.targets.isEmpty)
+        XCTAssertTrue(result.targets.allSatisfy { letter($0.item) == "a" })
+        let applied = try Service.applyChange(result, in: ctx)
+        XCTAssertEqual(applied.sessionsChanged, result.targets.count)
+
+        let changedIDs = Set(result.targets.map { $0.item.persistentModelID })
+        for item in block.sessions.flatMap(\.items) where !changedIDs.contains(item.persistentModelID) {
+            XCTAssertEqual(prescriptionFingerprint(item), before[item.persistentModelID], "B, C and other exercises untouched")
+        }
+        for t in result.targets { XCTAssertEqual(t.item.targetSets, t.before.sets + 1) }
+    }
+
+    func test_change_deloadIsSkippedByDefault_andIncludedOnRequest() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let skipped = planChange(block, ctx, day: p.day, exercise: p.x, change: PrescriptionChange(setDelta: 1))
+        XCTAssertTrue(skipped.targets.allSatisfy { letter($0.item) != "deload" })
+        XCTAssertTrue(skipped.refusals.contains { $0.reason == .deload }, "the deload week is reported, not silently dropped")
+
+        let included = planChange(block, ctx, day: p.day, exercise: p.x, includeDeload: true, change: PrescriptionChange(setDelta: 1))
+        XCTAssertTrue(included.targets.contains { letter($0.item) == "deload" })
+        XCTAssertEqual(included.targets.count, skipped.targets.count + skipped.refusals.filter { $0.reason == .deload }.count)
+    }
+
+    func test_change_plusOneOnARampedExercise_keepsTheRelativeShape() throws {
+        let (ctx, block) = try makeBlock()
+        // Find an exercise whose per-week set counts ramp (a week with more sets than the one before).
+        let all = sessions(block)
+        var chosen: (day: String, x: String)?
+        for first in all.prefix(6) {
+            guard let day = first.dayLabel else { continue }
+            for it in first.items where !ExerciseCatalog.isBodyweight(exerciseId: it.exerciseId) {
+                let weeks = all.filter { $0.dayLabel == day }.compactMap { s in item(s, it.exerciseId).map { (s.weekIndex, $0.targetSets) } }
+                if zip(weeks, weeks.dropFirst()).contains(where: { $1.1 > $0.1 }) { chosen = (day, it.exerciseId); break }
+            }
+            if chosen != nil { break }
+        }
+        let c = try XCTUnwrap(chosen, "the DUP10 template ramps sets in week 8")
+        let result = planChange(block, ctx, day: c.day, exercise: c.x, change: PrescriptionChange(setDelta: 1))
+        let beforeByWeek = Dictionary(uniqueKeysWithValues: result.targets.map { ($0.weekIndex, $0.before.sets) })
+        try Service.applyChange(result, in: ctx)
+        let afterByWeek = Dictionary(uniqueKeysWithValues: result.targets.map { ($0.weekIndex, $0.item.targetSets) })
+
+        let weeks = beforeByWeek.keys.sorted()
+        for (a, b) in zip(weeks, weeks.dropFirst()) {
+            XCTAssertEqual(afterByWeek[b]! - afterByWeek[a]!, beforeByWeek[b]! - beforeByWeek[a]!, "wk\(a)->wk\(b) step preserved")
+        }
+        XCTAssertTrue(afterByWeek.allSatisfy { $0.value == beforeByWeek[$0.key]! + 1 })
+    }
+
+    func test_change_setCount_resizesLoadsRepsAndRIRArrays_bothDirections() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let target = try XCTUnwrap(sessions(block).last { $0.dayLabel == p.day && item($0, p.x) != nil })
+        let it = try XCTUnwrap(item(target, p.x))
+        it.targetSets = 3
+        it.targetReps = 8; it.targetRIR = 2
+        it.plannedLoadsBySet = [50, 60, 70]; it.plannedRepsBySet = [8, 8, 8]; it.plannedRIRsBySet = [2, 2, 2]
+        it.waveRaw = "a"
+        try ctx.save()
+
+        func run(_ delta: Int) throws {
+            let result = planChange(block, ctx, day: p.day, exercise: p.x, scope: .thisSession(target), change: PrescriptionChange(setDelta: delta))
+            try Service.applyChange(result, in: ctx)
+        }
+        try run(+1)
+        XCTAssertEqual(it.targetSets, 4)
+        XCTAssertEqual(it.plannedLoadsBySet, [50, 60, 70, 70], "grow repeats the last load")
+        XCTAssertEqual(it.plannedRepsBySet, [8, 8, 8, 8]); XCTAssertEqual(it.plannedRIRsBySet, [2, 2, 2, 2])
+        try run(-1)
+        XCTAssertEqual(it.targetSets, 3)
+        XCTAssertEqual(it.plannedLoadsBySet, [50, 60, 70], "shrink keeps the first N")
+        XCTAssertEqual(it.plannedRepsBySet.count, 3); XCTAssertEqual(it.plannedRIRsBySet.count, 3)
+
+        it.plannedLoadsBySet = []
+        try run(+1)
+        XCTAssertEqual(it.plannedLoadsBySet, [0, 0, 0, 0], "empty -> zeros")
+    }
+
+    func test_change_repAndRIRRanges_writeTheRangesAndTheFlattenedDefaults() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let result = planChange(block, ctx, day: p.day, exercise: p.x, letters: ["b"],
+                                change: PrescriptionChange(repRange: 6...8, rirRange: 1...2))
+        try Service.applyChange(result, in: ctx)
+        for t in result.targets {
+            let i = t.item
+            XCTAssertEqual(i.repMin, 6); XCTAssertEqual(i.repMax, 8); XCTAssertEqual(i.targetReps, 6)
+            XCTAssertEqual(i.targetRIRMin, 1); XCTAssertEqual(i.targetRIRMax, 2); XCTAssertEqual(i.targetRIR, 2)
+            XCTAssertEqual(i.plannedRepsBySet, Array(repeating: 6, count: i.targetSets))
+            XCTAssertEqual(i.plannedRIRsBySet, Array(repeating: 2, count: i.targetSets))
+            XCTAssertEqual(t.after.text, "\(t.before.sets) x 6-8 @ RIR 1-2")
+        }
+    }
+
+    func test_change_neverTouchesPlanEdited_loadValues_orActuals() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let targets = sessions(block).filter { $0.dayLabel == p.day && item($0, p.x) != nil }.suffix(4)
+        let items = targets.compactMap { item($0, p.x) }
+        items[0].planEdited = true; items[1].planEdited = false; items[2].planEdited = true; items[3].planEdited = false
+        for i in items { i.suggestedLoad = 120; i.plannedLoadsBySet = Array(repeating: 120.0, count: i.targetSets) }
+        let flags = items.map(\.planEdited)
+        let result = planChange(block, ctx, day: p.day, exercise: p.x, change: PrescriptionChange(setDelta: 1, repRange: 5...7))
+        try Service.applyChange(result, in: ctx)
+        XCTAssertEqual(items.map(\.planEdited), flags, "true stays true, false stays false")
+        for i in items {
+            XCTAssertEqual(i.suggestedLoad, 120)
+            XCTAssertTrue(i.plannedLoadsBySet.allSatisfy { $0 == 120 }, "values unchanged; only the length follows the set count")
+            XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets)
+        }
+    }
+
+    func test_change_refusals_unsafe_noChange_invalid_inProgress() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let days = sessions(block).filter { $0.dayLabel == p.day && item($0, p.x) != nil }
+        item(days[1], p.x)!.actualLoads = [135]; item(days[1], p.x)!.actualReps = [5]      // logged -> unsafe
+        item(days[2], p.x)!.targetSets = 1                                                    // -1 would not change it
+        try ctx.save()
+
+        let result = planChange(block, ctx, day: p.day, exercise: p.x, letters: nil, includeDeload: true, change: PrescriptionChange(setDelta: -1))
+        XCTAssertEqual(result.refusals.first { $0.session === days[1] }?.reason, .unsafe)
+        XCTAssertEqual(result.refusals.first { $0.session === days[2] }?.reason, .noChange)
+        XCTAssertFalse(result.targets.contains { $0.session === days[1] || $0.session === days[2] })
+
+        XCTAssertTrue(planChange(block, ctx, day: p.day, exercise: p.x, change: PrescriptionChange()).targets.isEmpty, "an empty change plans nothing")
+        XCTAssertTrue(planChange(block, ctx, day: p.day, exercise: p.x, change: PrescriptionChange(repRange: 0...5)).targets.isEmpty, "out-of-bounds rep range is invalid")
+
+        let ok = planChange(block, ctx, day: p.day, exercise: p.x, change: PrescriptionChange(setDelta: 1))
+        days[0].status = .inProgress
+        XCTAssertThrowsError(try Service.applyChange(ok, in: ctx)) { XCTAssertEqual($0 as? Service.ReplaceError, .sessionInProgress) }
+    }
+
+    func test_change_forcedFailures_leaveEveryFieldUnchanged() throws {
+        for hooks in [Service.ApplyHooks(forceVerificationFailure: true), Service.ApplyHooks(forceSaveFailure: true)] {
+            let (ctx, block) = try makeBlock()
+            let p = try pick(block)
+            let result = planChange(block, ctx, day: p.day, exercise: p.x,
+                                    change: PrescriptionChange(setDelta: 1, repRange: 5...7, rirRange: 0...1))
+            try ctx.save()
+            let before = try fullSnapshot(ctx)
+            XCTAssertThrowsError(try Service.applyChange(result, in: ctx, hooks: hooks))
+            XCTAssertFalse(ctx.hasChanges)
+            XCTAssertEqual(try fullSnapshot(ctx), before, "targetSets, ranges, defaults and per-set arrays all restored")
+            XCTAssertNoThrow(try Service.applyChange(result, in: ctx), "the same plan still applies afterwards")
+        }
+    }
+
+    func test_change_nonWaveBlock_appliesToEverySession_andLetterFilterUsesTheEmptyLetter() throws {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                             UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: "My Own Plan", startDate: date(2026, 10, 5), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        var sess: [Session] = []
+        for w in 1...4 {
+            let it = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 100,
+                                 plannedRepsBySet: [10, 10, 10], plannedLoadsBySet: [100, 100, 100], plannedRIRsBySet: [2, 2, 2])
+            let s = Session(date: date(2026, 10, 5 + (w - 1) * 7), status: .planned, weekIndex: w, dayLabel: "Day A", items: [it])
+            s.meso = meso; ctx.insert(s); sess.append(s)
+        }
+        try ctx.save()
+        let now = date(2026, 10, 1)
+        let none = Service.planChangePrescription(meso: meso, dayLabel: "Day A", exerciseId: "bench_press", letters: ["a"],
+                                                  change: PrescriptionChange(setDelta: 1), now: now)
+        XCTAssertTrue(none.targets.isEmpty, "no session has wave A")
+        let all = Service.planChangePrescription(meso: meso, dayLabel: "Day A", exerciseId: "bench_press", letters: [""],
+                                                 change: PrescriptionChange(setDelta: 1, repRange: 8...12, rirRange: 2...3), now: now)
+        XCTAssertEqual(all.targets.count, 4)
+        try Service.applyChange(all, in: ctx)
+        for s in sess {
+            let i = s.items[0]
+            XCTAssertEqual(i.targetSets, 4); XCTAssertEqual(i.plannedLoadsBySet, [100, 100, 100, 100])
+            XCTAssertEqual(i.repMin, 8); XCTAssertEqual(i.repMax, 12); XCTAssertEqual(i.targetReps, 8)
+            XCTAssertEqual(i.targetRIRMin, 2); XCTAssertEqual(i.targetRIRMax, 3); XCTAssertEqual(i.targetRIR, 3)
+        }
+        for (a, b) in zip(sess, sess.dropFirst()) {
+            XCTAssertTrue(PlanMemoryEngine.nextTargetItem(for: a.items[0], after: a, in: sess) === b.items[0], "chain intact")
+        }
+    }
+
+    func test_change_journey_completedACarriesForwardIntoAResizedNextA() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let result = planChange(block, ctx, day: p.day, exercise: p.x, letters: ["a"], change: PrescriptionChange(setDelta: 1))
+        let aTargets = result.targets.sorted { $0.date < $1.date }
+        XCTAssertGreaterThanOrEqual(aTargets.count, 3)
+        try Service.applyChange(result, in: ctx)
+
+        let first = aTargets[0], next = aTargets[1]
+        XCTAssertEqual(next.item.targetSets, next.before.sets + 1)
+        XCTAssertEqual(next.item.suggestedLoad, 0, "empty target before carry-forward")
+        first.item.suggestedLoad = 100
+        first.item.plannedLoadsBySet = Array(repeating: 100.0, count: first.item.targetSets)
+        complete(first.session, item: first.item, load: 100, reps: first.item.targetReps)
+        try ctx.save()
+
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: first.session)
+
+        XCTAssertEqual(next.item.exerciseId, ExerciseCatalog.canonicalExerciseId(for: p.x))
+        XCTAssertGreaterThan(next.item.suggestedLoad, 0, "the result reaches the resized next A")
+        XCTAssertEqual(next.item.plannedLoadsBySet.count, next.item.targetSets, "carried loads follow the new set count")
+    }
 }

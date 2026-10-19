@@ -32,6 +32,10 @@ enum SessionItemEditService {
         case sameExercise
         /// `.thisSession` was asked for a session that is not on this day type, or has no `from` item.
         case notApplicable
+        /// Prescription change: a deload-week item (left alone unless explicitly included).
+        case deload
+        /// Prescription change: the change would leave this session as it is (already at the bound).
+        case noChange
     }
 
     struct Refusal {
@@ -120,35 +124,11 @@ enum SessionItemEditService {
         }
 
         // Sessions of this day type that carry the outgoing exercise.
-        var candidates: [(session: Session, item: SessionItem)] = []
-        var refusals: [Refusal] = []
-
-        func fromItem(in s: Session) -> SessionItem? {
-            s.items.sorted { $0.order < $1.order }
-                .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == from }
-        }
-
-        switch scope {
-        case .thisSession(let session):
-            if let item = fromItem(in: session),
-               session.meso?.persistentModelID == meso.persistentModelID,
-               SessionDayLabelMatcher.matches(session.dayLabel, dayLabel) {
-                candidates = [(session, item)]
-            } else {
-                refusals.append(Refusal(session: session, reason: .notApplicable))
-            }
-        case .allRemaining:
-            for s in meso.sessions.sorted(by: { $0.date < $1.date })
-            where SessionDayLabelMatcher.matches(s.dayLabel, dayLabel) {
-                guard let item = fromItem(in: s) else { continue }
-                // History is not "remaining": completed sessions, and planned ones from before today
-                // with nothing logged (missed), are simply left alone. Today's session is remaining
-                // whatever time of day it is dated.
-                if s.status == .completed { continue }
-                if s.status == .planned && s.date < startOfToday && !SessionEditSafety.hasLoggedData(s) { continue }
-                candidates.append((s, item))
-            }
-        }
+        let selected = selectCandidates(
+            meso: meso, dayLabel: dayLabel, exercise: from, scope: scope, startOfToday: startOfToday
+        )
+        let candidates = selected.candidates
+        var refusals = selected.refusals
 
         if from == to {
             return plan([], candidates.map { Refusal(session: $0.session, reason: .sameExercise) } + refusals)
@@ -161,11 +141,8 @@ enum SessionItemEditService {
 
         var targets: [Target] = []
         for (session, item) in candidates {
-            if meso.status != .active {
-                refusals.append(Refusal(session: session, reason: .inactiveMeso)); continue
-            }
-            if !SessionEditSafety.isSafeToModify(session) {
-                refusals.append(Refusal(session: session, reason: .unsafe)); continue
+            if let reason = safetyRefusal(meso: meso, session: session) {
+                refusals.append(Refusal(session: session, reason: reason)); continue
             }
             if session.items.contains(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == to }) {
                 refusals.append(Refusal(session: session, reason: .alreadyContainsReplacement)); continue
@@ -180,6 +157,58 @@ enum SessionItemEditService {
             ))
         }
         return plan(targets, refusals)
+    }
+
+    // MARK: - Shared target selection
+
+    /// Sessions of one day type holding `exercise` (canonical id) that are still "remaining": for
+    /// `.allRemaining`, everything except completed sessions and missed (planned, before today, nothing
+    /// logged) ones; for `.thisSession`, just that session. Safety is checked separately.
+    private static func selectCandidates(
+        meso: MesoBlock,
+        dayLabel: String?,
+        exercise: String,
+        scope: ReplaceScope,
+        startOfToday: Date
+    ) -> (candidates: [(session: Session, item: SessionItem)], refusals: [Refusal]) {
+        var candidates: [(session: Session, item: SessionItem)] = []
+        var refusals: [Refusal] = []
+
+        func item(in s: Session) -> SessionItem? {
+            s.items.sorted { $0.order < $1.order }
+                .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == exercise }
+        }
+
+        switch scope {
+        case .thisSession(let session):
+            if let found = item(in: session),
+               session.meso?.persistentModelID == meso.persistentModelID,
+               SessionDayLabelMatcher.matches(session.dayLabel, dayLabel) {
+                candidates = [(session, found)]
+            } else {
+                refusals.append(Refusal(session: session, reason: .notApplicable))
+            }
+        case .allRemaining:
+            for s in meso.sessions.sorted(by: { $0.date < $1.date })
+            where SessionDayLabelMatcher.matches(s.dayLabel, dayLabel) {
+                guard let found = item(in: s) else { continue }
+                // History is not "remaining": completed sessions, and planned ones from before today
+                // with nothing logged (missed), are simply left alone. Today's session is remaining
+                // whatever time of day it is dated.
+                if s.status == .completed { continue }
+                if s.status == .planned && s.date < startOfToday && !SessionEditSafety.hasLoggedData(s) { continue }
+                candidates.append((s, found))
+            }
+        }
+        return (candidates, refusals)
+    }
+
+    /// Why a candidate may not be edited: the block is not the active one, or the session is not a
+    /// clean planned session.
+    private static func safetyRefusal(meso: MesoBlock, session: Session) -> RefusalReason? {
+        if meso.status != .active { return .inactiveMeso }
+        if !SessionEditSafety.isSafeToModify(session) { return .unsafe }
+        return nil
     }
 
     // MARK: - Apply
@@ -359,9 +388,19 @@ enum SessionItemEditService {
         let isPR: Bool, isCompleted: Bool, planEdited: Bool
         let loadOverrideReasonRaw: String?, nextSuggestedLoad: Double?
         let coachNote: String?, prescriptionNotes: String?, intensifierNotes: String?
+        // Prescription fields (written by changePrescription), and identity fields it must not touch.
+        let targetSets: Int, targetReps: Int, targetRIR: Int
+        let setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?
+        let plannedReps: [Int], plannedRIRs: [Int]
+        let order: Int, waveRaw: String?, priorityRaw: String?, intensifierRaw: String?
 
         init(_ i: SessionItem) {
             item = i
+            targetSets = i.targetSets; targetReps = i.targetReps; targetRIR = i.targetRIR
+            setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
+            rirMin = i.targetRIRMin; rirMax = i.targetRIRMax
+            plannedReps = i.plannedRepsBySet; plannedRIRs = i.plannedRIRsBySet
+            order = i.order; waveRaw = i.waveRaw; priorityRaw = i.priorityRaw; intensifierRaw = i.intensifierRaw
             exerciseId = i.exerciseId; name = i.exerciseNameSnapshot
             suggestedLoad = i.suggestedLoad; plannedLoads = i.plannedLoadsBySet
             actualLoads = i.actualLoads; actualReps = i.actualReps; actualRIRs = i.actualRIRs
@@ -383,6 +422,10 @@ enum SessionItemEditService {
             item.isPR = isPR; item.isCompleted = isCompleted; item.planEdited = planEdited
             item.loadOverrideReasonRaw = loadOverrideReasonRaw; item.nextSuggestedLoad = nextSuggestedLoad
             item.coachNote = coachNote; item.prescriptionNotes = prescriptionNotes; item.intensifierNotes = intensifierNotes
+            item.targetSets = targetSets; item.targetReps = targetReps; item.targetRIR = targetRIR
+            item.setMin = setMin; item.setMax = setMax; item.repMin = repMin; item.repMax = repMax
+            item.targetRIRMin = rirMin; item.targetRIRMax = rirMax
+            item.plannedRepsBySet = plannedReps; item.plannedRIRsBySet = plannedRIRs
         }
     }
 
@@ -399,5 +442,301 @@ enum SessionItemEditService {
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: d)
+    }
+}
+
+
+// MARK: - Change prescription for remaining sessions
+
+/// What to change on an exercise's remaining sessions. Nothing here touches loads' values, the
+/// exercise, its wave, order, `planEdited` or anything logged.
+struct PrescriptionChange: Equatable {
+    /// Sets to add (+1) or remove (-1) from each session's `targetSets`; clamped to `setBounds`.
+    var setDelta: Int?
+    /// New rep range; `targetReps` becomes its lower bound (the template's convention).
+    var repRange: ClosedRange<Int>?
+    /// New RIR range; `targetRIR` becomes its upper bound (the template's convention).
+    var rirRange: ClosedRange<Int>?
+
+    static let setBounds = 1...6      // the logger shows at most 6 working sets
+    static let repBounds = 1...50
+    static let rirBounds = 0...5
+
+    init(setDelta: Int? = nil, repRange: ClosedRange<Int>? = nil, rirRange: ClosedRange<Int>? = nil) {
+        self.setDelta = setDelta; self.repRange = repRange; self.rirRange = rirRange
+    }
+
+    /// At least one part, and every part inside its bounds.
+    var isValid: Bool {
+        guard setDelta != nil || repRange != nil || rirRange != nil else { return false }
+        if let setDelta, setDelta == 0 { return false }
+        if let r = repRange, !(Self.repBounds.contains(r.lowerBound) && Self.repBounds.contains(r.upperBound)) { return false }
+        if let r = rirRange, !(Self.rirBounds.contains(r.lowerBound) && Self.rirBounds.contains(r.upperBound)) { return false }
+        return true
+    }
+}
+
+extension SessionItemEditService {
+
+    /// One session's prescription, as the preview shows it.
+    struct PrescriptionValues: Equatable {
+        let sets: Int
+        let repMin: Int, repMax: Int
+        let rirMin: Int, rirMax: Int
+
+        init(sets: Int, repMin: Int, repMax: Int, rirMin: Int, rirMax: Int) {
+            self.sets = sets; self.repMin = repMin; self.repMax = repMax; self.rirMin = rirMin; self.rirMax = rirMax
+        }
+
+        init(_ item: SessionItem) {
+            sets = item.targetSets
+            repMin = item.repMin ?? item.targetReps; repMax = item.repMax ?? item.targetReps
+            rirMin = item.targetRIRMin ?? item.targetRIR; rirMax = item.targetRIRMax ?? item.targetRIR
+        }
+
+        func applying(_ change: PrescriptionChange) -> PrescriptionValues {
+            var next = self
+            if let d = change.setDelta {
+                let bounds = PrescriptionChange.setBounds
+                next = PrescriptionValues(sets: min(max(sets + d, bounds.lowerBound), bounds.upperBound),
+                                          repMin: repMin, repMax: repMax, rirMin: rirMin, rirMax: rirMax)
+            }
+            if let r = change.repRange {
+                next = PrescriptionValues(sets: next.sets, repMin: r.lowerBound, repMax: r.upperBound,
+                                          rirMin: next.rirMin, rirMax: next.rirMax)
+            }
+            if let r = change.rirRange {
+                next = PrescriptionValues(sets: next.sets, repMin: next.repMin, repMax: next.repMax,
+                                          rirMin: r.lowerBound, rirMax: r.upperBound)
+            }
+            return next
+        }
+
+        /// "4 x 8-12 @ RIR 2-3"
+        var text: String {
+            func r(_ a: Int, _ b: Int) -> String { a == b ? "\(a)" : "\(a)-\(b)" }
+            return "\(sets) x \(r(repMin, repMax)) @ RIR \(r(rirMin, rirMax))"
+        }
+    }
+
+    struct PrescriptionTarget {
+        let session: Session
+        let item: SessionItem
+        let date: Date
+        let weekIndex: Int
+        let waveRaw: String?
+        let before: PrescriptionValues
+        let after: PrescriptionValues
+    }
+
+    struct ChangePlan {
+        let meso: MesoBlock
+        let dayLabel: String?
+        let exerciseId: String                 // canonical
+        /// Lower-cased wave letters to change ("" = items with no wave); nil = every letter.
+        let letters: Set<String>?
+        let includeDeload: Bool
+        let scope: ReplaceScope
+        let change: PrescriptionChange
+        let now: Date
+        let targets: [PrescriptionTarget]
+        let refusals: [Refusal]
+
+        var isApplicable: Bool { !targets.isEmpty }
+    }
+
+    // MARK: Plan (no writes)
+
+    /// Same target selection and safety as `planReplace`, plus the letter filter and the deload rule.
+    /// Deload-week items are refused unless `includeDeload`; a maintenance block has no deload week (its
+    /// items carry the deload wave on every session), so the rule does not apply there.
+    static func planChangePrescription(
+        meso: MesoBlock,
+        dayLabel: String?,
+        exerciseId: String,
+        letters: Set<String>? = nil,
+        includeDeload: Bool = false,
+        scope: ReplaceScope = .allRemaining,
+        change: PrescriptionChange,
+        now: Date = Date()
+    ) -> ChangePlan {
+        let exercise = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        let normalizedLetters = letters.map { Set($0.map { $0.lowercased() }) }
+        let selected = selectCandidates(
+            meso: meso, dayLabel: dayLabel, exercise: exercise, scope: scope,
+            startOfToday: Calendar.current.startOfDay(for: now)
+        )
+        var refusals = selected.refusals
+        var targets: [PrescriptionTarget] = []
+
+        for (session, item) in selected.candidates where change.isValid {
+            let key = letterKey(item)
+            if let normalizedLetters, !normalizedLetters.contains(key) { continue }
+            if key == "deload", !includeDeload, !meso.isMaintenance {
+                refusals.append(Refusal(session: session, reason: .deload)); continue
+            }
+            if let reason = safetyRefusal(meso: meso, session: session) {
+                refusals.append(Refusal(session: session, reason: reason)); continue
+            }
+            let before = PrescriptionValues(item)
+            let after = before.applying(change)
+            if after == before {
+                refusals.append(Refusal(session: session, reason: .noChange)); continue
+            }
+            targets.append(PrescriptionTarget(
+                session: session, item: item, date: session.date, weekIndex: session.weekIndex,
+                waveRaw: item.waveRaw, before: before, after: after
+            ))
+        }
+        return ChangePlan(meso: meso, dayLabel: dayLabel, exerciseId: exercise, letters: normalizedLetters,
+                          includeDeload: includeDeload, scope: scope, change: change, now: now,
+                          targets: targets, refusals: refusals)
+    }
+
+    private static func letterKey(_ item: SessionItem) -> String {
+        item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+    }
+
+    // MARK: Apply
+
+    /// Writes the planned change to the live targets, verifies, and saves once; any failure restores
+    /// every field and throws, leaving the store as it was.
+    @discardableResult
+    static func applyChange(_ plan: ChangePlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> ApplyResult {
+        guard plan.isApplicable else { throw ReplaceError.nothingToReplace }
+        guard !plan.meso.sessions.contains(where: { $0.status == .inProgress }) else {
+            throw ReplaceError.sessionInProgress
+        }
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let live = planChangePrescription(
+            meso: plan.meso, dayLabel: plan.dayLabel, exerciseId: plan.exerciseId, letters: plan.letters,
+            includeDeload: plan.includeDeload, scope: plan.scope, change: plan.change, now: plan.now
+        )
+        let plannedIDs = plan.targets.map { $0.session.persistentModelID }
+        let liveIDs = live.targets.map { $0.session.persistentModelID }
+        guard plannedIDs == liveIDs else {
+            throw ReplaceError.planStale(planned: plannedIDs.count, live: liveIDs.count)
+        }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        func chainIdentities() -> [ObjectIdentifier?] {
+            live.targets.map { t in
+                PlanMemoryEngine.nextTargetItem(for: t.item, after: t.session, in: allSessions).map(ObjectIdentifier.init)
+            }
+        }
+        let chainsBefore = chainIdentities()
+
+        let restorePoints = live.targets.map { ItemRestorePoint($0.item) }
+        func abandon() {
+            for point in restorePoints { point.restore() }
+            context.rollback()
+        }
+
+        var summary: [String] = []
+        let change = plan.change
+        for target in live.targets {
+            let item = target.item
+            let sets = target.after.sets
+
+            if change.setDelta != nil {
+                item.targetSets = sets
+                // Grow = repeat the last set's load, shrink = first N, empty = zeros (as carry-forward does).
+                item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: sets, fallback: 0)
+            }
+            if let reps = change.repRange {
+                item.repMin = reps.lowerBound; item.repMax = reps.upperBound
+                item.targetReps = reps.lowerBound
+                item.plannedRepsBySet = Array(repeating: item.targetReps, count: sets)
+            } else if change.setDelta != nil {
+                item.plannedRepsBySet = resized(item.plannedRepsBySet, to: sets, fallback: item.targetReps)
+            }
+            if let rir = change.rirRange {
+                item.targetRIRMin = rir.lowerBound; item.targetRIRMax = rir.upperBound
+                item.targetRIR = rir.upperBound
+                item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: sets)
+            } else if change.setDelta != nil {
+                item.plannedRIRsBySet = resized(item.plannedRIRsBySet, to: sets, fallback: item.targetRIR)
+            }
+
+            let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") "
+                + "wk\(target.weekIndex) wave=\(target.waveRaw ?? "-") \(plan.exerciseId) "
+                + "\(target.before.text) -> \(target.after.text)"
+            summary.append(line)
+            print(line)
+        }
+
+        var problems: [String] = []
+        for (target, point) in zip(live.targets, restorePoints) {
+            problems += prescriptionProblems(target, before: point)
+        }
+        for (idx, (before, after)) in zip(chainsBefore, chainIdentities()).enumerated() where before != after {
+            problems.append("carry-forward chain changed for wk\(live.targets[idx].weekIndex)")
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw ReplaceError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw ReplaceError.saveFailed("\(error)")
+        }
+        return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
+    }
+
+    /// Grow by repeating the last element (`fallback` when empty); shrink to the first `count`.
+    private static func resized<T>(_ array: [T], to count: Int, fallback: T) -> [T] {
+        guard count >= 0 else { return array }
+        if array.count == count { return array }
+        if array.count > count { return Array(array.prefix(count)) }
+        return array + Array(repeating: array.last ?? fallback, count: count - array.count)
+    }
+
+    /// The target has exactly the new prescription, and nothing else about the item moved.
+    private static func prescriptionProblems(_ target: PrescriptionTarget, before b: ItemRestorePoint) -> [String] {
+        let i = target.item
+        var d: [String] = []
+        func check<T: Equatable>(_ name: String, _ expected: T, _ actual: T) {
+            if expected != actual { d.append("\(name): expected \(expected), found \(actual)") }
+        }
+        // New values.
+        check("sets", target.after.sets, i.targetSets)
+        check("repMin", target.after.repMin, i.repMin ?? i.targetReps)
+        check("repMax", target.after.repMax, i.repMax ?? i.targetReps)
+        check("rirMin", target.after.rirMin, i.targetRIRMin ?? i.targetRIR)
+        check("rirMax", target.after.rirMax, i.targetRIRMax ?? i.targetRIR)
+        // Untouched fields.
+        check("exerciseId", b.exerciseId, i.exerciseId); check("name", b.name, i.exerciseNameSnapshot)
+        check("waveRaw", b.waveRaw, i.waveRaw); check("priorityRaw", b.priorityRaw, i.priorityRaw)
+        check("intensifierRaw", b.intensifierRaw, i.intensifierRaw); check("order", b.order, i.order)
+        check("suggestedLoad", b.suggestedLoad, i.suggestedLoad)
+        check("planEdited", b.planEdited, i.planEdited)
+        check("actualLoads", b.actualLoads, i.actualLoads); check("actualReps", b.actualReps, i.actualReps)
+        check("actualRIRs", b.actualRIRs, i.actualRIRs)
+        check("isCompleted", b.isCompleted, i.isCompleted); check("isPR", b.isPR, i.isPR)
+        check("coachNote", b.coachNote, i.coachNote); check("logs", b.logs.count, i.logs.count)
+        check("setMin", b.setMin, i.setMin); check("setMax", b.setMax, i.setMax)
+        // Load values: the surviving prefix is unchanged, and the array is sized to the new set count when sets changed.
+        let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count)
+        check("plannedLoads prefix", Array(b.plannedLoads.prefix(kept)), Array(i.plannedLoadsBySet.prefix(kept)))
+        if target.after.sets != target.before.sets {
+            check("plannedLoads count", target.after.sets, i.plannedLoadsBySet.count)
+        } else {
+            check("plannedLoads", b.plannedLoads, i.plannedLoadsBySet)
+        }
+        return d.map { "\(i.exerciseId) wk\(target.weekIndex): \($0)" }
     }
 }

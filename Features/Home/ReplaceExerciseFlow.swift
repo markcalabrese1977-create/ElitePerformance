@@ -114,6 +114,8 @@ struct ReplaceExerciseModel {
         case .inactiveMeso: return "block isn't active"
         case .sameExercise: return "same exercise"
         case .notApplicable: return "doesn't have this exercise"
+        case .deload: return "deload week"
+        case .noChange: return "already at the limit"
         }
     }
 
