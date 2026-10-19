@@ -969,3 +969,201 @@ final class UniversalityGuardTests: XCTestCase {
         XCTAssertEqual(out.components(separatedBy: "\n").count, src.components(separatedBy: "\n").count, "line count preserved")
     }
 }
+
+
+// MARK: - Insert / remove deload on a real backup
+
+/// Imports the backup named by EP_BACKUP_FIXTURE into an in-memory store, previews and applies an inserted
+/// deload week, then removes it and requires the export to match the one taken before the insert (excluding
+/// `exportedAt`). Skips without the fixture. Prints what it would do; the file holds personal data and is never copied.
+final class InsertDeloadRealBackupTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private let scheduledKey = "meso.scheduledStartDateEpoch"
+    private let snoozeKey = "meso.promptSnoozeEpoch"
+
+    private func out(_ s: String = "") { print("IDR| \(s)") }
+
+    private func makeContainer() throws -> ModelContainer {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
+            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    }
+
+    /// Export, parsed, with `exportedAt` removed.
+    private func exportJSON(_ ctx: ModelContext) throws -> [String: Any] {
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        json.removeValue(forKey: "exportedAt")
+        return json
+    }
+
+    private func canonical(_ json: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+    }
+
+    /// Paths where two JSON values differ (sessions/items matched by id so one insertion doesn't shift every row).
+    private func diff(_ a: Any, _ b: Any, path: String = "$", into lines: inout [String]) {
+        guard lines.count < 40 else { return }
+        if let x = a as? [String: Any], let y = b as? [String: Any] {
+            for k in Set(x.keys).union(y.keys).sorted() {
+                switch (x[k], y[k]) {
+                case (let l?, let r?): diff(l, r, path: "\(path).\(k)", into: &lines)
+                case (nil, _): lines.append("\(path).\(k): only after")
+                default: lines.append("\(path).\(k): only before")
+                }
+            }
+        } else if let x = a as? [Any], let y = b as? [Any] {
+            func key(_ v: Any) -> String? { (v as? [String: Any])?["id"] as? String }
+            if x.allSatisfy({ key($0) != nil }) && y.allSatisfy({ key($0) != nil }) {
+                let xs = Dictionary(x.map { (key($0)!, $0) }, uniquingKeysWith: { f, _ in f })
+                let ys = Dictionary(y.map { (key($0)!, $0) }, uniquingKeysWith: { f, _ in f })
+                for k in Set(xs.keys).union(ys.keys).sorted() {
+                    switch (xs[k], ys[k]) {
+                    case (let l?, let r?): diff(l, r, path: "\(path)[\(k.prefix(8))]", into: &lines)
+                    case (nil, _): lines.append("\(path)[\(k.prefix(8))]: only after")
+                    default: lines.append("\(path)[\(k.prefix(8))]: only before")
+                    }
+                }
+                if x.map({ key($0)! }) != y.map({ key($0)! }), lines.count < 40 { lines.append("\(path): same rows, different order") }
+            } else if x.count != y.count {
+                lines.append("\(path): count \(x.count) vs \(y.count)")
+            } else {
+                for (i, pair) in zip(x, y).enumerated() { diff(pair.0, pair.1, path: "\(path)[\(i)]", into: &lines) }
+            }
+        } else if "\(a)" != "\(b)" {
+            lines.append("\(path): \(a) vs \(b)")
+        }
+    }
+
+    private func day(_ d: Date) -> String {
+        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.dateFormat = "EEE yyyy-MM-dd"
+        return f.string(from: d)
+    }
+
+    func testInsertThenRemoveDeloadOnARealBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("EP_BACKUP_FIXTURE not set")
+        }
+        let savedNext = UserDefaults.standard.object(forKey: scheduledKey)
+        let savedSnooze = UserDefaults.standard.object(forKey: snoozeKey)
+        defer {
+            for (k, v) in [(scheduledKey, savedNext), (snoozeKey, savedSnooze)] {
+                if let v { UserDefaults.standard.set(v, forKey: k) } else { UserDefaults.standard.removeObject(forKey: k) }
+            }
+        }
+
+        let container = try makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>()).filter { $0.status == .active }
+        let block = try XCTUnwrap(blocks.max { $0.sessions.count < $1.sessions.count }, "no active block in the backup")
+        let now = Date()
+        let calendar = Calendar.current
+
+        // Next-meso date: use the backup's if the app restored one, else a sentinel so the shift is visible.
+        var nextSource = "restored from the backup"
+        if MesoLifecycle.scheduledStartDate == nil {
+            MesoLifecycle.scheduleNextMeso(on: calendar.date(byAdding: .day, value: 14, to: block.sessions.map(\.date).max() ?? now)!)
+            nextSource = "sentinel (none in the backup): block end + 14 days"
+        }
+        let nextBefore = MesoLifecycle.scheduledStartDate
+
+        let exportBefore = try exportJSON(ctx)
+        let bytesBefore = try canonical(exportBefore)
+
+        // --- Preview ---
+        let plan = Service.planInsertDeloadWeek(meso: block, context: ctx, now: now)
+        out("== PREVIEW: insert deload week into \"\(block.name)\" (\(block.sessions.count) sessions, totalWeeks \(block.totalWeeks.map(String.init) ?? "nil")) ==")
+        out("today \(day(now)); eligible weeks \(Service.eligibleDeloadWeeks(meso: block, now: now)); refusal \(plan.refusal.map { "\($0)" } ?? "none")")
+        XCTAssertNil(plan.refusal, "the backup's block should accept a deload: \(plan.refusal.map { "\($0)" } ?? "")")
+        let week = try XCTUnwrap(plan.weekIndex)
+        let profile = try? ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let custom = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        out("inserted as week \(week)")
+        for s in plan.deloadSessions {
+            out("  \(day(s.date))  \(s.dayLabel ?? "?")")
+            for i in s.items {
+                let source: String
+                if ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: custom) { source = "bodyweight" }
+                else if UserProfile.isProgressionExempt(exerciseId: i.exerciseId, profile: profile) { source = i.load > 0 ? "fixed-load hold" : "fixed-load hold (no history)" }
+                else { source = i.load > 0 ? "history seed" : "none" }
+                out("    \(ExerciseCatalog.displayName(for: i.exerciseId)): \(i.prescription), start \(LoadFormatter.number(i.load)) \(LoadFormatter.unitLabel) [\(source)]")
+            }
+        }
+        out("sessions shifted one week later: \(plan.shifted.count)")
+        out("block end: \(plan.blockEndBefore.map(day) ?? "?") -> \(plan.blockEndAfter.map(day) ?? "?")")
+
+        // --- Before-state for the assertions ---
+        let allBefore = try ctx.fetch(FetchDescriptor<Session>())
+        let weeksBefore = Set(block.sessions.map(\.weekIndex))
+        let totalBefore = block.totalWeeks
+        let sources = block.sessions.filter { $0.status == .completed }
+            .flatMap { s in s.items.filter { $0.waveRaw?.lowercased() != "deload" }.map { (s, $0) } }
+        let chainsBefore = sources.map { PlanMemoryEngine.nextTargetItem(for: $0.1, after: $0.0, in: allBefore)?.persistentModelID }
+        let completedBefore = (exportBefore["sessions"] as? [[String: Any]] ?? []).filter { $0["statusRaw"] as? String == "completed" }
+
+        // --- Apply ---
+        let result = try Service.insertDeloadWeek(plan, in: ctx)
+        let nextAfter = MesoLifecycle.scheduledStartDate
+        out("== APPLIED: \(result.deloadSessionsCreated) deload sessions created, \(result.sessionsShifted) shifted ==")
+        out("next-meso date (\(nextSource)): \(nextBefore.map(day) ?? "none") -> \(nextAfter.map(day) ?? "none")")
+        XCTAssertEqual(result.deloadSessionsCreated, plan.deloadSessions.count)
+        XCTAssertEqual(result.sessionsShifted, plan.shifted.count)
+
+        let allAfter = try ctx.fetch(FetchDescriptor<Session>())
+        let chainsAfter = sources.map { PlanMemoryEngine.nextTargetItem(for: $0.1, after: $0.0, in: allAfter) }
+        XCTAssertEqual(chainsBefore.count, chainsAfter.count)
+        var changed = 0
+        for (b, a) in zip(chainsBefore, chainsAfter) {
+            if b != a?.persistentModelID { changed += 1 }
+            XCTAssertNotEqual(a?.waveRaw?.lowercased(), "deload", "a completed source must never resolve to a deload item")
+        }
+        XCTAssertEqual(changed, 0, "every completed source resolves to the same target as before")
+        out("chains checked: \(sources.count) completed items, \(changed) changed, 0 to a deload item")
+
+        let weeksAfter = Set(block.sessions.map(\.weekIndex))
+        if let lo = weeksAfter.min(), let hi = weeksAfter.max() {
+            XCTAssertEqual(weeksAfter, Set(lo...hi), "weekInMeso contiguous")
+        }
+        if let before = weeksBefore.min().flatMap({ lo in weeksBefore.max().map { Set(lo...$0) } }) {
+            XCTAssertEqual(weeksBefore, before, "sanity: contiguous before as well")
+        }
+        XCTAssertEqual(block.totalWeeks, totalBefore.map { $0 + 1 })
+
+        let moved = Set(block.sessions.map(\.persistentModelID))
+        let outside = allAfter.filter { !moved.contains($0.persistentModelID) }
+        let outsideDays = Set(outside.map { calendar.startOfDay(for: $0.date) })
+        for s in block.sessions where s.insertedDeload == true || plan.shifted.contains(where: { $0.session === s }) {
+            XCTAssertFalse(outsideDays.contains(calendar.startOfDay(for: s.date)), "date collision on \(day(s.date))")
+        }
+        out("weeks now \(weeksAfter.min() ?? 0)...\(weeksAfter.max() ?? 0), totalWeeks \(block.totalWeeks.map(String.init) ?? "nil"), no date collisions")
+
+        let exportApplied = try exportJSON(ctx)
+        let completedApplied = (exportApplied["sessions"] as? [[String: Any]] ?? []).filter { $0["statusRaw"] as? String == "completed" }
+        XCTAssertEqual(try canonical(completedBefore), try canonical(completedApplied), "completed sessions byte-identical")
+        out("completed sessions byte-identical: \(completedBefore.count)")
+
+        // --- Remove ---
+        let removePlan = Service.planRemoveInsertedDeloadWeek(meso: block, context: ctx, now: now)
+        XCTAssertNil(removePlan.refusal)
+        let removed = try Service.removeInsertedDeloadWeek(removePlan, in: ctx)
+        out("== REMOVED: \(removed.deloadSessionsRemoved) deload sessions, \(removed.sessionsShifted) shifted back ==")
+        out("next-meso date after remove: \(MesoLifecycle.scheduledStartDate.map(day) ?? "none")")
+        XCTAssertEqual(MesoLifecycle.scheduledStartDate, nextBefore)
+
+        let exportAfter = try exportJSON(ctx)
+        let bytesAfter = try canonical(exportAfter)
+        if bytesAfter != bytesBefore {
+            var lines: [String] = []
+            diff(exportBefore, exportAfter, into: &lines)
+            lines.forEach { out("DIFF \($0)") }
+            XCTFail("export after insert+remove differs from the export before (\(lines.count) differences); see IDR| DIFF lines")
+        } else {
+            out("export after insert + remove is byte-identical to the export before (excluding exportedAt): \(bytesBefore.count) bytes")
+        }
+    }
+}
