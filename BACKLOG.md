@@ -25,3 +25,5 @@ One line per item; dates are 2026.
 - Set band (low priority): stepper/prescription widen setMin/setMax but never narrow, so a +1/-1 round
   trip leaves a wider label ("2-4 sets" with 3 working). Narrow back toward the original
   template band (store it, or recompute from the wave prescription), never below it.
+- Rest today (low priority): when the refusal is a collision with the next week's first session, say
+  "No open day this week. Skip a session instead."
