@@ -30,9 +30,7 @@ struct TodayTabView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
-    @State private var showRestDayConfirm = false
-    @State private var showCollisionAlert = false
-    @State private var collisionMessage = ""
+    @State private var showRestToday = false
 
     private var activeBlockSessions: [Session] {
         let todayStart = Calendar.current.startOfDay(for: Date())
@@ -82,7 +80,7 @@ struct TodayTabView: View {
     /// True when today has a planned (not started) session that can be pushed.
     private var canRestToday: Bool {
         guard let session = todaySession else { return false }
-        return session.status == .planned
+        return session.status == .planned && session.meso != nil
     }
 
     var body: some View {
@@ -108,25 +106,10 @@ struct TodayTabView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Today")
-            .confirmationDialog(
-                "Rest today?",
-                isPresented: $showRestDayConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Push this week's remaining sessions one day") {
-                    attemptPush()
+            .sheet(isPresented: $showRestToday) {
+                if let meso = todaySession?.meso {
+                    RestTodayFlow(meso: meso, onFinish: { showRestToday = false })
                 }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("Today becomes a rest day. All planned sessions remaining this week shift forward one day, and the rest day absorbs the change. Next week is unaffected.")
-            }
-            .alert("Schedule conflict", isPresented: $showCollisionAlert) {
-                Button("Push anyway") {
-                    executePush()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text(collisionMessage)
             }
         }
     }
@@ -167,7 +150,7 @@ struct TodayTabView: View {
 
             if canRestToday {
                 Button {
-                    showRestDayConfirm = true
+                    showRestToday = true
                 } label: {
                     HStack {
                         Image(systemName: "bed.double")
@@ -189,88 +172,6 @@ struct TodayTabView: View {
                 .fill(Color(.systemBackground))
                 .shadow(radius: 4, y: 2)
         )
-    }
-
-    // MARK: - Rest Today Logic
-
-    /// Compute the sessions to shift and their new dates.
-    /// Returns nil if there's nothing to push.
-    private func computeShift() -> [(session: Session, newDate: Date)]? {
-        guard let todaySession = todaySession else { return nil }
-
-        let cal = Calendar.current
-        let currentWeekIndex = todaySession.weekIndex
-        let todayStart = cal.startOfDay(for: Date())
-
-        let sessionsToShift = visibleSessions
-            .filter {
-                $0.status == .planned &&
-                $0.weekIndex == currentWeekIndex &&
-                cal.startOfDay(for: $0.date) >= todayStart
-            }
-            .sorted { $0.date < $1.date }
-
-        guard !sessionsToShift.isEmpty else { return nil }
-
-        return sessionsToShift.map { session in
-            let newDate = cal.date(byAdding: .day, value: 1, to: session.date) ?? session.date
-            return (session: session, newDate: newDate)
-        }
-    }
-
-    /// Check for collisions: does any shifted session land on a date
-    /// already occupied by a session from a different week?
-    private func detectCollisions(in shifts: [(session: Session, newDate: Date)]) -> [String] {
-        let cal = Calendar.current
-        var conflicts: [String] = []
-
-        for shift in shifts {
-            let newDayStart = cal.startOfDay(for: shift.newDate)
-            let newDayEnd = cal.date(byAdding: .day, value: 1, to: newDayStart)!
-
-            // Find any session on the new date from a different week
-            let conflicting = visibleSessions.first { other in
-                other.persistentModelID != shift.session.persistentModelID &&
-                other.weekIndex != shift.session.weekIndex &&
-                cal.startOfDay(for: other.date) >= newDayStart &&
-                other.date < newDayEnd
-            }
-
-            if let conflict = conflicting {
-                let shiftLabel = shift.session.dayLabel ?? "W\(shift.session.weekIndex) session"
-                let conflictLabel = conflict.dayLabel ?? "W\(conflict.weekIndex) session"
-                let dateStr = shift.newDate.formatted(date: .abbreviated, time: .omitted)
-                conflicts.append("\(shiftLabel) would land on \(dateStr), same day as \(conflictLabel).")
-            }
-        }
-
-        return conflicts
-    }
-
-    /// First attempt — check for collisions before committing.
-    private func attemptPush() {
-        guard let shifts = computeShift() else { return }
-
-        let conflicts = detectCollisions(in: shifts)
-
-        if conflicts.isEmpty {
-            executePush()
-        } else {
-            collisionMessage = conflicts.joined(separator: "\n\n") +
-                "\n\nBoth sessions will be on the same day. Push anyway, or train today's session as planned."
-            showCollisionAlert = true
-        }
-    }
-
-    /// Execute the push — shift all planned sessions in current week forward one day.
-    private func executePush() {
-        guard let shifts = computeShift() else { return }
-
-        for shift in shifts {
-            shift.session.date = shift.newDate
-        }
-
-        try? context.save()
     }
 }
 

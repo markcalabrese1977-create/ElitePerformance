@@ -1437,3 +1437,192 @@ extension SessionItemEditService {
         return RemoveDeloadResult(deloadSessionsRemoved: live.removals.count, sessionsShifted: live.shifted.count, summary: summary)
     }
 }
+
+// MARK: - Rest today
+
+/// "Rest today": today becomes a rest day, so today's meso moves its remaining planned sessions of this
+/// week forward one day. Same shape as the other edits: a pure plan for the preview, then an apply that
+/// re-plans, writes, verifies and saves once (restoring every date on failure). Only dates change.
+extension SessionItemEditService {
+
+    enum RestTodayRefusal: Equatable {
+        /// A session in the block is being trained.
+        case sessionInProgress
+        /// The block has no planned session today.
+        case nothingToMove
+        /// A session that would move already has logged work.
+        case unsafeSession
+        /// A moved session would land on a day another session already occupies (see `collisions`).
+        case dateCollision
+    }
+
+    enum RestTodayWarning: Equatable {
+        /// A moved session reaches the first day of the following week's training.
+        case reachesNextWeek(date: Date, dayLabel: String?)
+        /// A moved session reaches or passes the scheduled start of the next block.
+        case pastNextMesoStart(date: Date, nextStart: Date)
+    }
+
+    enum RestTodayError: Error, Equatable {
+        case refused(RestTodayRefusal)
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    struct RestTodayPlan {
+        let meso: MesoBlock
+        let now: Date
+        let weekIndex: Int?
+        /// Sessions to move, in date order (`newWeek == oldWeek`: only the date changes).
+        let moves: [ShiftedSession]
+        let collisions: [DateCollision]
+        let warnings: [RestTodayWarning]
+        let refusal: RestTodayRefusal?
+
+        var isApplicable: Bool { refusal == nil && !moves.isEmpty }
+    }
+
+    struct RestTodayResult {
+        let sessionsMoved: Int
+        let summary: [String]
+    }
+
+    private struct ForcedRestSaveFailure: Error {}
+
+    // MARK: Plan (no writes)
+
+    static func planRestToday(meso: MesoBlock, context: ModelContext, now: Date = Date()) -> RestTodayPlan {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        let all = meso.sessions
+
+        func refused(_ reason: RestTodayRefusal, week: Int? = nil, moves: [ShiftedSession] = [], collisions: [DateCollision] = []) -> RestTodayPlan {
+            RestTodayPlan(meso: meso, now: now, weekIndex: week, moves: moves, collisions: collisions, warnings: [], refusal: reason)
+        }
+
+        if all.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
+
+        // Today's session in THIS block fixes the week; sessions of any other block are never candidates.
+        guard let today = all.filter({ calendar.startOfDay(for: $0.date) == startOfToday && $0.status == .planned })
+            .min(by: { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) })
+        else { return refused(.nothingToMove) }
+        let week = today.weekIndex
+
+        let moving = all
+            .filter { $0.weekIndex == week && $0.status == .planned && calendar.startOfDay(for: $0.date) >= startOfToday }
+            .sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        let moves: [ShiftedSession] = moving.map { s in
+            ShiftedSession(session: s, oldDate: s.date,
+                           newDate: calendar.date(byAdding: .day, value: 1, to: s.date) ?? s.date,
+                           oldWeek: week, newWeek: week)
+        }
+        if moving.contains(where: { !SessionEditSafety.isSafeToModify($0) }) { return refused(.unsafeSession, week: week) }
+
+        // Every other session, any block and any status.
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let collisions = shiftCollisions(moves, among: allSessions, calendar: calendar)
+        if !collisions.isEmpty { return refused(.dateCollision, week: week, moves: moves, collisions: collisions) }
+
+        var warnings: [RestTodayWarning] = []
+        if let nextWeekFirst = all.filter({ $0.weekIndex > week }).min(by: { $0.date < $1.date }).map({ calendar.startOfDay(for: $0.date) }) {
+            for m in moves where calendar.startOfDay(for: m.newDate) >= nextWeekFirst {
+                warnings.append(.reachesNextWeek(date: m.newDate, dayLabel: m.session.dayLabel))
+            }
+        }
+        if let next = MesoLifecycle.scheduledStartDate {
+            let nextDay = calendar.startOfDay(for: next)
+            for m in moves where calendar.startOfDay(for: m.newDate) >= nextDay {
+                warnings.append(.pastNextMesoStart(date: m.newDate, nextStart: next))
+            }
+        }
+        return RestTodayPlan(meso: meso, now: now, weekIndex: week, moves: moves, collisions: [], warnings: warnings, refusal: nil)
+    }
+
+    // MARK: Apply
+
+    @discardableResult
+    static func restToday(_ plan: RestTodayPlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> RestTodayResult {
+        guard plan.isApplicable else { throw RestTodayError.refused(plan.refusal ?? .nothingToMove) }
+        let meso = plan.meso
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let live = planRestToday(meso: meso, context: context, now: plan.now)
+        guard live.isApplicable else { throw RestTodayError.refused(live.refusal ?? .nothingToMove) }
+        guard live.weekIndex == plan.weekIndex,
+              live.moves.map({ $0.session.persistentModelID }) == plan.moves.map({ $0.session.persistentModelID })
+        else { throw RestTodayError.planStale }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let calendar = Calendar.current
+        func everySession() -> [Session] {
+            var seen = Set<PersistentIdentifier>()
+            return (((try? context.fetch(FetchDescriptor<Session>())) ?? []) + meso.sessions)
+                .filter { seen.insert($0.persistentModelID).inserted }
+        }
+        let chainSources: [(session: Session, item: SessionItem)] =
+            meso.sessions.sorted { $0.date < $1.date }.flatMap { s in s.items.map { (s, $0) } }
+        func chainTargets() -> [PersistentIdentifier?] {
+            let sessions = everySession()
+            return chainSources.map { PlanMemoryEngine.nextTargetItem(for: $0.item, after: $0.session, in: sessions)?.persistentModelID }
+        }
+        let chainsBefore = chainTargets()
+
+        struct DateRestore {
+            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+        }
+        let restores = live.moves.map { DateRestore($0.session) }
+        func abandon() {
+            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            context.rollback()
+        }
+
+        for move in live.moves { move.session.date = move.newDate }
+
+        var problems: [String] = []
+        for (move, r) in zip(live.moves, restores) {
+            let tag = "\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?")"
+            if move.session.date != move.newDate { problems.append("\(tag): date is not the planned one") }
+            if calendar.dateComponents([.day], from: calendar.startOfDay(for: r.date), to: calendar.startOfDay(for: move.session.date)).day != 1 {
+                problems.append("\(tag): did not move exactly one day")
+            }
+            if move.session.weekInMeso != r.week || move.session.programIndex != r.programIndex {
+                problems.append("\(tag): week or index changed")
+            }
+        }
+        for (idx, (b, a)) in zip(chainsBefore, chainTargets()).enumerated() where b != a {
+            let src = chainSources[idx]
+            problems.append("carry-forward chain changed for \(src.item.exerciseId) \(isoDay(src.session.date)) \(src.session.dayLabel ?? "?")")
+        }
+        for c in shiftCollisions(live.moves, among: everySession(), calendar: calendar) {
+            problems.append("date collision on \(isoDay(c.date)): \(c.moved.dayLabel ?? "?") vs \(c.occupant.dayLabel ?? "?")")
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw RestTodayError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedRestSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw RestTodayError.saveFailed("\(error)")
+        }
+
+        let summary = live.moves.map {
+            "SessionItemEdit: rest today wk\(live.weekIndex ?? 0) \($0.session.dayLabel ?? "?") \(isoDay($0.oldDate)) -> \(isoDay($0.newDate))"
+        }
+        summary.forEach { print($0) }
+        return RestTodayResult(sessionsMoved: live.moves.count, summary: summary)
+    }
+}
