@@ -22,3 +22,6 @@ One line per item; dates are 2026.
 - kg support: User.units is unused; loads/increments/display/backups.
 - Settings (low priority): 'Use Health date of birth' row next to the Birthdate field, calling requestAuthorizationIfNeeded(), so users grant it in context instead of after a workout. Helper text: Health's date of birth is used when available, otherwise the Birthdate above (iOS can't report whether access was granted). Footer stays as is.
 - HR zones: when age is available, HRR uses 220 - age as max HR even if observed max exists. Prefer observed max (with a sanity floor); 220 - age only as fallback.
+- Set band (low priority): stepper/prescription widen setMin/setMax but never narrow, so a +1/-1 round
+  trip leaves a wider label ("2-4 sets" with 3 working). Narrow back toward the original
+  template band (store it, or recompute from the wave prescription), never below it.
