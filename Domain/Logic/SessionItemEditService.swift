@@ -917,7 +917,7 @@ extension SessionItemEditService {
                     load = lastCompletedLoad(for: i.exerciseId, in: allSessions) ?? 0
                 } else {
                     load = HistorySeedLoad.load(
-                        for: i.exerciseId, goalReps: repMin, targetRIR: deloadRIRRange.upperBound, in: allSessions,
+                        for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
                         loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom,
                         referenceDate: now
                     ) ?? 0

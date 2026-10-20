@@ -213,9 +213,9 @@ final class InsertDeloadWeekTests: XCTestCase {
                 } else {
                     XCTAssertGreaterThan(d.suggestedLoad, 0, "history at 100 -> a positive seed")
                     let expected = HistorySeedLoad.load(
-                        for: d.exerciseId, goalReps: d.targetReps, targetRIR: 4,
+                        for: d.exerciseId, goalReps: d.repMax ?? d.targetReps, targetRIR: 4,
                         in: sorted(block).filter { $0.status == .completed }, loadIncrement: 2.5, referenceDate: now)
-                    XCTAssertEqual(d.suggestedLoad, expected, "the seed is HistorySeedLoad at (reps, RIR 4)")
+                    XCTAssertEqual(d.suggestedLoad, expected, "the seed is HistorySeedLoad at (top of the rep range, RIR 4)")
                     XCTAssertEqual(d.suggestedLoad.truncatingRemainder(dividingBy: 2.5), 0, accuracy: 1e-9, "rounded down to the increment")
                 }
                 XCTAssertFalse(d.planEdited)
