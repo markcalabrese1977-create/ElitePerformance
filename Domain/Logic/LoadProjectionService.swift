@@ -695,6 +695,95 @@ enum HistorySeedLoad {
         return seeded > 0 ? seeded : nil
     }
 
+    /// Where a next-meso seed came from (for the preview).
+    enum SeedSource: String, Equatable {
+        case peak, history, fixed, bodyweight, none
+
+        /// "peak95" for a 0.95 factor, "history", "fixed", "bodyweight", "none".
+        func label(factor: Double) -> String {
+            self == .peak ? "peak\(Int((factor * 100).rounded()))" : rawValue
+        }
+    }
+
+    /// Best RIR-credited e1RM of `exerciseId` over `sessions` (the meso being continued), converted to a
+    /// load at the prescription and scaled by `factor`, rounded DOWN to the increment.
+    ///
+    /// Counted: completed sessions only, not on an inserted deload week, not in a maintenance block, and
+    /// not a deload-wave item. Sets are the same working sets `load` uses (rest-pause, drop and skipped
+    /// sets excluded, sets under half of the session's heaviest set dropped as warm-ups), credited with
+    /// their logged RIR (clamped 0...4). Unlike `load`, nothing is averaged: the best set of the best
+    /// session wins, so a deload, a maintenance block or an old light session cannot dilute it.
+    ///
+    /// - Returns: `nil` when no counted set exists. Bodyweight exercises are `0`.
+    static func peakLoad(
+        for exerciseId: String,
+        goalReps: Int,
+        targetRIR: Int,
+        in sessions: [Session],
+        loadIncrement: Double,
+        factor: Double = 0.95,
+        customExercises: [CustomExercise] = []
+    ) -> Double? {
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return 0 }
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+
+        var peak = 0.0
+        for session in sessions where session.status == .completed {
+            if session.insertedDeload == true || session.meso?.isMaintenance == true { continue }
+            guard let match = session.items.first(where: {
+                ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
+            }) else { continue }
+            if match.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" { continue }
+
+            let sets = qualifyingSets(of: match)
+            guard let heaviest = sets.map(\.load).max() else { continue }
+            for set in sets where set.load >= heaviest * warmupFraction {
+                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                peak = max(peak, E1RMCalculator.e1RM(load: set.load, reps: credited))
+            }
+        }
+        guard peak > 0 else { return nil }
+        let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
+                                 increment: loadIncrement)
+        return seeded > 0 ? seeded : nil
+    }
+
+    /// The starting load for one item of a next meso, and where it came from.
+    ///
+    /// Order: bodyweight 0; fixed-load (exempt) lifts take the last lifted load; otherwise the peak of
+    /// `previousMeso` (x `factor`); otherwise the decay-weighted `load` over all history; otherwise 0.
+    static func nextMesoSeed(
+        for exerciseId: String,
+        goalReps: Int,
+        targetRIR: Int,
+        previousMeso: [Session],
+        allSessions: [Session],
+        loadIncrement: Double,
+        bodyWeight: Double? = nil,
+        isFixedLoad: Bool,
+        factor: Double = 0.95,
+        customExercises: [CustomExercise] = [],
+        referenceDate: Date = Date()
+    ) -> (load: Double, source: SeedSource) {
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
+            return (0, .bodyweight)
+        }
+        if isFixedLoad {
+            if let last = SessionItemEditService.lastCompletedLoad(for: exerciseId, in: allSessions) { return (last, .fixed) }
+            return (0, .none)
+        }
+        if let peak = peakLoad(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: previousMeso,
+                               loadIncrement: loadIncrement, factor: factor, customExercises: customExercises) {
+            return (peak, .peak)
+        }
+        if let h = load(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: allSessions,
+                        loadIncrement: loadIncrement, bodyWeight: bodyWeight, customExercises: customExercises,
+                        referenceDate: referenceDate) {
+            return (h, .history)
+        }
+        return (0, .none)
+    }
+
     /// Context convenience: fetches sessions, custom exercises and the profile's increment/bodyweight.
     static func load(
         for exerciseId: String,

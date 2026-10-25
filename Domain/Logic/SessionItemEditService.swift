@@ -1017,7 +1017,7 @@ extension SessionItemEditService {
     }
 
     /// The most recent logged working load of a fixed-load exercise (deload items excluded), if any.
-    private static func lastCompletedLoad(for exerciseId: String, in sessions: [Session]) -> Double? {
+    static func lastCompletedLoad(for exerciseId: String, in sessions: [Session]) -> Double? {
         let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         for s in sessions.filter({ $0.status == .completed }).sorted(by: { $0.date > $1.date }) {
             guard let item = s.items.first(where: {
