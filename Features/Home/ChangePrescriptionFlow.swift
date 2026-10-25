@@ -73,6 +73,9 @@ struct ChangePrescriptionModel {
     var repLow: Int, repHigh: Int
     var changeRIR = false
     var rirLow: Int, rirHigh: Int
+    /// The note under the exercise: text replaces it, "Clear note" removes it, both empty leaves it alone.
+    var noteText = ""
+    var clearNote = false
 
     init(session: Session, item: SessionItem, context: ModelContext, scope: ReplaceScopeChoice, now: Date = Date()) {
         self.session = session; self.item = item; self.context = context; self.scope = scope; self.now = now
@@ -104,7 +107,8 @@ struct ChangePrescriptionModel {
         PrescriptionChange(
             setDelta: setDelta == 0 ? nil : setDelta,
             repRange: changeReps ? repLow...max(repLow, repHigh) : nil,
-            rirRange: changeRIR ? rirLow...max(rirLow, rirHigh) : nil
+            rirRange: changeRIR ? rirLow...max(rirLow, rirHigh) : nil,
+            note: clearNote ? "" : (noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText)
         )
     }
 
@@ -137,11 +141,20 @@ struct ChangePrescriptionModel {
         let wave: String
         let before: String
         let after: String
+        /// "Note: "old" -> "new"" when the change carries a note.
+        var note: String? = nil
+    }
+
+    /// A note shortened for the preview; empty reads "none".
+    static func shortNote(_ text: String?, limit: Int = 36) -> String {
+        guard let text, !text.isEmpty else { return "none" }
+        return text.count <= limit ? "\"\(text)\"" : "\"\(text.prefix(limit))…\""
     }
 
     static func rows(_ plan: SessionItemEditService.ChangePlan) -> [Row] {
         plan.targets.map {
-            Row(date: $0.date, wave: ReplaceExerciseModel.letter($0.waveRaw), before: $0.before.text, after: $0.after.text)
+            Row(date: $0.date, wave: ReplaceExerciseModel.letter($0.waveRaw), before: $0.before.text, after: $0.after.text,
+                note: !$0.changesNote ? nil : "Note: \(shortNote($0.beforeNote)) -> \(shortNote($0.afterNote))")
         }
     }
 
@@ -244,6 +257,17 @@ private struct ChangePrescriptionForm: View {
                     }
                 }
 
+                Section {
+                    TextField("Note shown under the exercise", text: $model.noteText, axis: .vertical)
+                        .lineLimit(1...3)
+                        .disabled(model.clearNote)
+                    Toggle("Clear note", isOn: $model.clearNote)
+                } header: {
+                    Text("Note")
+                } footer: {
+                    Text("Replaces the line shown under the exercise name in the sessions above. Leave empty to keep it.")
+                }
+
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red).font(.callout) }
                 }
@@ -263,8 +287,13 @@ private struct ChangePrescriptionForm: View {
                                         .padding(.horizontal, 6).padding(.vertical, 1)
                                         .background(.quaternary, in: Capsule())
                                 }
-                                Text("\(row.before)  →  \(row.after)")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                if row.before != row.after {
+                                    Text("\(row.before)  →  \(row.after)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let note = row.note {
+                                    Text(note).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }

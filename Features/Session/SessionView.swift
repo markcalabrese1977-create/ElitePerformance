@@ -606,21 +606,7 @@ private struct SessionExerciseCardView: View {
     }
 
     private var executionNoteLine: String? {
-        let intensifier = exercise.intensifierNotes?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let intensifier, !intensifier.isEmpty {
-            return intensifier
-        }
-
-        let prescription = exercise.prescriptionNotes?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let prescription, !prescription.isEmpty {
-            return prescription
-        }
-
-        return nil
+        NoteFields(intensifier: exercise.intensifierNotes, prescription: exercise.prescriptionNotes).displayed
     }
 
     private func shouldShowSet(_ set: UISessionSet) -> Bool {

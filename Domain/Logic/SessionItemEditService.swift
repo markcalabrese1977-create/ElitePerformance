@@ -457,23 +457,66 @@ struct PrescriptionChange: Equatable {
     var repRange: ClosedRange<Int>?
     /// New RIR range; `targetRIR` becomes its upper bound (the template's convention).
     var rirRange: ClosedRange<Int>?
+    /// The note shown under the exercise: nil = unchanged, "" (or only whitespace) = clear it, anything else
+    /// replaces it. See `NoteFields` for which stored field it lands in.
+    var note: String?
 
     static let setBounds = 1...6      // the logger shows at most 6 working sets
     static let repBounds = 1...50
     static let rirBounds = 0...5
 
-    init(setDelta: Int? = nil, repRange: ClosedRange<Int>? = nil, rirRange: ClosedRange<Int>? = nil) {
-        self.setDelta = setDelta; self.repRange = repRange; self.rirRange = rirRange
+    init(setDelta: Int? = nil, repRange: ClosedRange<Int>? = nil, rirRange: ClosedRange<Int>? = nil, note: String? = nil) {
+        self.setDelta = setDelta; self.repRange = repRange; self.rirRange = rirRange; self.note = note
     }
 
     /// At least one part, and every part inside its bounds.
     var isValid: Bool {
-        guard setDelta != nil || repRange != nil || rirRange != nil else { return false }
+        guard setDelta != nil || repRange != nil || rirRange != nil || note != nil else { return false }
         if let setDelta, setDelta == 0 { return false }
         if let r = repRange, !(Self.repBounds.contains(r.lowerBound) && Self.repBounds.contains(r.upperBound)) { return false }
         if let r = rirRange, !(Self.rirBounds.contains(r.lowerBound) && Self.rirBounds.contains(r.upperBound)) { return false }
         return true
     }
+}
+
+// MARK: - The note under an exercise
+
+extension SessionItem {
+    /// The line the session screen shows under the exercise name: `intensifierNotes` if it has text, else
+    /// `prescriptionNotes` (both trimmed). Defined once in `NoteFields.displayed`, which
+    /// `SessionView.executionNoteLine` also uses.
+    var executionNoteText: String? { NoteFields(self).displayed }
+}
+
+/// The two stored note fields of an item, and the rule for changing the note it displays.
+///
+/// RULE: a new note is written to the field the item currently DISPLAYS (`intensifierNotes` when that has text,
+/// otherwise `prescriptionNotes`), and the other field is cleared, so the display can never fall back to older
+/// text. Clearing empties both. Leading and trailing whitespace is trimmed.
+struct NoteFields: Equatable {
+    var intensifier: String?
+    var prescription: String?
+
+    init(intensifier: String?, prescription: String?) { self.intensifier = intensifier; self.prescription = prescription }
+    init(_ item: SessionItem) { intensifier = item.intensifierNotes; prescription = item.prescriptionNotes }
+
+    /// What the session screen would show for these fields.
+    var displayed: String? {
+        for raw in [intensifier, prescription] {
+            if let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty { return text }
+        }
+        return nil
+    }
+
+    static func applying(_ note: String, to item: SessionItem) -> NoteFields {
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return NoteFields(intensifier: nil, prescription: nil) }
+        let showsIntensifier = !(item.intensifierNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return showsIntensifier ? NoteFields(intensifier: text, prescription: nil)
+                                : NoteFields(intensifier: nil, prescription: text)
+    }
+
+    func write(to item: SessionItem) { item.intensifierNotes = intensifier; item.prescriptionNotes = prescription }
 }
 
 extension SessionItemEditService {
@@ -527,6 +570,11 @@ extension SessionItemEditService {
         let waveRaw: String?
         let before: PrescriptionValues
         let after: PrescriptionValues
+        /// The note the item shows now and what it will show (nil = no line); only meaningful when `changesNote`.
+        let beforeNote: String?
+        let afterNote: String?
+        /// True when the change carries a note (replace or clear), even if the result shows no line.
+        let changesNote: Bool
     }
 
     struct ChangePlan {
@@ -580,12 +628,16 @@ extension SessionItemEditService {
             }
             let before = PrescriptionValues(item)
             let after = before.applying(change)
-            if after == before {
+            let noteChanges = change.note.map { NoteFields.applying($0, to: item) != NoteFields(item) } ?? false
+            if after == before && !noteChanges {
                 refusals.append(Refusal(session: session, reason: .noChange)); continue
             }
             targets.append(PrescriptionTarget(
                 session: session, item: item, date: session.date, weekIndex: session.weekIndex,
-                waveRaw: item.waveRaw, before: before, after: after
+                waveRaw: item.waveRaw, before: before, after: after,
+                beforeNote: item.executionNoteText,
+                afterNote: change.note.flatMap { NoteFields.applying($0, to: item).displayed },
+                changesNote: change.note != nil
             ))
         }
         return ChangePlan(meso: meso, dayLabel: dayLabel, exerciseId: exercise, letters: normalizedLetters,
@@ -670,9 +722,12 @@ extension SessionItemEditService {
                 item.plannedRIRsBySet = resized(item.plannedRIRsBySet, to: sets, fallback: item.targetRIR)
             }
 
+            if let note = change.note { NoteFields.applying(note, to: item).write(to: item) }
+
             let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") "
                 + "wk\(target.weekIndex) wave=\(target.waveRaw ?? "-") \(plan.exerciseId) "
                 + "\(target.before.text) -> \(target.after.text)"
+                + (target.changesNote ? " note \(target.beforeNote ?? "-") -> \(target.afterNote ?? "-")" : "")
             summary.append(line)
             print(line)
         }
@@ -731,6 +786,17 @@ extension SessionItemEditService {
         check("actualRIRs", b.actualRIRs, i.actualRIRs)
         check("isCompleted", b.isCompleted, i.isCompleted); check("isPR", b.isPR, i.isPR)
         check("coachNote", b.coachNote, i.coachNote); check("logs", b.logs.count, i.logs.count)
+        // Notes: unchanged unless the change carries one; then the display reads exactly the new text and the
+        // other field holds nothing to fall back to.
+        if target.changesNote {
+            check("displayed note", target.afterNote, i.executionNoteText)
+            let shown = i.intensifierNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            let otherField = shown ? i.prescriptionNotes : i.intensifierNotes
+            check("fallback note field", nil, otherField)
+        } else {
+            check("intensifierNotes", b.intensifierNotes, i.intensifierNotes)
+            check("prescriptionNotes", b.prescriptionNotes, i.prescriptionNotes)
+        }
         // The set band only widens to include the new count (never narrows) when sets changed.
         let newSets = target.after.sets
         let widenSets = target.after.sets != target.before.sets

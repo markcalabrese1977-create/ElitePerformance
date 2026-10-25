@@ -176,3 +176,185 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         XCTAssertTrue(i.planEdited, "a hand-set load is protected")
     }
 }
+
+// MARK: - Change the note under an exercise for the remaining sessions
+
+final class NoteChangeTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private var container: ModelContainer!
+
+    private func makeBlock() throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                             UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        let cal = Calendar(identifier: .gregorian)
+        try DUPProgramSeeder.seed(
+            startDate: cal.date(from: DateComponents(year: 2026, month: 9, day: 25))!,
+            trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx,
+            template: DUP10WeekTemplate.template, calendar: cal, mesoName: "10-Week DUP Meso", mesoStatus: .active
+        )
+        try ctx.save()
+        return (ctx, try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first))
+    }
+
+    private let longAgo = Date(timeIntervalSince1970: 0)
+
+    /// The first non-bodyweight exercise of the first session, its day label, and every item of it in the block.
+    private func target(_ block: MesoBlock) throws -> (day: String, exercise: String, items: [SessionItem]) {
+        let first = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(first.items.sorted { $0.order < $1.order }.first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) })
+        let day = try XCTUnwrap(first.dayLabel)
+        let canon = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let items = block.sessions.filter { SessionDayLabelMatcher.matches($0.dayLabel, day) }
+            .flatMap(\.items).filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canon }
+        return (day, canon, items)
+    }
+
+    private func plan(_ block: MesoBlock, _ t: (day: String, exercise: String, items: [SessionItem]),
+                      letters: Set<String>? = nil, scope: Service.ReplaceScope = .allRemaining, note: String?) -> Service.ChangePlan {
+        Service.planChangePrescription(meso: block, dayLabel: t.day, exerciseId: t.exercise, letters: letters, scope: scope,
+                                       change: PrescriptionChange(note: note), now: longAgo)
+    }
+
+    private func fields(_ i: SessionItem) -> [String] { [i.intensifierNotes ?? "-", i.prescriptionNotes ?? "-"] }
+
+    func test_noteOnlyChange_isValid_andANilNoteIsNotAChange() {
+        XCTAssertTrue(PrescriptionChange(note: "x").isValid)
+        XCTAssertTrue(PrescriptionChange(note: "").isValid, "clearing is a change")
+        XCTAssertFalse(PrescriptionChange(note: nil).isValid)
+    }
+
+    func test_aOnlyNote_changesTheALetter_andLeavesBAndC() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        let before = Dictionary(uniqueKeysWithValues: t.items.map { (ObjectIdentifier($0), fields($0)) })
+        let loads = t.items.map { $0.plannedLoadsBySet }
+        let edited = t.items.map(\.planEdited)
+
+        let p = plan(block, t, letters: ["a"], note: "Pause every rep.")
+        XCTAssertFalse(p.targets.isEmpty)
+        XCTAssertTrue(p.targets.allSatisfy { $0.waveRaw?.lowercased() == "a" })
+        try Service.applyChange(p, in: ctx)
+
+        for i in t.items {
+            if i.waveRaw?.lowercased() == "a" {
+                XCTAssertEqual(i.executionNoteText, "Pause every rep.")
+                XCTAssertEqual(NoteFields(i).prescription == nil || NoteFields(i).intensifier == nil, true, "only the shown field holds text")
+            } else {
+                XCTAssertEqual(fields(i), before[ObjectIdentifier(i)], "B, C and deload notes are untouched")
+            }
+        }
+        XCTAssertEqual(t.items.map { $0.plannedLoadsBySet }, loads, "loads untouched")
+        XCTAssertEqual(t.items.map(\.planEdited), edited, "planEdited untouched")
+    }
+
+    func test_clearNote_emptiesBothFields_andTheLineDisappears() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        let p = plan(block, t, note: "")
+        try Service.applyChange(p, in: ctx)
+        for tgt in p.targets {
+            XCTAssertNil(tgt.item.intensifierNotes); XCTAssertNil(tgt.item.prescriptionNotes)
+            XCTAssertNil(tgt.item.executionNoteText)
+        }
+        // Whitespace-only counts as clear.
+        let again = plan(block, t, note: "   ")
+        XCTAssertTrue(again.targets.isEmpty, "already clear: nothing to change")
+        XCTAssertTrue(again.refusals.contains { $0.reason == .noChange })
+    }
+
+    func test_newNoteIsWrittenToTheDisplayedField_andTheOtherIsCleared_soNothingFallsBack() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        let sessions = block.sessions.sorted { $0.date < $1.date }
+        let aItems = t.items.filter { $0.waveRaw?.lowercased() == "a" }
+        let showsIntensifier = try XCTUnwrap(aItems.first)
+        let showsPrescription = try XCTUnwrap(aItems.dropFirst().first)
+        showsIntensifier.intensifierNotes = "OLD INTENSIFIER"; showsIntensifier.prescriptionNotes = "OLD RX"
+        showsPrescription.intensifierNotes = "   "; showsPrescription.prescriptionNotes = "OLD RX 2"
+        XCTAssertEqual(showsIntensifier.executionNoteText, "OLD INTENSIFIER")
+        XCTAssertEqual(showsPrescription.executionNoteText, "OLD RX 2", "a blank intensifier note does not display")
+        _ = sessions
+
+        let p = plan(block, t, letters: ["a"], note: "  New text  ")
+        try Service.applyChange(p, in: ctx)
+
+        XCTAssertEqual(showsIntensifier.intensifierNotes, "New text")
+        XCTAssertNil(showsIntensifier.prescriptionNotes, "the older note can never show again")
+        XCTAssertEqual(showsPrescription.prescriptionNotes, "New text")
+        XCTAssertNil(showsPrescription.intensifierNotes)
+        for i in [showsIntensifier, showsPrescription] { XCTAssertEqual(i.executionNoteText, "New text") }
+
+        // And clearing afterwards leaves nothing behind to fall back to.
+        try Service.applyChange(plan(block, t, letters: ["a"], note: ""), in: ctx)
+        XCTAssertNil(showsIntensifier.executionNoteText); XCTAssertNil(showsPrescription.executionNoteText)
+    }
+
+    func test_thisSessionScope_changesOnlyThatSession() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        let one = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let others = t.items.filter { !one.items.contains($0) }.map(fields)
+        let p = plan(block, t, scope: .thisSession(one), note: "Only today")
+        XCTAssertEqual(p.targets.count, 1)
+        try Service.applyChange(p, in: ctx)
+        XCTAssertEqual(p.targets[0].item.executionNoteText, "Only today")
+        XCTAssertEqual(t.items.filter { !one.items.contains($0) }.map(fields), others)
+    }
+
+    func test_previewShowsOldToNewTruncated() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        let long = String(repeating: "abcdefghij", count: 6)
+        let p = plan(block, t, letters: ["a"], note: long)
+        let rows = ChangePrescriptionModel.rows(p)
+        XCTAssertEqual(rows.count, p.targets.count)
+        let note = try XCTUnwrap(rows[0].note)
+        XCTAssertTrue(note.hasPrefix("Note: "), note)
+        XCTAssertTrue(note.contains("…\""), "long notes are shortened: \(note)")
+        XCTAssertTrue(note.contains(" -> "))
+        XCTAssertEqual(ChangePrescriptionModel.shortNote(nil), "none")
+        XCTAssertEqual(ChangePrescriptionModel.shortNote("hi"), "\"hi\"")
+        _ = ctx
+    }
+
+    func test_rollback_restoresBothNoteFields() throws {
+        let (ctx, block) = try makeBlock()
+        let t = try target(block)
+        for (n, i) in t.items.enumerated() where i.waveRaw?.lowercased() == "a" {
+            i.intensifierNotes = n % 2 == 0 ? "INT \(n)" : nil
+            i.prescriptionNotes = "RX \(n)"
+        }
+        try ctx.save()
+        let before = t.items.map(fields)
+
+        let p = plan(block, t, letters: ["a"], note: "Changed")
+        XCTAssertThrowsError(try Service.applyChange(p, in: ctx, hooks: .init(forceVerificationFailure: true)))
+        XCTAssertEqual(t.items.map(fields), before)
+        XCTAssertThrowsError(try Service.applyChange(p, in: ctx, hooks: .init(forceSaveFailure: true)))
+        XCTAssertEqual(t.items.map(fields), before)
+        XCTAssertFalse(ctx.hasChanges)
+    }
+
+    func test_sessionScreenUsesTheSameDisplayRule() {
+        XCTAssertEqual(NoteFields(intensifier: " I ", prescription: "R").displayed, "I")
+        XCTAssertEqual(NoteFields(intensifier: "  ", prescription: " R ").displayed, "R")
+        XCTAssertNil(NoteFields(intensifier: nil, prescription: "  ").displayed)
+    }
+
+    func test_modelBuildsTheNoteChange() throws {
+        let (ctx, block) = try makeBlock()
+        let first = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(first.items.first)
+        var model = ChangePrescriptionModel(session: first, item: item, context: ctx, scope: .allRemaining, now: longAgo)
+        XCTAssertNil(model.change.note)
+        model.noteText = "Hello"
+        XCTAssertEqual(model.change.note, "Hello")
+        model.clearNote = true
+        XCTAssertEqual(model.change.note, "", "Clear note wins over the text")
+    }
+}
