@@ -14,7 +14,7 @@ import SwiftData
 /// The per-letter carry-forward chains then run 1→4→7→10, 2→5→8→11, 3→6→9→12
 /// (`PlanMemoryEngine.nextTargetItem`: same meso, same dayLabel, same wave).
 ///
-/// Safety model (mirrors Week6UpperBCleanupMigration): nothing is written unless every
+/// Safety model: nothing is written unless every
 /// precondition holds, checked live. `dryRun` runs the identical planner and writes nothing;
 /// `apply` refuses on any blocker and saves once at the end. A re-run on an already converted
 /// block is a no-op.

@@ -66,42 +66,27 @@ final class BackupRoundTripHarnessTests: XCTestCase {
 
     private static let migrationList: [(String, (ModelContext) -> Void)] = [
         ("ExerciseNameSnapshotBackfill", { ExerciseNameSnapshotBackfill.runIfNeeded(in: $0) }),
-        ("ExerciseNameSnapshotRepair", { ExerciseNameSnapshotRepair.runIfNeeded(in: $0) }),
         ("CanonicalExerciseIdMigration", { CanonicalExerciseIdMigration.runIfNeeded(in: $0) }),
         ("CustomExerciseDedupMigration", { CustomExerciseDedupMigration.runIfNeeded(in: $0) }),
-        ("D5ExerciseIdRepairMigration", { D5ExerciseIdRepairMigration.runIfNeeded(in: $0) }),
-        ("Apr21SessionHistoryRepairMigration", { Apr21SessionHistoryRepairMigration.runIfNeeded(in: $0) }),
         ("SessionHistoryBlockBackfill", { SessionHistoryBlockBackfill.runIfNeeded(in: $0) }),
         ("MechanicalLoadRecoveryMigration", { MechanicalLoadRecoveryMigration.runIfNeeded(in: $0) }),
-        ("SessionDayLabelBackfill", { SessionDayLabelBackfill.runIfNeeded(in: $0) }),
         ("CustomExerciseStoreMigration", { CustomExerciseStoreMigration.runIfNeeded(in: $0) }),
         ("CustomExerciseUserDefaultsSyncRepair", { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
         ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
-        ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
-        ("PrescriptionNotesClearMigration", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
-        ("Week6UpperBCleanupMigration", { Week6UpperBCleanupMigration.runIfNeeded(in: $0) }),
-        ("TwelveWeekMesoConversionMigration", { TwelveWeekMesoConversionMigration.runIfNeeded(in: $0) })
+        ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) })
     ]
 
 
     private static let flagOwner: [(String, String)] = [
         ("ExerciseNameSnapshotBackfill", "exerciseNameSnapshotBackfill.v1.completed"),
-        ("ExerciseNameSnapshotRepair", "exerciseNameSnapshotRepair.v6.completed"),
         ("CanonicalExerciseIdMigration", "canonicalExerciseIdMigration.v1.completed"),
         ("CustomExerciseDedupMigration", "customExerciseDedupMigration.v1.completed"),
-        ("D5ExerciseIdRepairMigration", "d5ExerciseIdRepairMigration.v3.completed"),
-        ("Apr21SessionHistoryRepairMigration", "apr21SessionHistoryRepairMigration.v3.completed"),
         ("SessionHistoryBlockBackfill", "sessionHistoryBlockBackfill.v1.completed"),
         ("MechanicalLoadRecoveryMigration", "mechanicalLoadRecovery.v1.completed"),
-        ("SessionDayLabelBackfill", "sessionDayLabelBackfill.v1.completed"),
         ("CustomExerciseStoreMigration", "customExerciseStoreMigration.v1.completed"),
         ("CustomExerciseUserDefaultsSyncRepair", "customExerciseUserDefaultsSync.v1.completed"),
         ("MesoBlockIsMaintenanceBackfill", "mesoBlockIsMaintenanceBackfill.v1.completed"),
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
-        ("PrescriptionNotesClearMigration", "prescriptionNotesClear.v1.completed"),
-        ("Week6UpperBCleanupMigration", "week6UpperBCleanupMigration.v1.completed"),
-        ("TwelveWeekMesoConversionMigration", "twelveWeekMesoConversion.v1.completed"),
-        ("TwelveWeekMesoConversionMigration (dry-run log)", "twelveWeekMesoConversion.v1.dryRunLogged.v2"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
@@ -425,97 +410,6 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         log("group mechanicalLoad.* keys after migrations: \(groupAfterMig.count) (was \(postImportGroup.count - (postImportGroup[sentinelKey] != nil ? 1 : 0)) right after import)")
     }
 
-    // MARK: - 12-week conversion on the real export: apply, idempotency, post-conditions
-
-    func testTwelveWeekConversionOnFixture_appliesIdempotently_andMeetsPostconditions() throws {
-        guard let fixturePath = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !fixturePath.isEmpty else {
-            throw XCTSkip("EP_BACKUP_FIXTURE not set")
-        }
-        let savedDomain = appDomainSnapshot()
-        let savedGroup = groupLoadKeys()
-        defer { restoreAppDomain(savedDomain); restoreGroupLoadKeys(savedGroup); flushReport() }
-        for k in Self.completionKeys + [SameLetterTargetCatchUpMigration.completionKey, SameLetterTargetCatchUpMigration.dryRunLoggedKey,
-                                        V52AlignmentRepair.completionKey, V52AlignmentRepair.dryRunLoggedKey, V52AlignmentRepair.reportKey] {
-            UserDefaults.standard.removeObject(forKey: k)
-        }
-
-        let container = try makeContainer()
-        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: fixturePath), modelContainer: container)
-        let ctx = ModelContext(container)
-
-        // The whole startup sequence in app order; the conversion is run armed regardless of the shipped switch.
-        func startupSequence() {
-            for (name, run) in Self.migrationList where !name.hasPrefix("TwelveWeek") {
-                run(ctx); try? ctx.save()
-            }
-            SameLetterTargetCatchUpMigration.runIfNeeded(in: ctx)
-            try? ctx.save()
-            // As in the app: the conversion and V52 each get their own fresh context.
-            TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(container), dryRun: false)
-            V52AlignmentRepair.runIfNeeded(in: ModelContext(container))
-        }
-
-        startupSequence()
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "conversion applied and flag set")
-        let exportA = try exportJSON(container)
-
-        // ---- (d) post-conditions on the real data, independent of the in-app verifier ----
-        let cal = Calendar.current
-        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>()).filter { $0.status == .active && !$0.isMaintenance }
-        XCTAssertEqual(blocks.count, 1)
-        let block = try XCTUnwrap(blocks.first)
-        XCTAssertEqual(block.totalWeeks, 12)
-        let all = try ctx.fetch(FetchDescriptor<Session>())
-        let ss = all.filter { $0.meso?.persistentModelID == block.persistentModelID }
-        log("[conversion fixture] block '\(block.name)': \(ss.count) sessions")
-        XCTAssertEqual(ss.count, 72)
-        for w in 1...12 { XCTAssertEqual(ss.filter { $0.weekIndex == w }.count, 6, "week \(w)") }
-        XCTAssertEqual(Set(ss.compactMap { $0.programIndex }), Set(1...72))
-        XCTAssertEqual(ss.compactMap { $0.programIndex }.count, 72, "no repeats")
-        XCTAssertEqual(Set(ss.map { cal.startOfDay(for: $0.date) }).count, 72, "no shared dates")
-        XCTAssertTrue(ss.allSatisfy { cal.component(.weekday, from: $0.date) != 5 }, "no Thursday sessions")
-        XCTAssertTrue(ss.allSatisfy { s in s.items.allSatisfy { $0.waveRaw?.lowercased() != "deload" } }, "no deload items")
-        XCTAssertTrue(ss.allSatisfy { !$0.isDeloadWeek }, "isDeloadWeek false everywhere")
-        XCTAssertEqual(DUPMesoLengthConversion.createdLinks(sessions: ss, all: all).problems, [], "weeks 7/8/9 link to 10/11/12; nothing after")
-        let unwaved = DUPMesoLengthConversion.unwavedItems(block: block, context: ctx)
-        log("[conversion fixture] hand-added items outside the chains: \(unwaved)")
-        XCTAssertEqual(unwaved.count, 2, "the two hand-added week-1 lifts, nothing else")
-        for s in ss where s.weekIndex >= 10 {
-            for i in s.items {
-                XCTAssertFalse(i.planEdited); XCTAssertFalse(i.isCompleted)
-                XCTAssertTrue(i.actualReps.isEmpty && i.actualLoads.isEmpty && i.actualRIRs.isEmpty)
-            }
-        }
-        for (w, letter) in [(11, "b"), (12, "c")] {
-            XCTAssertTrue(ss.filter { $0.weekIndex == w }.allSatisfy { $0.items.allSatisfy { $0.waveRaw?.lowercased() == letter } }, "week \(w) wave \(letter)")
-        }
-        log("[conversion fixture] scheduled next meso: \(TwelveWeekMesoConversionMigration.scheduledNextMesoDescription(in: ctx))")
-
-        // ---- (c) idempotency: run ALL startup migrations again, flags intact, then with every flag cleared ----
-        func assertOnlyExportedAtDiffers(_ label: String) throws {
-            let now = try exportJSON(container)
-            let c = Collector()
-            diff(exportA, now, path: "", record: nil, key: "", into: c)
-            render(c, indent: "   ")
-            XCTAssertTrue(Set(c.entries.keys).isSubset(of: ["valueChanged\texportedAt"]), "\(label): \(c.entries.keys.sorted())")
-            XCTAssertTrue(c.orderDiffs.isEmpty, "\(label): reordered arrays \(c.orderDiffs)")
-        }
-        startupSequence()
-        try assertOnlyExportedAtDiffers("second launch (flags intact)")
-        // Third launch: the conversion's own flags are lost (e.g. defaults wiped) while every other flag stays.
-        // The block is already 12 weeks, so no 10-week block is eligible and nothing may change.
-        // (Clearing EVERY flag is not a supported re-run: CustomExerciseStoreMigration then re-migrates the 20
-        // customs to 40, and CustomExerciseDedupMigration.swift:21 traps on the duplicate ids. Existing issue,
-        // unreachable while those flags stay set, and unrelated to the conversion.)
-        for k in ["twelveWeekMesoConversion.v1.completed", "twelveWeekMesoConversion.v1.dryRunLogged.v2"] {
-            UserDefaults.standard.removeObject(forKey: k)
-        }
-        startupSequence()
-        try assertOnlyExportedAtDiffers("third launch (conversion flags lost, all migrations re-run)")
-        let after = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.meso?.persistentModelID == block.persistentModelID }
-        XCTAssertEqual(after.count, 72, "no duplicate weeks 11-12 after re-running")
-    }
-
     // MARK: - Realistic order: fresh install first launch -> restore -> next launch
 
     func testFreshInstallThenRestoreOrder() throws {
@@ -611,9 +505,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
 
 // MARK: - Another user's store: startup repairs must leave it byte-identical
 
-/// A store that is not Mark's but carries every shape the Mark-specific repairs look for. The
-/// registered `StartupBackfills` must leave it untouched; run directly, the retired repairs
-/// (other than the UUID-keyed Week 6 one) demonstrably would not.
+/// A store that carries every shape the retired one-user repairs used to look for. The registered
+/// `StartupBackfills` must leave it untouched.
 final class OtherUsersStoreStartupTests: XCTestCase {
 
     private var container: ModelContainer!
@@ -739,31 +632,6 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         ctx.rollback()
         XCTAssertEqual(try snapshot(ModelContext(container)), before, "no model changed")
     }
-
-    func test_sensitivity_theRetiredRepairsWouldHaveChangedThatStore() throws {
-        let runs: [(String, (ModelContext) -> Void)] = [
-            ("ExerciseNameSnapshotRepair", { ExerciseNameSnapshotRepair.runIfNeeded(in: $0) }),
-            ("D5ExerciseIdRepair", { D5ExerciseIdRepairMigration.runIfNeeded(in: $0) }),
-            ("Apr21SessionHistoryRepair", { Apr21SessionHistoryRepairMigration.runIfNeeded(in: $0) }),
-            ("SessionDayLabelBackfill", { SessionDayLabelBackfill.runIfNeeded(in: $0) }),
-            ("PrescriptionNotesClear", { PrescriptionNotesClearMigration.runIfNeeded(in: $0) }),
-        ]
-        for (name, run) in runs {
-            let ctx = try makeStore()
-            let before = try snapshot(ctx)
-            clearKeys()
-            run(ctx)
-            XCTAssertNotEqual(try snapshot(ctx), before, "\(name) fires on this store, so the test above is not vacuous")
-        }
-    }
-
-    func test_week6Cleanup_isInertOnAnotherUsersStore_evenWhenRunDirectly() throws {
-        let ctx = try makeStore()
-        let before = try snapshot(ctx)
-        clearKeys()
-        Week6UpperBCleanupMigration.runIfNeeded(in: ctx)
-        XCTAssertEqual(try snapshot(ctx), before, "keyed by Mark's session UUIDs: nothing matches")
-    }
 }
 
 // MARK: - Universality guard (C5)
@@ -775,18 +643,12 @@ final class OtherUsersStoreStartupTests: XCTestCase {
 /// Comments are stripped first (they don't execute), string contents are kept.
 final class UniversalityGuardTests: XCTestCase {
 
-    /// Unregistered one-shot repairs for one user's data. Nothing else may be listed here.
-    /// Each entry: file name (no extension) -> why it may carry user-specific literals.
-    static let allowlist: [String: String] = [
-        "Apr21SessionHistoryRepairMigration": "unregistered one-shot: restores one user's 2026-04-21 session and its history row",
-        "D5ExerciseIdRepairMigration": "unregistered one-shot: repairs one user's D5 day roster from 2026-04-28",
-        "V52AlignmentRepair": "unregistered one-shot: re-aligns one user's converted block by his custom exercise ids",
-        "V53AlignmentRepair": "unregistered one-shot: second alignment pass over the same user's custom exercise ids",
-        "Week6UpperBCleanupMigration": "unregistered one-shot: repairs one user's Week 6 dates and Upper A/B rosters by his ids",
-    ]
+    /// Files allowed to carry user-specific literals. Empty: the one-shot repairs that needed entries were
+    /// removed. Each entry would be: file name (no extension) -> why it may carry user-specific literals.
+    static let allowlist: [String: String] = [:]
 
-    /// The only names that may ever appear in `allowlist`: unregistered one-shot repairs, plus the catalog's
-    /// legacy alias table.
+    /// Names of the removed one-shot repairs, plus the catalog's legacy alias table. The only names that may
+    /// ever appear in `allowlist`; registering any of the repairs in `StartupBackfills` fails the registration test.
     static let permittedForAllowlist: Set<String> = [
         "SameLetterTargetCatchUpMigration", "TwelveWeekMesoConversionMigration", "V52AlignmentRepair",
         "V53AlignmentRepair", "ExerciseNameSnapshotRepair", "D5ExerciseIdRepairMigration",
@@ -927,7 +789,12 @@ final class UniversalityGuardTests: XCTestCase {
                       "user-specific literals in production code:\n" + offending.map(\.description).joined(separator: "\n"))
     }
 
-    func test_allowlist_hasNoStaleEntries_andIsOnlyUnregisteredOneShotRepairs() throws {
+    func test_allowlist_isEmpty_andRetiredRepairsStayOut() throws {
+        XCTAssertTrue(Self.allowlist.isEmpty, "no production file may carry user-specific literals: \(Self.allowlist.keys.sorted())")
+        let sources = try productionSources()
+        for name in Self.permittedForAllowlist where name != "ExerciseCatalog" {
+            XCTAssertFalse(sources.contains { $0.name == name }, "\(name) was removed from the app; do not re-add it")
+        }
         let matched = Set(try scan().map(\.name))
         for name in Self.allowlist.keys {
             XCTAssertTrue(matched.contains(name), "\(name) is allowlisted but no longer matches any pattern: remove it")

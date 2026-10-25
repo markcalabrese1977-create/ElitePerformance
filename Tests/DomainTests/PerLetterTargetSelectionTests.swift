@@ -541,7 +541,6 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     /// A break in a link the conversion creates (week 8 -> 11: a week-11 lift whose canonical id differs) fails
     /// verification and restores the store.
     func test_apply_forcedBreakInA8To11Link_failsAndRestoresTheStore() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
         let (ctx, block) = try seededBlock()
         try ctx.save()
         let before = try fingerprint(ctx)
@@ -558,7 +557,6 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
     /// Weeks 1-6 are not verified: a legacy dead end there is listed as [INFO] and the conversion still applies.
     func test_apply_legacyDeadEndInWeek2_isInfoNotFailure() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
         let (ctx, block) = try seededBlock()
         let w2 = try XCTUnwrap(try week(2, ctx).first)
         w2.items.sorted { $0.order < $1.order }[0].exerciseId = "tricep_kickback"      // no week-5 counterpart
@@ -803,109 +801,11 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertTrue(report.blockers.contains { $0.contains("maintenance") })
     }
 
-    // MARK: On-device one-shot (TwelveWeekMesoConversionMigration)
-
-    private func clearMigrationFlags() {
-        for k in [TwelveWeekMesoConversionMigration.completionKey,
-                  TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                  TwelveWeekMesoConversionMigration.reportKey,
-                  TwelveWeekMesoConversionMigration.shapeWarnedKey] {
-            UserDefaults.standard.removeObject(forKey: k)
-        }
-    }
-
-    func test_migration_dryRunLoggedFlag_isKeyedByReportVersion_soAChangedReportLogsAgain() {
-        XCTAssertEqual(TwelveWeekMesoConversionMigration.dryRunLoggedKey, "twelveWeekMesoConversion.v1.dryRunLogged.\(TwelveWeekMesoConversionMigration.reportVersion)")
-        XCTAssertEqual(TwelveWeekMesoConversionMigration.reportVersion, "v2")
-        // A flag left by an earlier report version does not suppress the current one.
-        let legacy = "twelveWeekMesoConversion.v1.dryRunLogged"
-        UserDefaults.standard.set(true, forKey: legacy); defer { UserDefaults.standard.removeObject(forKey: legacy); clearMigrationFlags() }
-        clearMigrationFlags()
-        UserDefaults.standard.set(true, forKey: legacy)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
-    }
-
-    func test_migration_reRunsDryRunWhenTheVersionedFlagIsMissing() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags(); UserDefaults.standard.removeObject(forKey: "twelveWeekMesoConversion.v1.dryRunLogged") }
-        UserDefaults.standard.set(true, forKey: "twelveWeekMesoConversion.v1.dryRunLogged")   // old-version flag
-        let (ctx, _) = try seededBlock()
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey), "logged again under the new version key")
-        XCTAssertNotNil(UserDefaults.standard.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
-    }
-
-    func test_migration_shipsArmed_applyMode() {
-        XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun, "armed: the launch driver applies the conversion when every gate passes")
-    }
-
-    func test_migration_dryRun_logsOnce_writesNothing_setsOnlyTheLoggedFlag() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, _) = try seededBlock()
-        try ctx.save()
-        let before = try fingerprint(ctx)
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
-
-        let d = UserDefaults.standard
-        XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
-        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "completion is only ever set after a successful apply")
-        let report = try XCTUnwrap(d.string(forKey: TwelveWeekMesoConversionMigration.reportKey))
-        XCTAssertTrue(report.contains("== GATES ==") && report.contains("== PROJECTED CHAINS =="))
-        XCTAssertEqual(try fingerprint(ctx), before, "dry run must not change any stored field")
-        XCTAssertFalse(ctx.hasChanges)
-
-        // Second launch: already logged -> no new report.
-        d.set("SENTINEL", forKey: TwelveWeekMesoConversionMigration.reportKey)
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: true)
-        XCTAssertEqual(d.string(forKey: TwelveWeekMesoConversionMigration.reportKey), "SENTINEL")
-    }
-
-    func test_migration_noEligibleBlock_leavesEveryFlagUnset() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-        container = c
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(c), dryRun: true)
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ModelContext(c), dryRun: false)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-    }
-
-    func test_migration_applyMode_convertsThenSetsCompletionAfterSave_andIsIdempotent() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, block) = try seededBlock()
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-        XCTAssertEqual(block.totalWeeks, 12)
-        XCTAssertEqual(try sessions(ctx).count, 72)
-        XCTAssertEqual(DUPMesoLengthConversion.verifyChains(block: block, context: ctx).broken, [])
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-        XCTAssertEqual(try sessions(ctx).count, 72, "completed flag makes a second launch a no-op")
-    }
-
-    func test_migration_applyMode_unsafeBlock_isRefusedAndFlagStaysUnset() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, block) = try seededBlock()
-        let item = try XCTUnwrap(try week(10, ctx).first?.items.first)
-        item.actualReps = [8]; item.actualLoads = [50]
-        try ctx.save()
-        let before = try fingerprint(ctx)
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "unset so it retries")
-        XCTAssertEqual(block.totalWeeks, 10)
-        XCTAssertEqual(try fingerprint(ctx), before)
-    }
-
     // MARK: Apply verifies its own result and rolls back on failure
 
     private struct InjectedSaveFailure: Error {}
 
     private func assertAppliedNothing(_ ctx: ModelContext, _ block: MesoBlock, before: String, file: StaticString = #filePath, line: UInt = #line) throws {
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "flag must stay unset", file: file, line: line)
         XCTAssertEqual(try fingerprint(ctx), before, "store must be exactly as before", file: file, line: line)
         XCTAssertEqual(block.totalWeeks, 10, file: file, line: line)
         XCTAssertEqual(block.name, "10-Week DUP Meso", file: file, line: line)
@@ -913,8 +813,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         XCTAssertFalse(ctx.hasChanges, "rollback leaves nothing pending", file: file, line: line)
     }
 
-    func test_apply_forcedChainBreak_rollsBack_storeUnchanged_flagUnset() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
+    func test_apply_forcedChainBreak_rollsBack_storeUnchanged() throws {
         let (ctx, block) = try seededBlock()
         try ctx.save()
         let before = try fingerprint(ctx)
@@ -934,18 +833,12 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         try assertAppliedNothing(ctx, block, before: before)
         XCTAssertEqual(ctx.autosaveEnabled, priorAutosave, "autosave restored")
 
-        // Same break through the launch driver: nothing written, flag unset.
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false, hooks: hooks)
-        try assertAppliedNothing(ctx, block, before: before)
-
-        // And with no hook the very same store converts fine afterwards (retry works).
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
+        // With no hook the very same store converts fine afterwards (retry works).
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertEqual(block.totalWeeks, 12)
     }
 
-    func test_apply_forcedSaveFailure_rollsBack_storeUnchanged_flagUnset() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
+    func test_apply_forcedSaveFailure_rollsBack_storeUnchanged() throws {
         let (ctx, block) = try seededBlock()
         try ctx.save()
         let before = try fingerprint(ctx)
@@ -956,15 +849,11 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         }
         try assertAppliedNothing(ctx, block, before: before)
 
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false, hooks: hooks)
-        try assertAppliedNothing(ctx, block, before: before)
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "retry after a failed save succeeds")
+        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertEqual(block.totalWeeks, 12, "retry after a failed save succeeds")
     }
 
     func test_apply_forcedThursdaySession_failsVerification_andRollsBack() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
         let (ctx, block) = try seededBlock()
         try ctx.save()
         let before = try fingerprint(ctx)
@@ -1003,18 +892,6 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         }
     }
 
-    func test_logHeaders_sayApplyWhenTheLaunchMayWrite_andDryRunOnlyWhenReadOnly() {
-        XCTAssertEqual(TwelveWeekMesoConversionMigration.logHeader(dryRun: false, blockName: "B"), "🧪 12-week conversion APPLY for 'B':")
-        XCTAssertEqual(TwelveWeekMesoConversionMigration.logHeader(dryRun: true, blockName: "B"), "🧪 12-week conversion DRY RUN for 'B':")
-        XCTAssertEqual(SameLetterTargetCatchUpMigration.logHeader(dryRun: false), "🧪 Same-letter catch-up APPLY:")
-        XCTAssertEqual(SameLetterTargetCatchUpMigration.logHeader(dryRun: true), "🧪 Same-letter catch-up DRY RUN:")
-        XCTAssertEqual(V52AlignmentRepair.logHeader(dryRun: false, blockName: "B"), "🧪 V52 alignment APPLY for 'B':")
-        XCTAssertEqual(V52AlignmentRepair.logHeader(dryRun: true, blockName: "B"), "🧪 V52 alignment DRY RUN for 'B':")
-        // The shipped switches decide which word a real launch prints.
-        XCTAssertFalse(TwelveWeekMesoConversionMigration.dryRun)
-        XCTAssertFalse(SameLetterTargetCatchUpMigration.dryRun)
-        XCTAssertFalse(V52AlignmentRepair.dryRun)
-    }
 
     func test_apply_success_reportsAllVerificationPassing_and18Chains() throws {
         let (ctx, block) = try seededBlock()
@@ -1051,118 +928,12 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
     // MARK: Already-converted blocks and the killed-before-save case
 
-    func test_migration_alreadyConvertedBlock_setsBothFlags_andWritesNothing() throws {
-        for dry in [false, true] {
-            clearMigrationFlags(); defer { clearMigrationFlags() }
-            let (ctx, block) = try seededBlock()
-            try ctx.save()
-            try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
-            clearMigrationFlags()                      // converted, but the flags were lost
-            let before = try fingerprint(ctx)
-            XCTAssertFalse(ctx.hasChanges)
-
-            TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: dry)
-
-            let d = UserDefaults.standard
-            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "dryRun=\(dry)")
-            XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey), "dryRun=\(dry)")
-            XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey))
-            XCTAssertEqual(try fingerprint(ctx), before, "writes nothing")
-            XCTAssertFalse(ctx.hasChanges)
-        }
-    }
-
-    func test_migration_partialTwelveWeekBlock_doesNotSetTheFlag_andWarnsOnce() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, block) = try seededBlock()
-        try ctx.save()
-        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
-        let missing = try XCTUnwrap(try week(12, ctx).last)
-        ctx.delete(missing)
-        try ctx.save()
-        clearMigrationFlags()
-        let before = try fingerprint(ctx)
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-
-        let d = UserDefaults.standard
-        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.dryRunLoggedKey))
-        XCTAssertTrue(d.bool(forKey: TwelveWeekMesoConversionMigration.shapeWarnedKey), "one-time warning recorded")
-        XCTAssertEqual(try fingerprint(ctx), before)
-        XCTAssertTrue(DUPMesoLengthConversion.convertedShapeProblems(block: block, context: ctx).contains { $0.contains("week 12") })
-
-        // Second launch: still unset, no second warning marker change needed.
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-        XCTAssertFalse(d.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-    }
-
-    func test_migration_twelveWeekBlockWithDeloadItem_doesNotSetTheFlag() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, block) = try seededBlock()
-        try ctx.save()
-        try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
-        try XCTUnwrap(try week(5, ctx).first?.items.first).waveRaw = "deload"
-        try ctx.save()
-        clearMigrationFlags()
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-    }
-
     /// Opens (or reopens) an on-disk store with the same schema the conversion tests use.
     private func onDiskContainer(at url: URL) throws -> ModelContainer {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
         return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url))
     }
 
-    func test_apply_killedBeforeSave_leavesTheOnDiskStoreUnchanged_thenNextLaunchConverts() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep-killtest-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("kill.store")
-
-        var before = ""
-        do {
-            // "Launch 1": seed an on-disk store, then die between the mutations and save().
-            let c1 = try onDiskContainer(at: url)
-            let ctx1 = ModelContext(c1)
-            ctx1.autosaveEnabled = false
-            try DUPProgramSeeder.seed(
-                startDate: date(2026, 9, 25), trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx1,
-                template: DUP10WeekTemplate.template, calendar: cal(), mesoName: "10-Week DUP Meso", mesoStatus: .active)
-            try ctx1.save()
-            let block1 = try XCTUnwrap(try ctx1.fetch(FetchDescriptor<MesoBlock>()).first)
-            before = try fingerprint(ctx1)
-
-            // A save hook that persists nothing: exactly what a process kill before save() leaves behind.
-            // The mutations (and the verification) really ran against ctx1; only the commit never happens.
-            var mutatedInMemory = false
-            let hooks = DUPMesoLengthConversion.ApplyHooks(save: { c in mutatedInMemory = c.hasChanges })
-            try DUPMesoLengthConversion.apply(block: block1, context: ctx1, calendar: cal(), hooks: hooks)
-            XCTAssertTrue(mutatedInMemory, "the conversion was staged in memory when the 'kill' hit")
-            XCTAssertEqual(block1.totalWeeks, 12, "in-memory state only")
-            // ctx1 / c1 go out of scope here without ever saving: the process is gone.
-        }
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey), "flag unset")
-
-        // "Launch 2": a fresh container on the same file sees exactly the pre-apply store.
-        let c2 = try onDiskContainer(at: url)
-        let ctx2 = ModelContext(c2)
-        XCTAssertEqual(try fingerprint(ctx2), before, "on-disk store identical to before the killed apply")
-        let block2 = try XCTUnwrap(try ctx2.fetch(FetchDescriptor<MesoBlock>()).first)
-        XCTAssertEqual(block2.totalWeeks, 10)
-        XCTAssertEqual(try sessions(ctx2).count, 60)
-
-        // ...and the real migration then converts it.
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx2, dryRun: false)
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-        XCTAssertEqual(block2.totalWeeks, 12)
-        XCTAssertEqual(try sessions(ctx2).count, 72)
-        // Reopen once more: the conversion really reached disk this time.
-        let ctx3 = ModelContext(try onDiskContainer(at: url))
-        XCTAssertEqual(try ctx3.fetch(FetchDescriptor<Session>()).count, 72)
-    }
 
     // MARK: Same-named archived block (the live store has an April "10-Week DUP Meso")
 
@@ -1181,35 +952,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         return (old, made)
     }
 
-    func test_sameNamedArchivedBlock_isNeverTouched_evenWithTotalWeeks10() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, active) = try seededBlock()
-        let (old, oldSessions) = try addArchivedSameNameBlock(ctx, totalWeeks: 10, status: .archived)
-        let oldBefore = oldSessions.map { "\($0.weekIndex)|\($0.date.timeIntervalSince1970)|\($0.items.map { "\($0.waveRaw ?? "")|\($0.suggestedLoad)" })" }
 
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-
-        XCTAssertEqual(active.totalWeeks, 12)
-        XCTAssertEqual(active.name, "12-Week DUP Meso")
-        XCTAssertEqual(old.name, "10-Week DUP Meso", "the archived block keeps its name")
-        XCTAssertEqual(old.totalWeeks, 10)
-        XCTAssertEqual(old.sessions.count, 4)
-        XCTAssertEqual(oldSessions.map { "\($0.weekIndex)|\($0.date.timeIntervalSince1970)|\($0.items.map { "\($0.waveRaw ?? "")|\($0.suggestedLoad)" })" }, oldBefore)
-        XCTAssertEqual(try sessions(ctx).filter { $0.meso === active }.count, 72)
-    }
-
-    func test_twoActiveTenWeekBlocks_isAmbiguous_andNothingIsDone() throws {
-        clearMigrationFlags(); defer { clearMigrationFlags() }
-        let (ctx, active) = try seededBlock()
-        _ = try addArchivedSameNameBlock(ctx, totalWeeks: 10, status: .active)   // pathological: two active blocks
-        let before = try fingerprint(ctx)
-
-        TwelveWeekMesoConversionMigration.runIfNeeded(in: ctx, dryRun: false)
-
-        XCTAssertEqual(active.totalWeeks, 10)
-        XCTAssertEqual(try fingerprint(ctx), before)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwelveWeekMesoConversionMigration.completionKey))
-    }
 }
 
 // MARK: - Last same-letter performance (LastSameLetterPerformance)

@@ -45,10 +45,6 @@ final class InsertDeloadWeekTests: XCTestCase {
             mesoName: "10-Week DUP Meso", mesoStatus: .active
         )
         let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
-        for k in [TwelveWeekMesoConversionMigration.completionKey, TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                  TwelveWeekMesoConversionMigration.reportKey, TwelveWeekMesoConversionMigration.shapeWarnedKey] {
-            UserDefaults.standard.removeObject(forKey: k)
-        }
         try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         XCTAssertEqual(block.totalWeeks, 12)
         try ctx.save()

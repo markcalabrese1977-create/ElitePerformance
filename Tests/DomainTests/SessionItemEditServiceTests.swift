@@ -31,10 +31,6 @@ final class SessionItemEditServiceTests: XCTestCase {
         )
         let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
         if convert12 {
-            for k in [TwelveWeekMesoConversionMigration.completionKey, TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                      TwelveWeekMesoConversionMigration.reportKey, TwelveWeekMesoConversionMigration.shapeWarnedKey] {
-                UserDefaults.standard.removeObject(forKey: k)
-            }
             try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
             XCTAssertEqual(block.totalWeeks, 12)
         }

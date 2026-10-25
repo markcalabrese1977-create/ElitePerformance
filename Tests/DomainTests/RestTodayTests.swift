@@ -33,10 +33,6 @@ final class RestTodayTests: XCTestCase {
             template: DUP10WeekTemplate.template, calendar: cal(), mesoName: "10-Week DUP Meso", mesoStatus: .active
         )
         let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
-        for k in [TwelveWeekMesoConversionMigration.completionKey, TwelveWeekMesoConversionMigration.dryRunLoggedKey,
-                  TwelveWeekMesoConversionMigration.reportKey, TwelveWeekMesoConversionMigration.shapeWarnedKey] {
-            UserDefaults.standard.removeObject(forKey: k)
-        }
         try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
         try ctx.save()
         return (ctx, block)
