@@ -2,6 +2,13 @@
 
 One line per item; dates are 2026.
 
+- Top set + back-off (priority, before TestFlight): set roles (top/back-off) with own
+  load, rep range, RIR; carry-forward per role. Repro (Oct 24, bench B): logging the
+  added 315 x 5 top set first -> "Set 1 came in short of the rep target" (judged
+  against back-off 6-8 @ 290); after one back-off -> "2 sets in. Finish the session."
+  with 2 back-offs left; added row shows "goal 8 @ 0 RIR" (0 = default sentinel shown
+  literally). Messages must judge each set by its role and actual index, and "finish"
+  only when all planned sets are logged.
 - Insert deload week (target: ready before rotation 3, Fri Nov 6; needed because a v5.3 tripwire deload must happen within days of the trigger). A USER-INITIATED action with a dry-run preview and a confirm step, never a startup migration. Start at the next Friday (week boundary). Shift every PLANNED session on or after that date by +7 days; completed sessions never move. Insert 6 deload sessions (one per day label) with that day's current roster, waveRaw "deload", ~half the sets, RIR 3-4, loads ~60% of each lift's most recent completed same-day load. Renumber weekInMeso and programIndex; totalWeeks +1 (update a week count in the block name if present). Verify before save: no completed session moved; every same-letter chain target is unchanged (week numbers shift, targets don't); nothing targets a deload item and deload items write nothing; no date collisions, no Thursdays; backup round-trip clean. Snapshot-and-restore rollback, same pattern as the 12-week conversion.
 - Deload in place (fallback, works today): log the week light with load-override reason Deliberate Deload. Follow-ups: (a) verify a deload-flagged source never seeds an EMPTY same-letter target (new-lift first exposure) with light loads; (b) the "Last A/B/C" caption and the meso summary verdicts must skip items flagged Deliberate Deload, as they already skip deload-wave items.
 - Start next meso from this one: clone roster, wave prescriptions, notes and length onto new dates; anchored loads, exempt lifts seed from the last lifted load (not peak e1RM). Needed by Dec 1; current meso ends Dec 16.
@@ -15,7 +22,7 @@ One line per item; dates are 2026.
 - Swap/add service: Today "Apply to future <weekday>" is unscoped and zeroes loads (guard or scope it); arrays sized to sets; rep range and wave on adds; lastKnownLoad must not read future plans; custom names from the table.
 - Test infrastructure: J4 flake; synchronized test folder (no hand-edited pbxproj); keep Tests/known_failures.txt set-based.
 - Universality guard (C5): never extend the allowlist except for unregistered one-shot repairs; add new patterns when new user-specific data appears.
-- Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; bench top set as a feature; isCleanSession vs deliberateDeload; onChange deprecations.
+- Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; isCleanSession vs deliberateDeload; onChange deprecations.
 - Hack squat re-entry after Dr. Alexander clears (sled + 135 at W1 stance pain-free -> fresh anchors per letter); cable hip adduction returns only after hips clear.
 - E1RM RIR model (low priority): HistorySeedLoad credits RIR additively on input (reps+RIR); load(for:reps:targetRIR:) applies 2.5%/RIR on output. Within ~1% at RIR<=2, ~2% at RIR 4 / low reps. Unify into one E1RMCalculator RIR function used by both; run a C3b-style before/after seed comparison.
 - Replace: optional prescription override (e.g. RIR) applied by the service without setting planEdited (planEdited blocks carry-forward writes into the item).
