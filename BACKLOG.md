@@ -34,3 +34,4 @@ One line per item; dates are 2026.
   template band (store it, or recompute from the wave prescription), never below it.
 - Rest today (low priority): when the refusal is a collision with the next week's first session, say
   "No open day this week. Skip a session instead."
+- Program selection ignores equipment/injury flags (6-day dumbbell-only user gets machines/cables). Part of Phase 3.1 onboarding; pre-launch.
