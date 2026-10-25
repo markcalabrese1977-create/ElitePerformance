@@ -27,6 +27,7 @@ struct MesoSummaryView: View {
     @State private var expandedExerciseId: String? = nil
     @State private var showMaintenancePathChoice: Bool = false
     @State private var showProgramPicker: Bool = false
+    @State private var showStartNextMeso: Bool = false
     @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
 
     // Extend maintenance block (mid-block action)
@@ -100,6 +101,12 @@ struct MesoSummaryView: View {
                     onNextBlock(.maintenanceBlock)
                     dismiss()
                 }
+            }
+            .sheet(isPresented: $showStartNextMeso) {
+                StartNextMesoFlow(meso: meso, onFinish: {
+                    showStartNextMeso = false
+                    dismiss()
+                })
             }
             .sheet(isPresented: $showExtendSheet) {
                 extendSheet
@@ -673,8 +680,17 @@ struct MesoSummaryView: View {
 
             VStack(spacing: 10) {
                 nextBlockButton(
-                    title: "Start new hypertrophy meso",
-                    subtitle: "Pick up where you left off. Loads anchor from this meso's peak.",
+                    title: "Start next meso from this one",
+                    subtitle: "Same exercises, sets, rep targets and cues on new dates. Starting loads are 95% of your best set in this meso.",
+                    icon: "arrow.triangle.branch",
+                    color: .blue
+                ) {
+                    showStartNextMeso = true
+                }
+
+                nextBlockButton(
+                    title: "New program from template",
+                    subtitle: "Choose a program and set it up fresh. Loads start from your recent history.",
                     icon: "arrow.up.forward.circle",
                     color: .blue
                 ) {

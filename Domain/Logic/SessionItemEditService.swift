@@ -1856,6 +1856,12 @@ extension SessionItemEditService {
         NoteFields(intensifier: i.intensifierNotes, prescription: i.prescriptionNotes).displayed
     }
 
+    /// Sessions of `meso` dated today or later that are not finished: what an unfinished meso still has ahead of it.
+    static func remainingSessions(of meso: MesoBlock, now: Date = Date(), calendar: Calendar = .current) -> [Session] {
+        let startOfToday = calendar.startOfDay(for: now)
+        return meso.sessions.filter { $0.status != .completed && $0.date >= startOfToday }
+    }
+
     /// The day after the meso's last session, at the start of its day; nil for a meso with no sessions.
     static func defaultNextMesoStart(for meso: MesoBlock, calendar: Calendar = .current) -> Date? {
         guard let last = meso.sessions.map(\.date).max() else { return nil }
@@ -1879,7 +1885,7 @@ extension SessionItemEditService {
         let all = meso.sessions
         var refusals: [NextMesoRefusal] = []
 
-        let remaining = all.filter { $0.status != .completed && $0.date >= startOfToday }
+        let remaining = remainingSessions(of: meso, now: now, calendar: cal)
         let toDelete = endOldMesoNow ? all.filter { $0.status == .planned && $0.date >= startOfToday && SessionEditSafety.isSafeToModify($0) } : []
 
         func plan(sessions: [NextMesoSession] = [], weeks: Int = 0, collisions: [NextMesoCollision] = []) -> NextMesoPlan {

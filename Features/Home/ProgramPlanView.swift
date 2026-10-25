@@ -18,6 +18,7 @@ struct ProgramPlanView: View {
     // Insert deload week
     @State private var showInsertDeload = false
     @State private var showRemoveDeload = false
+    @State private var showStartNextMeso = false
     @State private var removeDeloadWeek: Int?
 
     // Add session (date-targeted)
@@ -109,6 +110,15 @@ struct ProgramPlanView: View {
                         }
                         .buttonStyle(.borderless)
                         .padding(.top, 2)
+
+                        Button {
+                            showStartNextMeso = true
+                        } label: {
+                            Label("Start next meso from this one", systemImage: "arrow.triangle.branch")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.top, 2)
                     }
                 }
                 .padding(.vertical, 4)
@@ -187,6 +197,11 @@ struct ProgramPlanView: View {
         .sheet(isPresented: $showInsertDeload) {
             if let block = activeMesoBlock {
                 InsertDeloadFlow(meso: block, onFinish: { showInsertDeload = false })
+            }
+        }
+        .sheet(isPresented: $showStartNextMeso) {
+            if let block = activeMesoBlock {
+                StartNextMesoFlow(meso: block, onFinish: { showStartNextMeso = false })
             }
         }
         .sheet(isPresented: $showAddSessionSheet) {
