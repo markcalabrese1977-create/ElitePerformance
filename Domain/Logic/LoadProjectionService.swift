@@ -631,19 +631,20 @@ enum HistorySeedLoad {
     /// Floors to the increment: a starting load is never meaningfully above what history supports. The epsilon
     /// keeps a value that is a whole increment up to float noise (99.99999999 at 2.5) from dropping a step.
     ///
-    /// A near miss rounds UP: when the computed load is within `nearMissFraction` of the next increment
-    /// (318.5 at 5 is 0.47% short of 320), the next increment is the seed. Flooring there would cost a whole
-    /// step for a load the lifter is effectively already at; 316 (1.25% short) still floors to 315.
+    /// A near miss rounds UP: when the computed load is less than `nearMissIncrementFraction` of an increment
+    /// short of the next increment, the next increment is the seed (319.2 at 5 -> 320). The window is a share of
+    /// the STEP, not of the load, so it is the same size for a 30 lb and a 300 lb lift: at 5 lb, 318.5 -> 315 and
+    /// 104 -> 100 (exactly one lb short is not "less than").
     static func roundedDown(_ load: Double, increment: Double) -> Double {
         guard increment > 0 else { return load }
         let floored = ((load / increment) + 1e-9).rounded(.down) * increment
         let next = floored + increment
-        if next > 0, (next - load) / next <= nearMissFraction + 1e-9 { return next }
+        if next - load < nearMissIncrementFraction * increment - 1e-9 { return next }
         return floored
     }
 
-    /// How close (as a share of the next increment) a computed load must be to it to take it.
-    static let nearMissFraction = 0.01
+    /// How close to the next increment, as a share of the increment itself, a computed load must be to take it.
+    static let nearMissIncrementFraction = 0.2
 
     static let maxCreditedRIR = 4
     /// Sets lighter than this share of the session's heaviest set are warm-ups.

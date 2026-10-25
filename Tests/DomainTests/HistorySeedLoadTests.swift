@@ -55,12 +55,12 @@ final class HistorySeedLoadTests: XCTestCase {
 
     func test_roundsDownToTheUsersIncrement_exceptANearMiss() throws {
         let ctx = try makeContext()
-        let s = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [104])   // raw 104.0, 0.95% short of 105
-        XCTAssertEqual(seed([s], increment: 5), 105.0, "a near miss takes the next step")
-        XCTAssertEqual(seed([s], increment: 2.5), 105.0, "a near miss takes the next step")
-        let low = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [101])   // raw 101.0, 3.8% short of 105
-        XCTAssertEqual(seed([low], increment: 5), 100.0)
-        XCTAssertEqual(seed([low], increment: 2.5), 100.0)
+        let s = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [104])   // raw 104.0
+        XCTAssertEqual(seed([s], increment: 5), 100.0, "1 short of 105 is exactly a fifth of the step: floor")
+        XCTAssertEqual(seed([s], increment: 2.5), 102.5, "1.0 short of 105 is more than 0.5: floor")
+        let near = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [104.2])   // raw 104.2
+        XCTAssertEqual(seed([near], increment: 5), 105.0, "0.8 short of 105 is under a fifth of the step")
+        XCTAssertEqual(seed([near], increment: 2.5), 102.5, "0.8 short of 105 at 2.5 is not under 0.5: floor")
         let exact = session(ctx, status: .completed, daysAgo: 0, reps: [10], loads: [100])   // float noise: 99.99999999
         XCTAssertEqual(seed([exact], increment: 2.5), 100.0, "a whole increment is kept")
     }
@@ -155,7 +155,7 @@ final class HistorySeedLoadTests: XCTestCase {
         XCTAssertGreaterThan(heavy, light, "130x9@2 is a bigger lift than 130x9@0")
         // 130 x (9+2) -> e1RM 177.67; /1.2667 * 0.95 = 133.25 -> floor 132.5
         XCTAssertEqual(heavy, 132.5)
-        XCTAssertEqual(light, 127.5)   // 130 x 9 -> e1RM 169 -> 126.75, 0.59% short of 127.5 -> near miss takes 127.5
+        XCTAssertEqual(light, 125.0)   // 130 x 9 -> e1RM 169 -> 126.75, 0.75 short of 127.5 (more than half a step window of 0.5) -> floor 125
     }
 
     func test_missingRIR_countsAsZero_andRIRIsClampedToFour() throws {
@@ -319,14 +319,24 @@ final class HistorySeedLoadTests: XCTestCase {
         func r(_ v: Double, _ inc: Double) -> Double { HistorySeedLoad.roundedDown(v, increment: inc) }
         XCTAssertEqual(r(14.9, 5), 15)
         XCTAssertEqual(r(33.1, 5), 30)
-        XCTAssertEqual(r(316.0, 5), 315, "1.25% short is not a near miss")
-        XCTAssertEqual(r(318.5, 5), 320, "0.47% short of 320")
+        XCTAssertEqual(r(316.0, 5), 315)
+        XCTAssertEqual(r(318.5, 5), 315, "1.5 short of 320 is more than a fifth of the step")
+        XCTAssertEqual(r(319.2, 5), 320)
+        XCTAssertEqual(r(104, 5), 100, "exactly a fifth of the step short is not a near miss")
+        XCTAssertEqual(r(104.01, 5), 105)
         XCTAssertEqual(r(315.0, 5), 315, "a whole increment stays")
+        // 2.5-lb increments: the window is 0.5.
+        XCTAssertEqual(r(102.0, 2.5), 100, "exactly half a step short is not a near miss")
+        XCTAssertEqual(r(102.1, 2.5), 102.5)
+        XCTAssertEqual(r(101.9, 2.5), 100)
+        XCTAssertEqual(r(102.4, 2.5), 102.5)
+        XCTAssertEqual(r(126.75, 2.5), 125)
+        XCTAssertEqual(r(127.2, 2.5), 127.5)
         XCTAssertEqual(r(99.99999999, 2.5), 100)
         XCTAssertEqual(r(0, 5), 0)
         XCTAssertEqual(r(2.49, 2.5), 2.5)
-        XCTAssertEqual(r(2.4, 2.5), 0, "4% short is not a near miss")
-        XCTAssertEqual(r(1.0, 2.5), 0, "far below the first step")
+        XCTAssertEqual(r(2.0, 2.5), 0, "exactly half a step short is not a near miss")
+        XCTAssertEqual(r(1.0, 2.5), 0)
         XCTAssertEqual(r(42.3, 0), 42.3, "no increment, no rounding")
     }
 }
