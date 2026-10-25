@@ -437,7 +437,7 @@ enum SessionItemEditService {
         return "\(i.targetSets) x \(range(i.repMin, i.repMax, i.targetReps)) @ RIR \(range(i.targetRIRMin, i.targetRIRMax, i.targetRIR))"
     }
 
-    private static func isoDay(_ d: Date) -> String {
+    static func isoDay(_ d: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
@@ -1690,5 +1690,362 @@ extension SessionItemEditService {
         }
         summary.forEach { print($0) }
         return RestTodayResult(sessionsMoved: live.moves.count, summary: summary)
+    }
+}
+
+// MARK: - Start the next meso from this one
+
+/// Builds a new meso that keeps a meso's CURRENT program (latest roster, prescriptions and cues per day
+/// type and wave letter, and its week-by-week set counts) on new dates, with loads seeded from the
+/// lifter's history. Same shape as the other edits: `planNextMeso` is a pure read for the preview;
+/// `startNextMeso` (apply) re-plans against live state, writes, verifies and saves once, or restores.
+///
+/// TEMPLATE. The old meso's early weeks may hold exercises or prescriptions that were later replaced or
+/// changed (those edits only touch remaining sessions), so weeks are not cloned as stored. Instead, for
+/// every day type x wave letter the LATEST session of that letter (completed or planned) supplies the
+/// roster, order, prescription fields, cue and wave; the old meso's week -> letter pattern lays out the
+/// weeks. Inserted deload weeks are not part of the program and are skipped (weeks are renumbered
+/// contiguously). Set counts are not stored as a ramp, so each new week's set count is read back from
+/// the old meso's same week and slot (earned +1 sets, hand edits and the template ramp all reproduce);
+/// the set band is widened to include it, never narrowed. A block with no wave letters (maintenance,
+/// legacy) has one template per day type: its latest session.
+extension SessionItemEditService {
+
+    /// Peak-based seed scale (the "95" in peak95). Phase 4.4 gating can pass a different factor.
+    static let nextMesoPeakFactor = 0.95
+
+    enum NextMesoRefusal: Equatable {
+        /// The meso has no sessions to copy from.
+        case nothingToCopy
+        /// A session in the old meso is being trained.
+        case sessionInProgress
+        /// The start date is before today.
+        case startInPast
+        /// The old meso still has sessions dated today or later and `endOldMesoNow` is false (see `remainingOldSessions`).
+        case oldMesoHasRemainingSessions
+        /// `endOldMesoNow` would remove a remaining session that already has something logged on it.
+        case remainingSessionHasLoggedData
+        /// One week of the old meso has two sessions of the same day type, so the weekday pattern is ambiguous.
+        case duplicateDayLabelInWeek
+        /// A new session would land on a day that already has a session (see `collisions`).
+        case dateCollision
+    }
+
+    enum NextMesoError: Error, Equatable {
+        case refused([NextMesoRefusal])
+        /// The live state no longer matches the plan.
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    struct NextMesoCollision {
+        let date: Date
+        let dayLabel: String?
+        /// The existing session on that day; nil when two sessions of the new meso share it.
+        let occupant: Session?
+    }
+
+    struct NextMesoItem {
+        let order: Int
+        let exerciseId: String
+        let exerciseName: String?
+        let targetReps: Int
+        let targetSets: Int
+        let targetRIR: Int
+        let setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?
+        let waveRaw: String?
+        let priorityRaw: String?
+        let intensifierRaw: String?
+        let intensifierNotes: String?
+        let prescriptionNotes: String?
+        let plannedReps: [Int]
+        let plannedRIRs: [Int]
+        let seed: Double
+        let seedSource: HistorySeedLoad.SeedSource
+        let isBodyweight: Bool
+        /// The latest session item this one was taken from.
+        let templateItem: SessionItem
+
+        /// "4 x 4-6 @ RIR 2-3"
+        var prescription: String {
+            func range(_ lo: Int?, _ hi: Int?, _ fallback: Int) -> String {
+                guard let lo, let hi else { return "\(fallback)" }
+                return lo == hi ? "\(lo)" : "\(lo)-\(hi)"
+            }
+            return "\(targetSets) x \(range(repMin, repMax, targetReps)) @ RIR \(range(rirMin, rirMax, targetRIR))"
+        }
+    }
+
+    struct NextMesoSession {
+        let date: Date
+        let dayLabel: String?
+        /// 1-based, contiguous (inserted deload weeks of the old meso are skipped).
+        let weekIndex: Int
+        /// 1...K in date order across the whole new meso.
+        let programIndex: Int
+        /// Wave letter of the week ("a", "b", "c", "deload"); "" for a block with no letters.
+        let letter: String
+        let sessionNotes: String
+        let items: [NextMesoItem]
+        /// The latest session of this day type and letter, which supplied the roster.
+        let templateSession: Session
+    }
+
+    struct NextMesoPlan {
+        let oldMeso: MesoBlock
+        let name: String
+        let startDate: Date
+        let endOldMesoNow: Bool
+        let peakFactor: Double
+        let now: Date
+        let sessions: [NextMesoSession]
+        let weeks: Int
+        let endDate: Date?
+        /// Old meso sessions removed when `endOldMesoNow` (planned, dated today or later, nothing logged).
+        let sessionsToDelete: [Session]
+        /// Old meso sessions dated today or later that are not completed.
+        let remainingOldSessions: [Session]
+        let collisions: [NextMesoCollision]
+        let refusals: [NextMesoRefusal]
+
+        var isApplicable: Bool { refusals.isEmpty && !sessions.isEmpty }
+        var isMaintenance: Bool { oldMeso.isMaintenance }
+
+        /// The sessions of week 1 (the first week the lifter will train).
+        var firstWeek: [NextMesoSession] { sessions.filter { $0.weekIndex == 1 } }
+
+        /// The preview as text: header, one roster per day type x letter (prescription, seed and where it
+        /// came from), and the set count by week for every slot.
+        func previewLines() -> [String] {
+            var out: [String] = []
+            func day(_ d: Date?) -> String { d.map(SessionItemEditService.isoDay) ?? "-" }
+            out.append("NEXT MESO \"\(name)\": \(weeks) weeks, \(sessions.count) sessions, \(day(startDate)) -> \(day(endDate)); "
+                       + "from \"\(oldMeso.name)\"; peak factor \(peakFactor)")
+            if endOldMesoNow {
+                out.append("old meso ends now: \(sessionsToDelete.count) remaining planned sessions removed")
+            }
+            var seen = Set<String>()
+            for s in sessions {
+                let key = "\(s.dayLabel ?? "")|\(s.letter)"
+                guard seen.insert(key).inserted else { continue }
+                out.append("  \(s.dayLabel ?? "?") / \(s.letter.isEmpty ? "-" : s.letter.uppercased()) (first week \(s.weekIndex), \(day(s.date)))")
+                for i in s.items {
+                    out.append("    \(ExerciseCatalog.displayName(for: i.exerciseId)): \(i.prescription), seed "
+                               + "\(LoadFormatter.number(i.seed)) [\(i.seedSource.label(factor: peakFactor))]"
+                               + (SessionItemEditService.noteText(i).map { " — \($0)" } ?? ""))
+                }
+            }
+            var labels: [String] = []
+            for s in sessions where !labels.contains(s.dayLabel ?? "") { labels.append(s.dayLabel ?? "") }
+            for label in labels {
+                out.append("  sets by week, \(label.isEmpty ? "?" : label):")
+                let mine = sessions.filter { ($0.dayLabel ?? "") == label }
+                let orders = Set(mine.flatMap { $0.items.map(\.order) }).sorted()
+                for o in orders {
+                    let name = mine.compactMap { $0.items.first { $0.order == o }?.exerciseId }.last.map(ExerciseCatalog.displayName(for:)) ?? "?"
+                    let sets = mine.sorted { $0.weekIndex < $1.weekIndex }.map { s in s.items.first { $0.order == o }.map { String($0.targetSets) } ?? "-" }
+                    out.append("    \(name): \(sets.joined(separator: ","))")
+                }
+            }
+            return out
+        }
+    }
+
+    fileprivate static func noteText(_ i: NextMesoItem) -> String? {
+        NoteFields(intensifier: i.intensifierNotes, prescription: i.prescriptionNotes).displayed
+    }
+
+    /// The day after the meso's last session, at the start of its day; nil for a meso with no sessions.
+    static func defaultNextMesoStart(for meso: MesoBlock, calendar: Calendar = .current) -> Date? {
+        guard let last = meso.sessions.map(\.date).max() else { return nil }
+        return calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: last) ?? last)
+    }
+
+    // MARK: Plan (no writes)
+
+    static func planNextMeso(
+        meso: MesoBlock,
+        name: String,
+        startDate: Date? = nil,
+        endOldMesoNow: Bool,
+        peakFactor: Double = nextMesoPeakFactor,
+        context: ModelContext,
+        now: Date = Date(),
+        calendar cal: Calendar = .current
+    ) -> NextMesoPlan {
+        let startOfToday = cal.startOfDay(for: now)
+        let startDay = cal.startOfDay(for: startDate ?? defaultNextMesoStart(for: meso, calendar: cal) ?? now)
+        let all = meso.sessions
+        var refusals: [NextMesoRefusal] = []
+
+        let remaining = all.filter { $0.status != .completed && $0.date >= startOfToday }
+        let toDelete = endOldMesoNow ? all.filter { $0.status == .planned && $0.date >= startOfToday && SessionEditSafety.isSafeToModify($0) } : []
+
+        func plan(sessions: [NextMesoSession] = [], weeks: Int = 0, collisions: [NextMesoCollision] = []) -> NextMesoPlan {
+            NextMesoPlan(oldMeso: meso, name: name, startDate: startDay, endOldMesoNow: endOldMesoNow, peakFactor: peakFactor,
+                         now: now, sessions: sessions, weeks: weeks, endDate: sessions.map(\.date).max(),
+                         sessionsToDelete: toDelete, remainingOldSessions: remaining, collisions: collisions,
+                         refusals: refusals)
+        }
+
+        let sources = all.filter { $0.insertedDeload != true }
+        guard !sources.isEmpty else { refusals.append(.nothingToCopy); return plan() }
+
+        if all.contains(where: { $0.status == .inProgress }) { refusals.append(.sessionInProgress) }
+        if startDay < startOfToday { refusals.append(.startInPast) }
+        if endOldMesoNow {
+            if remaining.contains(where: { $0.status == .planned && !SessionEditSafety.isSafeToModify($0) }) {
+                refusals.append(.remainingSessionHasLoggedData)
+            }
+        } else if !remaining.isEmpty {
+            refusals.append(.oldMesoHasRemainingSessions)
+        }
+
+        func label(_ s: Session) -> String { s.dayLabel ?? "" }
+        func ordered(_ ss: [Session]) -> [Session] {
+            ss.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        }
+
+        // Week -> letter. A wave letter is a property of the whole week (the majority of its items' waves).
+        let weekOrder = Array(Set(sources.map(\.weekIndex))).sorted()
+        let waveBased = !meso.isMaintenance && sources.contains { $0.items.contains { WavePrescriptionGuard.isWaveLetter($0.waveRaw) } }
+        func weekLetter(_ week: Int) -> String {
+            guard waveBased else { return "" }
+            var counts: [String: Int] = [:]
+            for s in sources where s.weekIndex == week {
+                for i in s.items {
+                    let l = i.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+                    if !l.isEmpty { counts[l, default: 0] += 1 }
+                }
+            }
+            return counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key ?? ""
+        }
+        let letters = Dictionary(uniqueKeysWithValues: weekOrder.map { ($0, weekLetter($0)) })
+
+        /// Latest session of this day type and letter; any letter when that letter never occurred for the day.
+        func template(_ dayLabel: String, _ letter: String) -> Session? {
+            let ofDay = ordered(sources.filter { label($0) == dayLabel })
+            return ofDay.last { letters[$0.weekIndex] == letter } ?? ofDay.last
+        }
+
+        // Weekday of each day type: the most common one across the old meso (ties: the earlier weekday).
+        var weekdayCounts: [String: [Int: Int]] = [:]
+        for s in sources { weekdayCounts[label(s), default: [:]][cal.component(.weekday, from: s.date), default: 0] += 1 }
+        func modeWeekday(_ dayLabel: String) -> Int {
+            let counts = weekdayCounts[dayLabel] ?? [:]
+            return counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key ?? 2
+        }
+        func firstDate(onOrAfter d: Date, weekday: Int) -> Date {
+            var date = d
+            for _ in 0..<7 {
+                if cal.component(.weekday, from: date) == weekday { return date }
+                date = cal.date(byAdding: .day, value: 1, to: date) ?? date
+            }
+            return d
+        }
+
+        // Day types per old week, in the order the lifter trained them; the first of week 1 starts each new week.
+        var labelsByWeek: [Int: [Session]] = [:]
+        for w in weekOrder { labelsByWeek[w] = ordered(sources.filter { $0.weekIndex == w }) }
+        for w in weekOrder {
+            let ls = (labelsByWeek[w] ?? []).map(label)
+            if Set(ls).count != ls.count { refusals.append(.duplicateDayLabelInWeek); return plan() }
+        }
+        guard let firstLabel = labelsByWeek[weekOrder[0]]?.first.map(label) else { refusals.append(.nothingToCopy); return plan() }
+        let firstWeekStart = firstDate(onOrAfter: startDay, weekday: modeWeekday(firstLabel))
+
+        // Loads
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        let increment = profile?.minLoadIncrement ?? 2.5
+        var seedCache: [String: (load: Double, source: HistorySeedLoad.SeedSource)] = [:]
+        func seed(_ exerciseId: String, reps: Int, rir: Int) -> (load: Double, source: HistorySeedLoad.SeedSource) {
+            let key = "\(ExerciseCatalog.canonicalExerciseId(for: exerciseId))|\(reps)|\(rir)"
+            if let hit = seedCache[key] { return hit }
+            let r = HistorySeedLoad.nextMesoSeed(
+                for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
+                loadIncrement: increment, bodyWeight: profile?.bodyWeight,
+                isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
+                factor: peakFactor, customExercises: custom, referenceDate: now
+            )
+            seedCache[key] = r
+            return r
+        }
+
+        // Layout
+        var built: [(date: Date, week: Int, label: String, letter: String, old: Session, tpl: Session)] = []
+        for (idx, oldWeek) in weekOrder.enumerated() {
+            let base = cal.date(byAdding: .day, value: 7 * idx, to: firstWeekStart) ?? firstWeekStart
+            let letter = letters[oldWeek] ?? ""
+            let rows: [(date: Date, week: Int, label: String, letter: String, old: Session, tpl: Session)] =
+                (labelsByWeek[oldWeek] ?? []).compactMap { old in
+                    let l = label(old)
+                    guard let tpl = template(l, letter) else { return nil }
+                    return (firstDate(onOrAfter: base, weekday: modeWeekday(l)), idx + 1, l, letter, old, tpl)
+                }
+            built += rows.sorted { $0.date < $1.date }
+        }
+
+        // Collisions: any existing session (any meso) except the ones this action removes, and the new sessions among themselves.
+        let removing = Set(toDelete.map(\.persistentModelID))
+        let occupied = Dictionary(grouping: allSessions.filter { !removing.contains($0.persistentModelID) },
+                                  by: { cal.startOfDay(for: $0.date) })
+        var collisions: [NextMesoCollision] = []
+        var claimed = Set<Date>()
+        for row in built {
+            let day = cal.startOfDay(for: row.date)
+            for other in occupied[day] ?? [] { collisions.append(.init(date: day, dayLabel: row.label.isEmpty ? nil : row.label, occupant: other)) }
+            if !claimed.insert(day).inserted { collisions.append(.init(date: day, dayLabel: row.label.isEmpty ? nil : row.label, occupant: nil)) }
+        }
+        if !collisions.isEmpty { refusals.append(.dateCollision) }
+
+        // Sessions and items
+        let isMaintenance = meso.isMaintenance
+        var sessions: [NextMesoSession] = []
+        for (n, row) in built.enumerated() {
+            let oldItems = row.old.items
+            let items: [NextMesoItem] = row.tpl.items.sorted { $0.order < $1.order }.map { t in
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: t.exerciseId)
+                // The same exercise in the old week first, else whatever sat in the same slot there.
+                let slot = oldItems.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
+                    ?? oldItems.first { $0.order == t.order }
+                let sets = max(0, slot?.targetSets ?? t.targetSets)
+                let wave: String? = {
+                    if let raw = t.waveRaw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty { return t.waveRaw }
+                    return waveBased && !row.letter.isEmpty ? row.letter : nil
+                }()
+                let shown = NoteFields(t).displayed
+                let showsIntensifier = !(t.intensifierNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                let r = seed(t.exerciseId, reps: t.targetReps, rir: t.targetRIR)
+                return NextMesoItem(
+                    order: t.order, exerciseId: t.exerciseId,
+                    exerciseName: t.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: t.exerciseId),
+                    targetReps: t.targetReps, targetSets: sets, targetRIR: t.targetRIR,
+                    setMin: t.setMin.map { min($0, sets) }, setMax: t.setMax.map { max($0, sets) },
+                    repMin: t.repMin, repMax: t.repMax, rirMin: t.targetRIRMin, rirMax: t.targetRIRMax,
+                    waveRaw: wave, priorityRaw: t.priorityRaw, intensifierRaw: t.intensifierRaw,
+                    intensifierNotes: showsIntensifier ? shown : nil,
+                    prescriptionNotes: showsIntensifier ? nil : shown,
+                    plannedReps: resized(t.plannedRepsBySet, to: sets, fallback: t.targetReps),
+                    plannedRIRs: resized(t.plannedRIRsBySet, to: sets, fallback: t.targetRIR),
+                    seed: r.load, seedSource: r.source,
+                    isBodyweight: ExerciseCatalog.isBodyweight(exerciseId: t.exerciseId, customExercises: custom),
+                    templateItem: t
+                )
+            }
+            let dayName = row.label.isEmpty ? "Session" : row.label
+            let notes: String = {
+                if isMaintenance { return "\(dayName) · Maintenance" }
+                if row.letter.isEmpty { return dayName }
+                return "\(dayName) · \(row.letter == "deload" ? "Deload" : row.letter.uppercased()) wave"
+            }()
+            sessions.append(NextMesoSession(
+                date: row.date, dayLabel: row.label.isEmpty ? nil : row.label, weekIndex: row.week, programIndex: n + 1,
+                letter: row.letter, sessionNotes: notes, items: items, templateSession: row.tpl
+            ))
+        }
+        return plan(sessions: sessions, weeks: weekOrder.count, collisions: collisions)
     }
 }

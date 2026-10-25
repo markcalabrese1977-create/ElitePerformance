@@ -765,4 +765,323 @@ final class SessionItemEditServiceTests: XCTestCase {
         try Service.applyChange(reps, in: ctx)
         XCTAssertEqual(a.setMin, 3); XCTAssertEqual(a.setMax, 4)
     }
+
+    // MARK: - Start next meso: plan (M2)
+
+    private var nextNow: Date { date(2026, 9, 20) }                     // before the fixture block starts
+
+    private func nextPlan(_ block: MesoBlock, _ ctx: ModelContext, start: Date? = nil, end: Bool = true,
+                          now: Date? = nil) -> Service.NextMesoPlan {
+        Service.planNextMeso(meso: block, name: "Next", startDate: start, endOldMesoNow: end,
+                             context: ctx, now: now ?? nextNow)
+    }
+
+    private func weekday(_ d: Date) -> Int { Calendar.current.component(.weekday, from: d) }
+
+    /// A block of any template, seeded by the real seeder.
+    private func makeTemplateBlock(_ template: ProgramTemplate, weekdays: [Int], start: Date) throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                             UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: weekdays, context: ctx, template: template,
+                                  calendar: cal(), mesoName: template.name, mesoStatus: .active)
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
+        try ctx.save()
+        return (ctx, block)
+    }
+
+    func test_next_12weekBlock_layoutKeepsLettersWeekdaysAndContiguousNumbering() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let old = sessions(block)
+        let result = nextPlan(block, ctx)
+        XCTAssertTrue(result.refusals.isEmpty, "\(result.refusals)")
+        XCTAssertEqual(result.weeks, 12)
+        XCTAssertEqual(result.sessions.count, 72)
+        XCTAssertEqual(result.sessions.map(\.programIndex), Array(1...72))
+        XCTAssertEqual(result.sessions.map(\.date), result.sessions.map(\.date).sorted())
+        XCTAssertEqual(Set(result.sessions.map(\.weekIndex)), Set(1...12))
+        let pattern = ["a", "b", "c", "a", "b", "c", "a", "b", "c", "a", "b", "c"]
+        for s in result.sessions { XCTAssertEqual(s.letter, pattern[s.weekIndex - 1]) }
+        // Weekday per day type is the old one; the first session lands on the first old weekday, on/after the default start.
+        for s in result.sessions {
+            let o = try XCTUnwrap(old.first { $0.dayLabel == s.dayLabel })
+            XCTAssertEqual(weekday(s.date), weekday(o.date), s.dayLabel ?? "")
+        }
+        let defaultStart = try XCTUnwrap(Service.defaultNextMesoStart(for: block))
+        XCTAssertEqual(defaultStart, Calendar.current.startOfDay(for: old.last!.date.addingTimeInterval(86400)))
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(result.sessions.first).date, defaultStart)
+        XCTAssertEqual(weekday(try XCTUnwrap(result.sessions.first).date), weekday(old.first!.date))
+        XCTAssertEqual(result.sessionsToDelete.count, 72, "everything is planned and in the future")
+        // Items: prescription copied, arrays sized, no history -> nothing to seed.
+        for s in result.sessions {
+            for i in s.items {
+                XCTAssertEqual(i.plannedReps.count, i.targetSets)
+                XCTAssertEqual(i.waveRaw?.lowercased(), s.letter)
+                XCTAssertTrue(i.seedSource == .none || i.seedSource == .bodyweight)
+                XCTAssertEqual(i.seed, 0)
+            }
+        }
+        XCTAssertFalse(result.previewLines().isEmpty)
+    }
+
+    func test_next_isPure() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let before = try fullSnapshot(ctx)
+        _ = nextPlan(block, ctx)
+        XCTAssertEqual(try fullSnapshot(ctx), before)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<MesoBlock>()).count, 1)
+    }
+
+    func test_next_replacedSlot_usesTheNewExerciseInEveryWeek() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let first = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let order = try XCTUnwrap(item(first, p.x)).order
+        complete(first, item: try XCTUnwrap(item(first, p.x)), load: 135)       // week 1 keeps X as history
+        try ctx.save()
+        let now = first.date.addingTimeInterval(3600)
+        try Service.apply(plan(block, ctx, p, now: now), in: ctx)
+
+        let result = nextPlan(block, ctx, now: now)
+        let days = result.sessions.filter { $0.dayLabel == p.day }
+        XCTAssertEqual(days.count, 12)
+        for s in days {
+            XCTAssertNil(s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) },
+                         "week \(s.weekIndex) still has X")
+            XCTAssertEqual(s.items.first { $0.order == order }?.exerciseId, p.y, "week \(s.weekIndex)")
+        }
+    }
+
+    func test_next_swappedThenReplaced_endsOnTheLastExercise() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let used = Set(block.sessions.flatMap(\.items).map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
+        let z = try XCTUnwrap(ExerciseCatalog.all.first {
+            !used.contains($0.id) && $0.id != p.y && !ExerciseCatalog.isBodyweight(exerciseId: $0.id)
+        }).id
+        let now = date(2026, 9, 24)
+        try Service.apply(plan(block, ctx, p, now: now), in: ctx)
+        try Service.apply(Service.planReplace(meso: block, dayLabel: p.day, from: p.y, to: z, scope: .allRemaining, context: ctx, now: now), in: ctx)
+
+        let result = nextPlan(block, ctx, now: now)
+        for s in result.sessions.filter({ $0.dayLabel == p.day }) {
+            let ids = s.items.map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) }
+            XCTAssertTrue(ids.contains(ExerciseCatalog.canonicalExerciseId(for: z)), "week \(s.weekIndex)")
+            XCTAssertFalse(ids.contains(ExerciseCatalog.canonicalExerciseId(for: p.x)))
+            XCTAssertFalse(ids.contains(ExerciseCatalog.canonicalExerciseId(for: p.y)))
+        }
+    }
+
+    func test_next_insertedDeloadWeek_isExcluded_andWeeksStayContiguous() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let clean = nextPlan(block, ctx)
+        let insert = Service.planInsertDeloadWeek(meso: block, context: ctx, now: nextNow, week: 6)
+        XCTAssertNil(insert.refusal)
+        try Service.insertDeloadWeek(insert, in: ctx)
+        XCTAssertEqual(block.totalWeeks, 13)
+
+        let result = nextPlan(block, ctx)
+        XCTAssertTrue(result.refusals.isEmpty, "\(result.refusals)")
+        XCTAssertEqual(result.weeks, 12)
+        XCTAssertEqual(result.sessions.count, 72)
+        XCTAssertEqual(result.sessions.map(\.letter), clean.sessions.map(\.letter))
+        XCTAssertFalse(result.sessions.contains { $0.templateSession.insertedDeload == true })
+        XCTAssertFalse(result.sessions.contains { $0.letter == "deload" })
+        XCTAssertEqual(result.sessions.map(\.weekIndex), clean.sessions.map(\.weekIndex))
+        XCTAssertEqual(result.sessions.map(\.programIndex), Array(1...72))
+        XCTAssertEqual(result.sessionsToDelete.count, 78, "the old meso's inserted week is removed with the rest")
+    }
+
+    func test_next_earnedExtraSet_isReproducedInTheSameWeekOnly() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let w5 = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day && $0.weekIndex == 5 })
+        let it = try XCTUnwrap(item(w5, p.x))
+        let base = it.targetSets
+        it.targetSets = base + 1
+        try ctx.save()
+
+        let result = nextPlan(block, ctx)
+        func sets(_ week: Int) -> Int? {
+            result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == week }?
+                .items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }?.targetSets
+        }
+        XCTAssertEqual(sets(5), base + 1)
+        XCTAssertEqual(sets(11), try XCTUnwrap(item(try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day && $0.weekIndex == 11 }), p.x)).targetSets,
+                       "the other B weeks keep their own count")
+        let planned = try XCTUnwrap(result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 5 }?.items.first { $0.order == it.order })
+        XCTAssertGreaterThanOrEqual(planned.setMax ?? 0, base + 1)
+        XCTAssertEqual(planned.plannedReps.count, base + 1)
+    }
+
+    func test_next_handAddedNilWaveLift_isStampedWithTheWeeksLetter() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let last = try XCTUnwrap(sessions(block).last { $0.dayLabel == p.day })     // week 12, letter c
+        let added = SessionItem(order: 99, exerciseId: p.y, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        XCTAssertNil(added.waveRaw)
+        last.items.append(added)
+        try ctx.save()
+
+        let result = nextPlan(block, ctx)
+        for s in result.sessions.filter({ $0.dayLabel == p.day }) {
+            let found = s.items.first { $0.order == 99 }
+            if s.letter == "c" {
+                XCTAssertEqual(found?.exerciseId, p.y, "week \(s.weekIndex)")
+                XCTAssertEqual(found?.waveRaw, "c")
+            } else {
+                XCTAssertNil(found, "only the C template holds the lift")
+            }
+        }
+    }
+
+    func test_next_dayCounts_2_3_4_6_andWeekdayPatterns() throws {
+        let cases: [(ProgramTemplate, [Int])] = [
+            (FullBody2DayTemplate.template, [2, 5]),
+            (PPL3WeekTemplate.template, [3, 5, 7]),
+            (UpperLower4DayTemplate.template, [2, 3, 5, 6]),
+            (Hybrid5DayTemplate.template, [2, 3, 4, 5, 6]),
+            (DUP10WeekTemplate.template, [1, 2, 3, 4, 6, 7]),
+        ]
+        for (template, weekdays) in cases {
+            let (ctx, block) = try makeTemplateBlock(template, weekdays: weekdays, start: date(2026, 9, 21))
+            let old = sessions(block)
+            let result = nextPlan(block, ctx)
+            XCTAssertTrue(result.refusals.isEmpty, "\(template.name): \(result.refusals)")
+            XCTAssertEqual(result.weeks, template.totalWeeks, template.name)
+            XCTAssertEqual(result.sessions.count, weekdays.count * template.totalWeeks, template.name)
+            XCTAssertEqual(result.sessions.map(\.programIndex), Array(1...result.sessions.count), template.name)
+            XCTAssertEqual(Set(result.sessions.map { weekday($0.date) }), Set(weekdays), template.name)
+            for s in result.sessions {
+                let o = try XCTUnwrap(old.first { $0.dayLabel == s.dayLabel })
+                XCTAssertEqual(weekday(s.date), weekday(o.date), "\(template.name) \(s.dayLabel ?? "")")
+            }
+            XCTAssertEqual(Dictionary(grouping: result.sessions, by: \.weekIndex).values.map(\.count), Array(repeating: weekdays.count, count: template.totalWeeks), template.name)
+            // The week starts on the old first day's weekday.
+            XCTAssertEqual(weekday(try XCTUnwrap(result.sessions.first).date), weekday(try XCTUnwrap(old.first).date), template.name)
+        }
+    }
+
+    func test_next_oneOffWeekdayAnomaly_doesNotMoveTheDayType() throws {
+        let (ctx, block) = try makeTemplateBlock(PPL3WeekTemplate.template, weekdays: [2, 4, 6], start: date(2026, 9, 21))
+        let old = sessions(block)
+        let moved = try XCTUnwrap(old.first { $0.weekIndex == 4 && $0.dayLabel == old[0].dayLabel })
+        moved.date = Calendar.current.date(byAdding: .day, value: 1, to: moved.date)!       // one Tuesday instead of Monday
+        try ctx.save()
+        let result = nextPlan(block, ctx, start: date(2026, 12, 15))                          // a Tuesday
+        let first = try XCTUnwrap(result.sessions.first)
+        XCTAssertEqual(first.dayLabel, old[0].dayLabel)
+        XCTAssertEqual(weekday(first.date), 2, "the usual weekday wins")
+        XCTAssertGreaterThanOrEqual(first.date, date(2026, 12, 15))
+        XCTAssertEqual(first.date, date(2026, 12, 21), "next Monday on/after the chosen start")
+    }
+
+    func test_next_maintenanceBlock_nonWave_chronologicalPerDayType() throws {
+        let c = try ModelContainer(for: Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                                                UserProfile.self, User.self, CustomExercise.self]),
+                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = c
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        let meso = MesoBlock(name: "Maintenance Block", startDate: date(2026, 10, 5), status: .active, totalWeeks: 4, isMaintenance: true)
+        ctx.insert(meso)
+        var made: [Session] = []
+        for w in 1...4 {
+            for (n, label) in ["Day A", "Day B"].enumerated() {
+                let roster = [(exerciseId: "bench_press", name: "Bench Press" as String?, order: 1),
+                              (exerciseId: "barbell_row", name: "Row" as String?, order: 2)]
+                let s = Session(date: date(2026, 10, 5 + (w - 1) * 7 + n * 3), status: .planned, weekIndex: w, dayLabel: label,
+                                items: MaintenanceProgramSeeder.applyMaintenancePrescription(to: roster))
+                s.meso = meso; s.programIndex = (w - 1) * 2 + n + 1
+                ctx.insert(s); made.append(s)
+            }
+        }
+        made.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }!.items.first!.targetSets = 3
+        try ctx.save()
+
+        let result = Service.planNextMeso(meso: meso, name: "M2", endOldMesoNow: true, context: ctx, now: date(2026, 10, 1))
+        XCTAssertTrue(result.refusals.isEmpty, "\(result.refusals)")
+        XCTAssertEqual(result.sessions.count, 8)
+        XCTAssertTrue(result.isMaintenance)
+        XCTAssertEqual(Set(result.sessions.map(\.letter)), [""])
+        for s in result.sessions {
+            XCTAssertEqual(s.items.map(\.waveRaw), ["deload", "deload"])
+            XCTAssertEqual(s.sessionNotes, "\(s.dayLabel ?? "") · Maintenance")
+        }
+        XCTAssertEqual(result.sessions.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }?.items.first?.targetSets, 3)
+        XCTAssertEqual(result.sessions.first { $0.weekIndex == 2 && $0.dayLabel == "Day A" }?.items.first?.targetSets, 2)
+        XCTAssertEqual(weekday(try XCTUnwrap(result.sessions.first).date), weekday(made[0].date))
+    }
+
+    func test_next_seeds_comeFromThePeakOfTheOldMeso() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let first = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let it = try XCTUnwrap(item(first, p.x))
+        complete(first, item: it, load: 150, reps: 6)
+        try ctx.save()
+        let now = first.date.addingTimeInterval(86400 * 2)
+
+        let result = nextPlan(block, ctx, now: now)
+        XCTAssertEqual(result.refusals, [], "\(result.refusals)")
+        let planned = try XCTUnwrap(result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 1 }?
+            .items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) })
+        let expected = try XCTUnwrap(HistorySeedLoad.peakLoad(for: p.x, goalReps: planned.targetReps, targetRIR: planned.targetRIR,
+                                                              in: block.sessions, loadIncrement: 2.5))
+        XCTAssertEqual(planned.seed, expected)
+        XCTAssertEqual(planned.seedSource, .peak)
+        XCTAssertGreaterThan(planned.seed, 0)
+        let todayStart = Calendar.current.startOfDay(for: now)
+        XCTAssertEqual(result.sessionsToDelete.count, sessions(block).filter { $0.status == .planned && $0.date >= todayStart }.count,
+                       "completed and already-passed sessions stay")
+        XCTAssertFalse(result.sessionsToDelete.contains { $0 === first })
+    }
+
+    func test_next_refusals() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let all = sessions(block)
+
+        // Remaining planned sessions and no "end now".
+        let keep = nextPlan(block, ctx, end: false)
+        XCTAssertTrue(keep.refusals.contains(.oldMesoHasRemainingSessions))
+        XCTAssertEqual(keep.remainingOldSessions.count, 72)
+
+        // Start before today.
+        let past = nextPlan(block, ctx, start: date(2026, 9, 1))
+        XCTAssertTrue(past.refusals.contains(.startInPast))
+
+        // Anything in progress.
+        all[3].status = .inProgress
+        XCTAssertTrue(nextPlan(block, ctx).refusals.contains(.sessionInProgress))
+        all[3].status = .planned
+
+        // Something logged on a remaining planned session cannot be removed.
+        all[4].items.first!.actualReps = [5]; all[4].items.first!.actualLoads = [100]
+        XCTAssertTrue(nextPlan(block, ctx).refusals.contains(.remainingSessionHasLoggedData))
+        all[4].items.first!.actualReps = []; all[4].items.first!.actualLoads = []
+
+        // Collision with a session of ANOTHER meso on a day the new meso needs.
+        let ok = nextPlan(block, ctx)
+        XCTAssertTrue(ok.refusals.isEmpty)
+        let day = Calendar.current.startOfDay(for: try XCTUnwrap(ok.sessions[10]).date)
+        let other = MesoBlock(name: "Other", startDate: day, status: .archived, totalWeeks: 1)
+        ctx.insert(other)
+        let intruder = Session(date: day.addingTimeInterval(3600 * 7), status: .planned, weekIndex: 1, dayLabel: "X", items: [])
+        intruder.meso = other
+        ctx.insert(intruder)
+        try ctx.save()
+        let blocked = nextPlan(block, ctx)
+        XCTAssertTrue(blocked.refusals.contains(.dateCollision))
+        XCTAssertEqual(blocked.collisions.count, 1)
+        XCTAssertTrue(blocked.collisions.first?.occupant === intruder)
+        XCTAssertFalse(blocked.isApplicable)
+
+        // Nothing to copy.
+        let empty = MesoBlock(name: "Empty", startDate: date(2026, 12, 1), status: .active)
+        ctx.insert(empty)
+        XCTAssertEqual(Service.planNextMeso(meso: empty, name: "n", endOldMesoNow: true, context: ctx, now: nextNow).refusals, [.nothingToCopy])
+    }
 }
