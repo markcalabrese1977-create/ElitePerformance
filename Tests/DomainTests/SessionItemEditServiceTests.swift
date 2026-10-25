@@ -19,7 +19,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     /// production 10 -> 12 week conversion on it.
     private func makeBlock(convert12: Bool = false) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
-                             UserProfile.self, User.self, CustomExercise.self])
+                             UserProfile.self, User.self, CustomExercise.self, AppState.self])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         container = c
         let ctx = ModelContext(c)
@@ -781,7 +781,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     /// A block of any template, seeded by the real seeder.
     private func makeTemplateBlock(_ template: ProgramTemplate, weekdays: [Int], start: Date) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
-                             UserProfile.self, User.self, CustomExercise.self])
+                             UserProfile.self, User.self, CustomExercise.self, AppState.self])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         container = c
         let ctx = ModelContext(c)
@@ -979,9 +979,10 @@ final class SessionItemEditServiceTests: XCTestCase {
         XCTAssertEqual(first.date, date(2026, 12, 21), "next Monday on/after the chosen start")
     }
 
-    func test_next_maintenanceBlock_nonWave_chronologicalPerDayType() throws {
+    /// A 4-week, 2-day maintenance block (deload wave on every item, no letters), planned from Mon Oct 5 2026.
+    private func makeMaintenanceMeso() throws -> (ModelContext, MesoBlock, [Session]) {
         let c = try ModelContainer(for: Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
-                                                UserProfile.self, User.self, CustomExercise.self]),
+                                                UserProfile.self, User.self, CustomExercise.self, AppState.self]),
                                    configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         container = c
         let ctx = ModelContext(c)
@@ -999,7 +1000,13 @@ final class SessionItemEditServiceTests: XCTestCase {
                 ctx.insert(s); made.append(s)
             }
         }
-        made.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }!.items.first!.targetSets = 3
+        try ctx.save()
+        return (ctx, meso, made)
+    }
+
+    func test_next_maintenanceBlock_nonWave_chronologicalPerDayType() throws {
+        let (ctx, meso, made) = try makeMaintenanceMeso()
+        made.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }!.items.first { $0.order == 1 }!.targetSets = 3
         try ctx.save()
 
         let result = Service.planNextMeso(meso: meso, name: "M2", endOldMesoNow: true, context: ctx, now: date(2026, 10, 1))
@@ -1011,8 +1018,8 @@ final class SessionItemEditServiceTests: XCTestCase {
             XCTAssertEqual(s.items.map(\.waveRaw), ["deload", "deload"])
             XCTAssertEqual(s.sessionNotes, "\(s.dayLabel ?? "") · Maintenance")
         }
-        XCTAssertEqual(result.sessions.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }?.items.first?.targetSets, 3)
-        XCTAssertEqual(result.sessions.first { $0.weekIndex == 2 && $0.dayLabel == "Day A" }?.items.first?.targetSets, 2)
+        XCTAssertEqual(result.sessions.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }?.items.first { $0.order == 1 }?.targetSets, 3)
+        XCTAssertEqual(result.sessions.first { $0.weekIndex == 2 && $0.dayLabel == "Day A" }?.items.first { $0.order == 1 }?.targetSets, 2)
         XCTAssertEqual(weekday(try XCTUnwrap(result.sessions.first).date), weekday(made[0].date))
     }
 
@@ -1083,5 +1090,232 @@ final class SessionItemEditServiceTests: XCTestCase {
         let empty = MesoBlock(name: "Empty", startDate: date(2026, 12, 1), status: .active)
         ctx.insert(empty)
         XCTAssertEqual(Service.planNextMeso(meso: empty, name: "n", endOldMesoNow: true, context: ctx, now: nextNow).refusals, [.nothingToCopy])
+    }
+
+    // MARK: - Start next meso: apply (M3)
+
+    private let lifecycleKeys = ["meso.scheduledStartDateEpoch", "meso.activeStartDateEpoch", "meso.promptSnoozeEpoch",
+                                "meso.anchorDate", "meso.anchorDayNumber"]
+
+    /// Runs `body` with the lifecycle defaults saved and restored (the apply moves them).
+    private func withLifecycleDefaults(_ body: () throws -> Void) rethrows {
+        let d = UserDefaults.standard
+        let saved = lifecycleKeys.map { ($0, d.object(forKey: $0)) }
+        defer { for (k, v) in saved { if let v { d.set(v, forKey: k) } else { d.removeObject(forKey: k) } } }
+        try body()
+    }
+
+    /// The snapshot lines of every completed session in `snap` (its S| line and the item lines under it).
+    private func completedBlocks(_ snap: [String]) -> [[String]] {
+        var blocks: [[String]] = []
+        var current: [String] = []
+        var inCompleted = false
+        for line in snap {
+            if line.hasPrefix("S|") {
+                if inCompleted { blocks.append(current) }
+                current = [line]
+                inCompleted = line.split(separator: "|", omittingEmptySubsequences: false)[2] == "completed"
+            } else { current.append(line) }
+        }
+        if inCompleted { blocks.append(current) }
+        return blocks
+    }
+
+    private func blocksOf(_ ctx: ModelContext) throws -> [MesoBlock] {
+        try ctx.fetch(FetchDescriptor<MesoBlock>())
+    }
+
+    func test_nextApply_createsTheMeso_archivesTheOld_keepsHistory_andMovesTheLifecycleAfterSave() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            let p = try pick(block)
+            let first = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+            let it = try XCTUnwrap(item(first, p.x))
+            complete(first, item: it, load: 150, reps: 6)
+            try ctx.save()
+            let now = first.date.addingTimeInterval(3600)
+            MesoLifecycle.scheduleNextMeso(on: date(2026, 12, 14))
+            let before = try fullSnapshot(ctx)
+
+            let planned = nextPlan(block, ctx, now: now)
+            XCTAssertTrue(planned.isApplicable, "\(planned.refusals)")
+            let result = try Service.startNextMeso(planned, in: ctx)
+
+            XCTAssertEqual(result.sessionsCreated, 72)
+            XCTAssertEqual(result.sessionsDeleted, planned.sessionsToDelete.count)
+            let blocks = try blocksOf(ctx)
+            XCTAssertEqual(blocks.count, 2)
+            XCTAssertEqual(block.status, .archived)
+            let new = result.meso
+            XCTAssertEqual(new.status, .active)
+            XCTAssertEqual(blocks.filter { $0.status == .active }.count, 1)
+            XCTAssertEqual(new.name, "Next")
+            XCTAssertEqual(new.totalWeeks, 12)
+            XCTAssertFalse(new.isMaintenance)
+            XCTAssertEqual(new.sessions.count, 72)
+            // Old meso: only completed and already-passed sessions remain, byte-identical.
+            XCTAssertTrue(block.sessions.allSatisfy { $0.status == .completed || $0.date < Calendar.current.startOfDay(for: now) })
+            let after = try fullSnapshot(ctx)
+            for done in completedBlocks(before) {
+                let at = try XCTUnwrap(after.firstIndex(of: done[0]))
+                XCTAssertEqual(Array(after[at..<(at + done.count)]), done)
+            }
+            // The new items: clean, seeded from the peak, wave stamped, no state carried.
+            for s in new.sessions {
+                XCTAssertEqual(s.status, .planned)
+                XCTAssertNotEqual(s.insertedDeload, true)
+                for i in s.items {
+                    XCTAssertFalse(i.planEdited)
+                    XCTAssertFalse(SessionEditSafety.hasLoggedData(i))
+                    XCTAssertEqual(i.plannedLoadsBySet, Array(repeating: i.suggestedLoad, count: i.targetSets))
+                }
+            }
+            let seeded = try XCTUnwrap(new.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 1 }?.items.first { $0.exerciseId == p.x })
+            XCTAssertGreaterThan(seeded.suggestedLoad, 0)
+            // Lifecycle moved only now.
+            XCTAssertNil(MesoLifecycle.scheduledStartDate)
+            XCTAssertEqual(Calendar.current.startOfDay(for: MesoLifecycle.activeStartDate), planned.startDate)
+            XCTAssertEqual(AppStateBridge.shared(in: ctx).activeMesoStartDate, planned.startDate)
+            XCTAssertNil(AppStateBridge.shared(in: ctx).scheduledNextMesoStartDate)
+        }
+    }
+
+    func test_nextApply_replacedExerciseCuesAndSets_surviveIntoTheNewMeso() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            let p = try pick(block)
+            let now = date(2026, 9, 24)
+            try Service.apply(plan(block, ctx, p, now: now), in: ctx)
+            let lastOfDay = try XCTUnwrap(sessions(block).last { $0.dayLabel == p.day })
+            let y = try XCTUnwrap(item(lastOfDay, p.y))
+            y.prescriptionNotes = "tempo 3-1-1"; y.intensifierNotes = nil
+            try ctx.save()
+
+            let result = try Service.startNextMeso(nextPlan(block, ctx, now: now), in: ctx)
+            for s in result.meso.sessions where s.dayLabel == p.day && s.items.contains(where: { $0.exerciseId == p.y }) {
+                let i = try XCTUnwrap(s.items.first { $0.exerciseId == p.y })
+                if s.weekIndex == 12 { XCTAssertEqual(i.executionNoteText, "tempo 3-1-1") }
+            }
+            XCTAssertTrue(result.meso.sessions.filter { $0.dayLabel == p.day }.allSatisfy { s in
+                s.items.contains { $0.exerciseId == p.y } && !s.items.contains { $0.exerciseId == p.x }
+            })
+        }
+    }
+
+    func test_nextApply_endOldMesoFalse_whenTheOldMesoIsFinished_deletesNothing() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            for s in block.sessions { s.status = .completed }
+            try ctx.save()
+            let before = try fullSnapshot(ctx)
+            let now = try XCTUnwrap(Service.defaultNextMesoStart(for: block))      // the day after the last session
+            let planned = nextPlan(block, ctx, end: false, now: now)
+            XCTAssertTrue(planned.isApplicable, "\(planned.refusals)")
+            XCTAssertTrue(planned.sessionsToDelete.isEmpty)
+            let result = try Service.startNextMeso(planned, in: ctx)
+            XCTAssertEqual(result.sessionsDeleted, 0)
+            XCTAssertEqual(block.status, .archived)
+            XCTAssertEqual(block.sessions.count, 72)
+            let after = try fullSnapshot(ctx)
+            XCTAssertEqual(Array(after.prefix(before.count)).count, before.count)
+            XCTAssertTrue(Set(before).isSubset(of: Set(after)), "every old session line is untouched")
+        }
+    }
+
+    func test_nextApply_staleRefusedAndHookedFailures_leaveEverythingAsItWas() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            MesoLifecycle.scheduleNextMeso(on: date(2026, 12, 14))
+            let scheduled = MesoLifecycle.scheduledStartDate
+            let before = try fullSnapshot(ctx)
+            func untouched(_ what: String) throws {
+                XCTAssertEqual(try fullSnapshot(ctx), before, what)
+                let blocks = try blocksOf(ctx)
+                XCTAssertEqual(blocks.count, 1, what)
+                XCTAssertEqual(block.status, .active, what)
+                XCTAssertEqual(MesoLifecycle.scheduledStartDate, scheduled, what)
+            }
+
+            let planned = nextPlan(block, ctx)
+            XCTAssertThrowsError(try Service.startNextMeso(planned, in: ctx, hooks: .init(forceVerificationFailure: true))) {
+                guard case Service.NextMesoError.verificationFailed(let problems) = $0 else { return XCTFail("\($0)") }
+                XCTAssertEqual(problems, ["forced verification failure (test hook)"], "a clean apply has no other problems")
+            }
+            try untouched("verification failure")
+            XCTAssertThrowsError(try Service.startNextMeso(planned, in: ctx, hooks: .init(forceSaveFailure: true))) {
+                guard case Service.NextMesoError.saveFailed = $0 else { return XCTFail("\($0)") }
+            }
+            try untouched("save failure")
+
+            // A plan with refusals does not apply.
+            let refused = nextPlan(block, ctx, end: false)
+            XCTAssertThrowsError(try Service.startNextMeso(refused, in: ctx)) {
+                guard case Service.NextMesoError.refused(let r) = $0 else { return XCTFail("\($0)") }
+                XCTAssertTrue(r.contains(.oldMesoHasRemainingSessions))
+            }
+            try untouched("refused")
+
+            // The old meso moved under the plan: its template changed.
+            let it = try XCTUnwrap(sessions(block).last!.items.first)
+            it.targetSets += 1
+            XCTAssertThrowsError(try Service.startNextMeso(planned, in: ctx)) {
+                XCTAssertEqual($0 as? Service.NextMesoError, .planStale)
+            }
+            it.targetSets -= 1
+            try untouched("stale")
+            // ... and the same plan still applies once the state matches again.
+            XCTAssertNoThrow(try Service.startNextMeso(planned, in: ctx))
+        }
+    }
+
+    func test_nextApply_afterAnInsertedDeload_theNewMesoHasNone() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            try Service.insertDeloadWeek(Service.planInsertDeloadWeek(meso: block, context: ctx, now: nextNow, week: 4), in: ctx)
+            let result = try Service.startNextMeso(nextPlan(block, ctx), in: ctx)
+            XCTAssertEqual(result.meso.sessions.count, 72)
+            XCTAssertFalse(result.meso.sessions.contains { $0.insertedDeload == true })
+            XCTAssertEqual(result.meso.totalWeeks, 12)
+            XCTAssertEqual(Set(result.meso.sessions.map(\.weekIndex)), Set(1...12))
+        }
+    }
+
+    func test_nextApply_maintenanceBlock_staysMaintenance_andChainsChronologically() throws {
+        try withLifecycleDefaults {
+            let (ctx, meso, _) = try makeMaintenanceMeso()
+            let planned = Service.planNextMeso(meso: meso, name: "Maint 2", endOldMesoNow: true, context: ctx, now: date(2026, 10, 1))
+            let result = try Service.startNextMeso(planned, in: ctx)
+            XCTAssertTrue(result.meso.isMaintenance)
+            XCTAssertEqual(result.meso.sessions.count, 8)
+            XCTAssertEqual(meso.status, .archived)
+            // Maintenance items carry the deload wave, so the chain is: same day type, next week.
+            let sorted = result.meso.sessions.sorted { $0.date < $1.date }
+            let all = try ctx.fetch(FetchDescriptor<Session>())
+            for (idx, s) in sorted.enumerated() {
+                let a = try XCTUnwrap(s.items.first { $0.exerciseId == "bench_press" })
+                let expected = sorted[(idx + 1)...].lazy.filter { $0.dayLabel == s.dayLabel }
+                    .compactMap { $0.items.first { $0.exerciseId == "bench_press" } }.first
+                let resolved = PlanMemoryEngine.nextTargetItem(for: a, after: s, in: all)
+                XCTAssertTrue(resolved === expected, "\(s.dayLabel ?? "") wk\(s.weekIndex)")
+                XCTAssertEqual(expected == nil, s.weekIndex == 4)
+            }
+        }
+    }
+
+    func test_nextApply_canBeRepeated_theCopyOfACopyHasTheSameShape() throws {
+        try withLifecycleDefaults {
+            let (ctx, block) = try makeBlock(convert12: true)
+            let firstPlan = nextPlan(block, ctx)
+            let first = try Service.startNextMeso(firstPlan, in: ctx)
+            let again = Service.planNextMeso(meso: first.meso, name: "Third", endOldMesoNow: true, context: ctx, now: nextNow)
+            XCTAssertTrue(again.refusals.isEmpty, "\(again.refusals)")
+            func shape(_ sessions: [Service.NextMesoSession]) -> [String] {
+                sessions.map { "\($0.weekIndex)|\($0.dayLabel ?? "")|\($0.letter)|" + $0.items.map { "\($0.order):\($0.exerciseId):\($0.targetSets):\($0.prescription)" }.joined(separator: ",") }
+            }
+            XCTAssertEqual(shape(again.sessions), shape(firstPlan.sessions))
+            XCTAssertEqual(again.sessions.map { Calendar.current.component(.weekday, from: $0.date) },
+                           firstPlan.sessions.map { Calendar.current.component(.weekday, from: $0.date) })
+            XCTAssertEqual(again.sessions.count, 72)
+        }
     }
 }

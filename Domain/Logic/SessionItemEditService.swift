@@ -2049,3 +2049,250 @@ extension SessionItemEditService {
         return plan(sessions: sessions, weeks: weekOrder.count, collisions: collisions)
     }
 }
+
+// MARK: - Start the next meso: apply
+
+extension SessionItemEditService {
+
+    struct NextMesoResult {
+        let meso: MesoBlock
+        let sessionsCreated: Int
+        let sessionsDeleted: Int
+        /// One line per created session.
+        let summary: [String]
+    }
+
+    private struct ForcedNextMesoSaveFailure: Error {}
+
+    /// Everything about a session the plan or the user could have touched, as one comparable string.
+    fileprivate static func sessionFingerprint(_ s: Session) -> String {
+        var out = ["S", "\(s.date.timeIntervalSince1970)", s.status.rawValue, "\(s.weekIndex)", s.dayLabel ?? "-",
+                   s.programIndex.map(String.init) ?? "-", s.sessionNotes ?? "-", "\(s.insertedDeload.map { "\($0)" } ?? "-")",
+                   s.completedAt.map { "\($0.timeIntervalSince1970)" } ?? "-", "\(s.readinessStars)", s.readinessRaw,
+                   "\(s.hkWorkoutUUID ?? "-")", "\(s.hkDuration)", "\(s.items.count)"].joined(separator: "|")
+        for i in s.items.sorted(by: { ($0.order, $0.exerciseId) < ($1.order, $1.exerciseId) }) {
+            func opt(_ v: Int?) -> String { v.map(String.init) ?? "-" }
+            out += "\n" + [
+                "I", i.id?.uuidString ?? "", "\(i.order)", i.exerciseId, i.exerciseNameSnapshot ?? "-",
+                "\(i.targetReps)", "\(i.targetSets)", "\(i.targetRIR)", "\(i.suggestedLoad)",
+                i.waveRaw ?? "-", i.priorityRaw ?? "-", opt(i.setMin), opt(i.setMax), opt(i.repMin), opt(i.repMax),
+                opt(i.targetRIRMin), opt(i.targetRIRMax), i.intensifierRaw ?? "-", i.intensifierNotes ?? "-", i.prescriptionNotes ?? "-",
+                "\(i.logs.count)", "\(i.plannedRepsBySet)", "\(i.plannedLoadsBySet)", "\(i.plannedRIRsBySet)", "\(i.planEdited)",
+                "\(i.actualReps)", "\(i.actualLoads)", "\(i.actualRIRs)", "\(i.usedRestPauseFlags)", "\(i.restPausePatternsBySet)",
+                "\(i.dropSetPatternsBySet)", "\(i.setFeedbackBySet)", "\(i.pumpRatingsBySet)", "\(i.isCompleted)", "\(i.isPR)",
+                i.coachNote ?? "-", i.loadOverrideReasonRaw ?? "-", i.nextSuggestedLoad.map { "\($0)" } ?? "-",
+            ].joined(separator: "|")
+        }
+        return out
+    }
+
+    /// What the plan will write, as text, for the "has the live state moved" comparison.
+    private static func signature(_ plan: NextMesoPlan) -> String {
+        var parts = ["\(plan.oldMeso.persistentModelID)", plan.name, "\(plan.startDate.timeIntervalSince1970)", "\(plan.endOldMesoNow)",
+                     "\(plan.peakFactor)", plan.sessionsToDelete.map { "\($0.persistentModelID)" }.sorted().joined(separator: ",")]
+        for s in plan.sessions {
+            parts.append("\(s.date.timeIntervalSince1970)|\(s.dayLabel ?? "-")|\(s.weekIndex)|\(s.programIndex)|\(s.letter)|\(s.sessionNotes)")
+            for i in s.items {
+                parts.append("  \(i.order)|\(i.exerciseId)|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.waveRaw ?? "-")|\(i.seed)|\(i.seedSource.rawValue)|\(i.intensifierNotes ?? "-")|\(i.prescriptionNotes ?? "-")")
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Creates the planned meso, archives the old one (and removes its remaining planned sessions when the plan
+    /// says so), verifies, and saves once. Any failure puts every changed field back and throws, leaving the
+    /// store as it was. The meso lifecycle (labeling anchor, scheduled next-meso date) moves only after the save.
+    @discardableResult
+    static func startNextMeso(_ plan: NextMesoPlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> NextMesoResult {
+        guard plan.isApplicable else {
+            throw NextMesoError.refused(plan.refusals.isEmpty ? [.nothingToCopy] : plan.refusals)
+        }
+        let old = plan.oldMeso
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        // The plan is a preview; trust only live state.
+        let live = planNextMeso(meso: old, name: plan.name, startDate: plan.startDate, endOldMesoNow: plan.endOldMesoNow,
+                                peakFactor: plan.peakFactor, context: context, now: plan.now)
+        guard live.refusals.isEmpty, live.isApplicable else { throw NextMesoError.refused(live.refusals.isEmpty ? [.nothingToCopy] : live.refusals) }
+        guard signature(live) == signature(plan) else { throw NextMesoError.planStale }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let calendar = Calendar.current
+        let completedBefore = Dictionary(uniqueKeysWithValues: old.sessions.filter { $0.status == .completed }
+            .map { ($0.persistentModelID, sessionFingerprint($0)) })
+        let blocksBefore = (try? context.fetch(FetchDescriptor<MesoBlock>())) ?? []
+        let statusBefore = blocksBefore.map { (block: $0, status: $0.status) }
+        let removedIDs = Set(live.sessionsToDelete.map(\.persistentModelID))
+        let otherSessionsBefore = ((try? context.fetch(FetchDescriptor<Session>())) ?? []).filter { !removedIDs.contains($0.persistentModelID) }
+
+        // rollback() drops inserts and deletes but does not revert property edits (see DUPMesoLengthConversion.Snapshot),
+        // so the one edit made to live objects, the status of the blocks it archives, is put back by hand.
+        var created: [Session] = []
+        var newMeso: MesoBlock?
+        func abandon() {
+            for entry in statusBefore { entry.block.status = entry.status }
+            for s in created { context.delete(s) }
+            if let newMeso { context.delete(newMeso) }
+            context.rollback()
+        }
+
+        // 1. Archive every active block (the old meso among them).
+        for block in blocksBefore where block.status == .active { block.status = .archived }
+        old.status = .archived
+
+        // 2. Remove the old meso's remaining planned sessions.
+        for s in live.sessionsToDelete { context.delete(s) }
+
+        // 3. The new meso, its sessions and items.
+        let block = MesoBlock(
+            name: plan.name, startDate: live.startDate, status: .active,
+            notes: "Next meso from \(old.name) on \(isoDay(live.startDate))",
+            totalWeeks: live.weeks, isMaintenance: old.isMaintenance
+        )
+        context.insert(block)
+        newMeso = block
+        for sp in live.sessions {
+            let items: [SessionItem] = sp.items.map { ip in
+                let item = SessionItem(
+                    order: ip.order, exerciseId: ip.exerciseId, exerciseNameSnapshot: ip.exerciseName,
+                    targetReps: ip.targetReps, targetSets: ip.targetSets, targetRIR: ip.targetRIR, suggestedLoad: ip.seed,
+                    waveRaw: ip.waveRaw, priorityRaw: ip.priorityRaw,
+                    setMin: ip.setMin, setMax: ip.setMax, repMin: ip.repMin, repMax: ip.repMax,
+                    targetRIRMin: ip.rirMin, targetRIRMax: ip.rirMax,
+                    intensifierRaw: ip.intensifierRaw, intensifierNotes: ip.intensifierNotes, prescriptionNotes: ip.prescriptionNotes,
+                    plannedRepsBySet: ip.plannedReps,
+                    plannedLoadsBySet: Array(repeating: ip.seed, count: ip.targetSets),
+                    plannedRIRsBySet: ip.plannedRIRs
+                )
+                item.planEdited = false
+                return item
+            }
+            let session = Session(date: sp.date, status: .planned, sessionNotes: sp.sessionNotes,
+                                  weekIndex: sp.weekIndex, dayLabel: sp.dayLabel, items: items, programIndex: sp.programIndex)
+            session.meso = block
+            context.insert(session)
+            created.append(session)
+        }
+
+        // 4. Verify before anything is saved.
+        var problems: [String] = []
+        func check<T: Equatable>(_ what: String, _ expected: T, _ actual: T) {
+            if expected != actual { problems.append("\(what): expected \(expected), found \(actual)") }
+        }
+        check("created sessions in the block", live.sessions.count, block.sessions.count)
+        check("block status", MesoStatus.active, block.status)
+        check("totalWeeks", live.weeks, block.totalWeeks ?? -1)
+        check("old meso status", MesoStatus.archived, old.status)
+        check("active blocks", 1, blocksBefore.filter { $0.status == .active }.count + 1)
+
+        let byIndex = created.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }
+        check("programIndex contiguous", Array(1...created.count), byIndex.compactMap(\.programIndex))
+        check("programIndex follows date order", byIndex.map(\.date), byIndex.map(\.date).sorted())
+        let weeks = Set(created.map(\.weekIndex))
+        check("weeks contiguous", Array(1...live.weeks), weeks.sorted())
+        var weekdayByLabel: [String: Set<Int>] = [:]
+        for s in created { weekdayByLabel[s.dayLabel ?? "", default: []].insert(calendar.component(.weekday, from: s.date)) }
+        for (label, days) in weekdayByLabel where days.count != 1 { problems.append("day type \(label.isEmpty ? "?" : label) is on \(days.sorted()) weekdays") }
+
+        for (sp, s) in zip(live.sessions, created) {
+            let tag = "\(isoDay(sp.date)) \(sp.dayLabel ?? "?") wk\(sp.weekIndex)"
+            check("\(tag) date", sp.date, s.date)
+            check("\(tag) week", sp.weekIndex, s.weekIndex)
+            check("\(tag) status", SessionStatus.planned, s.status)
+            check("\(tag) insertedDeload", false, s.insertedDeload == true)
+            check("\(tag) item count", sp.items.count, s.items.count)
+            for (ip, i) in zip(sp.items, s.items.sorted { $0.order < $1.order }) {
+                let t = "\(tag) \(ip.exerciseId)"
+                check("\(t) exercise", ip.exerciseId, i.exerciseId)
+                check("\(t) sets", ip.targetSets, i.targetSets)
+                check("\(t) array sizes", [ip.targetSets, ip.targetSets, ip.targetSets],
+                      [i.plannedRepsBySet.count, i.plannedLoadsBySet.count, i.plannedRIRsBySet.count])
+                check("\(t) load", ip.seed, i.suggestedLoad)
+                check("\(t) planned loads", Array(repeating: ip.seed, count: ip.targetSets), i.plannedLoadsBySet)
+                check("\(t) planEdited", false, i.planEdited)
+                check("\(t) logged", false, SessionEditSafety.hasLoggedData(i))
+                check("\(t) actuals", 0, i.actualReps.count + i.actualLoads.count + i.actualRIRs.count + i.logs.count)
+                if ip.isBodyweight { check("\(t) bodyweight load", 0.0, i.suggestedLoad) }
+                if let lo = i.setMin, lo > ip.targetSets { problems.append("\(t): setMin \(lo) above sets \(ip.targetSets)") }
+                if let hi = i.setMax, hi < ip.targetSets { problems.append("\(t): setMax \(hi) below sets \(ip.targetSets)") }
+                if sp.letter.isEmpty == false, WavePrescriptionGuard.isWaveLetter(sp.letter) == false, i.waveRaw?.lowercased() != sp.letter {
+                    problems.append("\(t): wave \(i.waveRaw ?? "nil") in a \(sp.letter) week")
+                }
+            }
+        }
+
+        // Dates: none shares a day with a session that stays, or with another new one.
+        let stayingDays = Dictionary(grouping: otherSessionsBefore, by: { calendar.startOfDay(for: $0.date) })
+        var claimed = Set<Date>()
+        for s in created {
+            let day = calendar.startOfDay(for: s.date)
+            if !claimed.insert(day).inserted { problems.append("date collision on \(isoDay(day)) within the new meso") }
+            if let other = stayingDays[day]?.first { problems.append("date collision on \(isoDay(day)) with \(other.dayLabel ?? "?")") }
+        }
+
+        // Chains: every new item's carry-forward target is the next occurrence inside the new meso, or nothing.
+        let all = otherSessionsBefore + created
+        for s in created {
+            for i in s.items {
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                let wave = i.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+                let later = created.filter { $0.date > s.date }.sorted { $0.date < $1.date }
+                var expected: SessionItem?
+                for c in later {
+                    guard let match = c.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) else { continue }
+                    if wave.isEmpty {
+                        if match.waveRaw?.lowercased() != deloadWaveRaw { expected = match; break }
+                    } else if SessionDayLabelMatcher.matches(c.dayLabel, s.dayLabel), match.waveRaw?.lowercased() == wave {
+                        expected = match; break
+                    }
+                }
+                let resolved = PlanMemoryEngine.nextTargetItem(for: i, after: s, in: all)
+                if resolved !== expected {
+                    let at = resolved.flatMap { r in all.first { $0.items.contains { $0 === r } } }
+                    problems.append("chain \(isoDay(s.date)) \(s.dayLabel ?? "?") \(i.exerciseId) \(wave.isEmpty ? "(no wave)" : wave): expected "
+                                    + "\(expected == nil ? "none" : "next in the new meso"), resolved \(at.map { "\(isoDay($0.date)) wk\($0.weekIndex)" } ?? "none")")
+                }
+            }
+        }
+
+        // The old meso's finished sessions are exactly as they were.
+        for s in old.sessions where completedBefore[s.persistentModelID] != nil {
+            if sessionFingerprint(s) != completedBefore[s.persistentModelID] { problems.append("completed session \(isoDay(s.date)) \(s.dayLabel ?? "?") changed") }
+        }
+        check("completed sessions kept", completedBefore.count, old.sessions.filter { $0.status == .completed && !removedIDs.contains($0.persistentModelID) }.count)
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw NextMesoError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedNextMesoSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw NextMesoError.saveFailed("\(error)")
+        }
+
+        // Saved: the lifecycle follows.
+        MesoLifecycle.clearScheduledNextMeso()
+        MesoLifecycle.confirmStartNewMeso(on: live.startDate)
+        AppStateBridge.setActiveMesoStartDate(live.startDate, in: context)
+        AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
+        AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
+
+        let summary = live.sessions.map { s in
+            "SessionItemEdit: next meso wk\(s.weekIndex) \(isoDay(s.date)) \(s.dayLabel ?? "?") \(s.letter.isEmpty ? "-" : s.letter) "
+                + s.items.map { "\($0.exerciseId) \($0.prescription) @ \($0.seed) [\($0.seedSource.label(factor: live.peakFactor))]" }.joined(separator: "; ")
+        }
+        summary.forEach { print($0) }
+        return NextMesoResult(meso: block, sessionsCreated: created.count, sessionsDeleted: live.sessionsToDelete.count, summary: summary)
+    }
+}
