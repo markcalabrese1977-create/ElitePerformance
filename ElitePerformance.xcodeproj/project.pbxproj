@@ -11,7 +11,10 @@
 		DF36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift */; };
 		DF56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */; };
 		DFAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */; };
+		AAAE4D7EE5CAA2B422C49D60 /* StartNextMesoFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E935779C5E69AE2C784DD22A /* StartNextMesoFlow.swift */; };
 		DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */; };
+		A7F744CCD81B803A0026D54E /* NextMesoRealBackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367ED569153E005021AA95B0 /* NextMesoRealBackupTests.swift */; };
+		85CCA04C5B968B1457AB3DCB /* StartNextMesoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41BAF5F1B9650D5148D1FAE9 /* StartNextMesoFlowTests.swift */; };
 		DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */; };
 		DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */; };
 		DF54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */; };
@@ -68,6 +71,7 @@
 		D5E22AF63FADD6AF8947F2BB /* HeartRateAgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E12AF63FADD6AF8947F2BB /* HeartRateAgeTests.swift */; };
 		D5E2E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */; };
 		D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */; };
+		F4CDE0214473F70FA93E5735 /* SessionItemEditServiceNextMesoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48FFCD76DC9DB72368413DF0 /* SessionItemEditServiceNextMesoTests.swift */; };
 		D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */; };
 		D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */; };
 		D5AA00082F99900800AA0008 /* CoachMessageLandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */; };
@@ -110,6 +114,7 @@
 		D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */; };
 		D5E2847D40E637AB6976F531 /* LoadFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E1847D40E637AB6976F531 /* LoadFormatter.swift */; };
 		D5E274D80F395AF82536120C /* SessionItemEditService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E174D80F395AF82536120C /* SessionItemEditService.swift */; };
+		CEBABAAE38EAB695A95019D4 /* SessionItemEditService+NextMeso.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81C3B3DC2BF11A45CEB017EC /* SessionItemEditService+NextMeso.swift */; };
 		D5E224574895A8DF85FC2A1E /* SessionEditSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */; };
 		E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */; };
 		F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */; };
@@ -131,7 +136,10 @@
 		DE36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTodayTests.swift; sourceTree = "<group>"; };
 		DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoveInsertedDeloadTests.swift; sourceTree = "<group>"; };
 		DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlow.swift; sourceTree = "<group>"; };
+		E935779C5E69AE2C784DD22A /* StartNextMesoFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartNextMesoFlow.swift; sourceTree = "<group>"; };
 		DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadFlowTests.swift; sourceTree = "<group>"; };
+		367ED569153E005021AA95B0 /* NextMesoRealBackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextMesoRealBackupTests.swift; sourceTree = "<group>"; };
+		41BAF5F1B9650D5148D1FAE9 /* StartNextMesoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartNextMesoFlowTests.swift; sourceTree = "<group>"; };
 		DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertDeloadWeekTests.swift; sourceTree = "<group>"; };
 		DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertedDeloadMarkerTests.swift; sourceTree = "<group>"; };
 		DE54FD173A792E7EBBFDC1AF /* WeekDayNumberingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekDayNumberingTests.swift; sourceTree = "<group>"; };
@@ -189,6 +197,7 @@
 		D5E12AF63FADD6AF8947F2BB /* HeartRateAgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartRateAgeTests.swift; sourceTree = "<group>"; };
 		D5E1E2038FE86E9CF352675F /* ReplaceExerciseFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceExerciseFlowTests.swift; sourceTree = "<group>"; };
 		D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionItemEditServiceTests.swift; sourceTree = "<group>"; };
+		48FFCD76DC9DB72368413DF0 /* SessionItemEditServiceNextMesoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionItemEditServiceNextMesoTests.swift; sourceTree = "<group>"; };
 		D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySeedLoadTests.swift; sourceTree = "<group>"; };
 		D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEditSafetyTests.swift; sourceTree = "<group>"; };
 		D5AA00072F99900700AA0007 /* CoachMessageLandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessageLandingTests.swift; sourceTree = "<group>"; };
@@ -234,6 +243,7 @@
 		D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WavePrescriptionGuard.swift; sourceTree = "<group>"; };
 		D5E1847D40E637AB6976F531 /* LoadFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadFormatter.swift; sourceTree = "<group>"; };
 		D5E174D80F395AF82536120C /* SessionItemEditService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionItemEditService.swift; sourceTree = "<group>"; };
+		81C3B3DC2BF11A45CEB017EC /* SessionItemEditService+NextMeso.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionItemEditService+NextMeso.swift"; sourceTree = "<group>"; };
 		D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEditSafety.swift; sourceTree = "<group>"; };
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -418,6 +428,7 @@
 				D5WAVE0100000000000001 /* WavePrescriptionGuard.swift */,
 				D5E1847D40E637AB6976F531 /* LoadFormatter.swift */,
 				D5E174D80F395AF82536120C /* SessionItemEditService.swift */,
+				81C3B3DC2BF11A45CEB017EC /* SessionItemEditService+NextMeso.swift */,
 				D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */,
 				D537C68D2EE3A9B9006C16F7 /* PlanMemoryEngine.swift */,
 				D58618272ECCA95F006EF818 /* ProgramCatalog.swift */,
@@ -495,6 +506,7 @@
 			children = (
 				D550F56C2ED52FE00011D54B /* ProgramDayDetailView.swift */,
 				DEAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift */,
+				E935779C5E69AE2C784DD22A /* StartNextMesoFlow.swift */,
 				DE6AB5D455449C744E8B4919 /* RestTodayFlow.swift */,
 				D5E11680BAB57C164FE1C4EA /* ChangePrescriptionFlow.swift */,
 				D5E18481827B62430DFE68AB /* ReplaceExerciseFlow.swift */,
@@ -575,9 +587,12 @@
 				DEBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift */,
 				DE63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift */,
 				DE07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift */,
+				367ED569153E005021AA95B0 /* NextMesoRealBackupTests.swift */,
+				41BAF5F1B9650D5148D1FAE9 /* StartNextMesoFlowTests.swift */,
 				DE56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift */,
 				DE36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift */,
 				D5E15A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift */,
+				48FFCD76DC9DB72368413DF0 /* SessionItemEditServiceNextMesoTests.swift */,
 				D5E199C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift */,
 				D5E1F799430CEE43299F99B2 /* SessionEditSafetyTests.swift */,
 				01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */,
@@ -765,6 +780,7 @@
 				D550020B2F43D6E200908F53 /* ProgramState.swift in Sources */,
 				D550F56D2ED52FE20011D54B /* ProgramDayDetailView.swift in Sources */,
 				DFAE4EC1AFAAA4F1251D9230 /* InsertDeloadFlow.swift in Sources */,
+				AAAE4D7EE5CAA2B422C49D60 /* StartNextMesoFlow.swift in Sources */,
 				DF6AB5D455449C744E8B4919 /* RestTodayFlow.swift in Sources */,
 				D5E21680BAB57C164FE1C4EA /* ChangePrescriptionFlow.swift in Sources */,
 				D5E28481827B62430DFE68AB /* ReplaceExerciseFlow.swift in Sources */,
@@ -810,6 +826,7 @@
 				D5WAVE0100000000000002 /* WavePrescriptionGuard.swift in Sources */,
 				D5E2847D40E637AB6976F531 /* LoadFormatter.swift in Sources */,
 				D5E274D80F395AF82536120C /* SessionItemEditService.swift in Sources */,
+				CEBABAAE38EAB695A95019D4 /* SessionItemEditService+NextMeso.swift in Sources */,
 				D5E224574895A8DF85FC2A1E /* SessionEditSafety.swift in Sources */,
 				D5EC0F592FB895B000C9E38C /* Notifications.swift in Sources */,
 				D54A94A82F93044200EFBF25 /* ProgramApplicationService.swift in Sources */,
@@ -842,9 +859,12 @@
 				DFBBCE01FDCE3FD6970C5839 /* InsertedDeloadMarkerTests.swift in Sources */,
 				DF63D5037D974F56104B49DF /* InsertDeloadWeekTests.swift in Sources */,
 				DF07AB96F30D7A9A2B7096A1 /* InsertDeloadFlowTests.swift in Sources */,
+				A7F744CCD81B803A0026D54E /* NextMesoRealBackupTests.swift in Sources */,
+				85CCA04C5B968B1457AB3DCB /* StartNextMesoFlowTests.swift in Sources */,
 				DF56B43E33D29FD4606E3900 /* RemoveInsertedDeloadTests.swift in Sources */,
 				DF36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift in Sources */,
 				D5E25A9B865F51551C5B4737 /* SessionItemEditServiceTests.swift in Sources */,
+				F4CDE0214473F70FA93E5735 /* SessionItemEditServiceNextMesoTests.swift in Sources */,
 				D5E299C6C5DDFB626AFE6B4F /* HistorySeedLoadTests.swift in Sources */,
 				D5E2F799430CEE43299F99B2 /* SessionEditSafetyTests.swift in Sources */,
 				21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */,
