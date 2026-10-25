@@ -1100,16 +1100,37 @@ final class NextMesoRealBackupTests: XCTestCase {
         }
     }
 
+    private func normalized(_ json: [String: Any]) -> [String: Any] {
+        var out = json
+        func byID(_ rows: [[String: Any]]) -> [[String: Any]] { rows.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") } }
+        if let history = json["sessionHistory"] as? [[String: Any]] {
+            out["sessionHistory"] = byID(history).map { row -> [String: Any] in
+                var r = row
+                if let ex = row["exercises"] as? [[String: Any]] {
+                    r["exercises"] = ex.sorted { ((try? canonical($0)).flatMap { String(data: $0, encoding: .utf8) } ?? "")
+                                                  < ((try? canonical($1)).flatMap { String(data: $0, encoding: .utf8) } ?? "") }
+                }
+                return r
+            }
+        }
+        for key in ["exerciseNotes", "sessions", "mesoBlocks", "customExercises"] {
+            if let rows = json[key] as? [[String: Any]] { out[key] = byID(rows) }
+        }
+        return out
+    }
+
     /// export -> import into a fresh store -> export; the differences between the first and last export.
     private func roundTripDiff(_ url: URL, _ first: [String: Any]) throws -> [String] {
         let fresh = try makeContainer()
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: fresh)
         let second = try export(ModelContext(fresh)).json
-        // Only the sections a next meso writes. (SessionHistory rows come back in a different order on every
-        // import, which is noise for this check.)
-        let sections = ["sessions", "mesoBlocks"]
+        // Sessions, blocks, history rows and notes. SessionHistory rows are compared sorted by id, and the
+        // exercises inside a row sorted by content (they carry no id and come back in import order).
         var lines: [String] = []
-        for key in sections { diff(first[key] ?? [], second[key] ?? [], path: "$.\(key)", into: &lines) }
+        let n1 = normalized(first), n2 = normalized(second)
+        for key in ["sessions", "mesoBlocks", "sessionHistory", "exerciseNotes", "customExercises"] {
+            diff(n1[key] ?? [], n2[key] ?? [], path: "$.\(key)", into: &lines)
+        }
         return lines
     }
 
@@ -1138,7 +1159,7 @@ final class NextMesoRealBackupTests: XCTestCase {
 
         let before = try export(ctx)
         let baseline = try roundTripDiff(before.url, before.json)
-        out("baseline round trip of sessions + mesoBlocks (before apply): \(baseline.count) differences")
+        out("baseline round trip (before apply): \(baseline.count) differences")
 
         // --- Preview ---
         let plan = Service.planNextMeso(meso: old, name: "Next meso", startDate: tomorrow, endOldMesoNow: true, context: ctx, now: now)
@@ -1150,6 +1171,44 @@ final class NextMesoRealBackupTests: XCTestCase {
         for s in plan.firstWeek { out("  \(day(s.date)) \(s.dayLabel ?? "?") [\(s.letter.isEmpty ? "-" : s.letter)]: " + s.items.map { ExerciseCatalog.displayName(for: $0.exerciseId) }.joined(separator: ", ")) }
         let sources = Dictionary(grouping: plan.sessions.flatMap(\.items), by: { $0.seedSource.rawValue }).mapValues(\.count)
         out("seed sources across all items: \(sources.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+        // Condensed: one line per exercise (peak e1RM or source, seed per letter).
+        do {
+            let fixed = (try? ctx.fetch(FetchDescriptor<UserProfile>()).first)?.exemptExerciseIds ?? []
+            var order: [String] = []
+            var rows: [String: [String: (Double, String)]] = [:]
+            for s in plan.sessions {
+                for i in s.items {
+                    let id = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                    if rows[id] == nil { order.append(id) }
+                    let key = s.letter.isEmpty ? "-" : s.letter.uppercased()
+                    if rows[id, default: [:]][key] == nil { rows[id, default: [:]][key] = (i.seed, i.seedSource.rawValue) }
+                }
+            }
+            out("== CONDENSED: exercise | peak e1RM or source | seed A / B / C ==")
+            for id in order {
+                let peak = HistorySeedLoad.peakE1RM(for: id, in: old.sessions)
+                let r = rows[id] ?? [:]
+                let sources = Set(r.values.map(\.1))
+                let head = peak.map { "peak e1RM \(Int($0.rounded()))" } ?? (sources.count == 1 ? sources.first! : sources.sorted().joined(separator: "/"))
+                let seeds = ["A", "B", "C", "DELOAD", "-"].compactMap { k in r[k].map { "\(k == "DELOAD" ? "D" : k) \(LoadFormatter.number($0.0))" } }
+                let tag = fixed.contains(where: { ExerciseCatalog.canonicalExerciseId(for: $0) == id }) ? " (fixed-load)" : ""
+                out("  \(ExerciseCatalog.displayName(for: id))\(tag) | \(head) | \(seeds.joined(separator: " / "))")
+            }
+            out("== HISTORY FALLBACK: no qualifying completed old-meso working set ==")
+            for id in order where rows[id]?.values.contains(where: { $0.1 == "history" }) == true {
+                var withExercise = 0, completed = 0, deloadOnly = 0, noSets = 0
+                for s in old.sessions {
+                    guard let m = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id }) else { continue }
+                    withExercise += 1
+                    if s.status != .completed { continue }
+                    completed += 1
+                    if m.waveRaw?.lowercased() == "deload" { deloadOnly += 1 }
+                    else if !m.actualLoads.contains(where: { $0 > 0 }) || !m.actualReps.contains(where: { $0 > 0 }) { noSets += 1 }
+                }
+                out("  \(ExerciseCatalog.displayName(for: id)): in \(withExercise) old-meso sessions, \(completed) completed (\(deloadOnly) deload, \(noSets) with no logged load x reps); "
+                    + "the history seed used earlier mesos")
+            }
+        }
         XCTAssertTrue(plan.isApplicable, "the backup's meso should plan cleanly: \(plan.refusals)")
 
         // --- Apply ---

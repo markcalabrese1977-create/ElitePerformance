@@ -725,8 +725,16 @@ enum HistorySeedLoad {
         customExercises: [CustomExercise] = []
     ) -> Double? {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return 0 }
-        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        guard let peak = peakE1RM(for: exerciseId, in: sessions) else { return nil }
+        let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
+                                 increment: loadIncrement)
+        return seeded > 0 ? seeded : nil
+    }
 
+    /// The best RIR-credited e1RM `peakLoad` converts: completed, not an inserted deload, not maintenance, not a
+    /// deload-wave item, working sets only. `nil` when no such set exists.
+    static func peakE1RM(for exerciseId: String, in sessions: [Session]) -> Double? {
+        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         var peak = 0.0
         for session in sessions where session.status == .completed {
             if session.insertedDeload == true || session.meso?.isMaintenance == true { continue }
@@ -742,10 +750,7 @@ enum HistorySeedLoad {
                 peak = max(peak, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
         }
-        guard peak > 0 else { return nil }
-        let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
-                                 increment: loadIncrement)
-        return seeded > 0 ? seeded : nil
+        return peak > 0 ? peak : nil
     }
 
     /// The starting load for one item of a next meso, and where it came from.
