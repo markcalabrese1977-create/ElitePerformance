@@ -29,7 +29,7 @@ struct ExerciseNoteSheet: View {
                             try? modelContext.save()
                         }
                     )) {
-                        Text("Fixed load (rehab track): never auto-increase")
+                        Text("Fixed load: never auto-increase")
                             .font(.subheadline)
                     }
                     .padding(.horizontal, 12)

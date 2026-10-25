@@ -204,7 +204,7 @@ enum ProgramCatalog {
         whyItWorks: "Upper/lower 4x/week gives each muscle group two quality exposures per week without demanding a 6-day schedule. We use compounds as the spine and higher-rep accessories for detail work. The coach focuses on 1–3 RIR and small, frequent progressions so you build strength and size without cooking your joints."
     )
 
-    /// 3-day full-body fat-loss strength (Angela baseline)
+    /// 3-day full-body fat-loss strength
     static let fullBody3DayFatLoss = TrainingProgramDefinition(
         id: "fullbody_3d_fatloss",
         name: "3-Day Fat-Loss Strength",

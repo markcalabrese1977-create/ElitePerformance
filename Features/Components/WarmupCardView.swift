@@ -37,12 +37,12 @@ struct WarmupCardView: View {
         VStack(alignment: .leading, spacing: 12) {
 
             HStack {
-                Text("Warm-up (Non-negotiable)")
+                Text("Warm-up")
                     .font(.headline)
 
                 Spacer()
 
-                Toggle("Cranky", isOn: $crankyJoint)
+                Toggle("Sore joints", isOn: $crankyJoint)
                     .labelsHidden()
             }
 
@@ -160,7 +160,7 @@ struct WarmupCardView: View {
                 "→ then working sets"
             ]
             if crankyJoint {
-                steps.insert("Extra light ramp: ~35–40% ×8 (cranky-joint rule)", at: 0)
+                steps.insert("Extra light ramp: ~35–40% ×8 (light ramp for sore joints)", at: 0)
             }
             return steps
         }
@@ -172,7 +172,7 @@ struct WarmupCardView: View {
 
         var steps: [String] = []
         if crankyJoint {
-            steps.append("Extra light ramp: \(format(rounded(top * 0.40))) ×8 (cranky-joint rule)")
+            steps.append("Extra light ramp: \(format(rounded(top * 0.40))) ×8 (light ramp for sore joints)")
         }
 
         steps.append("Ramp 1: \(r1) ×8–10")

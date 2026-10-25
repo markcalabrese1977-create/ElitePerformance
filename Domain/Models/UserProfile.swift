@@ -69,7 +69,7 @@ final class UserProfile {
     var bodyWeight: Double?
 
     /// Per-exercise "fixed load" exemptions: canonical exerciseIds whose load never
-    /// auto-progresses (tendon-rehab track — the lifter raises it himself).
+    /// auto-progresses (fixed-load track; the lifter raises it).
     ///
     /// Nothing is exempt by default. Stored OPTIONAL so the additive SwiftData lightweight
     /// migration (existing rows get nil) and an old backup without the field both read as the

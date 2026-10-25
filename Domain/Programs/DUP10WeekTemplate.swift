@@ -43,7 +43,7 @@ enum DUP10WeekTemplate {
                 order: 1,
                 exerciseId: ExerciseCatalog.benchPress.id,
                 priority: .anchor,
-                notes: "Bench remains the true anchor here. No special bench techniques.",
+                notes: "Main press of the week. Drive load progression here.",
                 prescriptions: [
                     .init(wave: .a, setMin: 4, setMax: 4, repMin: 4, repMax: 6, targetRIRMin: 2, targetRIRMax: 3),
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 2),
@@ -57,7 +57,7 @@ enum DUP10WeekTemplate {
                 order: 2,
                 exerciseId: ExerciseCatalog.inclineDumbbellPress.id,
                 priority: .standard,
-                notes: "Incline stays shortened-ROM and shoulder-aware.",
+                notes: "Controlled, comfortable range of motion.",
                 prescriptions: [
                     .init(wave: .a, setMin: 3, setMax: 3, repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 3),
                     .init(wave: .b, setMin: 3, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
@@ -225,7 +225,7 @@ enum DUP10WeekTemplate {
                 order: 1,
                 exerciseId: ExerciseCatalog.hackSquat.id,
                 priority: .anchor,
-                notes: "D3 stays controlled. No hero leg programming.",
+                notes: "Controlled quad anchor. Keep reps clean.",
                 prescriptions: [
                     .init(wave: .a, setMin: 2, setMax: 3, repMin: 5, repMax: 7, targetRIRMin: 2, targetRIRMax: 3),
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
@@ -410,7 +410,7 @@ enum DUP10WeekTemplate {
                 order: 6,
                 exerciseId: ExerciseCatalog.overheadRopeTricepExtension.id,
                 priority: .firstCut,
-                notes: "Optional / first cut if arms are already fried.",
+                notes: "Optional. First to drop if your arms are fatigued.",
                 prescriptions: [
                     .init(wave: .a, setMin: 2, setMax: 2, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
@@ -435,7 +435,7 @@ enum DUP10WeekTemplate {
                 order: 1,
                 exerciseId: ExerciseCatalog.machineHipThrust.id,
                 priority: .anchor,
-                notes: "Hard, but not another leg war.",
+                notes: "Main glute and hamstring lift. Hard, but leave room to recover.",
                 prescriptions: [
                     .init(wave: .a, setMin: 4, setMax: 4, repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 3),
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
@@ -491,7 +491,7 @@ enum DUP10WeekTemplate {
                 order: 5,
                 exerciseId: ExerciseCatalog.hangingKneeRaise.id,
                 priority: .firstCut,
-                notes: "Skip if smoked.",
+                notes: "Skip if fatigued.",
                 prescriptions: [
                     .init(wave: .a, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .b, setMin: 2, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 2),

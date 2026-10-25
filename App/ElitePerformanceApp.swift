@@ -205,11 +205,8 @@ struct ElitePerformanceApp: App {
     }
 }
 
-/// The startup migration list, in app order. Only repairs that are safe on any user's store are registered.
-/// The one-shot catch-up, 12-week conversion, V52 and V53 alignment repairs were applied on the device and
-/// are no longer registered; neither are the Mark-specific repairs (ExerciseNameSnapshotRepair, D5 and Apr 21
-/// repairs, SessionDayLabelBackfill, PrescriptionNotesClear, Week6UpperBCleanup), which read another user's
-/// data as if it were his. Their types, completion keys and tests stay in the tree.
+/// The startup migration list, in app order. Only repairs that are safe on any user's store are registered;
+/// one-shot repairs have been removed (see git history).
 enum StartupBackfills {
     static func run(using container: ModelContainer) {
         let context = ModelContext(container)

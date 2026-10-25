@@ -730,7 +730,7 @@ final class FixedLoadExemptTests: XCTestCase {
             for: item(pushdown, load: 50, reps: [11, 11, 11]), minLoadIncrement: 5,
             carryForwardTarget: .exists, isProgressionExempt: true))
         XCTAssertEqual(rec.message,
-            "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when your elbow reads clean.")
+            "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when you're ready.")
         XCTAssertEqual(rec.nextSuggestedLoad, 50, "behavior unchanged: still a hold")
     }
 

@@ -510,7 +510,7 @@ struct CoachingEngine {
         }
 
         // RULE 4c — Fixed-load exercise (per-exercise exemption, set by the lifter —
-        // e.g. a tendon-rehab track whose load moves only on his say-so). Same shape
+        // e.g. a fixed-load track; the lifter raises it). Same shape
         // as RULE 4b: blocks the UPWARD paths only. Exactly the conditions under which
         // RULE 5a/5b would fire (all primary sets at the top at target RIR) return a
         // fixed message and a nil load, so nothing is written and the plan stands.
@@ -568,7 +568,7 @@ struct CoachingEngine {
         //     the key behavior change — partial progress no longer bumps [was path 5].
         if bestReps >= repMin && rirOnTarget {
             let msg = isProgressionExempt
-                ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when your elbow reads clean."
+                ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when you're ready."
                 : "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
             return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }

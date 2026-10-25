@@ -210,7 +210,7 @@ struct SettingsView: View {
                 Button("Repair maintenance loads") {
                     repairMaintenanceLoads()
                 }
-                Text("Resets inflated planned loads on upcoming maintenance sessions back to your last completed actuals for that exercise. Run this once after updating to a version that holds maintenance loads correctly.")
+                Text("Resets inflated planned loads on upcoming maintenance sessions back to your last completed actuals for that exercise.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                         }
