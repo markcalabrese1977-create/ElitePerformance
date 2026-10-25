@@ -37,3 +37,7 @@ One line per item; dates are 2026.
 - Rest today (low priority): when the refusal is a collision with the next week's first session, say
   "No open day this week. Skip a session instead."
 - Program selection ignores equipment/injury flags (6-day dumbbell-only user gets machines/cables). Part of Phase 3.1 onboarding; pre-launch.
+- Notes UX (pre-launch): two note types look alike. Label them in the UI: "Exercise
+  note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"
+  (executionNoteLine, editable via Change for remaining sessions). From the exercise
+  card, offer a link to edit the session cue for remaining sessions.
