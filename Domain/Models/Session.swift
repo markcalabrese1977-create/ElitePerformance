@@ -390,6 +390,44 @@ extension SessionItem {
         return roles[index] == Self.topRole
     }
 
+    /// Planned values of the back-off rows only (every row that is not a top row). For an item with
+    /// no top set this is the whole array.
+    func backOffValues<T>(_ array: [T]) -> [T] {
+        array.enumerated().filter { !isTopRow($0.offset) }.map(\.element)
+    }
+
+    /// Planned values of the top rows only, in row order (missing rows read as `fallback`).
+    func topValues<T>(_ array: [T], fallback: T) -> [T] {
+        topRowIndices.map { $0 < array.count ? array[$0] : fallback }
+    }
+
+    /// Rebuilds the planned arrays of an UNLOGGED item for `count` back-off rows: the back-off segment
+    /// is truncated or extended by repeating its last value, the top tail (loads, reps, RIRs) and the
+    /// role array are kept in step. `backOffLoad`, when given, fills every back-off load slot.
+    /// With no top set it only sets targetSets-many loads, as carry-forward always did.
+    func resizeBackOffs(to count: Int, backOffLoad: Double? = nil) {
+        let n = max(0, count)
+        func fit<T>(_ values: [T], fallback: T) -> [T] {
+            if values.count >= n { return Array(values.prefix(n)) }
+            let pad = values.last ?? fallback
+            return values + Array(repeating: pad, count: n - values.count)
+        }
+        let topLoads = topValues(plannedLoadsBySet, fallback: 0.0)
+        let topReps = topValues(plannedRepsBySet, fallback: topRepMin ?? targetReps)
+        let topRIRs = topValues(plannedRIRsBySet, fallback: topRIR ?? targetRIR)
+        let backReps = fit(backOffValues(plannedRepsBySet), fallback: targetReps)
+        let backRIRs = fit(backOffValues(plannedRIRsBySet), fallback: targetRIR)
+        let backLoads = backOffLoad.map { Array(repeating: $0, count: n) } ?? fit(backOffValues(plannedLoadsBySet), fallback: 0.0)
+        let tops = topLoads.count
+        targetSets = n
+        plannedLoadsBySet = backLoads + topLoads
+        if tops > 0 {
+            plannedRepsBySet = backReps + topReps
+            plannedRIRsBySet = backRIRs + topRIRs
+            setRolesBySet = Self.roles(backOffs: n, tops: tops)
+        }
+    }
+
     /// Role array for `targetSets` back-off rows followed by `topCount` top rows.
     static func roles(backOffs: Int, tops: Int) -> [String] {
         Array(repeating: "", count: max(0, backOffs)) + Array(repeating: topRole, count: max(0, tops))

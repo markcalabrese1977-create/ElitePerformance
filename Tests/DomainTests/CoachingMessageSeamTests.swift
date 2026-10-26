@@ -565,6 +565,171 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(r?.nextSuggestedLoad, 105)
     }
 
+
+    // MARK: B3. Role-aware carry-forward and seeds
+
+    /// Turns `item` into back-offs + one top row at the tail (planned arrays sized to match).
+    private func addTop(_ item: SessionItem, topLoad: Double) {
+        let n = item.targetSets
+        item.setRolesBySet = SessionItem.roles(backOffs: n, tops: 1)
+        item.topRepMin = 4; item.topRepMax = 6; item.topRIR = 2
+        item.plannedRepsBySet = Array(repeating: item.targetReps, count: n) + [5]
+        item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: n) + [2]
+        item.plannedLoadsBySet = Array(item.plannedLoadsBySet.prefix(n)) + [topLoad]
+    }
+
+    /// Seeds the program, gives week-1 and week-4 Day-A bench a top row, logs the week-1 session
+    /// (back-offs at the top of the range, top row as given) and returns (source, target).
+    private func topJourney(backOffsLogged: Int? = nil, topLoad: Double = 200, topReps: Int = 6,
+                            targetPlan: (SessionItem) -> Void = { _ in }) throws -> (SessionItem, SessionItem) {
+        let fixture = try JourneyFixture.make()
+        var comps = DateComponents(); comps.year = 2026; comps.month = 7; comps.day = 6
+        try fixture.seedProgram(startDate: Calendar.current.date(from: comps)!, startingLoad: 100.0)
+        let first = try XCTUnwrap(fixture.currentPlannedSession())
+        let sessions = fixture.allSessionsSorted()
+        let benchId = ExerciseCatalog.benchPress.id
+        let source = try XCTUnwrap(fixture.item(benchId, in: first))
+        let target = try XCTUnwrap(fixture.item(benchId, in: sessions[6]))
+        let n = source.targetSets
+        addTop(source, topLoad: topLoad)
+        addTop(target, topLoad: 0)
+        targetPlan(target)
+        let backReps = (source.repMax ?? source.targetReps) + 2
+        let logs = first.items.map { it -> JourneyExerciseLog in
+            if it === source {
+                let backs = (0..<(backOffsLogged ?? n)).map { _ in
+                    JourneySetLog(load: 100, reps: backReps, rir: it.targetRIR, feedback: "", pump: 0)
+                }
+                let pad = (0..<(n - backs.count)).map { _ in JourneySetLog(load: 0, reps: 0, rir: 0, feedback: "", pump: 0) }
+                return JourneyExerciseLog(exerciseId: it.exerciseId,
+                                          sets: backs + pad + [JourneySetLog(load: topLoad, reps: topReps, rir: 2, feedback: "", pump: 0)])
+            }
+            return JourneyExerciseLog(exerciseId: it.exerciseId, sets: (0..<it.targetSets).map { _ in
+                JourneySetLog(load: 100, reps: backReps, rir: it.targetRIR, feedback: "", pump: 0)
+            })
+        }
+        try fixture.logAndComplete(JourneySessionScript(logs: logs))
+        return (source, target)
+    }
+
+    /// Materialized, unedited target plan [95 x n] + top 300: the write is per role.
+    func test_B3_propagate_writesBackOffSlotsAndTopSlotSeparately() throws {
+        let (_, target) = try topJourney(targetPlan: { t in
+            t.suggestedLoad = 95
+            t.plannedLoadsBySet = Array(repeating: 95, count: t.targetSets) + [300]
+        })
+        let n = target.targetSets
+        XCTAssertGreaterThan(target.suggestedLoad, 95, "back-off bump written")
+        XCTAssertLessThan(target.suggestedLoad, 120, "back-off bump is off the 100 back-offs, never off the 200 top set")
+        XCTAssertEqual(Array(target.plannedLoadsBySet.prefix(n)), Array(repeating: target.suggestedLoad, count: n))
+        XCTAssertEqual(target.plannedLoadsBySet.count, n + 1, "the tail is preserved")
+        XCTAssertEqual(target.plannedLoadsBySet[n], 202.5, "top: one increment off the 200 top set (6 of 4-6 at RIR 2)")
+        XCTAssertEqual(target.setRolesBySet, SessionItem.roles(backOffs: n, tops: 1))
+    }
+
+    /// A skipped back-off: no back-off write (insufficient evidence), the logged top still writes its own slot.
+    func test_B3_skippedBackOff_noBackOffWrite_topStillWrites() throws {
+        let (source, target) = try topJourney(backOffsLogged: 2, targetPlan: { t in
+            t.suggestedLoad = 95
+            t.plannedLoadsBySet = Array(repeating: 95, count: t.targetSets) + [300]
+        })
+        let n = target.targetSets
+        XCTAssertGreaterThanOrEqual(n, 3)
+        XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(source), "2 of \(n) back-offs logged is incomplete evidence")
+        XCTAssertTrue(CoachingEngine.hasTopEvidence(source))
+        XCTAssertEqual(target.suggestedLoad, 95, "back-off load untouched")
+        XCTAssertEqual(Array(target.plannedLoadsBySet.prefix(n)), Array(repeating: 95, count: n))
+        XCTAssertEqual(target.plannedLoadsBySet[n], 202.5, "the top set has its own evidence")
+    }
+
+    /// Empty target: back-off loads resized to the target's back-off count, the top slot from the source's top.
+    func test_B3_emptyTargetSeed_keepsTailAndRoles() throws {
+        let (_, target) = try topJourney(topLoad: 200, topReps: 5, targetPlan: { t in
+            t.suggestedLoad = 0
+            t.plannedLoadsBySet = Array(repeating: 0, count: t.targetSets + 1)
+        })
+        let n = target.targetSets
+        XCTAssertEqual(target.plannedLoadsBySet.count, n + 1)
+        XCTAssertTrue(target.plannedLoadsBySet.prefix(n).allSatisfy { $0 > 0 && $0 < 150 }, "\(target.plannedLoadsBySet)")
+        XCTAssertEqual(target.plannedLoadsBySet[n], 200, "top in range holds at the logged top load")
+    }
+
+    func test_B3_propagatedPlan_isRoleAware_andPaddingStaysZero() {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        item.plannedLoadsBySet = [90, 90, 90, 300, 0]    // 5th = padding
+        XCTAssertEqual(PlanMemoryEngine.propagatedPlan(100, top: 320, for: item), [100, 100, 100, 320, 0])
+        XCTAssertEqual(PlanMemoryEngine.propagatedPlan(100, for: item), [100, 100, 100, 300, 0], "nil top keeps the top slot")
+        XCTAssertEqual(PlanMemoryEngine.propagatedPlan(nil, top: 320, for: item), [90, 90, 90, 320, 0], "nil back-off keeps the back-off slots")
+    }
+
+    func test_B3_resizeBackOffs_keepsTopTailAndRoles() {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+                               plannedRepsBySet: [7, 7, 7, 5], plannedLoadsBySet: [290, 290, 290, 315], plannedRIRsBySet: [2, 2, 2, 2])
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        item.resizeBackOffs(to: 4, backOffLoad: 300)
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual(item.plannedLoadsBySet, [300, 300, 300, 300, 315])
+        XCTAssertEqual(item.plannedRepsBySet, [7, 7, 7, 7, 5])
+        XCTAssertEqual(item.setRolesBySet, ["", "", "", "", "top"])
+        item.resizeBackOffs(to: 2)
+        XCTAssertEqual(item.plannedLoadsBySet, [300, 300, 315])
+        XCTAssertEqual(item.setRolesBySet, ["", "", "top"])
+        // No top set: only loads, exactly as carry-forward always did.
+        let plain = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+                                plannedRepsBySet: [7, 7, 7], plannedLoadsBySet: [290, 290, 290], plannedRIRsBySet: [2, 2, 2])
+        plain.resizeBackOffs(to: 4, backOffLoad: 300)
+        XCTAssertEqual(plain.plannedLoadsBySet, [300, 300, 300, 300])
+        XCTAssertNil(plain.setRolesBySet)
+    }
+
+    private func completedSession(daysAgo: Int, rows: [(Double, Int)], top: Bool, in ctx: ModelContext) -> Session {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: top ? rows.count - 1 : rows.count,
+                               targetRIR: 2, suggestedLoad: rows[0].0, repMin: 6, repMax: 8)
+        item.actualLoads = rows.map(\.0); item.actualReps = rows.map(\.1)
+        item.actualRIRs = Array(repeating: 2, count: rows.count)
+        item.plannedLoadsBySet = rows.map(\.0)
+        if top { item.setRolesBySet = SessionItem.roles(backOffs: rows.count - 1, tops: 1); item.topRepMin = 4; item.topRepMax = 6; item.topRIR = 2 }
+        let s = Session(date: Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date())!, status: .completed, weekIndex: 1, items: [item])
+        ctx.insert(s)
+        return s
+    }
+
+    func test_B3_historySeed_backOffFromBackOffRows_topFromTopRows_peakCountsAll() throws {
+        let ctx = try makeContext()
+        let withTop = completedSession(daysAgo: 7, rows: [(275, 8), (275, 8), (275, 8), (315, 5)], top: true, in: ctx)
+        let backOnly = completedSession(daysAgo: 7, rows: [(275, 8), (275, 8), (275, 8)], top: false, in: ctx)
+        let a = HistorySeedLoad.load(for: "bench_press", goalReps: 8, targetRIR: 2, in: [withTop], loadIncrement: 5)
+        let b = HistorySeedLoad.load(for: "bench_press", goalReps: 8, targetRIR: 2, in: [backOnly], loadIncrement: 5)
+        XCTAssertNotNil(a)
+        XCTAssertEqual(a, b, "the back-off seed ignores the heavier top row")
+        let top = HistorySeedLoad.load(for: "bench_press", goalReps: 5, targetRIR: 2, in: [withTop], loadIncrement: 5, role: .top)
+        let legacyTop = HistorySeedLoad.load(for: "bench_press", goalReps: 5, targetRIR: 2, in: [backOnly], loadIncrement: 5, role: .top)
+        XCTAssertNotNil(top); XCTAssertNotNil(legacyTop)
+        XCTAssertGreaterThan(top ?? 0, legacyTop ?? 0, "top seed reads the 315 x 5 row; a session with no top row falls back to all its rows")
+        let peakAll = try XCTUnwrap(HistorySeedLoad.peakE1RM(for: "bench_press", in: [withTop]))
+        let peakBack = try XCTUnwrap(HistorySeedLoad.peakE1RM(for: "bench_press", in: [withTop], role: .backOff))
+        XCTAssertGreaterThan(peakAll, peakBack, "peak e1RM still counts every row")
+    }
+
+    func test_B3_isCleanSession_judgesBackOffRowsOnly() {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+                            repMin: 6, repMax: 8)
+        i.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        i.actualReps = [7, 7, 7, 3]; i.actualLoads = [290, 290, 290, 315]; i.actualRIRs = [2, 2, 2, 0]
+        XCTAssertTrue(LoadProjectionService.isCleanSession(i, prescribedMin: 6), "a hard 3-rep top set does not fail the back-offs")
+        i.actualReps = [5, 5, 5, 12]
+        XCTAssertFalse(LoadProjectionService.isCleanSession(i, prescribedMin: 6), "a 12-rep top row does not satisfy the back-off minimum")
+    }
+
+    func test_B3_lastKnownLoad_isTheLastBackOff_notTheTopSet() throws {
+        let ctx = try makeContext()
+        _ = completedSession(daysAgo: 3, rows: [(290, 8), (290, 8), (290, 8), (315, 5)], top: true, in: ctx)
+        let current = Session(date: Date(), weekIndex: 1, items: [])
+        ctx.insert(current)
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 290)
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {

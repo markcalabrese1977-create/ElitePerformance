@@ -133,11 +133,8 @@ struct PlanMemoryEngine {
             // to targetSets. See resizedToTargetSets's doc comment for the extend/
             // truncate rule.
             targetItem.plannedLoadsBySet = isBodyweight
-                ? Array(repeating: 0, count: targetItem.targetSets)
-                : resizedToTargetSets(
-                    sourceItem.plannedLoadsBySet,
-                    targetCount: targetItem.targetSets
-                )
+                ? Array(repeating: 0, count: targetItem.targetSets + targetItem.topCount)
+                : carriedPlan(from: sourceItem, to: targetItem)
 
             guard progressionEnabled else { continue }
 
@@ -208,10 +205,7 @@ struct PlanMemoryEngine {
                 if let floorCapped {
                     let finalLoad = min(floorCapped, sourceItem.suggestedLoad * 2.0)
                     targetItem.suggestedLoad = finalLoad
-                    targetItem.plannedLoadsBySet = Array(
-                        repeating: finalLoad,
-                        count: targetItem.plannedLoadsBySet.count
-                    )
+                    targetItem.plannedLoadsBySet = Self.propagatedPlan(finalLoad, for: targetItem)
                 }
             }
 
@@ -247,10 +241,25 @@ struct PlanMemoryEngine {
                 isProgressionExempt: isProgressionExempt
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
                 targetItem.suggestedLoad = recommendedLoad
-                targetItem.plannedLoadsBySet = Array(
-                    repeating: recommendedLoad,
-                    count: targetItem.plannedLoadsBySet.count
+                targetItem.plannedLoadsBySet = Self.propagatedPlan(
+                    recommendedLoad,
+                    top: targetItem.hasTopSet ? recommendation.nextTopLoad : nil,
+                    for: targetItem
                 )
+            } else if targetItem.hasTopSet, let recommendation = CoachingEngine.recommend(
+                for: sourceItem,
+                minLoadIncrement: loadIncrement,
+                mesoPhase: session.mesoPhase,
+                consecutiveCleanCount: consecutiveCleanCount,
+                e1rmFloorLoad: projection?.e1rmFloorLoad,
+                peakE1RM: projection?.peakE1RM,
+                lastKnownLoad: projection?.lastLoad,
+                carryForwardTarget: .exists,
+                isProgressionExempt: isProgressionExempt
+            ), let topLoad = recommendation.nextTopLoad {
+                // No back-off verdict (e.g. a skipped back-off) but the top set was logged: it writes
+                // its own slot and leaves the back-off slots as carried.
+                targetItem.plannedLoadsBySet = Self.propagatedPlan(nil, top: topLoad, for: targetItem)
             }
 
             // Pain carry-forward
@@ -279,9 +288,14 @@ struct PlanMemoryEngine {
             let signal = PlanMemoryEngine.volumeRegulationSignal(from: recentItems)
 
             if signal.setDelta != 0 {
-                targetItem.targetSets = max(2, targetItem.targetSets + signal.setDelta)
+                let newCount = max(2, targetItem.targetSets + signal.setDelta)
                 let fill = targetItem.suggestedLoad > 0 ? targetItem.suggestedLoad : sourceItem.suggestedLoad
-                targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
+                if targetItem.hasTopSet {
+                    targetItem.resizeBackOffs(to: newCount, backOffLoad: fill)   // keeps the top tail and roles
+                } else {
+                    targetItem.targetSets = newCount
+                    targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
+                }
             }
 
             // Volume regulation note
@@ -423,14 +437,85 @@ struct PlanMemoryEngine {
         progressionEnabled: Bool,
         isProgressionExempt: Bool
     ) {
-        guard case .write(let recommendedLoad) = propagationDecision(
+        var backOff: Double?
+        if case .write(let load) = propagationDecision(
             sourceItem: sourceItem, targetItem: targetItem, session: session,
             allSessions: allSessions, activeMesoIDs: activeMesoIDs, loadIncrement: loadIncrement,
             bodyWeight: bodyWeight, customExercises: customExercises,
             progressionEnabled: progressionEnabled, isProgressionExempt: isProgressionExempt
-        ) else { return }
-        Self.applyPropagatedLoad(recommendedLoad, to: targetItem)
+        ) { backOff = load }
+        var top: Double?
+        if case .write(let load) = topPropagationDecision(
+            sourceItem: sourceItem, targetItem: targetItem, session: session,
+            allSessions: allSessions, activeMesoIDs: activeMesoIDs, loadIncrement: loadIncrement,
+            bodyWeight: bodyWeight, customExercises: customExercises,
+            progressionEnabled: progressionEnabled, isProgressionExempt: isProgressionExempt
+        ) { top = load }
+        guard backOff != nil || top != nil else { return }
+        Self.applyPropagatedLoad(backOff, top: top, to: targetItem)
         // planEdited intentionally left false — this is an automatic write.
+    }
+
+    /// What the propagate path would do for the TOP set of one source/target pair. Its own evidence
+    /// (a logged top row), its own load; the back-off guards (sufficient back-off rows) do not apply.
+    func topPropagationDecision(
+        sourceItem: SessionItem,
+        targetItem: SessionItem,
+        session: Session,
+        allSessions: [Session],
+        activeMesoIDs: Set<PersistentIdentifier>,
+        loadIncrement: Double,
+        bodyWeight: Double?,
+        customExercises: [CustomExercise],
+        progressionEnabled: Bool,
+        isProgressionExempt: Bool
+    ) -> PropagationDecision {
+        guard progressionEnabled else { return .skip("progression disabled") }
+        guard !isProgressionExempt else { return .skip("exempt (fixed-load) exercise") }
+        guard sourceItem.hasTopSet, targetItem.hasTopSet else { return .skip("no top set on source or target") }
+        guard !targetItem.planEdited else { return .skip("target plan edited by the user") }
+        guard CoachingEngine.hasTopEvidence(sourceItem) else { return .skip("top set not logged") }
+        if sourceItem.loadOverrideReason?.suppressesEarnedProgression == true {
+            return .skip("source flagged with a suppressing override reason")
+        }
+        guard targetItem.waveRaw?.lowercased() != "deload" else { return .skip("deload target holds") }
+        if ExerciseCatalog.isBodyweight(exerciseId: targetItem.exerciseId, customExercises: customExercises) {
+            return .skip("bodyweight target")
+        }
+        let projection = LoadProjectionService.project(
+            exerciseId: targetItem.exerciseId,
+            targetReps: targetItem.targetReps,
+            targetRIR: targetItem.targetRIR,
+            repMin: targetItem.repMin ?? targetItem.targetReps,
+            repMax: targetItem.repMax ?? targetItem.targetReps,
+            currentWaveRaw: targetItem.waveRaw,
+            allSessions: allSessions,
+            activeMesoSessionIDs: activeMesoIDs,
+            loadIncrement: loadIncrement,
+            bodyWeight: bodyWeight,
+            customExercises: customExercises
+        )
+        let consecutiveCleanCount = LoadProjectionService.consecutiveCleanCount(
+            exerciseId: sourceItem.exerciseId,
+            waveRaw: sourceItem.waveRaw,
+            repMin: sourceItem.repMin ?? sourceItem.targetReps,
+            allSessions: allSessions,
+            referenceDate: session.date
+        )
+        guard let recommendation = CoachingEngine.recommend(
+            for: sourceItem,
+            minLoadIncrement: loadIncrement,
+            mesoPhase: session.mesoPhase,
+            consecutiveCleanCount: consecutiveCleanCount,
+            e1rmFloorLoad: projection?.e1rmFloorLoad,
+            peakE1RM: projection?.peakE1RM,
+            lastKnownLoad: projection?.lastLoad,
+            carryForwardTarget: .exists,
+            isProgressionExempt: isProgressionExempt
+        ), let topLoad = recommendation.nextTopLoad else {
+            return .skip("no top-set load (pain flag, no baseline or flagged top-of-range)")
+        }
+        return .write(topLoad)
     }
 
     /// What the propagate path would do for one source/target pair — without doing it.
@@ -515,19 +600,24 @@ struct PlanMemoryEngine {
         return .write(recommendedLoad)
     }
 
-    /// The per-set plan a propagated load produces for `targetItem`.
-    /// Only the planned rows (the first `targetSets`) take the load. Slots past targetSets are
-    /// array padding (the Program tab pads every planned array to at least 4) and stay 0, so an
+    /// The per-set plan a propagated load produces for `targetItem`. Back-off slots (the first
+    /// `targetSets` non-top rows) take `load`, top slots take `top`; a nil keeps that role's current
+    /// slot values. Slots that are neither (array padding past the planned rows) stay 0, so an
     /// unplanned row never shows a suggested load.
-    static func propagatedPlan(_ load: Double, for targetItem: SessionItem) -> [Double] {
+    static func propagatedPlan(_ load: Double?, top: Double? = nil, for targetItem: SessionItem) -> [Double] {
+        let current = targetItem.plannedLoadsBySet
         let planned = max(0, targetItem.targetSets)
-        let count = max(targetItem.plannedLoadsBySet.count, planned)
-        return (0..<count).map { $0 < planned ? load : 0 }
+        let count = max(current.count, planned + targetItem.topCount)
+        return (0..<count).map { i in
+            if targetItem.isTopRow(i) { return top ?? (i < current.count ? current[i] : 0) }
+            if i < planned { return load ?? (i < current.count ? current[i] : 0) }
+            return 0
+        }
     }
 
-    static func applyPropagatedLoad(_ load: Double, to targetItem: SessionItem) {
-        targetItem.suggestedLoad = load
-        targetItem.plannedLoadsBySet = propagatedPlan(load, for: targetItem)
+    static func applyPropagatedLoad(_ load: Double?, top: Double? = nil, to targetItem: SessionItem) {
+        if let load { targetItem.suggestedLoad = load }
+        targetItem.plannedLoadsBySet = propagatedPlan(load, top: top, for: targetItem)
     }
 
     // MARK: - Helpers
@@ -542,6 +632,17 @@ struct PlanMemoryEngine {
     ///   confirmed via SessionView.swift's `let setIndex = idx + 1`), so keeping the
     ///   first N sets and dropping the trailing ones is correct.
     /// - If equal: returned unchanged.
+    /// The plan a source item hands an EMPTY target: back-off loads resized to the target's back-off
+    /// count, then the target's top slots from the source's top loads (0 when the source has none).
+    /// For items with no top set on either side this is exactly `resizedToTargetSets`.
+    private func carriedPlan(from source: SessionItem, to target: SessionItem) -> [Double] {
+        let back = resizedToTargetSets(source.backOffValues(source.plannedLoadsBySet), targetCount: target.targetSets)
+        guard target.hasTopSet else { return back }
+        let sourceTops = source.topValues(source.plannedLoadsBySet, fallback: 0.0)
+        let tops = (0..<target.topCount).map { $0 < sourceTops.count ? sourceTops[$0] : 0.0 }
+        return back + tops
+    }
+
     private func resizedToTargetSets(_ array: [Double], targetCount: Int) -> [Double] {
         guard targetCount >= 0 else { return array }
         if array.count == targetCount {
