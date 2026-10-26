@@ -51,13 +51,15 @@ struct StartNextMesoModel {
 
     // MARK: Copy
 
-    static func refusalText(_ refusal: Service.NextMesoRefusal, remaining: Int = 0) -> String {
+    static func refusalText(_ refusal: Service.NextMesoRefusal, remaining: Int = 0, mesoName: String = "This meso", lastRemaining: Date? = nil) -> String {
         switch refusal {
         case .nothingToCopy: return "This meso has no sessions to copy."
         case .sessionInProgress: return "A session in this meso is in progress. Finish it, then try again."
         case .startInPast: return "The start date has passed. Pick today or a later day."
         case .oldMesoHasRemainingSessions:
-            return "This meso still has \(remaining) planned session\(remaining == 1 ? "" : "s"). Turn on \"End this meso now\" to remove them, or start after the last one."
+            let count = remaining > 0 ? "\(remaining) planned session\(remaining == 1 ? "" : "s")" : "planned sessions left"
+            let last = lastRemaining.map { " (last: \($0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())))" } ?? ""
+            return "\(mesoName) still has \(count)\(last). Finish them first, or turn on \"End this meso now\" to remove them."
         case .remainingSessionHasLoggedData: return "A remaining session already has logged work, so it can't be removed. Complete or clear it first."
         case .duplicateDayLabelInWeek: return "A week of this meso has two sessions of the same day type, so the weekly pattern isn't clear."
         case .dateCollision: return "A new session would land on a day that already has a session."
@@ -212,7 +214,8 @@ struct StartNextMesoFlow: View {
                 if !plan.refusals.isEmpty {
                     Section {
                         ForEach(Array(plan.refusals.enumerated()), id: \.offset) { _, r in
-                            Text(StartNextMesoModel.refusalText(r, remaining: remaining.count)).foregroundStyle(.secondary)
+                            Text(StartNextMesoModel.refusalText(r, remaining: remaining.count, mesoName: meso.name,
+                                                                lastRemaining: remaining.map(\.date).max())).foregroundStyle(.secondary)
                         }
                     }
                     let collisions = StartNextMesoModel.collisionRows(plan)
