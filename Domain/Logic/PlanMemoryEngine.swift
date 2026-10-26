@@ -461,7 +461,7 @@ struct PlanMemoryEngine {
         // Incomplete evidence: fewer than min(sets, 3) primary working sets were logged, so
         // there is nothing reliable to write (a 4-set item with 3 logged still qualifies).
         guard CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) else {
-            return .skip("incomplete evidence (\(CoachingEngine.workingSetIndices(for: sourceItem).count) of \(CoachingEngine.requiredPrimarySets(for: sourceItem)) primary sets logged)")
+            return .skip("incomplete evidence (\(CoachingEngine.plannedWorkingSetIndices(for: sourceItem).count) of \(CoachingEngine.requiredPrimarySets(for: sourceItem)) primary sets logged)")
         }
         // Flagged source: a temporarily/deliberately reduced load never earns a
         // write-back. CoachingEngine RULE 4b already returns a nil load here, so

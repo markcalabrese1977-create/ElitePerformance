@@ -98,18 +98,31 @@ struct CoachingEngine {
         }
     }
 
+    /// Rows with both load and reps > 0, before the warm-up cull.
+    private static func loggedRowIndices(for item: SessionItem) -> [Int] {
+        let count = min(item.actualReps.count, item.actualLoads.count)
+        return (0..<count).filter { item.actualReps[$0] > 0 && item.actualLoads[$0] > 0 }
+    }
+
     /// Working sets = any set with both load and reps > 0, minus warmups (< 50% of the
     /// session max load). Shared with PlanMemoryEngine's incomplete-evidence guard.
     static func workingSetIndices(for item: SessionItem) -> [Int] {
-        let count = min(item.actualReps.count, item.actualLoads.count)
-        var indices: [Int] = []
-        for idx in 0..<count where item.actualReps[idx] > 0 && item.actualLoads[idx] > 0 {
-            indices.append(idx)
-        }
+        var indices = loggedRowIndices(for: item)
         if let maxLoad = indices.map({ item.actualLoads[$0] }).max(), maxLoad > 0 {
             indices = indices.filter { item.actualLoads[$0] >= maxLoad * 0.5 }
         }
         return indices
+    }
+
+    /// Working rows inside the planned set count. A row past targetSets is an extra set: it is
+    /// logged and counts toward history, but it is never evidence for the planned prescription
+    /// (not a primary set, not toward "all sets logged"). A logged warm-up opener sits in a row
+    /// of its own on top of the plan, so each culled warm-up row widens the planned window by one.
+    static func plannedWorkingSetIndices(for item: SessionItem) -> [Int] {
+        let working = workingSetIndices(for: item)
+        let warmupRows = loggedRowIndices(for: item).count - working.count
+        let limit = max(1, item.targetSets) + warmupRows
+        return working.filter { $0 < limit }
     }
 
     /// Primary working sets the progression decision needs: min(planned sets, 3).
@@ -120,7 +133,7 @@ struct CoachingEngine {
     /// True when enough primary working sets were logged for a load to be written onto a
     /// future plan. A 4-set item with 3 logged qualifies.
     static func hasSufficientPrimaryEvidence(_ item: SessionItem) -> Bool {
-        workingSetIndices(for: item).count >= requiredPrimarySets(for: item)
+        plannedWorkingSetIndices(for: item).count >= requiredPrimarySets(for: item)
     }
 
     /// What to say instead of a number when the chain has ended.
@@ -198,9 +211,14 @@ struct CoachingEngine {
         let plannedWorkingSetCount = max(1, item.targetSets)
         let growthSetTarget = min(plannedWorkingSetCount, 3)
 
-        // Progression evaluates only the first up to 3 working sets
-        let primaryIndices = Array(workingIndices.prefix(growthSetTarget))
-        guard !primaryIndices.isEmpty else { return nil }
+        // Only rows inside the planned set count are evidence for the prescription. An extra
+        // row (index >= targetSets) was judged against the wrong range and counted toward
+        // "sets in"; with nothing but extra rows logged there is nothing to say.
+        let plannedRows = plannedWorkingSetIndices(for: item)
+        guard !plannedRows.isEmpty else { return nil }
+
+        // Progression evaluates only the first up to 3 planned working sets
+        let primaryIndices = Array(plannedRows.prefix(growthSetTarget))
 
         // Will carry-forward actually write onto a materialized target? Not with incomplete
         // evidence (fewer than min(sets, 3) primary sets logged) or a flagged source whose
@@ -382,23 +400,26 @@ struct CoachingEngine {
         // RULE 3 — Incomplete: not all planned working sets logged yet → hold with
         // the stage-gate message; nothing to decide [was path B].
         let completedGrowthSetCount = primaryIndices.count
-        let completedWorkingSetCount = workingIndices.count
+        let completedWorkingSetCount = plannedRows.count
         if completedGrowthSetCount < growthSetTarget || completedWorkingSetCount < plannedWorkingSetCount {
             let remaining = plannedWorkingSetCount - completedWorkingSetCount
             if completedGrowthSetCount == 1 {
+                let setLabel = "Set \(primaryIndices[0] + 1)"
                 let currentLoadText = String(format: "%.1f", baseLoad)
                 let currentReps = primaryReps[0]
                 if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
-                    let msg = "Set 1 at \(currentLoadText) × \(currentReps) is already harder than the target RIR. Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
+                    let msg = "\(setLabel) at \(currentLoadText) × \(currentReps) is already harder than the target RIR. Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
                 }
                 if currentReps < plannedBottomReps {
-                    let msg = "Set 1 came in short of the rep target. Stay at this load — if reps stay low across sets, the load needs to come down next session."
+                    let msg = "\(setLabel) came in short of the rep target. Stay at this load — if reps stay low across sets, the load needs to come down next session."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
                 }
                 return nil
             }
-            let msg = "\(completedWorkingSetCount) sets in. Finish the session."
+            let msg = remaining > 0
+                ? "\(completedWorkingSetCount) of \(plannedWorkingSetCount) planned sets logged."
+                : "\(completedWorkingSetCount) sets in. Finish the session."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }
 

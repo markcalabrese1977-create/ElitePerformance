@@ -198,7 +198,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         // Coaching: a 0-load set is not a working set, so the engine sees 3 of 4 -> RULE 3 hold.
         let r = CoachingEngine.recommend(for: item)
         XCTAssertEqual(r?.nextSuggestedLoad, 100)
-        XCTAssertTrue(r?.message.contains("3 sets in") ?? false, "SURPRISING: bump withheld because the prefilled 0-load 4th set does not count")
+        XCTAssertTrue(r?.message.contains("3 of 4 planned sets logged") ?? false, "SURPRISING: bump withheld because the prefilled 0-load 4th set does not count")
     }
 
     func test_addSet_programTabPaddedPlannedLoad() throws {
@@ -265,7 +265,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_2a_fourSetTarget_threeLogged_holdsNoBump() {
         let r = rec(4, [8, 8, 8, 0], [100, 100, 100, 0], "2a")
         XCTAssertEqual(r?.nextSuggestedLoad, 100, "RULE 3: incomplete -> hold at baseLoad")
-        XCTAssertTrue(r?.message.contains("3 sets in") ?? false)
+        XCTAssertTrue(r?.message.contains("3 of 4 planned sets logged") ?? false)
         // SURPRISING: all three primary sets topped the range, yet the bump is withheld
         // solely because the 4th (non-primary) set was not logged.
     }
@@ -307,6 +307,58 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_3d_threeSetTarget_extraSetFewerReps() {
         let r = rec(3, [8, 8, 8, 5], [100, 100, 100, 100], "3d")
         XCTAssertEqual(r?.nextSuggestedLoad, 105.0)
+    }
+
+
+    // MARK: A1. Planned rows only (extra rows past targetSets are not evidence)
+
+    /// Device repro a): 3 planned back-offs, a top set logged FIRST in extra row 4.
+    func test_A1a_onlyExtraRowLogged_noMessage() {
+        let r = rec(3, [0, 0, 0, 5], [0, 0, 0, 315], "A1a")
+        XCTAssertNil(r, "an extra row alone is judged against nothing: no message")
+    }
+
+    /// Device repro b): extra row plus planned rows. The gate counts planned rows only and the
+    /// carried load is the planned row's, never the extra row's.
+    func test_A1b_extraRowDoesNotCountTowardSetsLogged() {
+        let r = rec(3, [7, 7, 0, 5], [290, 290, 0, 315], "A1b")
+        XCTAssertEqual(r?.message, "2 of 3 planned sets logged.")
+        XCTAssertEqual(r?.nextSuggestedLoad, 290, "not the 315 of the extra row")
+    }
+
+    /// One planned row on target plus the extra row: nothing to say yet (was "2 sets in. Finish").
+    func test_A1b2_onePlannedRowOnTargetPlusExtra_noMessage() {
+        XCTAssertNil(rec(3, [7, 0, 0, 5], [290, 0, 0, 315], "A1b2"))
+    }
+
+    func test_A1_setLabelUsesTheRealRowNumber() {
+        let r = rec(3, [0, 5, 0], [0, 100, 0], "A1 label")
+        XCTAssertTrue(r?.message.hasPrefix("Set 2 came in short") ?? false, r?.message ?? "nil")
+    }
+
+    /// Rows 1, 2 and 4 logged, row 3 skipped: 3 working rows exist but only 2 are planned.
+    func test_A1_rows1_2_4_isInsufficientEvidence() {
+        let i = coachItem(targetSets: 3, reps: [8, 8, 0, 8], loads: [100, 100, 0, 100])
+        XCTAssertEqual(CoachingEngine.workingSetIndices(for: i), [0, 1, 3])
+        XCTAssertEqual(CoachingEngine.plannedWorkingSetIndices(for: i), [0, 1])
+        XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(i), "an extra row must not complete the evidence")
+        let r = CoachingEngine.recommend(for: i)
+        XCTAssertEqual(r?.message, "2 of 3 planned sets logged.")
+        XCTAssertEqual(r?.nextSuggestedLoad, 100)
+    }
+
+    /// Rows 1-3 plus extra row 4: evidence is sufficient and the extra row never becomes primary.
+    func test_A1_rows1to3_plusExtra_unchanged() {
+        let i = coachItem(targetSets: 3, reps: [8, 8, 8, 5], loads: [100, 100, 100, 100])
+        XCTAssertTrue(CoachingEngine.hasSufficientPrimaryEvidence(i))
+        XCTAssertEqual(CoachingEngine.recommend(for: i)?.nextSuggestedLoad, 105.0)
+    }
+
+    /// Rule 1d is untouched for an item with no extra rows.
+    func test_A1_rule1d_unchangedWithoutExtraRows() {
+        let r = rec(3, [8, 8, 8], [100, 100, 88], "A1 1d")
+        XCTAssertEqual(r?.nextSuggestedLoad, 88)
+        XCTAssertTrue(r?.message.contains("Load dropped from 100 to 88") ?? false, r?.message ?? "nil")
     }
 
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
@@ -395,7 +447,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(session.status, .completed)
         let r = CoachingEngine.recommend(for: item)
         XCTAssertEqual(r?.nextSuggestedLoad, 100)
-        XCTAssertTrue(r?.message.contains("3 sets in") ?? false, r?.message ?? "nil")
+        XCTAssertTrue(r?.message.contains("3 of 4 planned sets logged") ?? false, r?.message ?? "nil")
         // SURPRISING: the item is complete and carry-forward ran, yet the engine treats it as
         // incomplete (RULE 3) and withholds the bump the three primary sets earned.
     }

@@ -177,7 +177,7 @@ final class CoachingEngineGuardTests: XCTestCase {
         )
         let result = CoachingEngine.recommend(for: i)
         XCTAssertNotNil(result)
-        XCTAssertTrue(result?.message.contains("Finish the session") ?? false)
+        XCTAssertEqual(result?.message, "2 of 3 planned sets logged.")
         XCTAssertEqual(result?.nextSuggestedLoad, 100, "no progression call while the session is still incomplete")
     }
 
