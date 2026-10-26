@@ -139,6 +139,10 @@ private struct HistorySetDetail: Identifiable {
 
     let rpUsed: Bool
     let rpPattern: String
+    /// A top-set row: labelled "Top set" instead of "Set N".
+    var isTop: Bool = false
+
+    private var setLabel: String { isTop ? "Top set" : "Set \(index)" }
 
     private func loadText(_ load: Double) -> String {
         if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
@@ -156,12 +160,12 @@ private struct HistorySetDetail: Identifiable {
                 case .none: return "skipped"
                 }
             }()
-            var s = "Set \(index) — \(reason) (planned \(loadText(load)) × \(reps)"
+            var s = "\(setLabel) — \(reason) (planned \(loadText(load)) × \(reps)"
             if let rir { s += " @ \(rir) RIR" }
             s += ")"
             return s
         } else {
-            var s = "Set \(index)  \(loadText(load)) × \(reps)"
+            var s = "\(setLabel)  \(loadText(load)) × \(reps)"
             if let rir { s += " @ \(rir) RIR" }
             if rpUsed {
                 let trimmed = rpPattern.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -334,7 +338,8 @@ private struct HistoryDayDetailView: View {
                                                         pumpRating: set.pumpRating,
                                                         exerciseId: uiEx.exerciseId,
                                                         rpUsed: set.usedRestPause,
-                                                        rpPattern: set.restPausePattern
+                                                        rpPattern: set.restPausePattern,
+                                                        isTop: set.isTop
                                                     )
                                                 )
                     } else if plannedReps > 0 {
@@ -349,7 +354,8 @@ private struct HistoryDayDetailView: View {
                                                         pumpRating: .none,
                                                         exerciseId: uiEx.exerciseId,
                                                         rpUsed: false,
-                                                        rpPattern: ""
+                                                        rpPattern: "",
+                                                        isTop: set.isTop
                                                     )
                                                 )
                     }

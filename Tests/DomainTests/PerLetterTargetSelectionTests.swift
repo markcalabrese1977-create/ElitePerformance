@@ -953,6 +953,40 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     }
 
 
+
+    /// A top set on the source weeks (7-9) rides into the created weeks (10-12): roles, spec and tail loads.
+    func test_apply_copiesTheTopSetIntoTheCreatedWeeks() throws {
+        let (ctx, block) = try seededBlock()
+        try seedLoads(ctx)
+        for w in 7...9 {
+            for s in try week(w, ctx) {
+                for i in s.items {
+                    let n = i.targetSets
+                    i.setRolesBySet = SessionItem.roles(backOffs: n, tops: 1)
+                    i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+                    i.plannedLoadsBySet = Array(i.plannedLoadsBySet.prefix(n)) + [315]
+                    i.plannedRepsBySet = Array(i.plannedRepsBySet.prefix(n)) + [4]
+                    i.plannedRIRsBySet = Array(i.plannedRIRsBySet.prefix(n)) + [2]
+                }
+            }
+        }
+        try ctx.save()
+        let report = try DUPMesoLengthConversion.apply(block: block, context: ctx, calendar: cal())
+        XCTAssertTrue(report.didWrite, "\(report.blockers)")
+        for w in 10...12 {
+            let items = try week(w, ctx).flatMap(\.items)
+            XCTAssertFalse(items.isEmpty)
+            for i in items {
+                XCTAssertEqual(i.topCount, 1, "week \(w)")
+                XCTAssertEqual(i.setRolesBySet, SessionItem.roles(backOffs: i.targetSets, tops: 1))
+                XCTAssertEqual([i.topRepMin, i.topRepMax, i.topRIR], [4, 6, 2])
+                XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets + 1)
+                XCTAssertEqual(i.plannedLoadsBySet.last, ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId) ? 0 : 315,
+                               "bodyweight lifts never carry a numeric load")
+                XCTAssertEqual(i.plannedRepsBySet.count, i.targetSets + 1)
+            }
+        }
+    }
 }
 
 // MARK: - Last same-letter performance (LastSameLetterPerformance)

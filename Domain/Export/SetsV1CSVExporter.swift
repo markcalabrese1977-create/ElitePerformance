@@ -42,7 +42,8 @@ enum SetsV1CSVExporter {
             "used_rest_pause",
             "rest_pause_pattern",
             "is_pr",
-            "coach_note"
+            "coach_note",
+            "set_role"
         ]
 
         var rows: [String] = []
@@ -117,7 +118,8 @@ enum SetsV1CSVExporter {
                         usedRP,
                         rpPattern,
                         isPR,
-                        coachNote
+                        coachNote,
+                        item.isTopRow(idx0) ? "top" : ""
                     ]
 
                     rows.append(fields.map(csvEscape).joined(separator: ","))

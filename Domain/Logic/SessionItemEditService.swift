@@ -264,18 +264,20 @@ enum SessionItemEditService {
             item.exerciseNameSnapshot = toName
 
             let sets = max(0, item.targetSets)
+            // A top set (its role, range and RIR) survives a replace; its load restarts at 0 for the new lift.
+            let rows = sets + item.topCount
             let seed = target.seedLoad ?? 0
             item.suggestedLoad = seed
-            item.plannedLoadsBySet = Array(repeating: seed, count: sets)
+            item.plannedLoadsBySet = Array(repeating: seed, count: sets) + Array(repeating: 0.0, count: item.topCount)
 
-            item.actualLoads = Array(repeating: 0.0, count: sets)
-            item.actualReps = Array(repeating: 0, count: sets)
-            item.actualRIRs = Array(repeating: 0, count: sets)
-            item.usedRestPauseFlags = Array(repeating: false, count: sets)
-            item.restPausePatternsBySet = Array(repeating: "", count: sets)
-            item.dropSetPatternsBySet = Array(repeating: "", count: sets)
-            item.setFeedbackBySet = Array(repeating: "", count: sets)
-            item.pumpRatingsBySet = Array(repeating: 0, count: sets)
+            item.actualLoads = Array(repeating: 0.0, count: rows)
+            item.actualReps = Array(repeating: 0, count: rows)
+            item.actualRIRs = Array(repeating: 0, count: rows)
+            item.usedRestPauseFlags = Array(repeating: false, count: rows)
+            item.restPausePatternsBySet = Array(repeating: "", count: rows)
+            item.dropSetPatternsBySet = Array(repeating: "", count: rows)
+            item.setFeedbackBySet = Array(repeating: "", count: rows)
+            item.pumpRatingsBySet = Array(repeating: 0, count: rows)
             for log in item.logs { context.delete(log) }
             item.logs = []
 
@@ -370,7 +372,7 @@ enum SessionItemEditService {
             check("targetRIRMin", rirMin, i.targetRIRMin); check("targetRIRMax", rirMax, i.targetRIRMax)
             check("plannedRepsBySet", plannedReps, i.plannedRepsBySet)
             check("plannedRIRsBySet", plannedRIRs, i.plannedRIRsBySet)
-            let n = max(0, i.targetSets)
+            let n = max(0, i.targetSets) + i.topCount
             if i.plannedLoadsBySet.count != n { d.append("plannedLoadsBySet not sized to targetSets") }
             return d.map { "\(i.exerciseId): \($0)" }
         }
@@ -393,9 +395,11 @@ enum SessionItemEditService {
         let setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?
         let plannedReps: [Int], plannedRIRs: [Int]
         let order: Int, waveRaw: String?, priorityRaw: String?, intensifierRaw: String?
+        let roles: [String]?, topRepMin: Int?, topRepMax: Int?, topRIR: Int?
 
         init(_ i: SessionItem) {
             item = i
+            roles = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
             targetSets = i.targetSets; targetReps = i.targetReps; targetRIR = i.targetRIR
             setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
             rirMin = i.targetRIRMin; rirMax = i.targetRIRMax
@@ -426,6 +430,7 @@ enum SessionItemEditService {
             item.setMin = setMin; item.setMax = setMax; item.repMin = repMin; item.repMax = repMax
             item.targetRIRMin = rirMin; item.targetRIRMax = rirMax
             item.plannedRepsBySet = plannedReps; item.plannedRIRsBySet = plannedRIRs
+            item.setRolesBySet = roles; item.topRepMin = topRepMin; item.topRepMax = topRepMax; item.topRIR = topRIR
         }
     }
 
@@ -450,6 +455,28 @@ enum SessionItemEditService {
 
 /// What to change on an exercise's remaining sessions. Nothing here touches loads' values, the
 /// exercise, its wave, order, `planEdited` or anything logged.
+/// A top set: `count` rows (the first one is the heaviest, shown first) of `repMin...repMax` reps at `rir`.
+struct TopSetSpec: Hashable {
+    var count: Int = 1
+    var repMin: Int
+    var repMax: Int
+    var rir: Int
+
+    static let countBounds = 1...3
+
+    var isValid: Bool {
+        Self.countBounds.contains(count) && repMin <= repMax
+            && PrescriptionChange.repBounds.contains(repMin) && PrescriptionChange.repBounds.contains(repMax)
+            && PrescriptionChange.rirBounds.contains(rir)
+    }
+}
+
+/// Adds or updates the top set, or removes it. Back-off rows are never touched by it.
+enum TopSetChange: Equatable {
+    case set(TopSetSpec)
+    case remove
+}
+
 struct PrescriptionChange: Equatable {
     /// Sets to add (+1) or remove (-1) from each session's `targetSets`; clamped to `setBounds`.
     var setDelta: Int?
@@ -460,18 +487,23 @@ struct PrescriptionChange: Equatable {
     /// The note shown under the exercise: nil = unchanged, "" (or only whitespace) = clear it, anything else
     /// replaces it. See `NoteFields` for which stored field it lands in.
     var note: String?
+    /// Add / update / remove the top set (nil = leave it as it is).
+    var topSet: TopSetChange?
 
     static let setBounds = 1...6      // the logger shows at most 6 working sets
     static let repBounds = 1...50
     static let rirBounds = 0...5
 
-    init(setDelta: Int? = nil, repRange: ClosedRange<Int>? = nil, rirRange: ClosedRange<Int>? = nil, note: String? = nil) {
+    init(setDelta: Int? = nil, repRange: ClosedRange<Int>? = nil, rirRange: ClosedRange<Int>? = nil, note: String? = nil,
+         topSet: TopSetChange? = nil) {
         self.setDelta = setDelta; self.repRange = repRange; self.rirRange = rirRange; self.note = note
+        self.topSet = topSet
     }
 
     /// At least one part, and every part inside its bounds.
     var isValid: Bool {
-        guard setDelta != nil || repRange != nil || rirRange != nil || note != nil else { return false }
+        guard setDelta != nil || repRange != nil || rirRange != nil || note != nil || topSet != nil else { return false }
+        if case .set(let spec)? = topSet, !spec.isValid { return false }
         if let setDelta, setDelta == 0 { return false }
         if let r = repRange, !(Self.repBounds.contains(r.lowerBound) && Self.repBounds.contains(r.upperBound)) { return false }
         if let r = rirRange, !(Self.rirBounds.contains(r.lowerBound) && Self.rirBounds.contains(r.upperBound)) { return false }
@@ -523,41 +555,53 @@ extension SessionItemEditService {
 
     /// One session's prescription, as the preview shows it.
     struct PrescriptionValues: Equatable {
-        let sets: Int
-        let repMin: Int, repMax: Int
-        let rirMin: Int, rirMax: Int
+        var sets: Int
+        var repMin: Int, repMax: Int
+        var rirMin: Int, rirMax: Int
+        /// The top set, or nil when the item has none.
+        var top: TopSetSpec?
 
-        init(sets: Int, repMin: Int, repMax: Int, rirMin: Int, rirMax: Int) {
+        init(sets: Int, repMin: Int, repMax: Int, rirMin: Int, rirMax: Int, top: TopSetSpec? = nil) {
             self.sets = sets; self.repMin = repMin; self.repMax = repMax; self.rirMin = rirMin; self.rirMax = rirMax
+            self.top = top
         }
 
         init(_ item: SessionItem) {
             sets = item.targetSets
             repMin = item.repMin ?? item.targetReps; repMax = item.repMax ?? item.targetReps
             rirMin = item.targetRIRMin ?? item.targetRIR; rirMax = item.targetRIRMax ?? item.targetRIR
+            top = item.hasTopSet
+                ? TopSetSpec(count: item.topCount, repMin: item.topRepMin ?? repMin, repMax: item.topRepMax ?? repMax,
+                             rir: item.topRIR ?? item.targetRIR)
+                : nil
         }
 
         func applying(_ change: PrescriptionChange) -> PrescriptionValues {
             var next = self
             if let d = change.setDelta {
                 let bounds = PrescriptionChange.setBounds
-                next = PrescriptionValues(sets: min(max(sets + d, bounds.lowerBound), bounds.upperBound),
-                                          repMin: repMin, repMax: repMax, rirMin: rirMin, rirMax: rirMax)
+                next.sets = min(max(sets + d, bounds.lowerBound), bounds.upperBound)
             }
             if let r = change.repRange {
-                next = PrescriptionValues(sets: next.sets, repMin: r.lowerBound, repMax: r.upperBound,
-                                          rirMin: next.rirMin, rirMax: next.rirMax)
+                next.repMin = r.lowerBound; next.repMax = r.upperBound
             }
             if let r = change.rirRange {
-                next = PrescriptionValues(sets: next.sets, repMin: next.repMin, repMax: next.repMax,
-                                          rirMin: r.lowerBound, rirMax: r.upperBound)
+                next.rirMin = r.lowerBound; next.rirMax = r.upperBound
+            }
+            switch change.topSet {
+            case .set(let spec)?: next.top = spec
+            case .remove?: next.top = nil
+            case nil: break
             }
             return next
         }
 
-        /// "4 x 8-12 @ RIR 2-3"
+        /// "4 x 8-12 @ RIR 2-3"; with a top set "1 x 4-6 @ 2 top + 3 x 6-8 @ 2".
         var text: String {
             func r(_ a: Int, _ b: Int) -> String { a == b ? "\(a)" : "\(a)-\(b)" }
+            if let top {
+                return "\(top.count) x \(r(top.repMin, top.repMax)) @ \(top.rir) top + \(sets) x \(r(repMin, repMax)) @ \(r(rirMin, rirMax))"
+            }
             return "\(sets) x \(r(repMin, repMax)) @ RIR \(r(rirMin, rirMax))"
         }
     }
@@ -693,36 +737,41 @@ extension SessionItemEditService {
             context.rollback()
         }
 
+        // One seed per apply: the top load at the top reps/RIR, from completed history (back-offs excluded).
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        var seedCache: [TopSetSpec: Double] = [:]
+        func topSeed(_ spec: TopSetSpec) -> Double {
+            if let hit = seedCache[spec] { return hit }
+            let v = HistorySeedLoad.load(
+                for: plan.exerciseId, goalReps: spec.repMin, targetRIR: spec.rir, in: allSessions,
+                loadIncrement: profile?.minLoadIncrement ?? 2.5, bodyWeight: profile?.bodyWeight,
+                customExercises: custom, referenceDate: plan.now, role: .top
+            ) ?? 0
+            seedCache[spec] = v
+            return v
+        }
+
         var summary: [String] = []
         let change = plan.change
         for target in live.targets {
             let item = target.item
             let sets = target.after.sets
 
-            if change.setDelta != nil {
-                item.targetSets = sets
-                // The wave's set band widens to include the new count and never narrows.
-                if let lo = item.setMin { item.setMin = min(lo, sets) }
-                if let hi = item.setMax { item.setMax = max(hi, sets) }
-                // Grow = repeat the last set's load, shrink = first N, empty = zeros (as carry-forward does).
-                item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: sets, fallback: 0)
-            }
-            if let reps = change.repRange {
-                item.repMin = reps.lowerBound; item.repMax = reps.upperBound
-                item.targetReps = reps.lowerBound
-                item.plannedRepsBySet = Array(repeating: item.targetReps, count: sets)
-            } else if change.setDelta != nil {
-                item.plannedRepsBySet = resized(item.plannedRepsBySet, to: sets, fallback: item.targetReps)
-            }
-            if let rir = change.rirRange {
-                item.targetRIRMin = rir.lowerBound; item.targetRIRMax = rir.upperBound
-                item.targetRIR = rir.upperBound
-                item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: sets)
-            } else if change.setDelta != nil {
-                item.plannedRIRsBySet = resized(item.plannedRIRsBySet, to: sets, fallback: item.targetRIR)
+            if !item.hasTopSet && target.after.top == nil {
+                applyBackOffsOnly(item, sets: sets, change: change)
+            } else {
+                applyWithTop(item, target: target, change: change)
             }
 
             if let note = change.note { NoteFields.applying(note, to: item).write(to: item) }
+
+            // A newly added top set starts from what history says the lifter can do at the top reps/RIR.
+            if target.before.top == nil, let spec = target.after.top, topSeed(spec) > 0 {
+                for idx in item.topRowIndices where idx < item.plannedLoadsBySet.count && item.plannedLoadsBySet[idx] == 0 {
+                    item.plannedLoadsBySet[idx] = topSeed(spec)
+                }
+            }
 
             let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") "
                 + "wk\(target.weekIndex) wave=\(target.waveRaw ?? "-") \(plan.exerciseId) "
@@ -753,6 +802,88 @@ extension SessionItemEditService {
             throw ReplaceError.saveFailed("\(error)")
         }
         return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
+    }
+
+    /// The back-off-only write (an item with no top set before or after): exactly what changePrescription always did.
+    private static func applyBackOffsOnly(_ item: SessionItem, sets: Int, change: PrescriptionChange) {
+        if change.setDelta != nil {
+            item.targetSets = sets
+            // The wave's set band widens to include the new count and never narrows.
+            if let lo = item.setMin { item.setMin = min(lo, sets) }
+            if let hi = item.setMax { item.setMax = max(hi, sets) }
+            // Grow = repeat the last set's load, shrink = first N, empty = zeros (as carry-forward does).
+            item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: sets, fallback: 0)
+        }
+        if let reps = change.repRange {
+            item.repMin = reps.lowerBound; item.repMax = reps.upperBound
+            item.targetReps = reps.lowerBound
+            item.plannedRepsBySet = Array(repeating: item.targetReps, count: sets)
+        } else if change.setDelta != nil {
+            item.plannedRepsBySet = resized(item.plannedRepsBySet, to: sets, fallback: item.targetReps)
+        }
+        if let rir = change.rirRange {
+            item.targetRIRMin = rir.lowerBound; item.targetRIRMax = rir.upperBound
+            item.targetRIR = rir.upperBound
+            item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: sets)
+        } else if change.setDelta != nil {
+            item.plannedRIRsBySet = resized(item.plannedRIRsBySet, to: sets, fallback: item.targetRIR)
+        }
+    }
+
+    /// The write for an item that has, gains or loses a top set. The back-off segment is the first
+    /// `targetSets` non-top rows and is resized exactly as above; the top rows ride at the tail
+    /// (`targetSets ..< targetSets + count`) with the roles and the spec in step. Arrays are sized
+    /// `sets + topCount`. A top load that already exists is kept (resized); a new top starts at 0 and is
+    /// seeded by `seedNewTopLoads`.
+    private static func applyWithTop(_ item: SessionItem, target: PrescriptionTarget, change: PrescriptionChange) {
+        let oldBackOffs = item.targetSets
+        let sets = target.after.sets
+        func backOffSegment<T>(_ a: [T]) -> [T] { Array(item.backOffValues(a).prefix(oldBackOffs)) }
+        var loads = backOffSegment(item.plannedLoadsBySet)
+        var reps = backOffSegment(item.plannedRepsBySet)
+        var rirs = backOffSegment(item.plannedRIRsBySet)
+        let oldTopLoads = item.topValues(item.plannedLoadsBySet, fallback: 0.0)
+        let oldTopReps = item.topValues(item.plannedRepsBySet, fallback: item.topRepMin ?? item.targetReps)
+        let oldTopRIRs = item.topValues(item.plannedRIRsBySet, fallback: item.topRIR ?? item.targetRIR)
+
+        if change.setDelta != nil {
+            item.targetSets = sets
+            if let lo = item.setMin { item.setMin = min(lo, sets) }
+            if let hi = item.setMax { item.setMax = max(hi, sets) }
+            loads = resized(loads, to: sets, fallback: 0)
+        }
+        if let r = change.repRange {
+            item.repMin = r.lowerBound; item.repMax = r.upperBound
+            item.targetReps = r.lowerBound
+            reps = Array(repeating: item.targetReps, count: sets)
+        } else if change.setDelta != nil {
+            reps = resized(reps, to: sets, fallback: item.targetReps)
+        }
+        if let r = change.rirRange {
+            item.targetRIRMin = r.lowerBound; item.targetRIRMax = r.upperBound
+            item.targetRIR = r.upperBound
+            rirs = Array(repeating: item.targetRIR, count: sets)
+        } else if change.setDelta != nil {
+            rirs = resized(rirs, to: sets, fallback: item.targetRIR)
+        }
+
+        guard let spec = target.after.top else {
+            // Removed: the top rows, roles and spec go; the back-offs are as above.
+            item.plannedLoadsBySet = loads; item.plannedRepsBySet = reps; item.plannedRIRsBySet = rirs
+            item.setRolesBySet = nil
+            item.topRepMin = nil; item.topRepMax = nil; item.topRIR = nil
+            return
+        }
+        let specChanged = target.before.top != target.after.top
+        let n = spec.count
+        let topLoads = resized(oldTopLoads, to: n, fallback: 0)
+        let topReps = specChanged ? Array(repeating: spec.repMin, count: n) : resized(oldTopReps, to: n, fallback: spec.repMin)
+        let topRIRs = specChanged ? Array(repeating: spec.rir, count: n) : resized(oldTopRIRs, to: n, fallback: spec.rir)
+        item.plannedLoadsBySet = loads + topLoads
+        item.plannedRepsBySet = reps + topReps
+        item.plannedRIRsBySet = rirs + topRIRs
+        item.setRolesBySet = SessionItem.roles(backOffs: sets, tops: n)
+        item.topRepMin = spec.repMin; item.topRepMax = spec.repMax; item.topRIR = spec.rir
     }
 
     /// Grow by repeating the last element (`fallback` when empty); shrink to the first `count`.
@@ -803,12 +934,33 @@ extension SessionItemEditService {
         check("setMin", widenSets ? b.setMin.map { min($0, newSets) } : b.setMin, i.setMin)
         check("setMax", widenSets ? b.setMax.map { max($0, newSets) } : b.setMax, i.setMax)
         // Load values: the surviving prefix is unchanged, and the array is sized to the new set count when sets changed.
-        let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count)
-        check("plannedLoads prefix", Array(b.plannedLoads.prefix(kept)), Array(i.plannedLoadsBySet.prefix(kept)))
-        if target.after.sets != target.before.sets {
-            check("plannedLoads count", target.after.sets, i.plannedLoadsBySet.count)
+        if b.roles == nil && target.after.top == nil {
+            let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count)
+            check("plannedLoads prefix", Array(b.plannedLoads.prefix(kept)), Array(i.plannedLoadsBySet.prefix(kept)))
+            if target.after.sets != target.before.sets {
+                check("plannedLoads count", target.after.sets, i.plannedLoadsBySet.count)
+            } else {
+                check("plannedLoads", b.plannedLoads, i.plannedLoadsBySet)
+            }
         } else {
-            check("plannedLoads", b.plannedLoads, i.plannedLoadsBySet)
+            // With a top set: back-off loads keep their surviving prefix, the array is back-offs + top rows,
+            // the roles say exactly that, and an existing top load is kept when the top set itself is unchanged.
+            let wantTops = target.after.top?.count ?? 0
+            check("plannedLoads count", target.after.sets + wantTops, i.plannedLoadsBySet.count)
+            check("roles", wantTops == 0 ? nil : SessionItem.roles(backOffs: target.after.sets, tops: wantTops), i.setRolesBySet)
+            let oldBack = Array(b.plannedLoads.enumerated().filter { !(b.roles?.indices.contains($0.offset) == true && b.roles?[$0.offset] == SessionItem.topRole) }
+                .map(\.element).prefix(b.targetSets))
+            let keptBack = min(oldBack.count, target.after.sets)
+            check("back-off loads prefix", Array(oldBack.prefix(keptBack)), Array(i.plannedLoadsBySet.prefix(keptBack)))
+            if let spec = target.after.top {
+                check("top spec", [spec.repMin, spec.repMax, spec.rir], [i.topRepMin ?? -1, i.topRepMax ?? -1, i.topRIR ?? -1])
+                if target.before.top == target.after.top {
+                    let oldTop = b.plannedLoads.enumerated().filter { b.roles?.indices.contains($0.offset) == true && b.roles?[$0.offset] == SessionItem.topRole }.map(\.element)
+                    check("top loads kept", oldTop, Array(i.plannedLoadsBySet.suffix(oldTop.count)))
+                }
+            } else {
+                check("top spec cleared", [Int?.none, .none, .none], [i.topRepMin, i.topRepMax, i.topRIR])
+            }
         }
         return d.map { "\(i.exerciseId) wk\(target.weekIndex): \($0)" }
     }
@@ -988,6 +1140,8 @@ extension SessionItemEditService {
                         referenceDate: now
                     ) ?? 0
                 }
+                // A deload is straight sets: the top set is dropped (the new items carry no roles) and the
+                // sets and the load come from the back-offs only.
                 return DeloadItemPlan(source: i, order: i.order, exerciseId: i.exerciseId,
                                       sets: max(1, (i.targetSets + 1) / 2), repMin: repMin, repMax: repMax, load: load)
             }
@@ -1024,7 +1178,7 @@ extension SessionItemEditService {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
                     && $0.waveRaw?.lowercased() != deloadWaveRaw
             }) else { continue }
-            if let load = item.actualLoads.last(where: { $0 > 0 }) { return load }
+            if let load = item.backOffValues(item.actualLoads).last(where: { $0 > 0 }) { return load }
         }
         return nil
     }

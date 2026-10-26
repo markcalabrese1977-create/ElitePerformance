@@ -830,6 +830,28 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(item.topRowIndices, [2])
     }
 
+
+    func test_B5_csvExport_labelsTopRows() throws {
+        let ctx = try makeContext()
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [])
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            plannedRepsBySet: [8, 8, 8, 5], plannedLoadsBySet: [290, 290, 290, 315], plannedRIRsBySet: [2, 2, 2, 2],
+            actualReps: [8, 7, 6, 5], actualLoads: [290, 290, 290, 315], actualRIRs: [2, 2, 2, 2]
+        )
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        session.items = [item]
+        ctx.insert(session)
+        try ctx.save()
+        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: ctx, fileName: "b5_\(UUID().uuidString).csv")
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let lines = try String(contentsOf: result.url, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertTrue(lines[0].hasSuffix(",coach_note,set_role"), lines[0])
+        XCTAssertEqual(lines.count, 5)
+        XCTAssertTrue(lines[4].hasSuffix(",top"), lines[4])
+        XCTAssertTrue(lines[1].hasSuffix(","), "back-off rows have an empty role: \(lines[1])")
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {

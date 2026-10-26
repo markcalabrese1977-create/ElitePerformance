@@ -81,11 +81,25 @@ struct ChangePrescriptionModel {
     var noteText = ""
     var clearNote = false
 
+    enum TopSetMode: Hashable { case noChange, set, remove }
+    /// Add (or update) a top set, or remove it. The back-off rows are never touched by it.
+    var topMode: TopSetMode = .noChange
+    var topLow = 4, topHigh = 6, topRIR = 2
+
     init(session: Session, item: SessionItem, context: ModelContext, scope: ReplaceScopeChoice, now: Date = Date()) {
         self.session = session; self.item = item; self.context = context; self.scope = scope; self.now = now
         let current = SessionItemEditService.PrescriptionValues(item)
         repLow = current.repMin; repHigh = current.repMax
         rirLow = current.rirMin; rirHigh = current.rirMax
+        if let top = current.top { topLow = top.repMin; topHigh = top.repMax; topRIR = top.rir }
+    }
+
+    var itemHasTopSet: Bool { item.hasTopSet }
+
+    /// "Add top set: 1 x 4-6 @ 2" / "Update top set: …"
+    var topSetTitle: String {
+        let reps = topLow == max(topLow, topHigh) ? "\(topLow)" : "\(topLow)-\(max(topLow, topHigh))"
+        return "\(itemHasTopSet ? "Update" : "Add") top set: 1 x \(reps) @ \(topRIR)"
     }
 
     var dayLabel: String? { session.dayLabel }
@@ -112,7 +126,14 @@ struct ChangePrescriptionModel {
             setDelta: setDelta == 0 ? nil : setDelta,
             repRange: changeReps ? repLow...max(repLow, repHigh) : nil,
             rirRange: changeRIR ? rirLow...max(rirLow, rirHigh) : nil,
-            note: clearNote ? "" : (noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText)
+            note: clearNote ? "" : (noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText),
+            topSet: {
+                switch topMode {
+                case .noChange: return nil
+                case .remove: return .remove
+                case .set: return .set(TopSetSpec(count: 1, repMin: topLow, repMax: max(topLow, topHigh), rir: topRIR))
+                }
+            }()
         )
     }
 
@@ -259,6 +280,26 @@ private struct ChangePrescriptionForm: View {
                         Stepper("Min \(model.rirLow)", value: $model.rirLow, in: PrescriptionChange.rirBounds)
                         Stepper("Max \(max(model.rirLow, model.rirHigh))", value: $model.rirHigh, in: PrescriptionChange.rirBounds)
                     }
+                }
+
+                Section {
+                    Picker("Top set", selection: $model.topMode) {
+                        Text("No change").tag(ChangePrescriptionModel.TopSetMode.noChange)
+                        Text(model.itemHasTopSet ? "Update" : "Add").tag(ChangePrescriptionModel.TopSetMode.set)
+                        if model.itemHasTopSet { Text("Remove").tag(ChangePrescriptionModel.TopSetMode.remove) }
+                    }
+                    .pickerStyle(.segmented)
+                    if model.topMode == .set {
+                        Stepper("Min \(model.topLow)", value: $model.topLow, in: PrescriptionChange.repBounds)
+                        Stepper("Max \(max(model.topLow, model.topHigh))", value: $model.topHigh, in: PrescriptionChange.repBounds)
+                        Stepper("RIR \(model.topRIR)", value: $model.topRIR, in: PrescriptionChange.rirBounds)
+                    }
+                } header: {
+                    Text("Top set")
+                } footer: {
+                    Text(model.topMode == .set
+                         ? "\(model.topSetTitle) — one heavy set logged in addition to the back-off sets, shown first. Its load starts from your history."
+                         : "A top set is one heavy set in addition to the back-off sets above.")
                 }
 
                 Section {

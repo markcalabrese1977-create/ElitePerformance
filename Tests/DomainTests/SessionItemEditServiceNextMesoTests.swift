@@ -649,4 +649,55 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
             XCTAssertEqual(again.sessions.count, 72)
         }
     }
+
+    // MARK: - Top set
+
+    /// The next meso inherits a lift's top set (roles, spec) from its latest week, with the top load seeded separately.
+    func test_next_inheritsTheTopSet_andSeedsTheTopLoadAtTopReps() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let all = sessions(block)
+        for s in all {
+            guard let it = item(s, p.x), s.dayLabel == p.day else { continue }
+            let n = it.targetSets
+            it.setRolesBySet = SessionItem.roles(backOffs: n, tops: 1)
+            it.topRepMin = 4; it.topRepMax = 6; it.topRIR = 2
+            it.plannedLoadsBySet = Array(it.plannedLoadsBySet.prefix(n)) + [0]
+            it.plannedRepsBySet = Array(it.plannedRepsBySet.prefix(n)) + [4]
+            it.plannedRIRsBySet = Array(it.plannedRIRsBySet.prefix(n)) + [2]
+        }
+        // History: the lift was done at 200 x 8 and a heavier 4-rep top.
+        let done = try XCTUnwrap(all.first { $0.dayLabel == p.day })
+        let doneItem = try XCTUnwrap(item(done, p.x))
+        let n = doneItem.targetSets
+        doneItem.actualLoads = Array(repeating: 200, count: n) + [260]
+        doneItem.actualReps = Array(repeating: 8, count: n) + [4]
+        doneItem.actualRIRs = Array(repeating: 2, count: n + 1)
+        done.status = .completed
+        try ctx.save()
+
+        let plan = nextPlan(block, ctx)
+        XCTAssertTrue(plan.isApplicable, "\(plan.refusals)")
+        let planned = plan.sessions.flatMap(\.items).filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }
+        XCTAssertFalse(planned.isEmpty)
+        for ip in planned {
+            XCTAssertEqual(ip.topCount, 1)
+            XCTAssertEqual([ip.topRepMin, ip.topRepMax, ip.topRIR], [4, 6, 2])
+            XCTAssertEqual(ip.plannedReps.count, ip.targetSets + 1)
+            XCTAssertEqual(ip.plannedReps.last, 4)
+            XCTAssertTrue(ip.prescription.contains(" top + "), ip.prescription)
+            XCTAssertGreaterThan(ip.topSeed, ip.seed, "the top seed reads the heavy 4-rep set; the back-off seed reads the 8s")
+        }
+        let result = try Service.startNextMeso(plan, in: ctx)
+        _ = result
+        let created = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.meso?.name == "Next" }
+        let items = created.flatMap(\.items).filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }
+        XCTAssertFalse(items.isEmpty)
+        for i in items {
+            XCTAssertEqual(i.setRolesBySet, SessionItem.roles(backOffs: i.targetSets, tops: 1))
+            XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets + 1)
+            XCTAssertGreaterThan(i.plannedLoadsBySet.last ?? 0, i.suggestedLoad)
+            XCTAssertTrue(i.plannedLoadsBySet.dropLast().allSatisfy { $0 == i.suggestedLoad })
+        }
+    }
 }

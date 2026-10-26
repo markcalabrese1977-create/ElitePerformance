@@ -175,6 +175,184 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         XCTAssertEqual(i.plannedLoadsBySet, [100, 105, 100])
         XCTAssertTrue(i.planEdited, "a hand-set load is protected")
     }
+    // MARK: B5. Top set for remaining sessions
+
+    private typealias SvcB5 = SessionItemEditService
+
+    /// First lift of the first session, its day label and canonical id.
+    private func liftB5(_ block: MesoBlock) throws -> (day: String, id: String, session: Session) {
+        let first = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(first.items.sorted { $0.order < $1.order }.first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) })
+        return (try XCTUnwrap(first.dayLabel), ExerciseCatalog.canonicalExerciseId(for: item.exerciseId), first)
+    }
+
+    private func liftItems(_ block: MesoBlock, day: String, id: String) -> [SessionItem] {
+        block.sessions.filter { SessionDayLabelMatcher.matches($0.dayLabel, day) }.sorted { $0.date < $1.date }
+            .compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id } }
+    }
+
+    private let topSpecB5 = TopSetSpec(count: 1, repMin: 4, repMax: 6, rir: 2)
+
+    func test_B5_addTopSet_forLettersBAndC_only() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let before = Dictionary(uniqueKeysWithValues: liftItems(block, day: lift.day, id: lift.id).map { ($0.id, $0.plannedLoadsBySet.count) })
+        let plan = SvcB5.planChangePrescription(
+            meso: block, dayLabel: lift.day, exerciseId: lift.id, letters: ["b", "c"], scope: .allRemaining,
+            change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0))
+        XCTAssertFalse(plan.targets.isEmpty)
+        for t in plan.targets {
+            XCTAssertTrue(["b", "c"].contains(t.waveRaw?.lowercased() ?? ""))
+            XCTAssertTrue(t.after.text.hasPrefix("1 x 4-6 @ 2 top + \(t.after.sets) x "), t.after.text)
+            XCTAssertNil(t.before.top)
+        }
+        try SvcB5.applyChange(plan, in: ctx)
+
+        for item in liftItems(block, day: lift.day, id: lift.id) {
+            let wave = item.waveRaw?.lowercased() ?? ""
+            if wave == "b" || wave == "c" {
+                XCTAssertEqual(item.topCount, 1, wave)
+                XCTAssertEqual(item.setRolesBySet, SessionItem.roles(backOffs: item.targetSets, tops: 1))
+                XCTAssertEqual(item.plannedLoadsBySet.count, item.targetSets + 1)
+                XCTAssertEqual(item.plannedRepsBySet.count, item.targetSets + 1)
+                XCTAssertEqual(item.plannedRIRsBySet.count, item.targetSets + 1)
+                XCTAssertEqual([item.topRepMin, item.topRepMax, item.topRIR], [4, 6, 2])
+                XCTAssertEqual([item.plannedRepsBySet.last, item.plannedRIRsBySet.last], [4, 2])
+                XCTAssertFalse(item.planEdited, "an automatic structural edit does not freeze carry-forward")
+            } else {
+                XCTAssertNil(item.setRolesBySet, "letter \(wave) is untouched")
+                XCTAssertEqual(item.plannedLoadsBySet.count, before[item.id])
+            }
+        }
+    }
+
+    func test_B5_newTopLoad_isSeededFromHistoryAtTopRepsAndRIR() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let done = lift.session
+        let doneItem = try XCTUnwrap(done.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == lift.id })
+        doneItem.actualLoads = [200, 200, 200]; doneItem.actualReps = [8, 8, 8]; doneItem.actualRIRs = [2, 2, 2]
+        done.status = .completed
+        try ctx.save()
+        let expected = try XCTUnwrap(HistorySeedLoad.load(
+            for: lift.id, goalReps: 4, targetRIR: 2, in: block.sessions.map { $0 }, loadIncrement: 2.5, role: .top))
+        let plan = SvcB5.planChangePrescription(
+            meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+            change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0))
+        try SvcB5.applyChange(plan, in: ctx)
+        let targets = plan.targets.map(\.item)
+        XCTAssertFalse(targets.isEmpty)
+        XCTAssertGreaterThan(expected, 200, "a 4-rep top at RIR 2 is heavier than 200 x 8")
+        for item in targets {
+            XCTAssertEqual(item.plannedLoadsBySet.last, expected)
+            XCTAssertTrue(item.plannedLoadsBySet.dropLast().allSatisfy { $0 == 0 }, "back-off loads are not touched")
+        }
+        XCTAssertEqual(done.items.first { $0 === doneItem }?.setRolesBySet, nil, "the completed session is history and is left alone")
+    }
+
+    func test_B5_updateRemoveAndSetDelta_keepTheTopTail() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let now = Date(timeIntervalSince1970: 0)
+        func run(_ change: PrescriptionChange) throws {
+            let plan = SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                    change: change, now: now)
+            try SvcB5.applyChange(plan, in: ctx)
+        }
+        try run(PrescriptionChange(topSet: .set(topSpecB5)))
+        // Deload-wave items are never changed (no top set there); the rest carry it.
+        let items = liftItems(block, day: lift.day, id: lift.id).filter { $0.hasTopSet }
+        XCTAssertFalse(items.isEmpty)
+        for i in items { i.plannedLoadsBySet[i.plannedLoadsBySet.count - 1] = 315 }     // a known top load
+        let sets0 = items.map(\.targetSets)
+
+        try run(PrescriptionChange(setDelta: 1))
+        for (i, s0) in zip(items, sets0) where i.targetSets == s0 + 1 {
+            XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets + 1)
+            XCTAssertEqual(i.plannedLoadsBySet.last, 315, "the top load rides the tail through a sets change")
+            XCTAssertEqual(i.setRolesBySet, SessionItem.roles(backOffs: i.targetSets, tops: 1))
+        }
+
+        try run(PrescriptionChange(topSet: .set(TopSetSpec(count: 1, repMin: 3, repMax: 5, rir: 1))))
+        for i in items {
+            XCTAssertEqual([i.topRepMin, i.topRepMax, i.topRIR], [3, 5, 1])
+            XCTAssertEqual(i.plannedLoadsBySet.last, 315, "updating the spec keeps the existing top load")
+            XCTAssertEqual([i.plannedRepsBySet.last, i.plannedRIRsBySet.last], [3, 1])
+        }
+
+        try run(PrescriptionChange(topSet: .remove))
+        for i in items {
+            XCTAssertNil(i.setRolesBySet); XCTAssertNil(i.topRepMin); XCTAssertNil(i.topRIR)
+            XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets)
+            XCTAssertEqual(i.plannedRepsBySet.count, i.targetSets)
+            XCTAssertFalse(i.hasTopSet)
+        }
+    }
+
+    func test_B5_rollback_restoresRolesAndSpec() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let plan = SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0))
+        let items = liftItems(block, day: lift.day, id: lift.id)
+        let snap = items.map { [$0.plannedLoadsBySet.count, $0.plannedRepsBySet.count, $0.topCount] }
+        XCTAssertThrowsError(try SvcB5.applyChange(plan, in: ctx, hooks: .init(forceVerificationFailure: true)))
+        XCTAssertEqual(items.map { [$0.plannedLoadsBySet.count, $0.plannedRepsBySet.count, $0.topCount] }, snap)
+        XCTAssertTrue(items.allSatisfy { $0.setRolesBySet == nil && $0.topRepMin == nil })
+        XCTAssertThrowsError(try SvcB5.applyChange(plan, in: ctx, hooks: .init(forceSaveFailure: true)))
+        XCTAssertTrue(items.allSatisfy { $0.setRolesBySet == nil })
+        XCTAssertFalse(ctx.hasChanges)
+    }
+
+    func test_B5_invalidTopSpec_isNotAChange_andNoChangeIsRefused() throws {
+        XCTAssertFalse(PrescriptionChange(topSet: .set(TopSetSpec(count: 1, repMin: 6, repMax: 4, rir: 2))).isValid)
+        XCTAssertFalse(PrescriptionChange(topSet: .set(TopSetSpec(count: 0, repMin: 4, repMax: 6, rir: 2))).isValid)
+        XCTAssertTrue(PrescriptionChange(topSet: .remove).isValid)
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        try SvcB5.applyChange(SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                           change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0)), in: ctx)
+        let again = SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                 change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0))
+        XCTAssertTrue(again.targets.isEmpty, "the same top set again is no change: " + again.targets.map { "\($0.waveRaw ?? "-") \($0.before.text) -> \($0.after.text)" }.joined(separator: "; "))
+        XCTAssertTrue(again.refusals.allSatisfy { $0.reason == .noChange || $0.reason == .deload }, "\(again.refusals.map { $0.reason })")
+        XCTAssertTrue(again.refusals.contains { $0.reason == .noChange })
+    }
+
+    func test_B5_replace_keepsTheTopSpec_withTheTopLoadRestartedAtZero() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let now = Date(timeIntervalSince1970: 0)
+        try SvcB5.applyChange(SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                           change: PrescriptionChange(topSet: .set(topSpecB5)), now: now), in: ctx)
+        for i in liftItems(block, day: lift.day, id: lift.id) { i.plannedLoadsBySet[i.plannedLoadsBySet.count - 1] = 315 }
+        let used = Set(block.sessions.flatMap(\.items).map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
+        let y = try XCTUnwrap(ExerciseCatalog.all.first { !used.contains($0.id) && !ExerciseCatalog.isBodyweight(exerciseId: $0.id) }).id
+        let plan = SvcB5.planReplace(meso: block, dayLabel: lift.day, from: lift.id, to: y, scope: .allRemaining, context: ctx, now: now)
+        let touched = plan.targets.map(\.item).filter { $0.hasTopSet }
+        XCTAssertFalse(touched.isEmpty)
+        try SvcB5.apply(plan, in: ctx)
+        for i in touched {
+            XCTAssertEqual(ExerciseCatalog.canonicalExerciseId(for: i.exerciseId), y)
+            XCTAssertEqual(i.setRolesBySet, SessionItem.roles(backOffs: i.targetSets, tops: 1), "the spec survives a replace")
+            XCTAssertEqual([i.topRepMin, i.topRepMax, i.topRIR], [4, 6, 2])
+            XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets + 1)
+            XCTAssertEqual(i.plannedLoadsBySet.last, 0, "the new lift's top load restarts")
+            XCTAssertEqual(i.actualLoads.count, i.targetSets + 1)
+        }
+    }
+
+    func test_B5_modelBuildsTheTopSetChange() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block)
+        XCTAssertNil(m.change.topSet)
+        m.topMode = .set; m.topLow = 4; m.topHigh = 6; m.topRIR = 2
+        XCTAssertEqual(m.change.topSet, .set(TopSetSpec(count: 1, repMin: 4, repMax: 6, rir: 2)))
+        XCTAssertEqual(m.topSetTitle, "Add top set: 1 x 4-6 @ 2")
+        m.topMode = .remove
+        XCTAssertEqual(m.change.topSet, .remove)
+        XCTAssertTrue(m.change.isValid)
+    }
 }
 
 // MARK: - Change the note under an exercise for the remaining sessions
@@ -357,4 +535,5 @@ final class NoteChangeTests: XCTestCase {
         model.clearNote = true
         XCTAssertEqual(model.change.note, "", "Clear note wins over the text")
     }
+
 }

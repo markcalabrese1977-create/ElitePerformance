@@ -260,6 +260,7 @@ enum DUPMesoLengthConversion {
             let intensifierRaw: String?, intensifierNotes: String?, prescriptionNotes: String?
             let plannedRepsBySet: [Int], plannedRIRsBySet: [Int], plannedLoadsBySet: [Double]
             let planEdited: Bool
+            let roles: [String]?, topRepMin: Int?, topRepMax: Int?, topRIR: Int?
             let actualReps: [Int], actualLoads: [Double], actualRIRs: [Int]
             let usedRestPauseFlags: [Bool], restPausePatternsBySet: [String], dropSetPatternsBySet: [String]
             let setFeedbackBySet: [String], pumpRatingsBySet: [Int]
@@ -274,6 +275,7 @@ enum DUPMesoLengthConversion {
                 intensifierRaw = i.intensifierRaw; intensifierNotes = i.intensifierNotes; prescriptionNotes = i.prescriptionNotes
                 plannedRepsBySet = i.plannedRepsBySet; plannedRIRsBySet = i.plannedRIRsBySet; plannedLoadsBySet = i.plannedLoadsBySet
                 planEdited = i.planEdited
+                roles = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
                 actualReps = i.actualReps; actualLoads = i.actualLoads; actualRIRs = i.actualRIRs
                 usedRestPauseFlags = i.usedRestPauseFlags; restPausePatternsBySet = i.restPausePatternsBySet
                 dropSetPatternsBySet = i.dropSetPatternsBySet; setFeedbackBySet = i.setFeedbackBySet
@@ -290,6 +292,7 @@ enum DUPMesoLengthConversion {
                 i.intensifierRaw = intensifierRaw; i.intensifierNotes = intensifierNotes; i.prescriptionNotes = prescriptionNotes
                 i.plannedRepsBySet = plannedRepsBySet; i.plannedRIRsBySet = plannedRIRsBySet; i.plannedLoadsBySet = plannedLoadsBySet
                 i.planEdited = planEdited
+                i.setRolesBySet = roles; i.topRepMin = topRepMin; i.topRepMax = topRepMax; i.topRIR = topRIR
                 i.actualReps = actualReps; i.actualLoads = actualLoads; i.actualRIRs = actualRIRs
                 i.usedRestPauseFlags = usedRestPauseFlags; i.restPausePatternsBySet = restPausePatternsBySet
                 i.dropSetPatternsBySet = dropSetPatternsBySet; i.setFeedbackBySet = setFeedbackBySet
@@ -730,11 +733,18 @@ enum DUPMesoLengthConversion {
         dst.intensifierRaw = src.intensifierRaw
         dst.intensifierNotes = src.intensifierNotes
         dst.prescriptionNotes = src.prescriptionNotes
-        dst.plannedRepsBySet = resized(src.plannedRepsBySet, to: n, fill: src.targetReps)
-        dst.plannedRIRsBySet = resized(src.plannedRIRsBySet, to: n, fill: src.targetRIR)
+        // A top set rides along: back-off rows are resized to n, the top rows (and roles and spec) are copied.
+        let tops = src.topCount
+        dst.plannedRepsBySet = resized(src.backOffValues(src.plannedRepsBySet), to: n, fill: src.targetReps)
+            + src.topValues(src.plannedRepsBySet, fallback: src.topRepMin ?? src.targetReps)
+        dst.plannedRIRsBySet = resized(src.backOffValues(src.plannedRIRsBySet), to: n, fill: src.targetRIR)
+            + src.topValues(src.plannedRIRsBySet, fallback: src.topRIR ?? src.targetRIR)
         dst.plannedLoadsBySet = bodyweight
-            ? Array(repeating: 0.0, count: n)
-            : resized(src.plannedLoadsBySet, to: n, fill: src.suggestedLoad)
+            ? Array(repeating: 0.0, count: n + tops)
+            : resized(src.backOffValues(src.plannedLoadsBySet), to: n, fill: src.suggestedLoad)
+                + src.topValues(src.plannedLoadsBySet, fallback: 0.0)
+        dst.setRolesBySet = tops > 0 ? SessionItem.roles(backOffs: n, tops: tops) : nil
+        dst.topRepMin = src.topRepMin; dst.topRepMax = src.topRepMax; dst.topRIR = src.topRIR
         dst.planEdited = false
         dst.actualReps = []
         dst.actualLoads = []

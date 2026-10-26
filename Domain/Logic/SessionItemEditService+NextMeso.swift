@@ -67,10 +67,16 @@ extension SessionItemEditService {
         let intensifierRaw: String?
         let intensifierNotes: String?
         let prescriptionNotes: String?
+        /// Back-off rows followed by the top rows (`topCount` of them).
         let plannedReps: [Int]
         let plannedRIRs: [Int]
         let seed: Double
         let seedSource: HistorySeedLoad.SeedSource
+        /// Top set inherited from the latest week of this lift (0 = none). The top load is seeded
+        /// separately, from top reps/RIR.
+        let topCount: Int
+        let topRepMin: Int?, topRepMax: Int?, topRIR: Int?
+        let topSeed: Double
         let isBodyweight: Bool
         /// The latest session item this one was taken from.
         let templateItem: SessionItem
@@ -81,7 +87,9 @@ extension SessionItemEditService {
                 guard let lo, let hi else { return "\(fallback)" }
                 return lo == hi ? "\(lo)" : "\(lo)-\(hi)"
             }
-            return "\(targetSets) x \(range(repMin, repMax, targetReps)) @ RIR \(range(rirMin, rirMax, targetRIR))"
+            let backOffs = "\(targetSets) x \(range(repMin, repMax, targetReps)) @ RIR \(range(rirMin, rirMax, targetRIR))"
+            guard topCount > 0 else { return backOffs }
+            return "\(topCount) x \(range(topRepMin, topRepMax, targetReps)) @ RIR \(topRIR ?? targetRIR) top + \(backOffs)"
         }
     }
 
@@ -288,6 +296,19 @@ extension SessionItemEditService {
             return r
         }
 
+        func topSeedLoad(_ exerciseId: String, reps: Int, rir: Int) -> Double {
+            let key = "top|\(ExerciseCatalog.canonicalExerciseId(for: exerciseId))|\(reps)|\(rir)"
+            if let hit = seedCache[key] { return hit.load }
+            let r = HistorySeedLoad.nextMesoSeed(
+                for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
+                loadIncrement: increment, bodyWeight: profile?.bodyWeight,
+                isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
+                factor: peakFactor, customExercises: custom, referenceDate: now, role: .top
+            )
+            seedCache[key] = r
+            return r.load
+        }
+
         // Layout
         var built: [(date: Date, week: Int, label: String, letter: String, old: Session, tpl: Session)] = []
         for (idx, oldWeek) in weekOrder.enumerated() {
@@ -333,6 +354,12 @@ extension SessionItemEditService {
                 let shown = NoteFields(t).displayed
                 let showsIntensifier = !(t.intensifierNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
                 let r = seed(t.exerciseId, reps: t.targetReps, rir: t.targetRIR)
+                // The latest week of this lift decides whether it carries a top set; else the template.
+                let topSource: SessionItem? = (slot?.hasTopSet == true) ? slot : (t.hasTopSet ? t : nil)
+                let topN = topSource?.topCount ?? 0
+                let topReps = topSource?.topRepMin ?? t.targetReps
+                let topRIRValue = topSource?.topRIR ?? t.targetRIR
+                let isBW = ExerciseCatalog.isBodyweight(exerciseId: t.exerciseId, customExercises: custom)
                 return NextMesoItem(
                     order: t.order, exerciseId: t.exerciseId,
                     exerciseName: t.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: t.exerciseId),
@@ -342,10 +369,14 @@ extension SessionItemEditService {
                     waveRaw: wave, priorityRaw: t.priorityRaw, intensifierRaw: t.intensifierRaw,
                     intensifierNotes: showsIntensifier ? shown : nil,
                     prescriptionNotes: showsIntensifier ? nil : shown,
-                    plannedReps: resized(t.plannedRepsBySet, to: sets, fallback: t.targetReps),
-                    plannedRIRs: resized(t.plannedRIRsBySet, to: sets, fallback: t.targetRIR),
+                    plannedReps: resized(t.backOffValues(t.plannedRepsBySet), to: sets, fallback: t.targetReps)
+                        + Array(repeating: topReps, count: topN),
+                    plannedRIRs: resized(t.backOffValues(t.plannedRIRsBySet), to: sets, fallback: t.targetRIR)
+                        + Array(repeating: topRIRValue, count: topN),
                     seed: r.load, seedSource: r.source,
-                    isBodyweight: ExerciseCatalog.isBodyweight(exerciseId: t.exerciseId, customExercises: custom),
+                    topCount: topN, topRepMin: topSource?.topRepMin, topRepMax: topSource?.topRepMax, topRIR: topSource?.topRIR,
+                    topSeed: topN > 0 && !isBW ? topSeedLoad(t.exerciseId, reps: topReps, rir: topRIRValue) : 0,
+                    isBodyweight: isBW,
                     templateItem: t
                 )
             }
@@ -407,7 +438,7 @@ extension SessionItemEditService {
         for s in plan.sessions {
             parts.append("\(s.date.timeIntervalSince1970)|\(s.dayLabel ?? "-")|\(s.weekIndex)|\(s.programIndex)|\(s.letter)|\(s.sessionNotes)")
             for i in s.items {
-                parts.append("  \(i.order)|\(i.exerciseId)|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.waveRaw ?? "-")|\(i.seed)|\(i.seedSource.rawValue)|\(i.intensifierNotes ?? "-")|\(i.prescriptionNotes ?? "-")")
+                parts.append("  \(i.order)|\(i.exerciseId)|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.waveRaw ?? "-")|\(i.seed)|\(i.seedSource.rawValue)|top\(i.topCount),\(i.topRepMin ?? -1),\(i.topRepMax ?? -1),\(i.topRIR ?? -1),\(i.topSeed)|\(i.intensifierNotes ?? "-")|\(i.prescriptionNotes ?? "-")")
             }
         }
         return parts.joined(separator: "\n")
@@ -482,9 +513,14 @@ extension SessionItemEditService {
                     targetRIRMin: ip.rirMin, targetRIRMax: ip.rirMax,
                     intensifierRaw: ip.intensifierRaw, intensifierNotes: ip.intensifierNotes, prescriptionNotes: ip.prescriptionNotes,
                     plannedRepsBySet: ip.plannedReps,
-                    plannedLoadsBySet: Array(repeating: ip.seed, count: ip.targetSets),
+                    plannedLoadsBySet: Array(repeating: ip.seed, count: ip.targetSets)
+                        + Array(repeating: ip.topSeed, count: ip.topCount),
                     plannedRIRsBySet: ip.plannedRIRs
                 )
+                if ip.topCount > 0 {
+                    item.setRolesBySet = SessionItem.roles(backOffs: ip.targetSets, tops: ip.topCount)
+                    item.topRepMin = ip.topRepMin; item.topRepMax = ip.topRepMax; item.topRIR = ip.topRIR
+                }
                 item.planEdited = false
                 return item
             }
@@ -526,10 +562,13 @@ extension SessionItemEditService {
                 let t = "\(tag) \(ip.exerciseId)"
                 check("\(t) exercise", ip.exerciseId, i.exerciseId)
                 check("\(t) sets", ip.targetSets, i.targetSets)
-                check("\(t) array sizes", [ip.targetSets, ip.targetSets, ip.targetSets],
+                let rows = ip.targetSets + ip.topCount
+                check("\(t) array sizes", [rows, rows, rows],
                       [i.plannedRepsBySet.count, i.plannedLoadsBySet.count, i.plannedRIRsBySet.count])
+                check("\(t) top rows", ip.topCount, i.topCount)
                 check("\(t) load", ip.seed, i.suggestedLoad)
-                check("\(t) planned loads", Array(repeating: ip.seed, count: ip.targetSets), i.plannedLoadsBySet)
+                check("\(t) planned loads", Array(repeating: ip.seed, count: ip.targetSets) + Array(repeating: ip.topSeed, count: ip.topCount),
+                      i.plannedLoadsBySet)
                 check("\(t) planEdited", false, i.planEdited)
                 check("\(t) logged", false, SessionEditSafety.hasLoggedData(i))
                 check("\(t) actuals", 0, i.actualReps.count + i.actualLoads.count + i.actualRIRs.count + i.logs.count)

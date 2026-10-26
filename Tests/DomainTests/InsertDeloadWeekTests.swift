@@ -485,4 +485,47 @@ final class InsertDeloadWeekTests: XCTestCase {
         XCTAssertEqual(block.sessions.filter { $0.insertedDeload == true }.map(\.weekIndex), [2])
         XCTAssertEqual(Service.planRemoveInsertedDeloadWeek(meso: block, context: ctx, now: start, week: 3).refusal, .noInsertedDeload)
     }
+
+    // MARK: - Top set
+
+    /// A deload is straight sets: the top set is dropped, and the sets and load come from the back-offs only.
+    func test_apply_deloadDropsTheTopSet_workingWeeksKeepIt() throws {
+        let (ctx, block) = try makeDUPBlock()
+        let now = completeFirstFourWeeks(block)
+        for w in [5, 6] {
+            for s in week(block, w) {
+                for i in s.items {
+                    let n = i.targetSets
+                    i.setRolesBySet = SessionItem.roles(backOffs: n, tops: 1)
+                    i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+                    i.plannedLoadsBySet = Array(i.plannedLoadsBySet.prefix(n)) + [315]
+                    i.plannedRepsBySet = Array(i.plannedRepsBySet.prefix(n)) + [4]
+                    i.plannedRIRsBySet = Array(i.plannedRIRsBySet.prefix(n)) + [2]
+                }
+            }
+        }
+        try ctx.save()
+        let plan = Service.planInsertDeloadWeek(meso: block, context: ctx, now: now)
+        try Service.insertDeloadWeek(plan, in: ctx)
+        let deload = sorted(block).filter { $0.insertedDeload == true }
+        XCTAssertFalse(deload.isEmpty)
+        for s in deload {
+            for i in s.items {
+                XCTAssertNil(i.setRolesBySet, "a deload item carries no top set")
+                XCTAssertEqual(i.plannedLoadsBySet.count, i.targetSets)
+                XCTAssertFalse(i.hasTopSet)
+            }
+        }
+        // The shifted working week keeps its top set.
+        let shifted = sorted(block).filter { $0.weekIndex == 6 && $0.insertedDeload != true }
+        XCTAssertTrue(shifted.flatMap(\.items).allSatisfy { $0.hasTopSet })
+    }
+
+    func test_lastCompletedLoad_readsBackOffsNotTheTopSet() {
+        let item = SessionItem(order: 1, exerciseId: "leg_extension", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        item.actualLoads = [100, 100, 100, 140]; item.actualReps = [8, 8, 8, 5]
+        let s = Session(date: Date(timeIntervalSince1970: 1_000), status: .completed, weekIndex: 1, items: [item])
+        XCTAssertEqual(Service.lastCompletedLoad(for: "leg_extension", in: [s]), 100)
+    }
 }
