@@ -16,7 +16,16 @@ import Foundation
 /// - `nextSuggestedLoad`: what to seed as the next-session planned load (if any)
 struct CoachingRecommendation {
     let message: String
+    /// The back-off (or only) load to carry forward.
     let nextSuggestedLoad: Double?
+    /// The top-set load to carry forward; nil on an item without a top set or with no top set logged.
+    let nextTopLoad: Double?
+
+    init(message: String, nextSuggestedLoad: Double?, nextTopLoad: Double? = nil) {
+        self.message = message
+        self.nextSuggestedLoad = nextSuggestedLoad
+        self.nextTopLoad = nextTopLoad
+    }
 }
 
 struct CoachingEngine {
@@ -98,14 +107,37 @@ struct CoachingEngine {
         }
     }
 
-    /// Rows with both load and reps > 0, before the warm-up cull.
+    /// Back-off rows (every row that is not a top row) with both load and reps > 0, before the
+    /// warm-up cull. On an item with no top set this is every logged row.
     private static func loggedRowIndices(for item: SessionItem) -> [Int] {
         let count = min(item.actualReps.count, item.actualLoads.count)
-        return (0..<count).filter { item.actualReps[$0] > 0 && item.actualLoads[$0] > 0 }
+        return (0..<count).filter { item.actualReps[$0] > 0 && item.actualLoads[$0] > 0 && !item.isTopRow($0) }
     }
 
-    /// Working sets = any set with both load and reps > 0, minus warmups (< 50% of the
-    /// session max load). Shared with PlanMemoryEngine's incomplete-evidence guard.
+    /// Logged top rows (reps and load > 0), by row. The role is the row's, never the logging order.
+    static func topWorkingIndices(for item: SessionItem) -> [Int] {
+        let count = min(item.actualReps.count, item.actualLoads.count)
+        return item.topRowIndices.filter { $0 < count && item.actualReps[$0] > 0 && item.actualLoads[$0] > 0 }
+    }
+
+    /// A top set was logged and can be written forward on its own evidence.
+    static func hasTopEvidence(_ item: SessionItem) -> Bool {
+        !topWorkingIndices(for: item).isEmpty
+    }
+
+    static func loadIncrement(for item: SessionItem, base: Double, minLoadIncrement: Double?) -> Double {
+        if let increment = minLoadIncrement, increment > 0 { return increment }
+        if let cluster = ExerciseCatalog.cluster(for: item.exerciseId) {
+            return ChestArmsLowBackMesoProfile.config(for: cluster).primaryLoadIncrement
+        }
+        if base >= 200 { return 5.0 }
+        if base >= 100 { return 2.5 }
+        return 2.0
+    }
+
+    /// Back-off working sets = any back-off set with both load and reps > 0, minus warmups (< 50% of
+    /// the max back-off load). Top rows are never part of this: they are read separately. Shared with
+    /// PlanMemoryEngine's incomplete-evidence guard.
     static func workingSetIndices(for item: SessionItem) -> [Int] {
         var indices = loggedRowIndices(for: item)
         if let maxLoad = indices.map({ item.actualLoads[$0] }).max(), maxLoad > 0 {
@@ -140,7 +172,84 @@ struct CoachingEngine {
     private static let carriesForwardClause =
         "That carries into your next block."
 
+    /// The coach's read of one exercise. An item without a top set is judged exactly as before; with
+    /// one, the top rows get their own read (against topRepMin/Max and topRIR) and every back-off
+    /// decision uses back-off rows only.
     static func recommend(
+        for item: SessionItem,
+        minLoadIncrement: Double? = nil,
+        mesoPhase: MesoPhase = .early,
+        consecutiveCleanCount: Int = 0,
+        e1rmFloorLoad: Double? = nil,
+        peakE1RM: Double? = nil,
+        lastKnownLoad: Double? = nil,
+        carryForwardTarget: CarryForwardTarget = .unresolved,
+        isProgressionExempt: Bool = false
+    ) -> CoachingRecommendation? {
+        let back = recommendBackOffs(
+            for: item, minLoadIncrement: minLoadIncrement, mesoPhase: mesoPhase,
+            consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
+            peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
+            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt
+        )
+        guard item.hasTopSet else { return back }
+        // Deload keeps its maintenance message; a pain flag stops every call, top set included.
+        if item.waveRaw?.lowercased() == "deload" { return back }
+        let painFlagged = item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
+        if painFlagged { return back }
+        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, isProgressionExempt: isProgressionExempt) else {
+            return back
+        }
+        let message = [top.message, back?.message].compactMap { $0 }.joined(separator: " ")
+        return CoachingRecommendation(message: message, nextSuggestedLoad: back?.nextSuggestedLoad, nextTopLoad: top.nextTopLoad)
+    }
+
+    private struct TopRead { let message: String; let nextTopLoad: Double? }
+
+    /// Judges the logged top rows: reps against topRepMin/Max, RIR against topRIR. Hold, or a
+    /// one-increment bump when every top row is at the top of its range at the target difficulty.
+    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, isProgressionExempt: Bool) -> TopRead? {
+        let rows = topWorkingIndices(for: item)
+        guard let lastRow = rows.last else { return nil }
+        let reps = rows.map { item.actualReps[$0] }
+        let load = item.actualLoads[lastRow]
+        let lo = item.topRepMin ?? item.repMin ?? item.targetReps
+        let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
+        let targetRIR = item.topRIR ?? item.targetRIR
+        let rirs = rows.compactMap { $0 < item.actualRIRs.count ? item.actualRIRs[$0] : nil }
+        let avgRIR: Double? = rirs.isEmpty ? nil : Double(rirs.reduce(0, +)) / Double(rirs.count)
+        let what = "Top set: \(compactLoad(load)) x \(reps.map(String.init).joined(separator: ", "))"
+        let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
+
+        let fatigue = rows.contains { idx in
+            guard idx < item.setFeedbackBySet.count else { return false }
+            let fb = item.setFeedbackBySet[idx]
+            return fb == SetFeedback.soreness.rawValue || fb == SetFeedback.disruption.rawValue
+        }
+        if fatigue {
+            return TopRead(message: "\(what) — soreness or disruption flagged, hold this load.", nextTopLoad: load)
+        }
+        if (reps.min() ?? 0) < lo {
+            return TopRead(message: "\(what), under the range (\(range)) — hold this load.", nextTopLoad: load)
+        }
+        if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
+            return TopRead(message: "\(what), harder than the target RIR — hold this load.", nextTopLoad: load)
+        }
+        if reps.allSatisfy({ $0 >= hi }) {
+            if isProgressionExempt {
+                return TopRead(message: "\(what), top of the range. Load is fixed on this exercise.", nextTopLoad: load)
+            }
+            if item.loadOverrideReason?.suppressesEarnedProgression == true {
+                return TopRead(message: "\(what), top of the range at a reduced load — no increase earned.", nextTopLoad: nil)
+            }
+            let step = loadIncrement(for: item, base: load, minLoadIncrement: minLoadIncrement)
+            let next = min(load + step, load * 2.0)
+            return TopRead(message: "\(what), top of the range — increase earned. Next top set: \(compactLoad(next)).", nextTopLoad: next)
+        }
+        return TopRead(message: "\(what), on target — hold.", nextTopLoad: load)
+    }
+
+    private static func recommendBackOffs(
         for item: SessionItem,
         minLoadIncrement: Double? = nil,
         mesoPhase: MesoPhase = .early,
@@ -292,16 +401,7 @@ struct CoachingEngine {
         }()
 
         func loadStep(for base: Double) -> Double {
-            if let increment = minLoadIncrement, increment > 0 {
-                return increment
-            }
-            if let cluster = ExerciseCatalog.cluster(for: item.exerciseId) {
-                let config = ChestArmsLowBackMesoProfile.config(for: cluster)
-                return config.primaryLoadIncrement
-            }
-            if base >= 200 { return 5.0 }
-            if base >= 100 { return 2.5 }
-            return 2.0
+            loadIncrement(for: item, base: base, minLoadIncrement: minLoadIncrement)
         }
 
         let primaryWorkPhrase: String = {
@@ -404,7 +504,7 @@ struct CoachingEngine {
         if completedGrowthSetCount < growthSetTarget || completedWorkingSetCount < plannedWorkingSetCount {
             let remaining = plannedWorkingSetCount - completedWorkingSetCount
             if completedGrowthSetCount == 1 {
-                let setLabel = "Set \(primaryIndices[0] + 1)"
+                let setLabel = (item.hasTopSet ? "Back-off set " : "Set ") + "\(primaryIndices[0] + 1)"
                 let currentLoadText = String(format: "%.1f", baseLoad)
                 let currentReps = primaryReps[0]
                 if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
@@ -418,7 +518,9 @@ struct CoachingEngine {
                 return nil
             }
             let msg = remaining > 0
-                ? "\(completedWorkingSetCount) of \(plannedWorkingSetCount) planned sets logged."
+                ? (item.hasTopSet
+                    ? "Back-offs: \(completedWorkingSetCount) of \(plannedWorkingSetCount) logged."
+                    : "\(completedWorkingSetCount) of \(plannedWorkingSetCount) planned sets logged.")
                 : "\(completedWorkingSetCount) sets in. Finish the session."
             return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
         }

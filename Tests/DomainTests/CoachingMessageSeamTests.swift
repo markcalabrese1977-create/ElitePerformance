@@ -471,6 +471,100 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertTrue(lines[4].contains("315"), lines[4])
     }
 
+
+    // MARK: B2. Role-aware coaching (top set + back-offs)
+
+    /// 3 back-off rows (6-8 @ 2, bench cluster step 5) and 1 top row at the tail (4-6 @ 2).
+    private func topSetItem(reps: [Int], loads: [Double], rirs: [Int]? = nil) -> SessionItem {
+        let i = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            repMin: 6, repMax: 8
+        )
+        i.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+        i.actualReps = reps
+        i.actualLoads = loads
+        i.actualRIRs = rirs ?? Array(repeating: 2, count: reps.count)
+        i.plannedRepsBySet = [7, 7, 7, 5]
+        i.setFeedbackBySet = Array(repeating: "", count: reps.count)
+        return i
+    }
+
+    /// Device repro: the top set is logged FIRST (tail row), then the back-offs one by one.
+    func test_B2_deviceRepro_topLoggedFirst_thenBackOffs() {
+        let a = CoachingEngine.recommend(for: topSetItem(reps: [0, 0, 0, 5], loads: [0, 0, 0, 315]))
+        XCTAssertEqual(a?.message, "Top set: 315 x 5, on target — hold.")
+        XCTAssertEqual(a?.nextTopLoad, 315)
+        XCTAssertNil(a?.nextSuggestedLoad, "no back-off logged: nothing to say about the back-off load")
+
+        let b = CoachingEngine.recommend(for: topSetItem(reps: [7, 0, 0, 5], loads: [290, 0, 0, 315]))
+        XCTAssertEqual(b?.message, "Top set: 315 x 5, on target — hold.", "one on-target back-off: nothing to add yet")
+
+        let c = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 0, 5], loads: [290, 290, 0, 315]))
+        XCTAssertEqual(c?.message, "Top set: 315 x 5, on target — hold. Back-offs: 2 of 3 logged.")
+        XCTAssertEqual(c?.nextSuggestedLoad, 290, "the back-off base is a back-off, never the 315 top set")
+        XCTAssertEqual(c?.nextTopLoad, 315)
+
+        let d = CoachingEngine.recommend(for: topSetItem(reps: [8, 8, 8, 5], loads: [290, 290, 290, 315]))
+        XCTAssertTrue(d?.message.hasPrefix("Top set: 315 x 5, on target — hold.") ?? false, d?.message ?? "nil")
+        XCTAssertTrue(d?.message.contains("increase earned") ?? false, d?.message ?? "nil")
+        XCTAssertEqual(d?.nextSuggestedLoad, 295, "back-off bump is one step off 290")
+        XCTAssertEqual(d?.nextTopLoad, 315, "top set at 5 of 4-6 holds")
+    }
+
+    func test_B2_topAtTopOfRange_earnsOneStep_underRange_holds() {
+        let up = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315]))
+        XCTAssertEqual(up?.nextTopLoad, 320)
+        XCTAssertTrue(up?.message.contains("Top set: 315 x 6, top of the range — increase earned. Next top set: 320.") ?? false, up?.message ?? "nil")
+        let low = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 3], loads: [290, 290, 290, 315]))
+        XCTAssertEqual(low?.nextTopLoad, 315)
+        XCTAssertTrue(low?.message.contains("under the range (4–6)") ?? false, low?.message ?? "nil")
+        let hard = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
+        XCTAssertEqual(hard?.nextTopLoad, 315, "harder than the target RIR holds even at the top of the range")
+    }
+
+    /// A skipped back-off with the top logged: back-off evidence is insufficient and the top load never
+    /// becomes the back-off base.
+    func test_B2_skippedBackOff_topLogged_noBackOffWrite_topNeverBase() {
+        let i = topSetItem(reps: [7, 7, 0, 5], loads: [290, 290, 0, 315])
+        XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(i))
+        XCTAssertTrue(CoachingEngine.hasTopEvidence(i))
+        XCTAssertEqual(CoachingEngine.plannedWorkingSetIndices(for: i), [0, 1])
+        XCTAssertEqual(CoachingEngine.workingSetIndices(for: i), [0, 1], "top rows are not back-off working sets")
+        let r = CoachingEngine.recommend(for: i)
+        XCTAssertEqual(r?.nextSuggestedLoad, 290)
+        XCTAssertTrue(r?.message.contains("Back-offs: 2 of 3 logged.") ?? false, r?.message ?? "nil")
+    }
+
+    /// Top at 315, back-offs 12.7% lighter: the heaviest set is not "an opener above the baseline".
+    func test_B2_backOffsTwelvePercentLighter_noRule1dRebaseline() {
+        let r = CoachingEngine.recommend(for: topSetItem(reps: [8, 8, 8, 5], loads: [275, 275, 275, 315]))
+        XCTAssertFalse(r?.message.contains("Load dropped") ?? true, r?.message ?? "nil")
+        XCTAssertEqual(r?.nextSuggestedLoad, 280, "bump off the back-off base 275, not off 315")
+        // Control: without roles the same rows ARE a dropped-load pattern when the heavy set leads.
+        let legacy = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 4, targetRIR: 2,
+                                 suggestedLoad: 290, repMin: 6, repMax: 8)
+        legacy.actualReps = [5, 8, 8, 8]; legacy.actualLoads = [315, 275, 275, 275]
+        legacy.actualRIRs = [2, 2, 2, 2]; legacy.setFeedbackBySet = ["", "", "", ""]
+        XCTAssertTrue(CoachingEngine.recommend(for: legacy)?.message.contains("Load dropped") ?? false)
+    }
+
+    func test_B2_painOnTopSet_stopsEverything_noTopLoad() {
+        let i = topSetItem(reps: [8, 8, 8, 5], loads: [290, 290, 290, 315])
+        i.setFeedbackBySet = ["", "", "", SetFeedback.pain.rawValue]
+        let r = CoachingEngine.recommend(for: i)
+        XCTAssertTrue(r?.message.hasPrefix("Pain was flagged") ?? false, r?.message ?? "nil")
+        XCTAssertNil(r?.nextTopLoad)
+        XCTAssertNil(r?.nextSuggestedLoad)
+    }
+
+    func test_B2_itemWithoutTopSet_hasNoTopLoad() {
+        let r = CoachingEngine.recommend(for: coachItem(targetSets: 3, reps: [8, 8, 8], loads: [100, 100, 100]))
+        XCTAssertNil(r?.nextTopLoad)
+        XCTAssertEqual(r?.nextSuggestedLoad, 105)
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {
