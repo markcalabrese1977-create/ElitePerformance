@@ -266,6 +266,19 @@ final class SessionItem {
     }
     var nextSuggestedLoad: Double?
 
+    // MARK: Top set (optional; nil on every item that has no top set)
+    //
+    // Back-off rows are 0..<targetSets; top rows sit at the tail (targetSets..<targetSets +
+    // topCount). The role comes from the ROW (setRolesBySet[idx] == "top"), never from the order
+    // sets were logged. All four fields are nil on an item without a top set, which then behaves
+    // exactly as before (no migration). Additive optionals: lightweight migration.
+
+    /// Index-aligned with the per-set arrays: "top" or "" (back-off). nil = no top set.
+    var setRolesBySet: [String]?
+    var topRepMin: Int?
+    var topRepMax: Int?
+    var topRIR: Int?
+
     init(
         id: UUID? = UUID(),
         createdAt: Date? = Date(),
@@ -354,6 +367,32 @@ final class SessionItem {
         self.coachNote = coachNote
         self.nextSuggestedLoad = nextSuggestedLoad
         self.loadOverrideReasonRaw = loadOverrideReasonRaw
+    }
+}
+
+// MARK: - Top-set roles
+
+extension SessionItem {
+    static let topRole = "top"
+
+    /// Row indices whose role is "top", ascending.
+    var topRowIndices: [Int] {
+        (setRolesBySet ?? []).enumerated().compactMap { $0.element == Self.topRole ? $0.offset : nil }
+    }
+
+    /// Number of top rows (0 when the item has no top set).
+    var topCount: Int { topRowIndices.count }
+
+    var hasTopSet: Bool { topCount > 0 }
+
+    func isTopRow(_ index: Int) -> Bool {
+        guard let roles = setRolesBySet, roles.indices.contains(index) else { return false }
+        return roles[index] == Self.topRole
+    }
+
+    /// Role array for `targetSets` back-off rows followed by `topCount` top rows.
+    static func roles(backOffs: Int, tops: Int) -> [String] {
+        Array(repeating: "", count: max(0, backOffs)) + Array(repeating: topRole, count: max(0, tops))
     }
 }
 

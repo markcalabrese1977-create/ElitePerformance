@@ -191,6 +191,12 @@ struct SessionItemBackupDTO: Codable {
     let planEdited: Bool?
 
     let logs: [SetLogBackupDTO]
+
+    // Added (top set). Optional so OLD backups decode with nil: an item without them has no top set.
+    var setRolesBySet: [String]? = nil
+    var topRepMin: Int? = nil
+    var topRepMax: Int? = nil
+    var topRIR: Int? = nil
 }
 
 // MARK: - SetLog

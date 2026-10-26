@@ -174,7 +174,11 @@ enum BackupSnapshotExporter {
                                         actualRIR: log.actualRIR,
                                         actualLoad: log.actualLoad
                                     )
-                                }
+                                },
+                                setRolesBySet: item.setRolesBySet,
+                                topRepMin: item.topRepMin,
+                                topRepMax: item.topRepMax,
+                                topRIR: item.topRIR
                             )
                         }
                 )

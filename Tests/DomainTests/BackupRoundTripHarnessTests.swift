@@ -1034,3 +1034,88 @@ final class InsertDeloadRealBackupTests: XCTestCase {
         }
     }
 }
+
+
+// MARK: - Top-set fields round trip
+
+final class TopSetBackupTests: XCTestCase {
+
+    private static var parked: [AnyObject] = []
+
+    private func makeContainer() throws -> ModelContainer {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
+            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        Self.parked.append(c)
+        return c
+    }
+
+    private func seed(_ ctx: ModelContext, withTop: Bool) throws {
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            repMin: 6, repMax: 8,
+            plannedRepsBySet: [7, 7, 7] + (withTop ? [5] : []),
+            plannedLoadsBySet: [290, 290, 290] + (withTop ? [315] : []),
+            plannedRIRsBySet: [2, 2, 2] + (withTop ? [2] : []),
+            actualReps: [8, 7, 6] + (withTop ? [5] : []),
+            actualLoads: [290, 290, 290] + (withTop ? [315] : []),
+            actualRIRs: [2, 2, 2] + (withTop ? [2] : [])
+        )
+        if withTop {
+            item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+            item.topRepMin = 4; item.topRepMax = 6; item.topRIR = 2
+        }
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [item])
+        ctx.insert(session)
+        try ctx.save()
+    }
+
+    private func exportItemJSON(_ container: ModelContainer) throws -> (url: URL, item: [String: Any]) {
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ModelContext(container))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        let sessions = try XCTUnwrap(json["sessions"] as? [[String: Any]])
+        let items = try XCTUnwrap(sessions.first?["items"] as? [[String: Any]])
+        return (result.url, try XCTUnwrap(items.first))
+    }
+
+    func test_topSetFields_roundTrip() throws {
+        let a = try makeContainer()
+        try seed(ModelContext(a), withTop: true)
+        let (url, itemJSON) = try exportItemJSON(a)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertEqual(itemJSON["setRolesBySet"] as? [String], ["", "", "", "top"])
+        XCTAssertEqual(itemJSON["topRepMin"] as? Int, 4)
+        XCTAssertEqual(itemJSON["topRepMax"] as? Int, 6)
+        XCTAssertEqual(itemJSON["topRIR"] as? Int, 2)
+
+        let b = try makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: b)
+        let item = try XCTUnwrap(try ModelContext(b).fetch(FetchDescriptor<SessionItem>()).first)
+        XCTAssertEqual(item.setRolesBySet, ["", "", "", "top"])
+        XCTAssertEqual(item.topCount, 1)
+        XCTAssertEqual(item.topRowIndices, [3])
+        XCTAssertEqual([item.topRepMin, item.topRepMax, item.topRIR], [4, 6, 2])
+        XCTAssertEqual(item.actualLoads, [290, 290, 290, 315])
+    }
+
+    func test_itemWithoutTopSet_writesNoKeys_andOldBackupsDecodeNil() throws {
+        let a = try makeContainer()
+        try seed(ModelContext(a), withTop: false)
+        let (url, itemJSON) = try exportItemJSON(a)
+        defer { try? FileManager.default.removeItem(at: url) }
+        for key in ["setRolesBySet", "topRepMin", "topRepMax", "topRIR"] {
+            XCTAssertNil(itemJSON[key], "\(key) must be absent for an item with no top set (same bytes as an old backup)")
+        }
+        let b = try makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: b)
+        let item = try XCTUnwrap(try ModelContext(b).fetch(FetchDescriptor<SessionItem>()).first)
+        XCTAssertNil(item.setRolesBySet)
+        XCTAssertNil(item.topRepMin); XCTAssertNil(item.topRepMax); XCTAssertNil(item.topRIR)
+        XCTAssertEqual(item.topCount, 0)
+        XCTAssertFalse(item.hasTopSet)
+        XCTAssertFalse(item.isTopRow(0))
+    }
+}

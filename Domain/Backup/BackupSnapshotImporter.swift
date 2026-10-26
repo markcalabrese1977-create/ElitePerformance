@@ -201,6 +201,11 @@ enum BackupSnapshotImporter {
                 // Old backups predate the key → nil falls back to false (the
                 // model default), keeping restored auto plans bump-eligible.
                 item.planEdited = itemDTO.planEdited ?? false
+                // Top-set fields: absent in old backups -> nil -> an ordinary item.
+                item.setRolesBySet = itemDTO.setRolesBySet
+                item.topRepMin = itemDTO.topRepMin
+                item.topRepMax = itemDTO.topRepMax
+                item.topRIR = itemDTO.topRIR
 
                 modelContext.insert(item)
                 session.items.append(item)
