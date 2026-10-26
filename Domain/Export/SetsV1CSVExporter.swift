@@ -76,9 +76,15 @@ enum SetsV1CSVExporter {
                 let isPR = item.isPR ? "true" : "false"
                 let coachNote = item.coachNote ?? ""
 
-                let setCount = max(1, item.targetSets)
+                // Every planned row, plus any later row that has a logged set.
+                let loggedRowCount = max(item.actualReps.count, item.actualLoads.count)
+                let rowIndices = LoggedRowSelection.indices(
+                    targetSets: item.targetSets,
+                    rowCount: max(max(1, item.targetSets), loggedRowCount),
+                    isLogged: { (item.actualReps.safeInt(at: $0) ?? 0) > 0 || (item.actualLoads.safeDouble(at: $0) ?? 0) > 0 }
+                )
 
-                for idx0 in 0..<setCount {
+                for idx0 in rowIndices {
                     let setIndex = String(idx0 + 1)
 
                     let plannedReps = item.plannedRepsBySet.safeInt(at: idx0).map(String.init) ?? ""

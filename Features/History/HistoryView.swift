@@ -292,9 +292,14 @@ private struct HistoryDayDetailView: View {
                 var totalVol: Double = 0
                 var setDetails: [HistorySetDetail] = []
 
-                let working = min(uiEx.targetSets, uiEx.sets.count)
+                // Planned rows plus any later row with a logged set (an extra or top set).
+                let rowIndices = LoggedRowSelection.indices(
+                    targetSets: min(uiEx.targetSets, uiEx.sets.count),
+                    rowCount: uiEx.sets.count,
+                    isLogged: { (uiEx.sets[$0].actualReps ?? 0) > 0 }
+                )
 
-                for idx in 0..<working {
+                for idx in rowIndices {
                     let set = uiEx.sets[idx]
 
                     let actualReps = set.actualReps ?? 0

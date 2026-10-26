@@ -526,3 +526,16 @@ extension Session {
         return band == .deload ? .late : band
     }
 }
+
+// MARK: - Which rows of an item to show or export
+
+/// Rows of an item that history views and exports include: every planned row (index < targetSets)
+/// plus any later row that has logged work. A row past targetSets with a logged set (an extra or
+/// top set) is real history and must not drop out.
+enum LoggedRowSelection {
+    static func indices(targetSets: Int, rowCount: Int, isLogged: (Int) -> Bool) -> [Int] {
+        guard rowCount > 0 else { return [] }
+        let planned = max(1, targetSets)
+        return (0..<rowCount).filter { $0 < planned || isLogged($0) }
+    }
+}

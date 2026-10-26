@@ -437,6 +437,40 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8), isBodyweight: true), "BW × 6–8 · goal 8 @ 2 RIR")
     }
 
+
+    // MARK: A3. History and CSV include every logged row
+
+    func test_A3_loggedRowSelection_plannedRowsPlusLoggedExtras() {
+        let logged: Set<Int> = [3]   // an extra row 4 with a logged set; row 5 is unlogged padding
+        XCTAssertEqual(LoggedRowSelection.indices(targetSets: 3, rowCount: 5, isLogged: { logged.contains($0) }), [0, 1, 2, 3])
+        XCTAssertEqual(LoggedRowSelection.indices(targetSets: 3, rowCount: 5, isLogged: { _ in false }), [0, 1, 2])
+        XCTAssertEqual(LoggedRowSelection.indices(targetSets: 4, rowCount: 3, isLogged: { _ in false }), [0, 1, 2], "never past rowCount")
+        XCTAssertEqual(LoggedRowSelection.indices(targetSets: 0, rowCount: 2, isLogged: { _ in false }), [0], "at least one planned row")
+    }
+
+    func test_A3_csvExport_includesLoggedExtraRow_butNotUnloggedPadding() throws {
+        let ctx = try makeContext()
+        let session = Session(date: Date(), status: .completed, weekIndex: 1, items: [])
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            plannedRepsBySet: [8, 8, 8, 0, 0], plannedLoadsBySet: [290, 290, 290, 0, 0], plannedRIRsBySet: [2, 2, 2, 0, 0],
+            actualReps: [8, 7, 6, 5, 0], actualLoads: [290, 290, 290, 315, 0], actualRIRs: [2, 2, 2, 2, 0]
+        )
+        session.items = [item]
+        ctx.insert(session)
+        try ctx.save()
+
+        let name = "a3_\(UUID().uuidString).csv"
+        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: ctx, fileName: name)
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let lines = try String(contentsOf: result.url, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(result.rowCount, 4, "3 planned rows + the logged extra row; the unlogged padding row is not exported")
+        XCTAssertEqual(lines.count, 5, "header + 4 rows")
+        XCTAssertTrue(lines[4].contains(",4,3,"), "set_index 4, target_sets 3: \(lines[4])")
+        XCTAssertTrue(lines[4].contains("315"), lines[4])
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {

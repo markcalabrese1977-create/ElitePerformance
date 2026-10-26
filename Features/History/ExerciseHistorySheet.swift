@@ -410,7 +410,7 @@ struct ExerciseHistorySheet: View {
                 var executedSetCount = 0
                 var bestE1RM: Double? = nil
 
-                for set in uiEx.sets where set.index <= target {
+                for set in uiEx.sets where set.index <= target || (set.actualReps ?? 0) > 0 {
                     let reps = set.actualReps ?? 0
                     guard reps > 0 else { continue }
                     let load = set.actualLoad ?? 0
