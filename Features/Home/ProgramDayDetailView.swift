@@ -377,7 +377,7 @@ struct ProgramDayDetailView: View {
     private func autoGeneratePerSetPlan(for item: SessionItem, overwriteLoadsFromSuggested: Bool) {
         let isMaintenance = item.waveRaw?.lowercased() == "deload" &&
                     session.meso?.isMaintenance == true
-                let setCount = isMaintenance ? item.targetSets : max(4, item.targetSets)
+                let setCount = isMaintenance ? item.targetSets : max(4, item.targetSets + item.topCount)
 
         func ensureIntArray(_ array: inout [Int]) {
             if array.count < setCount {
@@ -398,6 +398,7 @@ struct ProgramDayDetailView: View {
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
         ensureIntArray(&item.plannedRIRsBySet)
+        padRoles(of: item, to: setCount)
 
         let firstPlannedNonZero = item.plannedLoadsBySet.first(where: { $0 > 0 }) ?? 0
 
@@ -433,7 +434,7 @@ struct ProgramDayDetailView: View {
 
         // Clear non-working extra rows in the editable 4-set UI tail
         if workingSetCount < setCount {
-            for idx in workingSetCount..<setCount {
+            for idx in workingSetCount..<setCount where !item.isTopRow(idx) {
                 if idx < item.plannedRepsBySet.count {
                     item.plannedRepsBySet[idx] = 0
                 }
@@ -465,7 +466,7 @@ struct ProgramDayDetailView: View {
 
     /// Ensures the plan arrays can safely be edited up to max(4, targetSets)
     private func normalizePlanArrays(for item: SessionItem) {
-        let setCount = max(4, item.targetSets)
+        let setCount = max(4, item.targetSets + item.topCount)
 
         func ensureIntArray(_ array: inout [Int]) {
             if array.count < setCount {
@@ -486,6 +487,14 @@ struct ProgramDayDetailView: View {
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
         ensureIntArray(&item.plannedRIRsBySet)
+        padRoles(of: item, to: setCount)
+    }
+
+    /// Keeps the role array in step with the padded planned arrays (padding rows are back-off/blank).
+    private func padRoles(of item: SessionItem, to setCount: Int) {
+        guard var roles = item.setRolesBySet, roles.count < setCount else { return }
+        roles.append(contentsOf: repeatElement("", count: setCount - roles.count))
+        item.setRolesBySet = roles
     }
     
     private func fetchRecentSessions(limit: Int) -> [Session] {
@@ -1223,12 +1232,16 @@ private struct ProgramExercisePlanRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            let setRows = isMaintenance ? item.targetSets : max(4, item.targetSets)
+            let setRows = isMaintenance ? item.targetSets : max(4, item.targetSets + item.topCount)
+            // Top rows first (storage keeps them at the tail), then the back-offs and spare rows.
+            let rowOrder = item.topRowIndices.filter { $0 < setRows } + (0..<setRows).filter { !item.isTopRow($0) }
 
-                        ForEach(0..<setRows, id: \.self) { idx in
+                        ForEach(rowOrder, id: \.self) { idx in
                 HStack(spacing: 8) {
-                    Text("Set \(idx + 1)")
+                    Text(item.isTopRow(idx) ? "Top" : "Set \(idx + 1)")
                         .font(.caption2)
+                        .fontWeight(item.isTopRow(idx) ? .semibold : .regular)
+                        .foregroundStyle(item.isTopRow(idx) ? Color.orange : Color.primary)
                         .frame(width: 40, alignment: .leading)
 
                     // LOAD – string-based so 0.5, 1.5, 47.5 all work
@@ -1262,7 +1275,7 @@ private struct ProgramExercisePlanRow: View {
             }
 
             if workingSetCount < item.plannedRepsBySet.count {
-                for idx in workingSetCount..<item.plannedRepsBySet.count {
+                for idx in workingSetCount..<item.plannedRepsBySet.count where !item.isTopRow(idx) {
                     item.plannedRepsBySet[idx] = 0
                 }
             }
@@ -1275,7 +1288,7 @@ private struct ProgramExercisePlanRow: View {
             let setRows = max(4, item.targetSets)
             let limit = min(setRows, item.plannedRIRsBySet.count)
 
-            for idx in 0..<limit {
+            for idx in 0..<limit where !item.isTopRow(idx) {
                 item.plannedRIRsBySet[idx] = newValue
             }
 
@@ -1384,6 +1397,10 @@ private struct ProgramExercisePlanRow: View {
         ensureIntArray(&item.plannedRepsBySet)
         ensureDoubleArray(&item.plannedLoadsBySet)
         ensureIntArray(&item.plannedRIRsBySet)
+        if var roles = item.setRolesBySet, roles.count < setCount {
+            roles.append(contentsOf: repeatElement("", count: setCount - roles.count))
+            item.setRolesBySet = roles
+        }
         ensureIntArray(&item.actualReps)
         ensureDoubleArray(&item.actualLoads)
         ensureIntArray(&item.actualRIRs)

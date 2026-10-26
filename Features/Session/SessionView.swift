@@ -457,12 +457,12 @@ struct SessionView: View {
     }
     private var completionSubtitle: String {
         let allExercises = viewModel.exercises
-        let totalPlanned = allExercises.reduce(0) { $0 + $1.targetSets }
+        let totalPlanned = allExercises.reduce(0) { $0 + $1.targetSets + $1.topCount }
         let totalCompleted = allExercises.reduce(0) { total, ex in
-            total + ex.sets.filter { $0.index <= ex.targetSets && $0.status == .completed }.count
+            total + ex.sets.filter { ex.isPlannedRow($0) && $0.status == .completed }.count
         }
         let totalSkipped = allExercises.reduce(0) { total, ex in
-            total + ex.sets.filter { $0.index <= ex.targetSets && $0.status.isAnySkip }.count
+            total + ex.sets.filter { ex.isPlannedRow($0) && $0.status.isAnySkip }.count
         }
 
         if totalSkipped == 0 {
@@ -566,6 +566,11 @@ private struct SessionExerciseCardView: View {
         )
     }
 
+    private var topRepRange: RepRange {
+        if let lo = exercise.topRepMin, let hi = exercise.topRepMax { return RepRange(min: lo, max: max(lo, hi)) }
+        return repRange
+    }
+
     private var todayDetailLine: String {
         let parts = exercise.detail.components(separatedBy: " · ")
 
@@ -610,7 +615,7 @@ private struct SessionExerciseCardView: View {
     }
 
     private func shouldShowSet(_ set: UISessionSet) -> Bool {
-        if set.index <= exercise.targetSets {
+        if exercise.isPlannedRow(set) {
             return true
         }
 
@@ -728,12 +733,12 @@ private struct SessionExerciseCardView: View {
             }
 
             VStack(spacing: 6) {
-                ForEach(exercise.sets) { set in
+                ForEach(exercise.displaySets) { set in
                     if shouldShowSet(set) {
                         SessionSetRowView(
                             uiSet: set,
-                            repRange: repRange,
-                            isExtraSet: set.index > exercise.targetSets,
+                            repRange: set.isTop ? topRepRange : repRange,
+                            isExtraSet: set.index > exercise.targetSets && !set.isTop,
                             isBodyweightExercise: isBodyweightExercise,
                             bodyWeight: userProfile?.bodyWeight,
                             onBodyweightSettingsTapped: onBodyweightSettingsTapped,
@@ -842,9 +847,10 @@ private struct SessionSetRowView: View {
 
             // Top line: Set label + status chip (locked sets only)
             HStack {
-                Text("Set \(uiSet.index)")
+                Text(uiSet.isTop ? "Top set" : "Set \(uiSet.index)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .fontWeight(uiSet.isTop ? .semibold : .regular)
+                    .foregroundStyle(uiSet.isTop ? Color.orange : Color.secondary)
                 Spacer()
                 if isLocked {
                                     if uiSet.status.isAnySkip {
@@ -878,7 +884,7 @@ private struct SessionSetRowView: View {
             // PLAN / SUGGESTED line
             Text(isExtraSet
                  ? UISessionSet.extraSetLabel(repRange: repRange, rir: uiSet.plannedRIR)
-                 : "\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
+                 : "\(uiSet.isTop ? "TOP SET" : (uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN")) \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
                 .font(.caption)
                 .foregroundStyle(!isExtraSet && uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
                 .lineLimit(2)
@@ -1607,7 +1613,15 @@ final class SessionScreenViewModel: ObservableObject {
             .filter { $0.index <= exercise.targetSets }
             .last ?? exercise.sets.last
 
-        let nextIndex = (exercise.sets.map(\.index).max() ?? 0) + 1
+        // With a top set the new back-off row goes BEFORE the top tail: every row past the planned
+        // back-offs moves down one, so the top set keeps its role and its logged data.
+        let hasTop = exercise.sets.contains(where: \.isTop)
+        let nextIndex = hasTop ? exercise.targetSets + 1 : (exercise.sets.map(\.index).max() ?? 0) + 1
+        if hasTop {
+            for i in exercise.sets.indices where exercise.sets[i].index > exercise.targetSets {
+                exercise.sets[i].index += 1
+            }
+        }
 
         let plannedLoad = seedSet?.plannedLoad ?? 0
         let plannedReps = seedSet?.plannedReps ?? 10
@@ -1982,6 +1996,14 @@ final class SessionScreenViewModel: ObservableObject {
             item.setFeedbackBySet        = Array(repeating: "", count: setCount)
             item.pumpRatingsBySet        = Array(repeating: 0, count: setCount)
 
+            if uiExercise.sets.contains(where: \.isTop) {
+                var roles = Array(repeating: "", count: setCount)
+                for uiSet in uiExercise.sets where uiSet.isTop && uiSet.index - 1 < setCount {
+                    roles[uiSet.index - 1] = SessionItem.topRole
+                }
+                item.setRolesBySet = roles
+            }
+
             for uiSet in uiExercise.sets {
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
@@ -2180,7 +2202,7 @@ final class SessionScreenViewModel: ObservableObject {
             var lastRIR: Int? = nil
             var topE1RM: Double? = nil
 
-            for set in exercise.sets where set.index <= exercise.targetSets {
+            for set in exercise.sets where exercise.isPlannedRow(set) {
                 guard set.status == .completed else { continue }
 
                 let reps = set.actualReps ?? set.plannedReps
@@ -2369,20 +2391,21 @@ extension SessionScreenViewModel {
             let baseRIR = item.targetRIR
 
             // We currently support up to 4 sets in the logger UI
-            let setCount = max(4, targetSets)   // keeps “3-to-grow, 1-to-know” UI baseline
+            let setCount = max(4, targetSets + item.topCount)   // keeps “3-to-grow, 1-to-know” UI baseline; top rows ride at the tail
             var uiSets: [UISessionSet] = []
             uiSets.reserveCapacity(setCount)
 
             for idx in 0..<setCount {
                 let setIndex = idx + 1
-                let isPlannedWorkingSet = setIndex <= targetSets
+                let isTop = item.isTopRow(idx)
+                let isPlannedWorkingSet = setIndex <= targetSets || isTop
 
                 // ---- Planned values ----
                 let plannedReps: Int = {
                     if idx < item.plannedRepsBySet.count, item.plannedRepsBySet[idx] > 0 {
                         return item.plannedRepsBySet[idx]
                     } else {
-                        return baseReps
+                        return isTop ? (item.topRepMin ?? baseReps) : baseReps
                     }
                 }()
 
@@ -2390,7 +2413,8 @@ extension SessionScreenViewModel {
                     if idx < item.plannedLoadsBySet.count, item.plannedLoadsBySet[idx] > 0 {
                         return item.plannedLoadsBySet[idx]
                     } else {
-                        return isPlannedWorkingSet ? baseLoad : 0.0
+                        // A top row never borrows the back-off load: no plan = no suggestion.
+                        return isPlannedWorkingSet && !isTop ? baseLoad : 0.0
                     }
                 }()
 
@@ -2400,7 +2424,7 @@ extension SessionScreenViewModel {
                     if idx < item.plannedRIRsBySet.count, item.plannedRIRsBySet[idx] > 0 {
                         return item.plannedRIRsBySet[idx]
                     }
-                    return baseRIR
+                    return isTop ? (item.topRIR ?? baseRIR) : baseRIR
                 }()
 
                 // ---- Actual values (read back from SwiftData) ----
@@ -2501,7 +2525,8 @@ extension SessionScreenViewModel {
                                         restPausePattern: rpPattern,
                                         usedDropSet: dropUsed,
                                         dropSets: dropEntries,
-                                        pumpRating: pumpRating
+                                        pumpRating: pumpRating,
+                                        isTop: isTop
                                     )
                                 )
             }
@@ -2539,7 +2564,9 @@ extension SessionScreenViewModel {
                 targetSets: item.targetSets,
                 sets: uiSets,
                 coachMessage: item.coachNote ?? "",
-                itemID: item.id
+                itemID: item.id,
+                topRepMin: item.topRepMin,
+                topRepMax: item.topRepMax
             )
         }
 
@@ -2666,8 +2693,21 @@ struct UISessionExercise: Identifiable {
         "Week \(weekIndex) · \(setsText) · \(repsText) · \(rirText)"
     }
 
+    /// Top-set rep range (nil on an exercise with no top set).
+    var topRepMin: Int?
+    var topRepMax: Int?
+
+    var topCount: Int { sets.filter(\.isTop).count }
+
+    /// A planned row: a back-off within targetSets, or a top row.
+    func isPlannedRow(_ set: UISessionSet) -> Bool { set.index <= targetSets || set.isTop }
+
+    /// Rows in display order: top rows first, then the back-offs and extras. Storage order (index)
+    /// is unchanged; the role comes from the row, never from when it was logged.
+    var displaySets: [UISessionSet] { sets.filter(\.isTop) + sets.filter { !$0.isTop } }
+
     var isComplete: Bool {
-        let workingSets = sets.filter { $0.index <= targetSets }
+        let workingSets = sets.filter { isPlannedRow($0) }
         guard !workingSets.isEmpty else { return false }
         return workingSets.allSatisfy { $0.status == .completed || $0.status.isAnySkip }
     }
@@ -2691,8 +2731,12 @@ struct UISessionExercise: Identifiable {
         targetSets: Int,
         sets: [UISessionSet],
         coachMessage: String = "",
-        itemID: UUID? = nil
+        itemID: UUID? = nil,
+        topRepMin: Int? = nil,
+        topRepMax: Int? = nil
     ) {
+        self.topRepMin = topRepMin
+        self.topRepMax = topRepMax
         // Derive a stable UUID from exerciseId so ForEach identity is consistent
         // across republishes of viewModel.exercises.
         self.id = UUID(uuidString: exerciseId) ?? {
@@ -2739,7 +2783,9 @@ struct UISessionExercise: Identifiable {
 
 struct UISessionSet: Identifiable {
     var id: Int { index }
-    let index: Int
+    var index: Int
+    /// This row is a top set (role comes from the row).
+    var isTop: Bool = false
     
     var plannedLoad: Double
     var plannedReps: Int
@@ -2775,8 +2821,10 @@ struct UISessionSet: Identifiable {
         restPausePattern: String = "",
         usedDropSet: Bool = false,
         dropSets: [DropSetEntry] = [],
-        pumpRating: PumpRating = .none
+        pumpRating: PumpRating = .none,
+        isTop: Bool = false
     ) {
+        self.isTop = isTop
         self.index = index
         self.plannedLoad = plannedLoad
         self.plannedReps = plannedReps

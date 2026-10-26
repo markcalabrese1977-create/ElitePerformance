@@ -730,6 +730,106 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 290)
     }
 
+
+    // MARK: B4. Top set in the logger
+
+    private func topSession(in ctx: ModelContext) -> (Session, SessionItem) {
+        let session = Session(date: Date(), weekIndex: 1, items: [])
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 7, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            repMin: 6, repMax: 8,
+            plannedRepsBySet: [7, 7, 7, 5], plannedLoadsBySet: [290, 290, 290, 315], plannedRIRsBySet: [2, 2, 2, 2]
+        )
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        item.topRepMin = 4; item.topRepMax = 6; item.topRIR = 2
+        session.items = [item]
+        ctx.insert(session)
+        return (session, item)
+    }
+
+    func test_B4_topRowIsBuiltFirstInDisplay_withItsOwnPlan() throws {
+        let ctx = try makeContext()
+        let (session, item) = topSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        let ex = vm.exercises[0]
+        XCTAssertEqual(ex.sets.map(\.index), [1, 2, 3, 4], "storage order keeps the top at the tail")
+        XCTAssertEqual(ex.displaySets.map(\.index), [4, 1, 2, 3], "display shows the top first")
+        let top = ex.sets[3]
+        XCTAssertTrue(top.isTop)
+        XCTAssertEqual([top.plannedLoad, Double(top.plannedReps), Double(top.plannedRIR ?? -1)], [315, 5, 2])
+        XCTAssertEqual([ex.topRepMin, ex.topRepMax], [4, 6])
+        XCTAssertFalse(ex.sets[0].isTop)
+        XCTAssertEqual(ex.topCount, 1)
+    }
+
+    /// Device repro through the real logger: top first, then the back-offs; completion needs every planned row incl. the top.
+    func test_B4_topLoggedFirst_roleFromRow_coachingAndCompletion() throws {
+        let ctx = try makeContext()
+        let (session, item) = topSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        log(vm, ctx, set: 4, load: "315", reps: "5")
+        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, on target — hold.")
+        XCTAssertEqual(item.actualLoads, [0, 0, 0, 315])
+        XCTAssertEqual(item.setRolesBySet, ["", "", "", "top"], "role persisted from the row")
+        log(vm, ctx, set: 1, load: "290", reps: "7")
+        log(vm, ctx, set: 2, load: "290", reps: "7")
+        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, on target — hold. Back-offs: 2 of 3 logged.")
+        XCTAssertFalse(vm.exercises[0].isComplete)
+        log(vm, ctx, set: 3, load: "290", reps: "7")
+        XCTAssertTrue(vm.exercises[0].isComplete)
+        XCTAssertEqual(item.targetSets, 3)
+    }
+
+    func test_B4_topNotLogged_keepsTheExerciseIncomplete() throws {
+        let ctx = try makeContext()
+        let (session, item) = topSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        for set in 1...3 { log(vm, ctx, set: set, load: "290", reps: "7") }
+        XCTAssertFalse(vm.exercises[0].isComplete, "the planned top row is part of the session")
+        log(vm, ctx, set: 4, load: "315", reps: "5")
+        XCTAssertTrue(vm.exercises[0].isComplete)
+    }
+
+    /// Add Set inserts the new back-off BEFORE the top tail; the top keeps its role and its logged data.
+    func test_B4_addSet_insertsBackOffBeforeTheTopTail() throws {
+        let ctx = try makeContext()
+        let (session, item) = topSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        log(vm, ctx, set: 4, load: "315", reps: "5")
+        vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
+        let ex = vm.exercises[0]
+        XCTAssertEqual(ex.targetSets, 4)
+        XCTAssertEqual(ex.sets.map(\.index), [1, 2, 3, 4, 5])
+        XCTAssertEqual(ex.sets.map(\.isTop), [false, false, false, false, true])
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual(item.setRolesBySet?.prefix(5).map { $0 }, ["", "", "", "", "top"])
+        XCTAssertEqual(item.actualLoads[4], 315, "the logged top set moved with its row")
+        XCTAssertEqual(item.actualReps[4], 5)
+        XCTAssertEqual(item.actualLoads[3], 0, "the new back-off row is unlogged")
+        XCTAssertTrue(CoachingEngine.hasTopEvidence(item))
+        XCTAssertEqual(ex.sets[3].plannedLoad, 290, "the new back-off is seeded from the last back-off, not the top")
+    }
+
+    func test_B4_programTabSetStepper_keepsTheTopTail() {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 7, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+                               setMin: 3, setMax: 3,
+                               plannedRepsBySet: [7, 7, 7, 5], plannedLoadsBySet: [290, 290, 290, 315], plannedRIRsBySet: [2, 2, 2, 2])
+        item.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        PlanStepperEdits.setSets(item, to: 4)
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual(item.plannedLoadsBySet, [290, 290, 290, 290, 315])
+        XCTAssertEqual(item.setRolesBySet, ["", "", "", "", "top"])
+        XCTAssertEqual(item.setMax, 4)
+        PlanStepperEdits.setSets(item, to: 2)
+        XCTAssertEqual(item.plannedLoadsBySet, [290, 290, 315])
+        XCTAssertEqual(item.topRowIndices, [2])
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {
