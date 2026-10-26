@@ -733,6 +733,7 @@ private struct SessionExerciseCardView: View {
                         SessionSetRowView(
                             uiSet: set,
                             repRange: repRange,
+                            isExtraSet: set.index > exercise.targetSets,
                             isBodyweightExercise: isBodyweightExercise,
                             bodyWeight: userProfile?.bodyWeight,
                             onBodyweightSettingsTapped: onBodyweightSettingsTapped,
@@ -804,6 +805,8 @@ private struct SessionExerciseCardView: View {
 private struct SessionSetRowView: View {
     let uiSet: UISessionSet
     let repRange: RepRange
+    /// A row past the planned set count: shown as an extra set, with no suggested load.
+    var isExtraSet: Bool = false
     let isBodyweightExercise: Bool
     let bodyWeight: Double?
     let onBodyweightSettingsTapped: () -> Void
@@ -873,9 +876,11 @@ private struct SessionSetRowView: View {
             }
 
             // PLAN / SUGGESTED line
-            Text("\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
+            Text(isExtraSet
+                 ? UISessionSet.extraSetLabel(repRange: repRange, rir: uiSet.plannedRIR)
+                 : "\(uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN") \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
                 .font(.caption)
-                .foregroundStyle(uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
+                .foregroundStyle(!isExtraSet && uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
@@ -2389,8 +2394,10 @@ extension SessionScreenViewModel {
                     }
                 }()
 
+                // A stored 0 is the Program tab's array padding, not a prescription: treat it as
+                // unset and show the base RIR (same rule as ProgramDayDetailView's RIR binding).
                 let plannedRIR: Int? = {
-                    if idx < item.plannedRIRsBySet.count {
+                    if idx < item.plannedRIRsBySet.count, item.plannedRIRsBySet[idx] > 0 {
                         return item.plannedRIRsBySet[idx]
                     }
                     return baseRIR
@@ -2830,12 +2837,19 @@ struct UISessionSet: Identifiable {
             )
         }
     }
+    /// "EXTRA SET  6-8 reps @ 2 RIR": the line for a row past the planned set count (no load).
+    static func extraSetLabel(repRange: RepRange, rir: Int?) -> String {
+        let reps = repRange.min == repRange.max ? "\(repRange.min)" : "\(repRange.min)-\(repRange.max)"
+        let rirText = rir.map { " @ \($0) RIR" } ?? ""
+        return "EXTRA SET  \(reps) reps\(rirText)"
+    }
+
     func plannedDescription(with repRange: RepRange, isBodyweight: Bool = false) -> String {
         if plannedLoad == 0 && plannedReps == 0 { return "—" }
 
         let loadText: String
         if plannedLoad == 0 {
-            loadText = isBodyweight ? "BW" : "0.0"
+            loadText = isBodyweight ? "BW" : "—"
         } else {
             loadText = String(format: "%.1f", plannedLoad)
         }

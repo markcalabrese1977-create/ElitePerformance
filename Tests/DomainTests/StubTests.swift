@@ -1491,7 +1491,9 @@ final class BodyweightMechanicsTests: XCTestCase {
         XCTAssertFalse(bwText.contains("0.0"))
 
         let nonBwText = bwSet.plannedDescription(with: repRange, isBodyweight: false)
-        XCTAssertTrue(nonBwText.contains("0.0"))
+        // A 0 load on a loaded exercise has no number to show: a dash, never "0.0".
+        XCTAssertTrue(nonBwText.contains("—"))
+        XCTAssertFalse(nonBwText.contains("0.0"))
         XCTAssertFalse(nonBwText.contains("BW"))
     }
 

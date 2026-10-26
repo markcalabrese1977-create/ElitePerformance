@@ -361,6 +361,82 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertTrue(r?.message.contains("Load dropped from 100 to 88") ?? false, r?.message ?? "nil")
     }
 
+
+    // MARK: A2. Padded slots and the stored-0 RIR sentinel
+
+    /// Device repro c): a Program-tab-padded item (4th slot is 0 load / 0 reps / 0 RIR), Add Set,
+    /// top set logged in the visible 4th row. The pre-existing 4th row was built from the padded
+    /// 0 RIR; after logging, a rebuilt screen shows the row as a planned working row.
+    func test_A2_paddedZeroRIR_isUnset_onTheAddedRowBeforeAndAfterLogging() throws {
+        let ctx = try makeContext()
+        let session = Session(date: Date(), weekIndex: 1, items: [])
+        let item = SessionItem(
+            order: 1, exerciseId: "bench_press",
+            targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290,
+            repMin: 6, repMax: 8,
+            plannedRepsBySet: [7, 7, 7, 0],
+            plannedLoadsBySet: [290, 290, 290, 0],
+            plannedRIRsBySet: [2, 2, 2, 0]
+        )
+        session.items = [item]
+        ctx.insert(session)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+
+        XCTAssertEqual(vm.exercises[0].sets[3].plannedRIR, 2, "padded 0 RIR is unset: show the base RIR, not '@ 0 RIR'")
+        vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
+        log(vm, ctx, set: 4, load: "315", reps: "5")
+        XCTAssertEqual(item.actualLoads[3], 315)
+
+        let reopened = SessionScreenViewModel(session: session)
+        park(reopened)
+        let row4 = reopened.exercises[0].sets[3]
+        XCTAssertEqual(row4.plannedRIR, 2, "after logging, the row must not read '@ 0 RIR' either")
+        // Cause of "SUGGESTED 290": row 4 is inside targetSets (Add Set made it 4) and its stored
+        // per-set load is 0, so the rebuild falls back to the item's suggested load.
+        XCTAssertEqual(item.plannedLoadsBySet[3], 0)
+        XCTAssertEqual(row4.plannedLoad, 290, "planned row with no per-set load takes the item's suggested load")
+    }
+
+    /// A carry-forward write onto a materialized target must not fill padded slots past targetSets.
+    func test_A2_propagation_doesNotFillPaddedExtraSlots() throws {
+        let fixture = try JourneyFixture.make()
+        var comps = DateComponents(); comps.year = 2026; comps.month = 7; comps.day = 6
+        try fixture.seedProgram(startDate: Calendar.current.date(from: comps)!, startingLoad: 100.0)
+        let first = try XCTUnwrap(fixture.currentPlannedSession())
+        let sessions = fixture.allSessionsSorted()
+        let benchId = ExerciseCatalog.benchPress.id
+        let source = try XCTUnwrap(fixture.item(benchId, in: first))
+        let target = try XCTUnwrap(fixture.item(benchId, in: sessions[6]))
+        let sets = target.targetSets
+        // A materialized, unedited plan whose arrays the Program tab padded to 4.
+        target.suggestedLoad = 95
+        target.plannedLoadsBySet = Array(repeating: 95, count: sets) + [0]
+        XCTAssertGreaterThan(sets, 0)
+
+        let reps = (source.repMax ?? source.targetReps) + 2
+        let logs = first.items.map { it in
+            JourneyExerciseLog(exerciseId: it.exerciseId, sets: (0..<it.targetSets).map { _ in
+                JourneySetLog(load: 100, reps: reps, rir: it.targetRIR, feedback: "", pump: 0)
+            })
+        }
+        try fixture.logAndComplete(JourneySessionScript(logs: logs))
+
+        XCTAssertNotEqual(target.suggestedLoad, 95, "the write must have happened for this test to mean anything")
+        XCTAssertEqual(Array(target.plannedLoadsBySet.prefix(sets)), Array(repeating: target.suggestedLoad, count: sets))
+        XCTAssertEqual(target.plannedLoadsBySet.dropFirst(sets).filter { $0 != 0 }.count, 0,
+                       "padded slots past targetSets must stay 0: \(target.plannedLoadsBySet)")
+    }
+
+
+    func test_A2_extraSetLabel_andZeroLoadShowsDash() {
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 2), "EXTRA SET  6-8 reps @ 2 RIR")
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 8), rir: 1), "EXTRA SET  8 reps @ 1 RIR")
+        let row = UISessionSet(index: 4, exerciseId: "bench_press", plannedLoad: 0, plannedReps: 6, plannedRIR: 2)
+        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8)), "— × 6–8 · goal 8 @ 2 RIR")
+        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8), isBodyweight: true), "BW × 6–8 · goal 8 @ 2 RIR")
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {

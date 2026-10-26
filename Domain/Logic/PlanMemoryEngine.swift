@@ -516,8 +516,13 @@ struct PlanMemoryEngine {
     }
 
     /// The per-set plan a propagated load produces for `targetItem`.
+    /// Only the planned rows (the first `targetSets`) take the load. Slots past targetSets are
+    /// array padding (the Program tab pads every planned array to at least 4) and stay 0, so an
+    /// unplanned row never shows a suggested load.
     static func propagatedPlan(_ load: Double, for targetItem: SessionItem) -> [Double] {
-        Array(repeating: load, count: max(targetItem.plannedLoadsBySet.count, targetItem.targetSets))
+        let planned = max(0, targetItem.targetSets)
+        let count = max(targetItem.plannedLoadsBySet.count, planned)
+        return (0..<count).map { $0 < planned ? load : 0 }
     }
 
     static func applyPropagatedLoad(_ load: Double, to targetItem: SessionItem) {
