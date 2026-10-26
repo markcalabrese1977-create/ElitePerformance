@@ -65,7 +65,13 @@ final class StartNextMesoFlowTests: XCTestCase {
         let off = Model(meso: block, context: ctx, now: before, endOldMesoNow: false)
         XCTAssertTrue(off.plan().refusals.contains(.oldMesoHasRemainingSessions))
         XCTAssertNil(Model.removalText(off.plan()))
-        XCTAssertTrue(Model.refusalText(.oldMesoHasRemainingSessions, remaining: 60).contains("60 planned sessions"))
+        let last = try XCTUnwrap(off.remainingSessions.map(\.date).max())
+        let lastText = last.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        XCTAssertEqual(
+            Model.refusalText(.oldMesoHasRemainingSessions, remaining: off.remainingSessions.count, mesoName: block.name, lastRemaining: last),
+            "10-Week DUP Meso still has 60 planned sessions (last: \(lastText)). Finish them first, or turn on \"End this meso now\" to remove them.")
+        XCTAssertFalse(Model.refusalText(.oldMesoHasRemainingSessions, remaining: 60, lastRemaining: last).contains("start after"))
+        XCTAssertTrue(Model.refusalText(.oldMesoHasRemainingSessions, remaining: 1, mesoName: "X", lastRemaining: last).contains("1 planned session ("))
 
         for s in block.sessions { s.status = .completed }
         try ctx.save()
