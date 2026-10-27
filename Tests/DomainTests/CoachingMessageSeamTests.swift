@@ -2,12 +2,6 @@ import XCTest
 import SwiftData
 @testable import ElitePerformance
 
-/// SessionScreenViewModel aborts the test host when it is released from a plain XCTest method
-/// (SIGABRT in swift_task_deinitOnExecutorMainActorBackDeploy). Objects built by tests that
-/// create one are parked here for the life of the process.
-private var parkedForProcessLifetime: [AnyObject] = []
-private func parkForProcessLifetime(_ objects: AnyObject...) { parkedForProcessLifetime.append(contentsOf: objects) }
-
 final class CoachingMessageSeamTests: XCTestCase {
 
     // Broken at authorship (see TestOpenQuestions.swift): this fixture logs
@@ -39,7 +33,7 @@ final class CoachingMessageSeamTests: XCTestCase {
         context.insert(session)
 
         let vm = SessionScreenViewModel(session: session)
-        parkForProcessLifetime(vm, session, item, container)
+        defer { withExtendedLifetime(container) {} }
 
         vm.exercises[0].sets[0].actualLoadText = "100"
         vm.exercises[0].sets[0].actualRepsText = "10"
@@ -82,7 +76,7 @@ final class CoachingMessageSeamTests: XCTestCase {
         context.insert(session)
 
         let vm = SessionScreenViewModel(session: session)
-        parkForProcessLifetime(vm, session, item, container)
+        defer { withExtendedLifetime(container) {} }
 
         vm.exercises[0].sets[0].actualLoadText = "100"
         vm.exercises[0].sets[0].actualRepsText = "10"
@@ -113,16 +107,10 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     /// Held for the test's lifetime: a ModelContext does not retain its container.
     private var container: ModelContainer?
 
-    /// SessionScreenViewModel has a known deinit crash (abrt) when released. Objects
-    /// built by these tests are parked here for the life of the test process.
-    private static var parked: [AnyObject] = []
-    private func park(_ objects: AnyObject...) { Self.parked.append(contentsOf: objects) }
-
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         container = c
-        park(c)
         return ModelContext(c)
     }
 
@@ -156,7 +144,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = threeSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for s in 1...3 { log(vm, ctx, set: s, load: "100") }
 
         XCTAssertEqual(vm.exercises[0].sets.count, 4, "init always builds max(4, targetSets) rows")
@@ -184,7 +171,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = threeSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for s in 1...3 { log(vm, ctx, set: s, load: "100") }
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
 
@@ -206,7 +192,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = threeSetSession(in: ctx, plannedLoads: [100, 100, 100, 0])
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for s in 1...3 { log(vm, ctx, set: s, load: "100") }
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
         let prefilled = vm.exercises[0].sets[3].actualLoadText
@@ -220,7 +205,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = threeSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for s in 1...3 { log(vm, ctx, set: s, load: "100") }
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
         log(vm, ctx, set: 4, load: "100")
@@ -381,7 +365,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         session.items = [item]
         ctx.insert(session)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
 
         XCTAssertEqual(vm.exercises[0].sets[3].plannedRIR, 2, "padded 0 RIR is unset: show the base RIR, not '@ 0 RIR'")
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
@@ -389,7 +372,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(item.actualLoads[3], 315)
 
         let reopened = SessionScreenViewModel(session: session)
-        park(reopened)
         let row4 = reopened.exercises[0].sets[3]
         XCTAssertEqual(row4.plannedRIR, 2, "after logging, the row must not read '@ 0 RIR' either")
         // Cause of "SUGGESTED 290": row 4 is inside targetSets (Add Set made it 4) and its stored
@@ -752,7 +734,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = topSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         let ex = vm.exercises[0]
         XCTAssertEqual(ex.sets.map(\.index), [1, 2, 3, 4], "storage order keeps the top at the tail")
         XCTAssertEqual(ex.displaySets.map(\.index), [4, 1, 2, 3], "display shows the top first")
@@ -769,7 +750,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = topSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         log(vm, ctx, set: 4, load: "315", reps: "5")
         XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, on target — hold.")
         XCTAssertEqual(item.actualLoads, [0, 0, 0, 315])
@@ -787,7 +767,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = topSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for set in 1...3 { log(vm, ctx, set: set, load: "290", reps: "7") }
         XCTAssertFalse(vm.exercises[0].isComplete, "the planned top row is part of the session")
         log(vm, ctx, set: 4, load: "315", reps: "5")
@@ -799,7 +778,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = topSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         log(vm, ctx, set: 4, load: "315", reps: "5")
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
         let ex = vm.exercises[0]
@@ -859,7 +837,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = threeSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         XCTAssertEqual(item.prescribedSets, 3, "born prescribed")
         for s in 1...3 { log(vm, ctx, set: s, load: "100") }
         vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
@@ -936,7 +913,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = persistentFourSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
 
         XCTAssertEqual(vm.exercises[0].sets.count, 4, "no hidden 5th row: rows = max(4, targetSets)")
         XCTAssertEqual(vm.exercises[0].sets[3].plannedLoad, 100, "row 4 is a planned working set: planned load comes from the array")
@@ -956,7 +932,6 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let ctx = try makeContext()
         let (session, item) = persistentFourSetSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
-        park(vm, session, item)
         for s in 1...3 { log(vm, ctx, set: s, load: nil) }
         vm.skipSet(exerciseID: vm.exercises[0].id, setIndex: 4, reason: .none, context: ctx)
 
