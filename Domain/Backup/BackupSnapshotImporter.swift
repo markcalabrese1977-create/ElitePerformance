@@ -206,6 +206,8 @@ enum BackupSnapshotImporter {
                 item.topRepMin = itemDTO.topRepMin
                 item.topRepMax = itemDTO.topRepMax
                 item.topRIR = itemDTO.topRIR
+                // nil for a backup from before the key existed (the init default would invent a value).
+                item.prescribedSets = itemDTO.prescribedSets
 
                 modelContext.insert(item)
                 session.items.append(item)

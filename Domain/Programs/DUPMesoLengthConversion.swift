@@ -260,6 +260,7 @@ enum DUPMesoLengthConversion {
             let intensifierRaw: String?, intensifierNotes: String?, prescriptionNotes: String?
             let plannedRepsBySet: [Int], plannedRIRsBySet: [Int], plannedLoadsBySet: [Double]
             let planEdited: Bool
+            let prescribedSets: Int?
             let roles: [String]?, topRepMin: Int?, topRepMax: Int?, topRIR: Int?
             let actualReps: [Int], actualLoads: [Double], actualRIRs: [Int]
             let usedRestPauseFlags: [Bool], restPausePatternsBySet: [String], dropSetPatternsBySet: [String]
@@ -275,6 +276,7 @@ enum DUPMesoLengthConversion {
                 intensifierRaw = i.intensifierRaw; intensifierNotes = i.intensifierNotes; prescriptionNotes = i.prescriptionNotes
                 plannedRepsBySet = i.plannedRepsBySet; plannedRIRsBySet = i.plannedRIRsBySet; plannedLoadsBySet = i.plannedLoadsBySet
                 planEdited = i.planEdited
+                prescribedSets = i.prescribedSets
                 roles = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
                 actualReps = i.actualReps; actualLoads = i.actualLoads; actualRIRs = i.actualRIRs
                 usedRestPauseFlags = i.usedRestPauseFlags; restPausePatternsBySet = i.restPausePatternsBySet
@@ -292,6 +294,7 @@ enum DUPMesoLengthConversion {
                 i.intensifierRaw = intensifierRaw; i.intensifierNotes = intensifierNotes; i.prescriptionNotes = prescriptionNotes
                 i.plannedRepsBySet = plannedRepsBySet; i.plannedRIRsBySet = plannedRIRsBySet; i.plannedLoadsBySet = plannedLoadsBySet
                 i.planEdited = planEdited
+                i.prescribedSets = prescribedSets
                 i.setRolesBySet = roles; i.topRepMin = topRepMin; i.topRepMax = topRepMax; i.topRIR = topRIR
                 i.actualReps = actualReps; i.actualLoads = actualLoads; i.actualRIRs = actualRIRs
                 i.usedRestPauseFlags = usedRestPauseFlags; i.restPausePatternsBySet = restPausePatternsBySet
@@ -716,10 +719,12 @@ enum DUPMesoLengthConversion {
     /// never copied; `planEdited` stays false. Bodyweight items keep load 0.
     private static func copyPrescription(from src: SessionItem, to dst: SessionItem, customExercises: [CustomExercise]) {
         let bodyweight = ExerciseCatalog.isBodyweight(exerciseId: src.exerciseId, customExercises: customExercises)
-        let n = max(0, src.targetSets)
+        // The program's prescribed set count, not a session's in-session Add Set.
+        let n = max(0, src.effectivePrescribedSets)
         dst.order = src.order
         dst.targetReps = src.targetReps
-        dst.targetSets = src.targetSets
+        dst.targetSets = n
+        dst.prescribedSets = src.effectivePrescribedSets
         dst.targetRIR = src.targetRIR
         dst.suggestedLoad = bodyweight ? 0 : src.suggestedLoad
         dst.waveRaw = src.waveRaw

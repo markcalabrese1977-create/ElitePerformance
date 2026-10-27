@@ -75,7 +75,8 @@ struct ProgramPlanPropagationService {
                     if let dst = future.items.first(where: { $0.exerciseId == src.exerciseId }) {
                         dst.order           = src.order
                         dst.targetReps      = src.targetReps
-                        dst.targetSets      = src.targetSets
+                        dst.targetSets      = src.effectivePrescribedSets
+                        dst.prescribedSets  = src.effectivePrescribedSets
                         dst.targetRIR       = src.targetRIR
                         dst.suggestedLoad   = src.suggestedLoad
                         dst.plannedRepsBySet  = src.plannedRepsBySet
@@ -100,7 +101,7 @@ struct ProgramPlanPropagationService {
                 for src in sourceItems {
                     guard !futureIds.contains(src.exerciseId) else { continue }
 
-                    let setCount = max(0, src.targetSets)
+                    let setCount = max(0, src.effectivePrescribedSets)
                     let newItem = SessionItem(
                         order: src.order,
                         exerciseId: src.exerciseId,

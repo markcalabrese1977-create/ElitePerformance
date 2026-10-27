@@ -1041,6 +1041,7 @@ final class InsertDeloadRealBackupTests: XCTestCase {
 final class TopSetBackupTests: XCTestCase {
 
     private static var parked: [AnyObject] = []
+    static func keepAlive(_ c: AnyObject) { parked.append(c) }
 
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
@@ -1117,5 +1118,54 @@ final class TopSetBackupTests: XCTestCase {
         XCTAssertEqual(item.topCount, 0)
         XCTAssertFalse(item.hasTopSet)
         XCTAssertFalse(item.isTopRow(0))
+    }
+}
+
+extension TopSetBackupTests {
+    func test_prescribedSets_roundTrip_andOldBackupsDecodeNil() throws {
+        let a = try makeContainerForPrescribed()
+        let ctx = ModelContext(a)
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 4, targetRIR: 2, suggestedLoad: 100,
+                               prescribedSets: 3)
+        ctx.insert(Session(date: Date(), status: .completed, weekIndex: 1, items: [item]))
+        try ctx.save()
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ModelContext(a))
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        let exported = try XCTUnwrap(((json["sessions"] as? [[String: Any]])?.first?["items"] as? [[String: Any]])?.first)
+        XCTAssertEqual(exported["prescribedSets"] as? Int, 3)
+        XCTAssertEqual(exported["targetSets"] as? Int, 4)
+        let b = try makeContainerForPrescribed()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: result.url, modelContainer: b)
+        let back = try XCTUnwrap(try ModelContext(b).fetch(FetchDescriptor<SessionItem>()).first)
+        XCTAssertEqual(back.prescribedSets, 3)
+        XCTAssertEqual(back.targetSets, 4)
+
+        // An old backup: no key. It must restore as nil, not as the init default.
+        var old = json
+        var sessions = try XCTUnwrap(old["sessions"] as? [[String: Any]])
+        var items = try XCTUnwrap(sessions[0]["items"] as? [[String: Any]])
+        items[0].removeValue(forKey: "prescribedSets")
+        sessions[0]["items"] = items
+        old["sessions"] = sessions
+        let oldURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try JSONSerialization.data(withJSONObject: old).write(to: oldURL)
+        defer { try? FileManager.default.removeItem(at: oldURL) }
+        let c = try makeContainerForPrescribed()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: oldURL, modelContainer: c)
+        let restored = try XCTUnwrap(try ModelContext(c).fetch(FetchDescriptor<SessionItem>()).first)
+        XCTAssertNil(restored.prescribedSets)
+        XCTAssertEqual(restored.effectivePrescribedSets, restored.targetSets)
+    }
+
+    fileprivate func makeContainerForPrescribed() throws -> ModelContainer {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
+            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        TopSetBackupTests.keepAlive(c)
+        return c
     }
 }

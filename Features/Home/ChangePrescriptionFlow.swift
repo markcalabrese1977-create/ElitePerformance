@@ -14,7 +14,7 @@ enum PlanStepperEdits {
         if item.hasTopSet {
             item.resizeBackOffs(to: value)   // the top tail and the roles move with the back-off count
         } else {
-            item.targetSets = value
+            item.setPrescribedSets(value)
         }
         widenSetBand(item, toInclude: value)
     }

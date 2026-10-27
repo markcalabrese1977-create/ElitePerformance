@@ -839,7 +839,8 @@ struct ProgramDayDetailView: View {
 
                     // Flattened execution defaults
                     dst.targetReps = src.targetReps
-                    dst.targetSets = src.targetSets
+                    dst.targetSets = src.effectivePrescribedSets
+                    dst.prescribedSets = src.effectivePrescribedSets
                     dst.targetRIR = src.targetRIR
                     dst.suggestedLoad = src.suggestedLoad
 

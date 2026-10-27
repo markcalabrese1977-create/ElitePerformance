@@ -178,7 +178,8 @@ enum BackupSnapshotExporter {
                                 setRolesBySet: item.setRolesBySet,
                                 topRepMin: item.topRepMin,
                                 topRepMax: item.topRepMax,
-                                topRIR: item.topRIR
+                                topRIR: item.topRIR,
+                                prescribedSets: item.prescribedSets
                             )
                         }
                 )

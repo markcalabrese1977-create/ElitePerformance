@@ -197,6 +197,9 @@ struct SessionItemBackupDTO: Codable {
     var topRepMin: Int? = nil
     var topRepMax: Int? = nil
     var topRIR: Int? = nil
+
+    // Added (prescribed set count). Optional so OLD backups decode with nil: effectivePrescribedSets == targetSets.
+    var prescribedSets: Int? = nil
 }
 
 // MARK: - SetLog

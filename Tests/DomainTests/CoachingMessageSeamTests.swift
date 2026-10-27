@@ -852,6 +852,35 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertTrue(lines[1].hasSuffix(","), "back-off rows have an empty role: \(lines[1])")
     }
 
+
+    // MARK: B7. Prescribed set count
+
+    func test_B7_inSessionAddSet_changesTargetSetsOnly() throws {
+        let ctx = try makeContext()
+        let (session, item) = threeSetSession(in: ctx)
+        let vm = SessionScreenViewModel(session: session)
+        park(vm, session, item)
+        XCTAssertEqual(item.prescribedSets, 3, "born prescribed")
+        for s in 1...3 { log(vm, ctx, set: s, load: "100") }
+        vm.addSet(toExerciseID: vm.exercises[0].id, context: ctx)
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual(item.prescribedSets, 3, "Add Set is not a prescription change")
+        XCTAssertEqual(item.effectivePrescribedSets, 3)
+    }
+
+    func test_B7_prescriptionEditsMovePrescribedSets() {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        PlanStepperEdits.setSets(i, to: 4)
+        XCTAssertEqual([i.targetSets, i.prescribedSets], [4, 4])
+        i.setRolesBySet = SessionItem.roles(backOffs: 4, tops: 1)
+        i.plannedLoadsBySet = [100, 100, 100, 100, 150]; i.plannedRepsBySet = [8, 8, 8, 8, 5]; i.plannedRIRsBySet = [2, 2, 2, 2, 2]
+        PlanStepperEdits.setSets(i, to: 3)
+        XCTAssertEqual([i.targetSets, i.prescribedSets], [3, 3])
+        let old = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        old.prescribedSets = nil
+        XCTAssertEqual(old.effectivePrescribedSets, 3)
+    }
+
     // MARK: 4. Top-set pattern, persistent 4-set items, Skip
 
     private func benchTopSetItem(reps: [Int], loads: [Double]) -> SessionItem {

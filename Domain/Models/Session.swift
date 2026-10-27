@@ -279,6 +279,13 @@ final class SessionItem {
     var topRepMax: Int?
     var topRIR: Int?
 
+    /// The number of back-off sets the PROGRAM prescribes for this session. `targetSets` is what this
+    /// session is set up to run and is changed by the in-session Add Set; `prescribedSets` is changed
+    /// only by a prescription edit (materialization, Change prescription, the Program tab, volume
+    /// regulation, insert deload, next-meso clone). nil on data from before the key existed: readers use
+    /// `effectivePrescribedSets`, which then falls back to `targetSets` (today's behavior).
+    var prescribedSets: Int?
+
     init(
         id: UUID? = UUID(),
         createdAt: Date? = Date(),
@@ -320,12 +327,15 @@ final class SessionItem {
         isPR: Bool = false,
         coachNote: String? = nil,
         nextSuggestedLoad: Double? = nil,
-        loadOverrideReasonRaw: String? = nil
+        loadOverrideReasonRaw: String? = nil,
+        prescribedSets: Int? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
         self.updatedAt = updatedAt
 
+        // A new item is born prescribed: what it is created with is what the program prescribes.
+        self.prescribedSets = prescribedSets ?? targetSets
         self.order = order
         self.exerciseId = exerciseId
         self.exerciseNameSnapshot = exerciseNameSnapshot
@@ -385,6 +395,15 @@ extension SessionItem {
 
     var hasTopSet: Bool { topCount > 0 }
 
+    /// The prescribed back-off set count (see `prescribedSets`); `targetSets` for data without the key.
+    var effectivePrescribedSets: Int { prescribedSets ?? targetSets }
+
+    /// A prescription edit: both the session's set count and the prescribed count move.
+    func setPrescribedSets(_ n: Int) {
+        targetSets = n
+        prescribedSets = n
+    }
+
     func isTopRow(_ index: Int) -> Bool {
         guard let roles = setRolesBySet, roles.indices.contains(index) else { return false }
         return roles[index] == Self.topRole
@@ -419,7 +438,7 @@ extension SessionItem {
         let backRIRs = fit(backOffValues(plannedRIRsBySet), fallback: targetRIR)
         let backLoads = backOffLoad.map { Array(repeating: $0, count: n) } ?? fit(backOffValues(plannedLoadsBySet), fallback: 0.0)
         let tops = topLoads.count
-        targetSets = n
+        setPrescribedSets(n)
         plannedLoadsBySet = backLoads + topLoads
         if tops > 0 {
             plannedRepsBySet = backReps + topReps

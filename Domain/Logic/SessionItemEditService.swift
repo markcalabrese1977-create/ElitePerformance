@@ -396,9 +396,11 @@ enum SessionItemEditService {
         let plannedReps: [Int], plannedRIRs: [Int]
         let order: Int, waveRaw: String?, priorityRaw: String?, intensifierRaw: String?
         let roles: [String]?, topRepMin: Int?, topRepMax: Int?, topRIR: Int?
+        let prescribedSets: Int?
 
         init(_ i: SessionItem) {
             item = i
+            prescribedSets = i.prescribedSets
             roles = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
             targetSets = i.targetSets; targetReps = i.targetReps; targetRIR = i.targetRIR
             setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
@@ -431,6 +433,7 @@ enum SessionItemEditService {
             item.targetRIRMin = rirMin; item.targetRIRMax = rirMax
             item.plannedRepsBySet = plannedReps; item.plannedRIRsBySet = plannedRIRs
             item.setRolesBySet = roles; item.topRepMin = topRepMin; item.topRepMax = topRepMax; item.topRIR = topRIR
+            item.prescribedSets = prescribedSets
         }
     }
 
@@ -807,7 +810,7 @@ extension SessionItemEditService {
     /// The back-off-only write (an item with no top set before or after): exactly what changePrescription always did.
     private static func applyBackOffsOnly(_ item: SessionItem, sets: Int, change: PrescriptionChange) {
         if change.setDelta != nil {
-            item.targetSets = sets
+            item.setPrescribedSets(sets)
             // The wave's set band widens to include the new count and never narrows.
             if let lo = item.setMin { item.setMin = min(lo, sets) }
             if let hi = item.setMax { item.setMax = max(hi, sets) }
@@ -847,7 +850,7 @@ extension SessionItemEditService {
         let oldTopRIRs = item.topValues(item.plannedRIRsBySet, fallback: item.topRIR ?? item.targetRIR)
 
         if change.setDelta != nil {
-            item.targetSets = sets
+            item.setPrescribedSets(sets)
             if let lo = item.setMin { item.setMin = min(lo, sets) }
             if let hi = item.setMax { item.setMax = max(hi, sets) }
             loads = resized(loads, to: sets, fallback: 0)

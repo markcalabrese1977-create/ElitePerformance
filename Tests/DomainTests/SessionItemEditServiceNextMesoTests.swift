@@ -226,7 +226,10 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
         XCTAssertEqual(result.sessionsToDelete.count, 78, "the old meso's inserted week is removed with the rest")
     }
 
-    func test_next_earnedExtraSet_isReproducedInTheSameWeekOnly() throws {
+    /// CHANGED by B7 (prescribed set count): this used to pin that an earned in-session extra set was copied
+    /// into the same week of the next meso. The clone now reads the PRESCRIBED count, so Add Set -- which only
+    /// changes what that session ran -- is not carried; a deliberate prescription edit is (next test).
+    func test_next_earnedExtraSet_isNotCopiedIntoTheNextMeso() throws {
         let (ctx, block) = try makeBlock(convert12: true)
         let p = try pick(block)
         let w5 = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day && $0.weekIndex == 5 })
@@ -240,9 +243,28 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
             result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == week }?
                 .items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }?.targetSets
         }
-        XCTAssertEqual(sets(5), base + 1)
+        XCTAssertEqual(sets(5), base, "an in-session Add Set is not the prescription")
         XCTAssertEqual(sets(11), try XCTUnwrap(item(try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day && $0.weekIndex == 11 }), p.x)).targetSets,
                        "the other B weeks keep their own count")
+        let planned = try XCTUnwrap(result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 5 }?.items.first { $0.order == it.order })
+        XCTAssertEqual(planned.plannedReps.count, base)
+    }
+
+    /// A deliberate prescription edit of one week (Change prescription / Program tab) IS copied into the same week.
+    func test_next_prescriptionEditOfOneWeek_isCopiedIntoTheSameWeekOnly() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let w5 = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day && $0.weekIndex == 5 })
+        let it = try XCTUnwrap(item(w5, p.x))
+        let base = it.targetSets
+        it.setPrescribedSets(base + 1)
+        try ctx.save()
+        let result = nextPlan(block, ctx)
+        func sets(_ week: Int) -> Int? {
+            result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == week }?
+                .items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }?.targetSets
+        }
+        XCTAssertEqual(sets(5), base + 1)
         let planned = try XCTUnwrap(result.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 5 }?.items.first { $0.order == it.order })
         XCTAssertGreaterThanOrEqual(planned.setMax ?? 0, base + 1)
         XCTAssertEqual(planned.plannedReps.count, base + 1)
@@ -337,7 +359,7 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
 
     func test_next_maintenanceBlock_nonWave_chronologicalPerDayType() throws {
         let (ctx, meso, made) = try makeMaintenanceMeso()
-        made.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }!.items.first { $0.order == 1 }!.targetSets = 3
+        made.first { $0.weekIndex == 3 && $0.dayLabel == "Day A" }!.items.first { $0.order == 1 }!.setPrescribedSets(3)
         try ctx.save()
 
         let result = Service.planNextMeso(meso: meso, name: "M2", endOldMesoNow: true, context: ctx, now: date(2026, 10, 1))
@@ -588,11 +610,12 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
 
             // The old meso moved under the plan: its template changed.
             let it = try XCTUnwrap(sessions(block).last!.items.first)
-            it.targetSets += 1
+            let n0 = it.targetSets
+            it.setPrescribedSets(n0 + 1)
             XCTAssertThrowsError(try Service.startNextMeso(planned, in: ctx)) {
                 XCTAssertEqual($0 as? Service.NextMesoError, .planStale)
             }
-            it.targetSets -= 1
+            it.setPrescribedSets(n0)
             try untouched("stale")
             // ... and the same plan still applies once the state matches again.
             XCTAssertNoThrow(try Service.startNextMeso(planned, in: ctx))
@@ -699,5 +722,62 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
             XCTAssertGreaterThan(i.plannedLoadsBySet.last ?? 0, i.suggestedLoad)
             XCTAssertTrue(i.plannedLoadsBySet.dropLast().allSatisfy { $0 == i.suggestedLoad })
         }
+    }
+
+    // MARK: - Prescribed set count survives in-session Add Set
+
+    private func planned(_ plan: Service.NextMesoPlan, week: Int, day: String, x: String) -> Service.NextMesoItem? {
+        plan.sessions.first { $0.weekIndex == week && $0.dayLabel == day }?.items
+            .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: x) }
+    }
+
+    /// Add Set on a completed session changes `targetSets` only; the clone keeps the prescribed count.
+    func test_next_clone_usesPrescribedSets_notTheAddSetInflation() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let done = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let it = try XCTUnwrap(item(done, p.x))
+        let n = it.targetSets
+        XCTAssertEqual(it.prescribedSets, n, "a seeded item is born prescribed")
+        it.targetSets = n + 1                   // what the logger's persist() does on Add Set
+        complete(done, item: it, load: 200)
+        try ctx.save()
+        XCTAssertEqual(it.prescribedSets, n, "Add Set never touches prescribedSets")
+        let plan = nextPlan(block, ctx)
+        XCTAssertEqual(planned(plan, week: done.weekIndex, day: p.day, x: p.x)?.targetSets, n)
+    }
+
+    /// Old data (no key anywhere) keeps today's behavior: the clone reads targetSets.
+    func test_next_clone_oldDataWithoutTheKey_keepsTodaysBehavior() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        for s in block.sessions { for i in s.items { i.prescribedSets = nil } }
+        let done = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let it = try XCTUnwrap(item(done, p.x))
+        let n = it.targetSets
+        it.targetSets = n + 1
+        complete(done, item: it, load: 200)
+        try ctx.save()
+        XCTAssertEqual(planned(nextPlan(block, ctx), week: done.weekIndex, day: p.day, x: p.x)?.targetSets, n + 1)
+    }
+
+    /// A completed item without the key takes the nearest same-letter session that has it.
+    func test_next_clone_nilPrescribedOnCompleted_fallsBackToTheSameLetterNeighbour() throws {
+        let (ctx, block) = try makeBlock()
+        let p = try pick(block)
+        let done = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let it = try XCTUnwrap(item(done, p.x))
+        let n = it.targetSets
+        it.targetSets = n + 1
+        it.prescribedSets = nil                  // a session logged before the key existed
+        complete(done, item: it, load: 200)
+        try ctx.save()
+        XCTAssertEqual(planned(nextPlan(block, ctx), week: done.weekIndex, day: p.day, x: p.x)?.targetSets, n,
+                       "the next same-letter session of the block carries the key")
+        // A planned session without the key is already the prescription: no fallback.
+        let later = try XCTUnwrap(sessions(block).last { $0.dayLabel == p.day })
+        let laterItem = try XCTUnwrap(item(later, p.x))
+        laterItem.prescribedSets = nil
+        XCTAssertEqual(Service.prescribedSetCount(of: laterItem, in: later, among: sessions(block)), laterItem.targetSets)
     }
 }

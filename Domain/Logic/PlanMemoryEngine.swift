@@ -293,7 +293,7 @@ struct PlanMemoryEngine {
                 if targetItem.hasTopSet {
                     targetItem.resizeBackOffs(to: newCount, backOffLoad: fill)   // keeps the top tail and roles
                 } else {
-                    targetItem.targetSets = newCount
+                    targetItem.setPrescribedSets(newCount)
                     targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
                 }
             }

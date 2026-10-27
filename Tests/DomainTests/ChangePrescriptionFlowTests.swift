@@ -342,6 +342,22 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         }
     }
 
+
+    func test_B7_changePrescriptionSets_movesPrescribedSets_withTargetSets() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let plan = SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                change: PrescriptionChange(setDelta: -1), now: Date(timeIntervalSince1970: 0))
+        let items = plan.targets.map(\.item)
+        let before = items.map(\.targetSets)
+        XCTAssertFalse(items.isEmpty)
+        try SvcB5.applyChange(plan, in: ctx)
+        for (i, b) in zip(items, before) {
+            XCTAssertEqual(i.targetSets, max(1, b - 1))
+            XCTAssertEqual(i.prescribedSets, i.targetSets)
+        }
+    }
+
     func test_B5_modelBuildsTheTopSetChange() throws {
         let (ctx, block) = try makeBlock()
         var m = try model(ctx, block)

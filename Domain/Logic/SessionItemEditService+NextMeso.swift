@@ -179,6 +179,28 @@ extension SessionItemEditService {
     }
 
     /// The day after the meso's last session, at the start of its day; nil for a meso with no sessions.
+    /// The set count the program prescribed for `item` (an item of `session`), among the meso's sessions `all`.
+    /// An item that carries `prescribedSets` answers with it. One that does not (data from before the key
+    /// existed) on a COMPLETED session may carry an in-session Add Set, so it takes the nearest same-day-type,
+    /// same-wave session of the meso that does carry the key; with none, today's `targetSets`. A planned
+    /// session's `targetSets` already is the prescription.
+    static func prescribedSetCount(of item: SessionItem, in session: Session, among all: [Session]) -> Int {
+        if let p = item.prescribedSets { return p }
+        guard session.status == .completed else { return item.targetSets }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let wave = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        let nearest = all.compactMap { other -> (gap: TimeInterval, sets: Int)? in
+            guard other !== session, SessionDayLabelMatcher.matches(other.dayLabel, session.dayLabel),
+                  let match = other.items.first(where: {
+                      ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
+                          && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == wave
+                  }),
+                  let sets = match.prescribedSets else { return nil }
+            return (abs(other.date.timeIntervalSince(session.date)), sets)
+        }.min { $0.gap < $1.gap }
+        return nearest?.sets ?? item.targetSets
+    }
+
     static func defaultNextMesoStart(for meso: MesoBlock, calendar: Calendar = .current) -> Date? {
         guard let last = meso.sessions.map(\.date).max() else { return nil }
         return calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: last) ?? last)
@@ -346,7 +368,8 @@ extension SessionItemEditService {
                 // The same exercise in the old week first, else whatever sat in the same slot there.
                 let slot = oldItems.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
                     ?? oldItems.first { $0.order == t.order }
-                let sets = max(0, slot?.targetSets ?? t.targetSets)
+                // The PRESCRIBED set count of that week, never the count an in-session Add Set left on it.
+                let sets = max(0, slot.map { prescribedSetCount(of: $0, in: row.old, among: all) } ?? t.targetSets)
                 let wave: String? = {
                     if let raw = t.waveRaw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty { return t.waveRaw }
                     return waveBased && !row.letter.isEmpty ? row.letter : nil

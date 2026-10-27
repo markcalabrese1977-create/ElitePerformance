@@ -1909,7 +1909,7 @@ final class SessionScreenViewModel: ObservableObject {
                     exerciseId: sourceItem.exerciseId,
                     exerciseNameSnapshot: sourceItem.exerciseNameSnapshot,
                     targetReps: sourceItem.targetReps,
-                    targetSets: sourceItem.targetSets,
+                    targetSets: sourceItem.effectivePrescribedSets,
                     targetRIR: sourceItem.targetRIR,
                     suggestedLoad: sourceItem.suggestedLoad,
 
