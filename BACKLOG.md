@@ -4,10 +4,9 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 
 ## Open
 
-- Install: put 48e6bcb on the phone after the Fri Oct 30 Push A backup checks out (it carries top set + back-off, the prescribed set count and its backfill, the next-meso clone, and the deinit fix). Verify the launch log lists the 10 StartupBackfills (the new one last) and that the Push A next-meso preview shows 3 back-offs on B/C weeks.
+- Install: install current HEAD after the Fri Oct 30 Push A backup checks out; commits after 46039ee are deinit (a5b3b74), baseline (48e6bcb), test-only (c3ca2d0) and docs. 46039ee carries top set + back-off, the prescribed set count and its backfill, and the next-meso clone. Verify the launch log lists the 10 StartupBackfills (the new one last) and that the Push A next-meso preview shows 3 back-offs on B/C weeks.
 - HealthKitAuthorizationCoordinator: add `nonisolated deinit {}` defensively (same shape
   as SessionScreenViewModel; tests pass today). Low priority.
-- Deinit fix: the baseline part is done (a5b3b74, 48e6bcb; B10/F6/M7 pass and are out of Tests/known_failures.txt). Remaining: delete the view-model parking workaround in SameDaySessionsTests and CoachingMessageSeamTests.
 - Top set follow-ups (feat/top-set, shipped): (a) planEdited is one flag, so a manual load edit freezes carry-forward for both roles; split per role if it bites; (b) Change prescription only offers a top count of 1 (the model allows up to 3); (c) MesoPerformanceAnalyzer, PR and recap code were not reviewed for top rows (they count every row; verify the first/last-load comparisons); (d) Add Set on an item without a top set still appends a plain row; adding a top set is done from Change prescription.
 - Coach-message honesty (mostly done): the stage-gate wording is now "N of M planned sets logged." (d491a8c) and landing / blocked-write wording shipped (0cd2455). Remaining: the unresolved-target fallback for a non-exempt reduce still says "next session"; a completed session with a skipped set reads "N of M planned sets logged." with no word about the skip.
 - Deload in place (fallback, works today; Insert deload week has since shipped, see Done): log the week light with load-override reason Deliberate Deload. Follow-ups: (a) verify a deload-flagged source never seeds an EMPTY same-letter target (new-lift first exposure) with light loads; (b) the "Last A/B/C" caption and the meso summary verdicts must skip items flagged Deliberate Deload, as they already skip deload-wave items.
@@ -56,8 +55,8 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - DONE (fe51f10): HealthKit workout sync never waits on authorization; the permission request is made once, at a safe moment, by HealthKitAuthorizationCoordinator.
 - DONE (865cce8, fcd8ef1, 1123df3, a5c5f71, 0eef263, f1f1a31): universality cleanup (no user-specific assumptions, one-shot repairs unregistered then removed) and the UniversalityGuardTests scan.
 - DONE (91308c8): text audit, neutral app-supplied wording.
-- DONE (a5b3b74, 48e6bcb): nonisolated deinit for SessionScreenViewModel; B10/F6/M7 pass and left Tests/known_failures.txt. (Parking-workaround removal is still open above.)
+- DONE (a5b3b74 nonisolated deinit for SessionScreenViewModel, 48e6bcb baseline: B10/F6/M7 pass and left Tests/known_failures.txt, c3ca2d0 parking workaround removed): deinit fix.
 - DONE (46039ee): PrescribedSetsBackfill, the tenth registered StartupBackfill.
 - Replaced, kept for history: "Next install after Oct 21: main branch; verify the launch log equals today's minus the three unregistered migrations (StartupBackfills refactor)." (superseded by the Install item above)
-- Replaced, kept for history: "Deinit fix (feat/nonisolated-deinit): own install after Oct 21; then remove B10/F6/M7 from Tests/known_failures.txt and delete the parking workaround." (baseline part done, see Open)
+- Replaced, kept for history: "Deinit fix (feat/nonisolated-deinit): own install after Oct 21; then remove B10/F6/M7 from Tests/known_failures.txt and delete the parking workaround." (done, see Done)
 - Replaced, kept for history: "Coach-message honesty: non-exempt reduce text says \"next session\"; \"N sets in. Finish the session.\" appears on completed sessions with incomplete evidence; blocked-write wording." (see Open)
