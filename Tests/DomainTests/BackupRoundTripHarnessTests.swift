@@ -45,6 +45,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "canonicalExerciseIdMigration.v1.completed",
         "week6UpperBCleanupMigration.v1.completed",
         "mesoBlockIsMaintenanceBackfill.v1.completed",
+        "prescribedSetsBackfill.v1.completed",
         "customExerciseIdRepairMigration.v1.completed",
         "sessionHistoryBlockBackfill.v1.completed",
         "exerciseNameSnapshotRepair.v6.completed",
@@ -73,7 +74,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("CustomExerciseStoreMigration", { CustomExerciseStoreMigration.runIfNeeded(in: $0) }),
         ("CustomExerciseUserDefaultsSyncRepair", { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
         ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
-        ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) })
+        ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
+        ("PrescribedSetsBackfill", { PrescribedSetsBackfill.runIfNeeded(in: $0) })
     ]
 
 
@@ -87,6 +89,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("CustomExerciseUserDefaultsSyncRepair", "customExerciseUserDefaultsSync.v1.completed"),
         ("MesoBlockIsMaintenanceBackfill", "mesoBlockIsMaintenanceBackfill.v1.completed"),
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
+        ("PrescribedSetsBackfill", "prescribedSetsBackfill.v1.completed"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
@@ -519,6 +522,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         "sessionDayLabelBackfill.v1.completed", "customExerciseStoreMigration.v1.completed",
         "customExerciseUserDefaultsSync.v1.completed", "mesoBlockIsMaintenanceBackfill.v1.completed",
         "bodyweightPhantomLoadMigration.v1.completed", "prescriptionNotesClear.v1.completed",
+        "prescribedSetsBackfill.v1.completed",
         "week6UpperBCleanupMigration.v1.completed", "custom_exercises_v2",
     ]
     private var savedDefaults: [String: Any] = [:]
@@ -609,6 +613,15 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         // A custom exercise with a long spaced name.
         ctx.insert(CustomExercise(id: "custom_\(UUID().uuidString.lowercased())",
                                   name: "Single Arm Overhead Dumbbell Triceps Extension", primaryMuscleRaw: "triceps", isCompound: false))
+        // An in-progress session (a logged first set): its targetSets may already carry an Add Set.
+        let live = item(1, "overhead_press", name: "Overhead Press")
+        live.actualReps = [8, 0, 0]; live.actualLoads = [95, 0, 0]
+        let inProgress = Session(date: day(2026, 5, 7), status: .inProgress, weekIndex: 6, dayLabel: "Upper", items: [live])
+        inProgress.meso = meso
+        ctx.insert(inProgress)
+
+        // The store as it was before `prescribedSets` existed: no item carries it.
+        for s in try ctx.fetch(FetchDescriptor<Session>()) { for i in s.items { i.prescribedSets = nil } }
         try ctx.save()
         return ctx
     }
@@ -622,15 +635,79 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
-    func test_registeredStartupBackfills_leaveAnotherUsersStoreByteIdentical() throws {
+    /// Every registered backfill but PrescribedSetsBackfill leaves the store byte-identical; that one adds
+    /// `prescribedSets` (= targetSets) to PLANNED items and changes nothing else. The comparison removes
+    /// exactly that one key from planned items and requires everything else to be unchanged.
+    func test_registeredStartupBackfills_leaveAnotherUsersStoreUnchanged_exceptPrescribedSetsOnPlannedItems() throws {
         let ctx = try makeStore()
         let before = try snapshot(ctx)
+        XCTAssertFalse(String(decoding: before, as: UTF8.self).contains("prescribedSets"), "precondition: a pre-key store")
 
         clearKeys()
         StartupBackfills.run(using: container)
 
         ctx.rollback()
-        XCTAssertEqual(try snapshot(ModelContext(container)), before, "no model changed")
+        let afterData = try snapshot(ModelContext(container))
+        var after = try XCTUnwrap(JSONSerialization.jsonObject(with: afterData) as? [String: Any])
+        var sessions = try XCTUnwrap(after["sessions"] as? [[String: Any]])
+        var plannedItems = 0, otherItems = 0
+        for s in sessions.indices {
+            let status = sessions[s]["statusRaw"] as? String
+            var items = try XCTUnwrap(sessions[s]["items"] as? [[String: Any]])
+            for i in items.indices {
+                if status == "planned" {
+                    XCTAssertEqual(items[i]["prescribedSets"] as? Int, items[i]["targetSets"] as? Int,
+                                   "planned item: prescribedSets == targetSets")
+                    items[i].removeValue(forKey: "prescribedSets")
+                    plannedItems += 1
+                } else {
+                    XCTAssertNil(items[i]["prescribedSets"], "\(status ?? "?") sessions are never touched")
+                    otherItems += 1
+                }
+            }
+            sessions[s]["items"] = items
+        }
+        after["sessions"] = sessions
+        XCTAssertGreaterThan(plannedItems, 0)
+        XCTAssertGreaterThan(otherItems, 0, "the store has completed and in-progress items too")
+        let scoped = try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys])
+        XCTAssertEqual(scoped, before, "every other byte is unchanged")
+    }
+
+    func test_prescribedSetsBackfill_isIdempotent_andWaitsForSessions() throws {
+        // An empty store: nothing to do and NOT marked done, so it still runs after a restore.
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = empty
+        clearKeys()
+        PrescribedSetsBackfill.runIfNeeded(in: ModelContext(empty))
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "prescribedSetsBackfill.v1.completed"))
+
+        let ctx = try makeStore()
+        clearKeys()
+        PrescribedSetsBackfill.runIfNeeded(in: ctx)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: "prescribedSetsBackfill.v1.completed"))
+        let once = try snapshot(ctx)
+        PrescribedSetsBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(try snapshot(ctx), once, "a second run changes nothing")
+        for s in try ctx.fetch(FetchDescriptor<Session>()) {
+            for i in s.items {
+                if s.status == .planned { XCTAssertEqual(i.prescribedSets, i.targetSets) }
+                else { XCTAssertNil(i.prescribedSets, "\(s.status) sessions are untouched") }
+            }
+        }
+        // An item that already carries the key is never overwritten.
+        let planned = try XCTUnwrap(try ctx.fetch(FetchDescriptor<Session>()).first { $0.status == .planned })
+        let keep = try XCTUnwrap(planned.items.first)
+        keep.prescribedSets = 2; keep.targetSets = 3
+        try ctx.save()
+        UserDefaults.standard.removeObject(forKey: "prescribedSetsBackfill.v1.completed")
+        PrescribedSetsBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(keep.prescribedSets, 2)
     }
 }
 

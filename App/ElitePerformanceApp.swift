@@ -219,5 +219,6 @@ enum StartupBackfills {
         CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
         MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
         BodyweightPhantomLoadMigration.runIfNeeded(in: context)
+        PrescribedSetsBackfill.runIfNeeded(in: context)
     }
 }
