@@ -18,13 +18,5 @@ ReorderTests test_J4_reorderOperatesOnOrderSortedViewNotRawArrayPosition  # flak
 TemplateSlotKeyInvariantTests test_noExerciseIdAppearsOnMoreThanOneDay_inAnyTemplate
 UnitAndIncrementChangeTests test_M13_incrementChangeReRoundsFutureSuggestionLeavesHistoricalLoadUntouched
 
-# Fail via the SessionScreenViewModel deinit abort (SIGABRT in swift_task_deinitOnExecutorMainActorBackDeploy);
-# pre-existing, newly visible when the classes run individually; remove when the crash is fixed.
-# Crash reports for these exist from 2026-09-25; B10 also verified failing at f7f952e (pre-characterization).
-LoadWriteTests test_B10_sessionScreenViewModelAddExerciseSeedsNameAndArrays
-MaintenanceBlockSeedingTests test_F6_addedExerciseToMaintenanceSessionGetsMaintenancePrescriptionAndRetentionMessage
-SameDaySessionsTests test_M7_multipleSessionsSameDateDoNotCollideOnWeekIndexOrIdentity
 # NOTE: CoachingMessageSeamTests now completes in a single process (its tests park the view model so the host no
 # longer aborts); testHandleSetLogged_completeSession above is a genuine assertion failure, not a crash.
-# SameDaySessionsTests (its only test is M7) and the B10/F6 tests above still abort the host: run everything else
-# in batches with -skip-testing for these three, and run these three only as single -only-testing runs.
