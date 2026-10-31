@@ -80,6 +80,12 @@ struct ExerciseCatalog {
         } catch { }
     }
 
+    /// Rewrites the UserDefaults mirror of the custom exercises from SwiftData, carrying every CatalogExercise
+    /// field (isBodyweight included). SwiftData is the source of truth; `all` / `displayName(for:)` read the mirror.
+    static func rebuildCustomMirror(from context: ModelContext) {
+        saveCustom(customExercises(in: context))
+    }
+
     @discardableResult
     static func addCustomExercise(
         name: String,

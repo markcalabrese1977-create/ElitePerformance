@@ -98,3 +98,45 @@ final class BackupRestorePRIndexTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(after["bench_press"]).bestSetVolume, 1000, "the stale 99,999 is replaced")
     }
 }
+
+// MARK: - Custom-exercise UserDefaults mirror
+
+final class BackupRestoreCustomMirrorTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    private let mirrorKey = "custom_exercises_v2"
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        UserDefaults.standard.removeObject(forKey: mirrorKey)
+    }
+
+    override func tearDown() {
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func mirror() throws -> [CatalogExercise] {
+        guard let data = UserDefaults.standard.data(forKey: mirrorKey) else { return [] }
+        return try JSONDecoder().decode([CatalogExercise].self, from: data)
+    }
+
+    func test_restore_rebuildsMirrorWithEveryField_includingIsBodyweight() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        let pull = ExerciseCatalog.addCustomExercise(name: "Rope Climb Probe", primaryMuscle: .back,
+                                                     isCompound: true, isBodyweight: true, in: source)
+        let curl = ExerciseCatalog.addCustomExercise(name: "Wrist Roller Probe", primaryMuscle: .biceps,
+                                                     isCompound: false, isBodyweight: false, in: source)
+        let expected = Set([pull, curl])
+
+        // A fresh install: SwiftData is restored from the file, the UserDefaults mirror starts empty.
+        UserDefaults.standard.removeObject(forKey: mirrorKey)
+        let target = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: target)
+
+        XCTAssertEqual(Set(try mirror()), expected, "every CatalogExercise field survives, not just id/name/muscle/compound")
+        XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: pull.id), "a restored bodyweight custom is still bodyweight")
+        XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: curl.id))
+    }
+}

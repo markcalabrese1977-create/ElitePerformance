@@ -8,7 +8,6 @@ import SwiftData
 /// ModelContext, so the cache must be kept in sync with SwiftData.
 enum CustomExerciseUserDefaultsSyncRepair {
     private static let completionKey = "customExerciseUserDefaultsSync.v1.completed"
-    private static let storeKey = "custom_exercises_v2"
 
     static func runIfNeeded(in context: ModelContext) {
         guard !UserDefaults.standard.bool(forKey: completionKey) else { return }
@@ -19,20 +18,8 @@ enum CustomExerciseUserDefaultsSyncRepair {
             return
         }
 
-        let catalog = exercises.map { ex in
-            CatalogExercise(
-                id: ex.id ?? UUID().uuidString,
-                name: ex.name,
-                primaryMuscle: MuscleGroup(rawValue: ex.primaryMuscleRaw ?? "") ?? .chest,
-                isCompound: ex.isCompound
-            )
-        }
-
-        if let data = try? JSONEncoder().encode(catalog) {
-            UserDefaults.standard.set(data, forKey: storeKey)
-            NotificationCenter.default.post(name: .exerciseCatalogDidChange, object: nil)
-            print("✅ CustomExerciseUserDefaultsSyncRepair: synced \(catalog.count) exercise(s) to UserDefaults")
-        }
+        ExerciseCatalog.rebuildCustomMirror(from: context)
+        print("✅ CustomExerciseUserDefaultsSyncRepair: synced \(exercises.count) exercise(s) to UserDefaults")
 
         UserDefaults.standard.set(true, forKey: completionKey)
     }
