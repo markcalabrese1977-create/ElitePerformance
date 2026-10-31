@@ -51,25 +51,23 @@ enum EquipmentPreset: String, Codable, CaseIterable {
     case homeBarbell
     case dumbbellsBench
     case machinesOnly
-    case bodyweight
 
     /// Equipment tags a lifter on this preset can be assumed to have.
     var defaultEquipment: Set<GearTag> {
         switch self {
         case .fullGym:        return Set(GearTag.allCases)
-        case .homeBarbell:    return [.barbell, .ezBar, .dumbbell, .bench, .pullUpBar]
+        case .homeBarbell:    return [.barbell, .ezBar, .dumbbell, .bench, .rack, .pullUpBar]
         case .dumbbellsBench: return [.dumbbell, .bench]
         case .machinesOnly:   return [.machine, .cable, .smith]
-        case .bodyweight:     return []
         }
     }
 
     /// Closest legacy `EquipmentProfile`, kept in step so existing readers of `equipmentProfile` still work.
     var legacyProfile: EquipmentProfile {
         switch self {
-        case .fullGym, .machinesOnly:      return .commercial
-        case .homeBarbell:                 return .homeGym
-        case .dumbbellsBench, .bodyweight: return .dumbbellsOnly
+        case .fullGym, .machinesOnly: return .commercial
+        case .homeBarbell:            return .homeGym
+        case .dumbbellsBench:         return .dumbbellsOnly
         }
     }
 
@@ -88,6 +86,7 @@ enum GearTag: String, Codable, CaseIterable, Hashable {
     case ezBar
     case dumbbell
     case bench
+    case rack
     case cable
     case machine
     case smith
@@ -145,7 +144,11 @@ final class UserProfile {
 
     var equipmentPreset: EquipmentPreset {
         get {
-            if let raw = equipmentPresetRaw, let preset = EquipmentPreset(rawValue: raw) { return preset }
+            if let raw = equipmentPresetRaw {
+                // "bodyweight" was a preset in an unreleased draft; it reads as the closest remaining one.
+                if raw == "bodyweight" { return .dumbbellsBench }
+                if let preset = EquipmentPreset(rawValue: raw) { return preset }
+            }
             return EquipmentPreset(legacy: equipmentProfile)
         }
         set {

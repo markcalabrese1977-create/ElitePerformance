@@ -840,6 +840,58 @@ struct ExerciseCatalog {
 
     // MARK: - All exercises array
 
+    // MARK: - Added with the equipment-aware fitter (generic barbell / dumbbell / bodyweight options)
+
+    static let barbellBackSquat = CatalogExercise(
+        id: "barbell_back_squat",
+        name: "Barbell Back Squat",
+        primaryMuscle: .quads,
+        isCompound: true
+    )
+
+    static let barbellOverheadPress = CatalogExercise(
+        id: "barbell_overhead_press",
+        name: "Barbell Overhead Press",
+        primaryMuscle: .shoulders,
+        isCompound: true
+    )
+
+    static let barbellHipThrust = CatalogExercise(
+        id: "barbell_hip_thrust",
+        name: "Barbell Hip Thrust",
+        primaryMuscle: .glutes,
+        isCompound: true
+    )
+
+    static let dumbbellRomanianDeadlift = CatalogExercise(
+        id: "dumbbell_romanian_deadlift",
+        name: "Dumbbell Romanian Deadlift",
+        primaryMuscle: .hamstrings,
+        isCompound: true
+    )
+
+    static let dumbbellSingleLegCalfRaise = CatalogExercise(
+        id: "dumbbell_single_leg_calf_raise",
+        name: "Dumbbell Single-Leg Calf Raise",
+        primaryMuscle: .calves,
+        isCompound: false
+    )
+
+    static let bodyweightCalfRaise = CatalogExercise(
+        id: "bodyweight_calf_raise",
+        name: "Bodyweight Calf Raise",
+        primaryMuscle: .calves,
+        isCompound: false,
+        isBodyweight: true
+    )
+
+    static let dumbbellPullover = CatalogExercise(
+        id: "dumbbell_pullover",
+        name: "Dumbbell Pullover",
+        primaryMuscle: .back,
+        isCompound: false
+    )
+
     /// Master list used by lookups throughout the app.
     static var builtIn: [CatalogExercise] = [
         // Chest / push
@@ -956,6 +1008,15 @@ struct ExerciseCatalog {
                         cableOverheadCurl,
                         spiderCurl,
                         machineCurl,
+
+                // Fitter additions
+                barbellBackSquat,
+                barbellOverheadPress,
+                barbellHipThrust,
+                dumbbellRomanianDeadlift,
+                dumbbellSingleLegCalfRaise,
+                bodyweightCalfRaise,
+                dumbbellPullover,
     ]
     static var all: [CatalogExercise] {
         let userDefaultsCustom = loadUniversalCustomExercises()
@@ -1185,6 +1246,7 @@ extension ExerciseCatalog {
                      "arnold_press",
                      "dumbbell_shoulder_press",
                      "machine_shoulder_press",
+                     "barbell_overhead_press",
                      "upright_row":
                     return .secondaryPressOrArms
 
@@ -1200,6 +1262,9 @@ extension ExerciseCatalog {
                      "smith_machine_squat",
                      "sumo_deadlift",
                      "conventional_deadlift",
+                     "barbell_back_squat",
+                     "barbell_hip_thrust",
+                     "dumbbell_romanian_deadlift",
                      "glute_bridge",
                      "step_up":
                     return .primaryLeg
@@ -1247,6 +1312,9 @@ extension ExerciseCatalog {
                      "cable_woodchop",
                      "plank",
                      "decline_sit_up",
+                     "dumbbell_single_leg_calf_raise",
+                     "bodyweight_calf_raise",
+                     "dumbbell_pullover",
                      "toes_to_bar":
                     return .pumpIsolation
 
