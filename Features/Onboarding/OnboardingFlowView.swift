@@ -483,6 +483,7 @@ struct OnboardingFlowView: View {
         case .shoulders: return "Shoulders"
         case .elbows:    return "Elbows"
         case .wrists:    return "Wrists"
+        case .hips:      return "Hips"
         }
     }
 
@@ -1106,7 +1107,7 @@ struct OnboardingFlowView: View {
 
 extension InjuryFlag: CaseIterable {
     static var allCases: [InjuryFlag] {
-        [.lowBack, .knees, .shoulders, .elbows, .wrists]
+        [.lowBack, .knees, .shoulders, .elbows, .wrists, .hips]
     }
 }
 

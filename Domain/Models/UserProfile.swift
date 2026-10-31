@@ -36,6 +36,7 @@ enum InjuryFlag: String, Codable {
     case shoulders
     case elbows
     case wrists
+    case hips
 }
 
 enum EquipmentProfile: String, Codable {
