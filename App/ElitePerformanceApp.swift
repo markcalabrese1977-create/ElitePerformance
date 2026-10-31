@@ -11,21 +11,7 @@ struct ElitePerformanceApp: App {
         // device log always opens with which build produced everything below it.
         print("ℹ️ \(BuildInfo.logLine)")
 
-        let schema = Schema([
-            User.self,
-            ProgramState.self,
-            Session.self,
-            SessionItem.self,
-            SetLog.self,
-            PRIndex.self,
-            SessionHistory.self,
-            SessionHistoryExercise.self,
-            ExerciseNote.self,
-            AppState.self,
-            MesoBlock.self,
-            UserProfile.self,
-            CustomExercise.self
-        ])
+        let schema = AppSchema.makeSchema()
 
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
