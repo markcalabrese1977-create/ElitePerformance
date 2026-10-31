@@ -42,6 +42,9 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"
   (executionNoteLine, editable via Change for remaining sessions). From the exercise
   card, offer a link to edit the session cue for remaining sessions.
+- Custom "Concentration Curl" duplicates the built-in concentration_curl (found by the
+  O1 collision check). Decide: merge the custom into the built-in (move history,
+  canonical id) via the existing dedup path, or rename. Low priority.
 
 ## Done (Oct 2026)
 
