@@ -170,14 +170,15 @@ enum ProgramFitter {
         return map
     }()
 
-    private struct Candidate {
+    /// A substitution candidate. Internal so tests can inject a synthetic pool.
+    struct Candidate {
         let index: Int
         let exercise: CatalogExercise
         let traits: ExerciseTraits
     }
 
     /// Tagged built-ins in catalog order. Untagged built-ins and customs are not here, so they are never chosen.
-    private static let candidates: [Candidate] = catalog.enumerated().compactMap { i, ex in
+    static let candidates: [Candidate] = catalog.enumerated().compactMap { i, ex in
         ExerciseTraits.traits(for: ex.id).map { Candidate(index: i, exercise: ex, traits: $0) }
     }
 
@@ -193,8 +194,8 @@ enum ProgramFitter {
     /// Which stage of the substitution order produced a replacement.
     enum SubstitutionStage: Equatable {
         case pattern    // (a) same pattern, max stress on flagged joints <= 1
-        case muscle     // (b) same primary muscle, lowest available stress
-        case fallback   // (c) lowest-stress available option (same pattern or muscle), none under the (a) limit
+        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1
+        case fallback   // (c) nothing passes the (a)/(b) stress filter: lowest-stress available option
     }
 
     enum SlotOutcome: Equatable {
@@ -220,7 +221,8 @@ enum ProgramFitter {
 
     /// The substitution decision for every slot of a day, in order. `used` starts as every exercise in the original day
     /// and grows with each replacement, so a swap never duplicates an exercise. Internal so tests can check each stage.
-    static func substitutionPlan(_ day: ProgramDayTemplate, profile: FitProfile) -> [SlotPlan] {
+    static func substitutionPlan(_ day: ProgramDayTemplate, profile: FitProfile, pool: [Candidate]? = nil) -> [SlotPlan] {
+        let candidates = pool ?? Self.candidates
         var used = Set(day.exerciseTemplates.map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
         var plan: [SlotPlan] = []
 
@@ -244,37 +246,37 @@ enum ProgramFitter {
                         && (!available || flaggedStress(c.traits, profile.injuries) < ownStress)
                 }
             }
-            // Within a stage's safe set prefer: same isCompound, loadable if the original was loaded, lower flagged
-            // stress, then catalog order.
+            // Every stage orders its candidates the same way: loadable (when the original was loaded), then same
+            // isCompound, then lower summed flagged stress, then catalog order.
             let originalLoaded = !current.exercise.isBodyweight
             func preferred(_ safe: [Candidate]) -> Candidate? {
-                safe.min { a, b in
-                    func key(_ c: Candidate) -> (Int, Int, Int, Int) {
-                        (c.exercise.isCompound != current.exercise.isCompound ? 1 : 0,
-                         originalLoaded && c.exercise.isBodyweight ? 1 : 0,
-                         flaggedStress(c.traits, profile.injuries), c.index)
-                    }
-                    return key(a) < key(b)
+                func key(_ c: Candidate) -> (Int, Int, Int, Int) {
+                    (originalLoaded && c.exercise.isBodyweight ? 1 : 0,
+                     c.exercise.isCompound != current.exercise.isCompound ? 1 : 0,
+                     flaggedStress(c.traits, profile.injuries), c.index)
                 }
+                return safe.min { key($0) < key($1) }
             }
-            // Stages (b) and (c) first narrow to the lowest available stress.
-            func lowestStress(_ pool: [Candidate]) -> Candidate? {
-                let u = usable(pool)
-                guard let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min() else { return nil }
-                return preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m })
+            func safe(_ pool: [Candidate]) -> [Candidate] {
+                usable(pool).filter { maxStress($0.traits, profile.injuries) <= patternStageMaxStress }
             }
             let samePattern = candidates.filter { $0.traits.pattern == traits.pattern }
             let sameMuscle = candidates.filter { $0.exercise.primaryMuscle == current.exercise.primaryMuscle }
 
             let found: (Candidate, SubstitutionStage)?
-            if let c = preferred(usable(samePattern.filter { maxStress($0.traits, profile.injuries) <= patternStageMaxStress })) {
+            if let c = preferred(safe(samePattern)) {
                 found = (c, .pattern)
-            } else if let c = lowestStress(sameMuscle) {
+            } else if let c = preferred(safe(sameMuscle)) {
                 found = (c, .muscle)
-            } else if let c = lowestStress(candidates.filter { $0.traits.pattern == traits.pattern || $0.exercise.primaryMuscle == current.exercise.primaryMuscle }) {
-                found = (c, .fallback)
             } else {
-                found = nil
+                // (c) nothing passes the stress filter: take the lowest-stress usable option, same preference order.
+                let u = usable(candidates.filter { $0.traits.pattern == traits.pattern || $0.exercise.primaryMuscle == current.exercise.primaryMuscle })
+                if let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min(),
+                   let c = preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m }) {
+                    found = (c, .fallback)
+                } else {
+                    found = nil
+                }
             }
 
             if let (chosen, stage) = found {

@@ -148,6 +148,7 @@ struct ExerciseTraits: Equatable {
         "machine_curl": ExerciseTraits(equipment: [.machine], pattern: .elbowFlexion),
         "barbell_back_squat": ExerciseTraits(equipment: [.barbell, .rack], pattern: .squat, stress: [.lowBack: 1, .knees: 2, .hips: 1]),
         "barbell_overhead_press": ExerciseTraits(equipment: [.barbell, .rack], pattern: .verticalPress, stress: [.lowBack: 1, .shoulders: 2, .elbows: 1, .wrists: 1]),
+        "landmine_press": ExerciseTraits(equipment: [.barbell], pattern: .verticalPress, stress: [.shoulders: 1, .elbows: 1, .wrists: 1]),
         "barbell_hip_thrust": ExerciseTraits(equipment: [.barbell, .bench], pattern: .gluteBridge, stress: [.lowBack: 1, .hips: 1]),
         "dumbbell_romanian_deadlift": ExerciseTraits(equipment: [.dumbbell], pattern: .hipHinge, stress: [.lowBack: 1, .hips: 1]),
         "dumbbell_single_leg_calf_raise": ExerciseTraits(equipment: [.dumbbell], pattern: .calfRaise),

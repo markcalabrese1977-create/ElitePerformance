@@ -856,6 +856,13 @@ struct ExerciseCatalog {
         isCompound: true
     )
 
+    static let landminePress = CatalogExercise(
+        id: "landmine_press",
+        name: "Landmine Press",
+        primaryMuscle: .shoulders,
+        isCompound: true
+    )
+
     static let barbellHipThrust = CatalogExercise(
         id: "barbell_hip_thrust",
         name: "Barbell Hip Thrust",
@@ -1012,6 +1019,7 @@ struct ExerciseCatalog {
                 // Fitter additions
                 barbellBackSquat,
                 barbellOverheadPress,
+                landminePress,
                 barbellHipThrust,
                 dumbbellRomanianDeadlift,
                 dumbbellSingleLegCalfRaise,
@@ -1247,6 +1255,7 @@ extension ExerciseCatalog {
                      "dumbbell_shoulder_press",
                      "machine_shoulder_press",
                      "barbell_overhead_press",
+                     "landmine_press",
                      "upright_row":
                     return .secondaryPressOrArms
 

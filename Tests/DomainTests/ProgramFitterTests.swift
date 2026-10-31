@@ -213,10 +213,10 @@ final class ProgramFitterTests: XCTestCase {
     // MARK: - Stage-local optimality
 
     /// Re-derives each swap from the documented stage order and checks the fitter chose the optimum of the first
-    /// stage that had any candidate: stage (a) filters to max flagged stress <= 1, stages (b) and (c) to the lowest
-    /// available stress; then the preference is same isCompound, loadable if the original was loaded, lower flagged
-    /// stress, catalog order. Also: never a stress-2 choice on a flagged joint when a later stage offered lower, and
-    /// a loaded slot never gets a bodyweight-only substitute when a loadable safe option of the same kind existed.
+    /// stage that had any candidate: stages (a) same pattern and (b) same muscle keep only candidates whose max flagged
+    /// stress is <= 1, ordered loadable (if the original was loaded) > same isCompound > lower summed stress > catalog
+    /// order; stage (c) runs only when neither passes and takes the lowest stress. Also: a loaded original never gets a
+    /// bodyweight-only substitute when any safe loadable candidate exists in that stage, regardless of compound-ness.
     func test_substitutionStages_areLocallyOptimal() {
         var failures: [String] = []
         var staged = [0, 0, 0]
@@ -253,7 +253,7 @@ final class ProgramFitterTests: XCTestCase {
                                 return u.filter { sum($0.1) == m }
                             }
                             func key(_ e: (CatalogExercise, ExerciseTraits, Int)) -> (Int, Int, Int, Int) {
-                                (e.0.isCompound != current.isCompound ? 1 : 0, !current.isBodyweight && e.0.isBodyweight ? 1 : 0, sum(e.1), e.2)
+                                (!current.isBodyweight && e.0.isBodyweight ? 1 : 0, e.0.isCompound != current.isCompound ? 1 : 0, sum(e.1), e.2)
                             }
                             func best(_ safe: [(CatalogExercise, ExerciseTraits, Int)]) -> CatalogExercise? { safe.min { key($0) < key($1) }?.0 }
 
@@ -261,7 +261,7 @@ final class ProgramFitterTests: XCTestCase {
                             let sameMuscle = builtIn.filter { $0.primaryMuscle == current.primaryMuscle }
                             let union = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern || $0.primaryMuscle == current.primaryMuscle }
                             let safeA = usable(samePattern).filter { peak($0.1) <= 1 }
-                            let safeB = lowest(usable(sameMuscle))
+                            let safeB = usable(sameMuscle).filter { peak($0.1) <= 1 }
                             let safeC = lowest(usable(union))
                             let expected: (CatalogExercise?, ProgramFitter.SubstitutionStage, [(CatalogExercise, ExerciseTraits, Int)])
                             if !safeA.isEmpty { expected = (best(safeA), .pattern, safeA) }
@@ -275,15 +275,14 @@ final class ProgramFitterTests: XCTestCase {
                                 let laterLowest = [best(safeB), best(safeC)].compactMap { $0 }.compactMap { ExerciseTraits.traits(for: $0.id) }.map(sum).min()
                                 if let l = laterLowest, l < sum(ct) { failures.append("\(tag): stress-2 choice \(chosenId) but a later stage had stress \(l)") }
                             }
-                            if stage == .pattern, let ct = ExerciseTraits.traits(for: chosenId), peak(ct) > 1 {
-                                failures.append("\(tag): stage (a) chose peak stress \(peak(ct))")
+                            if stage != .fallback, let ct = ExerciseTraits.traits(for: chosenId), peak(ct) > 1 {
+                                failures.append("\(tag): stage \(stage) chose peak stress \(peak(ct))")
                             }
-                            // loaded slot, bodyweight-only substitute, loadable safe option of the same kind existed
-                            if let chosen = builtIn.first(where: { $0.id == chosenId }), !current.isBodyweight, chosen.isBodyweight {
-                                if expected.2.contains(where: { !$0.0.isBodyweight && $0.0.isCompound == chosen.isCompound }) {
-                                    failures.append("\(tag): loaded slot got bodyweight-only \(chosenId) although a loadable safe option existed")
-                                }
-                                if expected.2.contains(where: { !$0.0.isBodyweight }) { passedOverLoadable += 1 }
+                            // a loaded original never gets a bodyweight-only substitute while any safe loadable candidate exists
+                            if let chosen = builtIn.first(where: { $0.id == chosenId }), !current.isBodyweight, chosen.isBodyweight,
+                               expected.2.contains(where: { !$0.0.isBodyweight }) {
+                                failures.append("\(tag): loaded slot got bodyweight-only \(chosenId) although a safe loadable candidate existed")
+                                passedOverLoadable += 1
                             }
                             used.insert(chosenId)
                         }
@@ -291,8 +290,54 @@ final class ProgramFitterTests: XCTestCase {
                 }
             }
         }
-        print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) fallback=\(staged[2]) bodyweightOverLoadableOfOtherKind=\(passedOverLoadable) failures=\(failures.count)")
+        print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) fallback=\(staged[2]) bodyweightOverSafeLoadable=\(passedOverLoadable) failures=\(failures.count)")
         XCTAssertTrue(failures.isEmpty, failures.prefix(15).joined(separator: "\n"))
+    }
+
+    // MARK: - Stage (c), synthetic
+
+    private func fake(_ id: String, _ index: Int, muscle: MuscleGroup, compound: Bool, traits: ExerciseTraits) -> ProgramFitter.Candidate {
+        ProgramFitter.Candidate(index: index, exercise: CatalogExercise(id: id, name: id, primaryMuscle: muscle, isCompound: compound), traits: traits)
+    }
+
+    private func hackSquatDay() -> ProgramDayTemplate {
+        ProgramDayTemplate(id: "d", dayNumber: 1, title: "Day", role: "", exerciseTemplates: [slot("s1", 1, "hack_squat", .standard)])
+    }
+
+    /// No candidate passes the stress filter in (a) or (b): stage (c) takes the lowest stress, and only then.
+    func test_stageC_runsOnlyWhenNoCandidatePassesTheFilter_andTakesTheLowestStress() {
+        let prof = FitProfile(equipment: [.dumbbell], injuries: [.knees, .hips], sessionMinutes: 120)
+        let day = hackSquatDay()
+        // all stress-2 on a flagged joint, same pattern and muscle; one needs a machine (unavailable) with stress 0
+        let heavy = fake("heavy", 1, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 2, .hips: 1]))
+        let lighter = fake("lighter", 2, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 2]))
+        let unavailable = fake("unavailable", 3, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.machine], pattern: .squat))
+        let plan = ProgramFitter.substitutionPlan(day, profile: prof, pool: [heavy, lighter, unavailable])
+        XCTAssertEqual(plan.map(\.outcome), [.replace(exerciseId: "lighter", stage: .fallback)])
+
+        // add one candidate that passes the filter: stage (a) wins even though (c) has lower-stress-sum options
+        let safe = fake("safe", 4, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 1, .hips: 1]))
+        let plan2 = ProgramFitter.substitutionPlan(day, profile: prof, pool: [heavy, lighter, unavailable, safe])
+        XCTAssertEqual(plan2.map(\.outcome), [.replace(exerciseId: "safe", stage: .pattern)])
+
+        // stage (b): same muscle, different pattern, passes the filter
+        let sibling = fake("sibling", 5, muscle: .quads, compound: false, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .kneeExtension, stress: [.knees: 1]))
+        let plan3 = ProgramFitter.substitutionPlan(day, profile: prof, pool: [heavy, lighter, sibling])
+        XCTAssertEqual(plan3.map(\.outcome), [.replace(exerciseId: "sibling", stage: .muscle)])
+    }
+
+    /// Loaded original: any safe loadable candidate beats a bodyweight-only one, even when the bodyweight one matches
+    /// compound-ness and has lower stress.
+    func test_loadedOriginal_prefersSafeLoadableOverBodyweightOnly_regardlessOfCompoundness() {
+        let prof = FitProfile(equipment: [.dumbbell], injuries: [], sessionMinutes: 120)
+        let day = hackSquatDay()
+        var bw = fake("bw", 1, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [], pattern: .squat))
+        bw = ProgramFitter.Candidate(index: 1, exercise: CatalogExercise(id: "bw", name: "bw", primaryMuscle: .quads, isCompound: true, isBodyweight: true), traits: bw.traits)
+        let loaded = fake("loaded", 2, muscle: .quads, compound: false, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [:]))
+        let plan = ProgramFitter.substitutionPlan(day, profile: prof, pool: [bw, loaded])
+        XCTAssertEqual(plan.map(\.outcome), [.replace(exerciseId: "loaded", stage: .pattern)])
+        // with no loadable candidate the bodyweight option is still taken
+        XCTAssertEqual(ProgramFitter.substitutionPlan(day, profile: prof, pool: [bw]).map(\.outcome), [.replace(exerciseId: "bw", stage: .pattern)])
     }
 
     // MARK: - Targeted behaviour

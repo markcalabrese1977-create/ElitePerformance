@@ -37,6 +37,11 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   template band (store it, or recompute from the wave prescription), never below it.
 - Rest today (low priority): when the refusal is a collision with the next week's first session, say
   "No open day this week. Skip a session instead."
+- Custom "Landmine Press" (shoulders, compound; 6 logged items in the Oct 30 backup) duplicates the new built-in
+  landmine_press. The one-shot dedup migration already ran on existing installs, so the two coexist. Decide: merge the
+  custom into the built-in (move history, canonical id) or rename. ExerciseTraitsCoverageTests tracks it as a known
+  collision. Low priority.
+- 2-Day Full Body template is ~99 min untrimmed; trim its content (pre-launch).
 - Program selection ignores equipment/injury flags (6-day dumbbell-only user gets machines/cables). Part of Phase 3.1 onboarding; pre-launch.
 - Notes UX (pre-launch): two note types look alike. Label them in the UI: "Exercise
   note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"
