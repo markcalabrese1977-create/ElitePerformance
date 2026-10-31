@@ -219,3 +219,49 @@ final class LegacyExerciseNotesBackfillTests: XCTestCase {
         XCTAssertTrue(ExerciseNotesStore.legacyEntries().isEmpty)
     }
 }
+
+// MARK: - App Group mechanicalLoad.* projection
+
+final class BackupRestoreMechanicalLoadTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+    }
+
+    override func tearDown() {
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    func test_restore_rebuildsTheAppGroupProjection() throws {
+        guard let group = UserDefaults(suiteName: MechanicalLoadSharedStore.appGroupID) else {
+            throw XCTSkip("App Group defaults unavailable in this environment")
+        }
+        let day = BackupTestSupport.date(1_000_000)
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        source.insert(SessionHistory(date: day, weekIndex: 1, title: "A", subtitle: "Week 1", totalExercises: 1,
+                                     totalSets: 3, totalVolume: 100, mechanicalLoad: 4321, exercises: []))
+        try source.save()
+
+        // Left behind by whatever was on the device before: a day the restored history does not have.
+        let staleKey = MechanicalLoadSharedStore.keyPrefix + "1900-01-01"
+        group.set(777.0, forKey: staleKey)
+        group.removeObject(forKey: MechanicalLoadSharedStore.keyPrefix + Self.dateKey(day))
+        XCTAssertEqual(group.double(forKey: staleKey), 777, "precondition: the group store is writable here")
+
+        try BackupTestSupport.restore(from: source, into: try BackupTestSupport.makeContainer())
+
+        XCTAssertEqual(MechanicalLoadSharedStore.read(for: day), 4321, "the restored day is projected")
+        XCTAssertEqual(group.double(forKey: staleKey), 0, "a projection with no history behind it is cleared")
+    }
+
+    private static func dateKey(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Calendar.current.startOfDay(for: date))
+    }
+}

@@ -303,6 +303,10 @@ enum BackupSnapshotImporter {
             AppStateBridge.syncToUserDefaults(from: restoredAppState)
         }
 
+        // The App Group mechanicalLoad.* day totals are a projection of SessionHistory, which was just restored:
+        // rebuild them (this also clears totals left behind by the data that was replaced).
+        MechanicalLoadProjector.projectAll(in: modelContext)
+
         // Rebuild the UserDefaults mirror of the custom exercises from the restored rows so
         // ExerciseCatalog.all can resolve their names (and isBodyweight) without a ModelContext.
         // Always rewritten, an empty list included: a backup with no customs must clear a stale mirror.
