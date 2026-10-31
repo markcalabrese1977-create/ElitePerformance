@@ -2,6 +2,12 @@
 
 One line per item; dates are 2026. Open items first; shipped items are under "Done (Oct 2026)" with their commits (original wording kept).
 
+## Rules
+
+- New persisted field: add it to the backup DTO, exporter and importer, and set it to a non-default value in the BA2 builder (`PopulatedStoreBuilder`). BA1 fails with `Entity.field` otherwise. A field that must not be backed up goes in `BackupSchemaMap.exclusions` with a one-line reason.
+- New UserDefaults / App Group key: register it in `PersistedKeyRegistry` (Domain/Sync) with a disposition; BA3 fails on any key the registry does not cover. Prefer a model field.
+- New persisted model: add it to `AppSchema.models`; BA1 and the app container both read that one list.
+
 ## Open
 
 - Install: install current HEAD after the Fri Oct 30 Push A backup checks out; commits after 46039ee are deinit (a5b3b74), baseline (48e6bcb), test-only (c3ca2d0) and docs. 46039ee carries top set + back-off, the prescribed set count and its backfill, and the next-meso clone. Verify the launch log lists the 10 StartupBackfills (the new one last) and that the Push A next-meso preview shows 3 back-offs on B/C weeks.
