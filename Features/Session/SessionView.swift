@@ -23,7 +23,7 @@ struct SessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: SessionScreenViewModel
     @State private var hasDisabledIdleTimer = false
-    @AppStorage("warmup.isHidden.v1") private var isWarmupHidden = false
+    @AppStorage(AppStateBridge.warmupHiddenKey) private var isWarmupHidden = false
     // Unified sheet state (swap / recap / history / note / add)
     @State private var activeSheet: ActiveSheet?
     @State private var pendingAddedExerciseForPropagation: (exerciseId: String, exerciseName: String)?
@@ -256,6 +256,9 @@ struct SessionView: View {
             lastLetterCaptions = viewModel.lastLetterCaptions(context: modelContext)
         }
         .onDisappear(perform: restoreIdleTimerIfNeeded)
+        .onChange(of: isWarmupHidden) { hidden in
+            AppStateBridge.setWarmupHidden(hidden, in: modelContext)
+        }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {
                 viewModel.refreshFromSession()

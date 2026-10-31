@@ -7,6 +7,8 @@ enum AppStateBridge {
     private static let promptSnoozeEpochKey = "meso.promptSnoozeEpoch"
     private static let anchorDateKey = "meso.anchorDate"
     private static let anchorDayNumberKey = "meso.anchorDayNumber"
+    /// The session screen's @AppStorage key for the warm-up card; AppState.warmupHidden is its backed-up copy.
+    static let warmupHiddenKey = "warmup.isHidden.v1"
 
 
     static func shared(in context: ModelContext) -> AppState {
@@ -64,6 +66,11 @@ enum AppStateBridge {
                 state.mesoAnchorDayNumber = v
                 changed = true
             }
+        }
+
+        if state.warmupHidden == nil, let hidden = UserDefaults.standard.object(forKey: warmupHiddenKey) as? Bool {
+            state.warmupHidden = hidden
+            changed = true
         }
 
         if state.id == nil {
@@ -125,6 +132,12 @@ enum AppStateBridge {
             UserDefaults.standard.removeObject(forKey: anchorDayNumberKey)
         }
 
+
+        // Only ever written, never cleared: a nil AppState value means "not captured yet", and the device's own
+        // setting must not be wiped by it.
+        if let hidden = state.warmupHidden {
+            UserDefaults.standard.set(hidden, forKey: warmupHiddenKey)
+        }
     }
 
 
@@ -159,5 +172,13 @@ enum AppStateBridge {
         state.updatedAt = Date()
         try? context.save()
         syncToUserDefaults(from: state)
+    }
+
+    static func setWarmupHidden(_ hidden: Bool, in context: ModelContext) {
+        let state = shared(in: context)
+        guard state.warmupHidden != hidden else { return }
+        state.warmupHidden = hidden
+        state.updatedAt = Date()
+        try? context.save()
     }
 }

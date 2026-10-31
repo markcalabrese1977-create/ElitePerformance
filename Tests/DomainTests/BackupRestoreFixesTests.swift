@@ -265,3 +265,64 @@ final class BackupRestoreMechanicalLoadTests: XCTestCase {
         return f.string(from: Calendar.current.startOfDay(for: date))
     }
 }
+
+// MARK: - warmup.isHidden.v1 (user preference, backed up through AppState)
+
+final class BackupWarmupPreferenceTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    private let key = AppStateBridge.warmupHiddenKey
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    override func tearDown() {
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    func test_setWarmupHidden_isExported() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        AppStateBridge.setWarmupHidden(true, in: ctx)
+
+        let appState = try XCTUnwrap(BackupTestSupport.exportJSON(ctx)["appState"] as? [String: Any])
+        XCTAssertEqual(appState["warmupHidden"] as? Bool, true)
+    }
+
+    func test_restore_putsThePreferenceBackInUserDefaults() throws {
+        for hidden in [true, false] {
+            let source = ModelContext(try BackupTestSupport.makeContainer())
+            AppStateBridge.setWarmupHidden(hidden, in: source)
+            UserDefaults.standard.set(!hidden, forKey: key)   // the device disagrees with the backup
+
+            let target = try BackupTestSupport.makeContainer()
+            try BackupTestSupport.restore(from: source, into: target)
+
+            XCTAssertEqual(UserDefaults.standard.object(forKey: key) as? Bool, hidden, "restored value wins (\(hidden))")
+            XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<AppState>()).first?.warmupHidden, hidden)
+        }
+    }
+
+    func test_backupWithoutThePreference_leavesTheDevicesOwnSetting() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        source.insert(AppState())
+        try source.save()
+        UserDefaults.standard.set(true, forKey: key)
+
+        try BackupTestSupport.restore(from: source, into: try BackupTestSupport.makeContainer())
+
+        XCTAssertEqual(UserDefaults.standard.object(forKey: key) as? Bool, true, "a nil backup value never clears it")
+    }
+
+    func test_existingDeviceSetting_isCapturedIntoAppState() throws {
+        UserDefaults.standard.set(true, forKey: key)
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+
+        AppStateBridge.importFromUserDefaultsIfNeeded(in: ctx)
+
+        XCTAssertEqual(AppStateBridge.shared(in: ctx).warmupHidden, true)
+    }
+}

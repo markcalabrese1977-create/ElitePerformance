@@ -67,6 +67,8 @@ struct AppStateBackupDTO: Codable {
     let mesoAnchorDayNumber: Int?
 
     let appModeRaw: String?
+    // Added (warm-up card preference). Optional so OLD backups decode with nil: the device keeps its own setting.
+    var warmupHidden: Bool? = nil
 }
 
 // MARK: - MesoBlock

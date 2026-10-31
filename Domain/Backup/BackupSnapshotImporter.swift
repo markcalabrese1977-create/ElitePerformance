@@ -56,7 +56,8 @@ enum BackupSnapshotImporter {
                 mesoPromptSnoozeUntil: dto.mesoPromptSnoozeUntil,
                 mesoAnchorDate: dto.mesoAnchorDate,
                 mesoAnchorDayNumber: dto.mesoAnchorDayNumber,
-                appModeRaw: dto.appModeRaw
+                appModeRaw: dto.appModeRaw,
+                warmupHidden: dto.warmupHidden
             )
             modelContext.insert(appState)
         }

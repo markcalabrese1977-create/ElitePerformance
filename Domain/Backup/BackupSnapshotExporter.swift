@@ -51,7 +51,8 @@ enum BackupSnapshotExporter {
                     mesoPromptSnoozeUntil: $0.mesoPromptSnoozeUntil,
                     mesoAnchorDate: $0.mesoAnchorDate,
                     mesoAnchorDayNumber: $0.mesoAnchorDayNumber,
-                    appModeRaw: $0.appModeRaw
+                    appModeRaw: $0.appModeRaw,
+                    warmupHidden: $0.warmupHidden
                 )
             },
             userProfile: userProfile.map {
