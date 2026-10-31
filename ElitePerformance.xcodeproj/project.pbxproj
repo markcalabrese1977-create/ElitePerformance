@@ -121,6 +121,9 @@
 		F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */; };
 		BA023869D6BC4C0CB75ACF06 /* BackupTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */; };
 		BA02B474E66CCF7BD7DE5D89 /* BackupRestoreFixesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */; };
+		BA02D748E97E9F0FAB7DA576 /* BackupSchemaSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */; };
+		BA02319F7138BC19154E1839 /* BackupSchemaCompletenessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */; };
+		BA02A96E0C7155694AD5C760 /* BackupFullRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -250,6 +253,9 @@
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
 		BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupTestSupport.swift; sourceTree = "<group>"; };
 		BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreFixesTests.swift; sourceTree = "<group>"; };
+		BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSchemaSupport.swift; sourceTree = "<group>"; };
+		BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSchemaCompletenessTests.swift; sourceTree = "<group>"; };
+		BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFullRoundTripTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -610,6 +616,9 @@
 				A1B2C3D4E5F60718293A4B02 /* BackupRoundTripHarnessTests.swift */,
 				BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */,
 				BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */,
+				BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */,
+				BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */,
+				BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -884,6 +893,9 @@
 				A1B2C3D4E5F60718293A4B01 /* BackupRoundTripHarnessTests.swift in Sources */,
 				BA023869D6BC4C0CB75ACF06 /* BackupTestSupport.swift in Sources */,
 				BA02B474E66CCF7BD7DE5D89 /* BackupRestoreFixesTests.swift in Sources */,
+				BA02D748E97E9F0FAB7DA576 /* BackupSchemaSupport.swift in Sources */,
+				BA02319F7138BC19154E1839 /* BackupSchemaCompletenessTests.swift in Sources */,
+				BA02A96E0C7155694AD5C760 /* BackupFullRoundTripTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
