@@ -119,6 +119,8 @@
 		E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FDCCF184C1A4C6231234A1 /* ExerciseCustomizationSheet.swift */; };
 		F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */; };
 		F3E4195B6521C77AABE17A1B /* JourneyAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */; };
+		BA023869D6BC4C0CB75ACF06 /* BackupTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */; };
+		BA02B474E66CCF7BD7DE5D89 /* BackupRestoreFixesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -246,6 +248,8 @@
 		81C3B3DC2BF11A45CEB017EC /* SessionItemEditService+NextMeso.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionItemEditService+NextMeso.swift"; sourceTree = "<group>"; };
 		D5E124574895A8DF85FC2A1E /* SessionEditSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEditSafety.swift; sourceTree = "<group>"; };
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
+		BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupTestSupport.swift; sourceTree = "<group>"; };
+		BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreFixesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -604,6 +608,8 @@
 				F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */,
 				37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */,
 				A1B2C3D4E5F60718293A4B02 /* BackupRoundTripHarnessTests.swift */,
+				BA01665BD0BF387A50697CCE /* BackupTestSupport.swift */,
+				BA01678BA64D988EEB5E5AF4 /* BackupRestoreFixesTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -876,6 +882,8 @@
 				344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */,
 				3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* BackupRoundTripHarnessTests.swift in Sources */,
+				BA023869D6BC4C0CB75ACF06 /* BackupTestSupport.swift in Sources */,
+				BA02B474E66CCF7BD7DE5D89 /* BackupRestoreFixesTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

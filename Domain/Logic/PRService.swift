@@ -4,15 +4,10 @@ import SwiftData
 /// Handles reading/writing PR data from SwiftData.
 struct PRService {
 
-    /// Update the PR index based on a single SessionItem's newly saved logs.
-    /// Uses best single-set volume (load * reps) as the PR metric.
-    static func updatePR(for item: SessionItem, in context: ModelContext) {
+    /// Best single working set (load * reps) logged on `item`, or nil when nothing meaningful was done.
+    /// Shared by the live PR update and the post-restore rebuild so they cannot disagree.
+    static func bestSet(in item: SessionItem) -> (volume: Double, load: Double, reps: Int)? {
         let count = min(item.actualReps.count, item.actualLoads.count)
-        guard count > 0 else {
-            item.isPR = false
-            return
-        }
-
         var bestVolume: Double = 0
         var bestLoad: Double = 0
         var bestReps: Int = 0
@@ -30,11 +25,20 @@ struct PRService {
             }
         }
 
-        // No meaningful work, nothing to do.
-        guard bestVolume > 0 else {
+        guard bestVolume > 0 else { return nil }
+        return (bestVolume, bestLoad, bestReps)
+    }
+
+    /// Update the PR index based on a single SessionItem's newly saved logs.
+    /// Uses best single-set volume (load * reps) as the PR metric.
+    static func updatePR(for item: SessionItem, in context: ModelContext) {
+        guard let best = bestSet(in: item) else {
             item.isPR = false
             return
         }
+        let bestVolume = best.volume
+        let bestLoad = best.load
+        let bestReps = best.reps
 
         // Capture exerciseId as a plain String so the predicate macro doesn't get cute.
         let exerciseId = item.exerciseId
