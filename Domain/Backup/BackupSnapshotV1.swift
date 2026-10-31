@@ -50,6 +50,10 @@ struct UserProfileBackupDTO: Codable {
     var exemptExerciseIds: [String]? = nil
     // Added (optional birthdate for age-based heart-rate zones). Absent in older backups.
     var birthDateOverride: Date? = nil
+    // Added (equipment preset + checklist). Optional so OLD backups decode with nil: preset derives from
+    // equipmentProfileRaw, checklist empty.
+    var equipmentPresetRaw: String? = nil
+    var equipmentChecklistRaws: [String]? = nil
 }
 
 // MARK: - AppState

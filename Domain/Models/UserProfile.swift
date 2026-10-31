@@ -45,6 +45,56 @@ enum EquipmentProfile: String, Codable {
     case dumbbellsOnly
 }
 
+/// Coarse equipment preset the program fitter works from. Empty/unset resolves to `.fullGym`.
+enum EquipmentPreset: String, Codable, CaseIterable {
+    case fullGym
+    case homeBarbell
+    case dumbbellsBench
+    case machinesOnly
+    case bodyweight
+
+    /// Equipment tags a lifter on this preset can be assumed to have.
+    var defaultEquipment: Set<GearTag> {
+        switch self {
+        case .fullGym:        return Set(GearTag.allCases)
+        case .homeBarbell:    return [.barbell, .ezBar, .dumbbell, .bench, .pullUpBar]
+        case .dumbbellsBench: return [.dumbbell, .bench]
+        case .machinesOnly:   return [.machine, .cable, .smith]
+        case .bodyweight:     return []
+        }
+    }
+
+    /// Closest legacy `EquipmentProfile`, kept in step so existing readers of `equipmentProfile` still work.
+    var legacyProfile: EquipmentProfile {
+        switch self {
+        case .fullGym, .machinesOnly:      return .commercial
+        case .homeBarbell:                 return .homeGym
+        case .dumbbellsBench, .bodyweight: return .dumbbellsOnly
+        }
+    }
+
+    init(legacy: EquipmentProfile) {
+        switch legacy {
+        case .commercial:    self = .fullGym
+        case .homeGym:       self = .homeBarbell
+        case .dumbbellsOnly: self = .dumbbellsBench
+        }
+    }
+}
+
+/// A piece of gear an exercise can require. Bodyweight-only exercises require none.
+enum GearTag: String, Codable, CaseIterable, Hashable {
+    case barbell
+    case ezBar
+    case dumbbell
+    case bench
+    case cable
+    case machine
+    case smith
+    case pullUpBar
+    case dipStation
+}
+
 
 // MARK: - UserProfile model
 //
@@ -83,6 +133,37 @@ final class UserProfile {
     /// Optional birthdate the lifter enters when HealthKit has no date of birth; HealthKit's wins when
     /// both exist. Only used for age-based heart-rate zones; nil means no age is assumed.
     var birthDateOverride: Date? = nil
+
+    /// Equipment preset the fitter works from. Stored OPTIONAL so the additive SwiftData migration (existing
+    /// rows get nil) and old backups both read as "derive from the legacy `equipmentProfileRaw`". Use
+    /// `equipmentPreset`, never this raw column.
+    var equipmentPresetRaw: String? = nil
+
+    /// Optional explicit gear checklist (GearTag raw values). nil or empty means "use the preset's
+    /// defaults". Use `equipmentChecklist` / `effectiveEquipment`.
+    var equipmentChecklistRaws: [String]? = nil
+
+    var equipmentPreset: EquipmentPreset {
+        get {
+            if let raw = equipmentPresetRaw, let preset = EquipmentPreset(rawValue: raw) { return preset }
+            return EquipmentPreset(legacy: equipmentProfile)
+        }
+        set {
+            equipmentPresetRaw = newValue.rawValue
+            equipmentProfileRaw = newValue.legacyProfile.rawValue
+        }
+    }
+
+    var equipmentChecklist: Set<GearTag> {
+        get { Set((equipmentChecklistRaws ?? []).compactMap { GearTag(rawValue: $0) }) }
+        set { equipmentChecklistRaws = newValue.isEmpty ? nil : newValue.map(\.rawValue).sorted() }
+    }
+
+    /// Gear the fitter may assume: the checklist when the lifter filled one in, else the preset's defaults.
+    var effectiveEquipment: Set<GearTag> {
+        let checklist = equipmentChecklist
+        return checklist.isEmpty ? equipmentPreset.defaultEquipment : checklist
+    }
 
     var exemptExerciseIds: [String] {
         get { exemptExerciseIdsStored ?? Self.defaultExemptExerciseIds }
@@ -123,7 +204,12 @@ final class UserProfile {
     }
     var equipmentProfile: EquipmentProfile {
         get { EquipmentProfile(rawValue: equipmentProfileRaw) ?? .commercial }
-        set { equipmentProfileRaw = newValue.rawValue }
+        // A direct change to the legacy profile (Settings picker, onboarding) supersedes any stored preset,
+        // so the preset re-derives from it.
+        set {
+            equipmentProfileRaw = newValue.rawValue
+            equipmentPresetRaw = nil
+        }
     }
     var injuryFlags: [InjuryFlag] {
         get { injuryFlagRaws.compactMap { InjuryFlag(rawValue: $0) } }

@@ -42,6 +42,8 @@ enum BackupSnapshotImporter {
             // restores to the default (empty), so assign explicitly.
             profile.exemptExerciseIds = dto.exemptExerciseIds ?? UserProfile.defaultExemptExerciseIds
             profile.birthDateOverride = dto.birthDateOverride
+            profile.equipmentPresetRaw = dto.equipmentPresetRaw
+            profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
             modelContext.insert(profile)
         }
 

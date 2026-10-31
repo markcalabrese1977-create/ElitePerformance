@@ -72,7 +72,9 @@ enum BackupSnapshotExporter {
                     unitPreferenceRaw: nil,
                     bodyWeight: $0.bodyWeight,
                     exemptExerciseIds: $0.exemptExerciseIds,
-                    birthDateOverride: $0.birthDateOverride
+                    birthDateOverride: $0.birthDateOverride,
+                    equipmentPresetRaw: $0.equipmentPresetRaw,
+                    equipmentChecklistRaws: $0.equipmentChecklistRaws
                 )
             },
             mesoBlocks: mesoBlocks.map { block in
