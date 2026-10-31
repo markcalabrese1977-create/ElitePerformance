@@ -12,7 +12,10 @@ enum LegacyExerciseNotesBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         let legacy = ExerciseNotesStore.legacyEntries()
-        guard !legacy.isEmpty else { return }
+        guard !legacy.isEmpty else {
+            print("ℹ️ Legacy exercise notes backfill not needed.")
+            return
+        }
 
         guard let existing = try? context.fetch(FetchDescriptor<ExerciseNote>()) else {
             print("⚠️ Legacy exercise notes backfill failed: could not fetch notes.")
@@ -22,6 +25,7 @@ enum LegacyExerciseNotesBackfill {
 
         var migrated: [String] = []
         var blank: [String] = []
+        var kept = 0
         for entry in legacy {
             let trimmed = entry.note.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
@@ -30,13 +34,15 @@ enum LegacyExerciseNotesBackfill {
                 context.insert(ExerciseNote(exerciseId: entry.exerciseId, note: trimmed))
                 haveNote.insert(entry.exerciseId)
                 migrated.append(entry.exerciseId)
+            } else {
+                kept += 1
             }
         }
 
         do {
             if !migrated.isEmpty { try context.save() }
             for exerciseId in migrated + blank { ExerciseNotesStore.clear(exerciseId: exerciseId) }
-            if !migrated.isEmpty { print("✅ Legacy exercise notes backfill moved \(migrated.count) note(s).") }
+            print("\(migrated.isEmpty ? "ℹ️" : "✅") Legacy exercise notes backfill moved \(migrated.count) notes, kept \(kept) legacy keys (existing notes).")
         } catch {
             context.rollback()
             print("⚠️ Legacy exercise notes backfill save failed: \(error)")
