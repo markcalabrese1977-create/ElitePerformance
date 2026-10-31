@@ -104,7 +104,7 @@ final class BackupRestorePRIndexTests: XCTestCase {
 final class BackupRestoreCustomMirrorTests: XCTestCase {
 
     private var sandbox: DefaultsSandbox!
-    private let mirrorKey = "custom_exercises_v2"
+    let mirrorKey = "custom_exercises_v2"
 
     override func setUp() {
         super.setUp()
@@ -117,7 +117,7 @@ final class BackupRestoreCustomMirrorTests: XCTestCase {
         super.tearDown()
     }
 
-    private func mirror() throws -> [CatalogExercise] {
+    func mirror() throws -> [CatalogExercise] {
         guard let data = UserDefaults.standard.data(forKey: mirrorKey) else { return [] }
         return try JSONDecoder().decode([CatalogExercise].self, from: data)
     }
@@ -138,5 +138,20 @@ final class BackupRestoreCustomMirrorTests: XCTestCase {
         XCTAssertEqual(Set(try mirror()), expected, "every CatalogExercise field survives, not just id/name/muscle/compound")
         XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: pull.id), "a restored bodyweight custom is still bodyweight")
         XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: curl.id))
+    }
+}
+
+extension BackupRestoreCustomMirrorTests {
+    func test_restoreOfBackupWithNoCustoms_clearsAStaleMirror() throws {
+        let stale = [CatalogExercise(id: "stale_probe_id", name: "Stale Probe", primaryMuscle: .chest, isCompound: false)]
+        UserDefaults.standard.set(try JSONEncoder().encode(stale), forKey: mirrorKey)
+        XCTAssertEqual(try mirror().count, 1, "precondition: a stale entry is mirrored")
+
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        let target = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: target)
+
+        XCTAssertTrue(try mirror().isEmpty, "the mirror follows the restored SwiftData, which has no customs")
+        XCTAssertFalse(ExerciseCatalog.all.contains { $0.id == "stale_probe_id" })
     }
 }

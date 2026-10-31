@@ -305,9 +305,8 @@ enum BackupSnapshotImporter {
 
         // Rebuild the UserDefaults mirror of the custom exercises from the restored rows so
         // ExerciseCatalog.all can resolve their names (and isBodyweight) without a ModelContext.
-        if !snapshot.customExercises.isEmpty {
-            ExerciseCatalog.rebuildCustomMirror(from: modelContext)
-        }
+        // Always rewritten, an empty list included: a backup with no customs must clear a stale mirror.
+        ExerciseCatalog.rebuildCustomMirror(from: modelContext)
 
         return BackupSnapshotImportResult(
             mesoBlockCount: snapshot.mesoBlocks.count,
