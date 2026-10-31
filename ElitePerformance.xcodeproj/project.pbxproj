@@ -28,6 +28,7 @@
 		7920EC09B73B4EB3AAF3086E /* LoadWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */; };
 		88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */; };
 		A1B2C3D4E5F60718293A4B01 /* BackupRoundTripHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* BackupRoundTripHarnessTests.swift */; };
+		A1B2C3D4E5F60718293A4B11 /* ExerciseTraitsCoverageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B12 /* ExerciseTraitsCoverageTests.swift */; };
 		D503127F2F12BE7800980F64 /* AddExerciseSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */; };
 		D51A8C0A2FAE614A00127E79 /* E1RMCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51A8C092FAE614800127E79 /* E1RMCalculator.swift */; };
 		D52432D42EEF19BC00B300B8 /* HealthKitWorkoutSummarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52432D32EEF19BA00B300B8 /* HealthKitWorkoutSummarySyncService.swift */; };
@@ -159,6 +160,7 @@
 		5A6DBD33A5BF47679F167D00 /* InvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvariantTests.swift; sourceTree = "<group>"; };
 		9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestOpenQuestions.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B02 /* BackupRoundTripHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupRoundTripHarnessTests.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B12 /* ExerciseTraitsCoverageTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExerciseTraitsCoverageTests.swift; sourceTree = "<group>"; };
 		B6D5B777622F4CC286985D27 /* LoadWriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadWriteTests.swift; sourceTree = "<group>"; };
 		D2BC7067F476B81A686F6A31 /* JourneyHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyHarnessTests.swift; sourceTree = "<group>"; };
 		D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExerciseSheet.swift; sourceTree = "<group>"; };
@@ -622,6 +624,7 @@
 				BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */,
 				BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */,
 				BA0156FDF8A9858CD42D7409 /* PersistedKeyRegistryTests.swift */,
+				A1B2C3D4E5F60718293A4B12 /* ExerciseTraitsCoverageTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -900,6 +903,7 @@
 				BA02319F7138BC19154E1839 /* BackupSchemaCompletenessTests.swift in Sources */,
 				BA02A96E0C7155694AD5C760 /* BackupFullRoundTripTests.swift in Sources */,
 				BA026EF2B44767C1BE7269C7 /* PersistedKeyRegistryTests.swift in Sources */,
+				A1B2C3D4E5F60718293A4B11 /* ExerciseTraitsCoverageTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
