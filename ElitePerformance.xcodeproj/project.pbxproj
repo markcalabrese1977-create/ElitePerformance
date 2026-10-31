@@ -124,6 +124,7 @@
 		BA02D748E97E9F0FAB7DA576 /* BackupSchemaSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */; };
 		BA02319F7138BC19154E1839 /* BackupSchemaCompletenessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */; };
 		BA02A96E0C7155694AD5C760 /* BackupFullRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */; };
+		BA026EF2B44767C1BE7269C7 /* PersistedKeyRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0156FDF8A9858CD42D7409 /* PersistedKeyRegistryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -256,6 +257,7 @@
 		BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSchemaSupport.swift; sourceTree = "<group>"; };
 		BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSchemaCompletenessTests.swift; sourceTree = "<group>"; };
 		BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFullRoundTripTests.swift; sourceTree = "<group>"; };
+		BA0156FDF8A9858CD42D7409 /* PersistedKeyRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedKeyRegistryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -619,6 +621,7 @@
 				BA01D03A3705BD7319F4C295 /* BackupSchemaSupport.swift */,
 				BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */,
 				BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */,
+				BA0156FDF8A9858CD42D7409 /* PersistedKeyRegistryTests.swift */,
 			);
 			path = DomainTests;
 			sourceTree = "<group>";
@@ -896,6 +899,7 @@
 				BA02D748E97E9F0FAB7DA576 /* BackupSchemaSupport.swift in Sources */,
 				BA02319F7138BC19154E1839 /* BackupSchemaCompletenessTests.swift in Sources */,
 				BA02A96E0C7155694AD5C760 /* BackupFullRoundTripTests.swift in Sources */,
+				BA026EF2B44767C1BE7269C7 /* PersistedKeyRegistryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
