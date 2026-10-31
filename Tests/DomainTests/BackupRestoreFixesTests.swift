@@ -155,3 +155,67 @@ extension BackupRestoreCustomMirrorTests {
         XCTAssertFalse(ExerciseCatalog.all.contains { $0.id == "stale_probe_id" })
     }
 }
+
+// MARK: - Legacy exerciseNotes.v1.<id> keys
+
+final class LegacyExerciseNotesBackfillTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    private let ids = ["bench_press", "plank", "barbell_row", "hammer_curl"]
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        ids.forEach { ExerciseNotesStore.clear(exerciseId: $0) }
+    }
+
+    override func tearDown() {
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func notes(_ ctx: ModelContext) throws -> [String: String] {
+        Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<ExerciseNote>()).map { ($0.exerciseId, $0.note) })
+    }
+
+    func test_movesEveryLegacyKey_intoExerciseNote_andTheExportIncludesThem() throws {
+        ExerciseNotesStore.save(exerciseId: "bench_press", note: "  pause the first rep  ")
+        ExerciseNotesStore.save(exerciseId: "plank", note: "squeeze glutes")
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+
+        LegacyExerciseNotesBackfill.runIfNeeded(in: ctx)
+
+        XCTAssertEqual(try notes(ctx), ["bench_press": "pause the first rep", "plank": "squeeze glutes"])
+        XCTAssertTrue(ExerciseNotesStore.legacyEntries().isEmpty, "legacy keys are deleted once the save succeeded")
+        let exported = try XCTUnwrap(BackupTestSupport.exportJSON(ctx)["exerciseNotes"] as? [[String: Any]])
+        XCTAssertEqual(Set(exported.compactMap { $0["exerciseId"] as? String }), ["bench_press", "plank"])
+
+        // Idempotent: a second run adds nothing.
+        LegacyExerciseNotesBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ExerciseNote>()).count, 2)
+    }
+
+    func test_neverOverwritesAnExistingNote_andKeepsItsLegacyKey() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        ctx.insert(ExerciseNote(exerciseId: "barbell_row", note: "newer note in SwiftData"))
+        try ctx.save()
+        ExerciseNotesStore.save(exerciseId: "barbell_row", note: "older legacy text")
+        ExerciseNotesStore.save(exerciseId: "hammer_curl", note: "neutral grip")
+
+        LegacyExerciseNotesBackfill.runIfNeeded(in: ctx)
+
+        XCTAssertEqual(try notes(ctx), ["barbell_row": "newer note in SwiftData", "hammer_curl": "neutral grip"])
+        XCTAssertEqual(ExerciseNotesStore.legacyEntries().map(\.exerciseId), ["barbell_row"],
+                       "the conflicting legacy text is not discarded")
+    }
+
+    func test_blankLegacyKeys_createNoNote_andAreRemoved() throws {
+        ExerciseNotesStore.save(exerciseId: "plank", note: "   \n ")
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+
+        LegacyExerciseNotesBackfill.runIfNeeded(in: ctx)
+
+        XCTAssertTrue(try notes(ctx).isEmpty)
+        XCTAssertTrue(ExerciseNotesStore.legacyEntries().isEmpty)
+    }
+}

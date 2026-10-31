@@ -709,6 +709,39 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         PrescribedSetsBackfill.runIfNeeded(in: ctx)
         XCTAssertEqual(keep.prescribedSets, 2)
     }
+
+    /// Legacy exerciseNotes.v1.* keys are moved into ExerciseNote rows by the startup backfills, and that is the
+    /// ONLY change to the store (prescribedSets on planned items is the other backfill's separate, known change).
+    func test_legacyNotesBackfill_addsOnlyExerciseNoteRows() throws {
+        let legacy = ["bench_press": "pause the first rep", "plank": "squeeze glutes"]
+        defer { legacy.keys.forEach { ExerciseNotesStore.clear(exerciseId: $0) } }
+        let ctx = try makeStore()
+        let before = try XCTUnwrap(JSONSerialization.jsonObject(with: snapshot(ctx)) as? [String: Any])
+        XCTAssertEqual((before["exerciseNotes"] as? [Any])?.count, 0, "precondition: the store has no notes")
+        for (id, note) in legacy { ExerciseNotesStore.save(exerciseId: id, note: note) }
+
+        clearKeys()
+        StartupBackfills.run(using: container)
+        ctx.rollback()
+        var after = try XCTUnwrap(JSONSerialization.jsonObject(with: snapshot(ModelContext(container))) as? [String: Any])
+
+        let added = try XCTUnwrap(after["exerciseNotes"] as? [[String: Any]])
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: added.map { ($0["exerciseId"] as! String, $0["note"] as! String) }), legacy)
+
+        // Scope the comparison: drop the notes and the other backfill's prescribedSets, require the rest identical.
+        after["exerciseNotes"] = before["exerciseNotes"]
+        var sessions = try XCTUnwrap(after["sessions"] as? [[String: Any]])
+        for s in sessions.indices {
+            var items = try XCTUnwrap(sessions[s]["items"] as? [[String: Any]])
+            for i in items.indices { items[i].removeValue(forKey: "prescribedSets") }
+            sessions[s]["items"] = items
+        }
+        after["sessions"] = sessions
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys]),
+                       try JSONSerialization.data(withJSONObject: before, options: [.sortedKeys]),
+                       "nothing but ExerciseNote rows was added from the legacy keys")
+        XCTAssertTrue(ExerciseNotesStore.legacyEntries().isEmpty)
+    }
 }
 
 // MARK: - Universality guard (C5)
