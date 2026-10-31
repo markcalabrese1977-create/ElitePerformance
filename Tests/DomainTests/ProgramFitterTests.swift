@@ -103,12 +103,22 @@ final class ProgramFitterTests: XCTestCase {
             let finalIds = day.exerciseTemplates.map { Self.canon($0.exerciseId) }
             if Set(finalIds).count != finalIds.count { fail("\(day.title): duplicate exercise") }
 
-            let inDay = Set(finalIds).union(origDay.exerciseTemplates.map { Self.canon($0.exerciseId) })
+            // exercises the fitter could not reuse: the original day plus every replacement chosen, even ones trimmed away later
+            var inDay = Set(finalIds).union(origDay.exerciseTemplates.map { Self.canon($0.exerciseId) })
+            for step in ProgramFitter.substitutionPlan(origDay, profile: p) { if case .replace(let id, _) = step.outcome { inDay.insert(id) } }
             let reasonsForDay = result.reasons.filter { $0.dayNumber == day.dayNumber }
 
-            // anchors never dropped
-            for slot in origDay.exerciseTemplates where slot.priority == .anchor {
+            // An anchor replaced by an isolation exercise is demoted to standard; every other anchor must survive.
+            var demoted = Set<String>()
+            for step in ProgramFitter.substitutionPlan(origDay, profile: p) {
+                if case .replace(let id, _) = step.outcome, origDay.exerciseTemplates[step.originalIndex].priority == .anchor,
+                   catalogByName[id]?.isCompound == false { demoted.insert(origDay.exerciseTemplates[step.originalIndex].id) }
+            }
+            for slot in origDay.exerciseTemplates where slot.priority == .anchor && !demoted.contains(slot.id) {
                 if !day.exerciseTemplates.contains(where: { $0.id == slot.id }) { fail("\(day.title): anchor \(slot.id) dropped") }
+            }
+            for slot in day.exerciseTemplates where demoted.contains(slot.id) && slot.priority != .standard {
+                fail("\(day.title): \(slot.id) replaced by isolation but still \(slot.priority)")
             }
 
             for ex in day.exerciseTemplates {
@@ -119,28 +129,34 @@ final class ProgramFitterTests: XCTestCase {
                     let flagged = reasonsForDay.contains { $0.kind == .unfit && $0.slotIndex == slotIndex }
                     fail("\(day.title): \(ex.exerciseId) needs unavailable gear" + (flagged ? " (unfit reason present)" : ""))
                 }
-                // joint stress: nothing stressed remains when a lower-stress option existed
+                // joint stress: a kept (not swapped) exercise with stressed flagged joints means nothing lower-stress existed
                 let own = p.injuries.reduce(0) { $0 + traits.stress(for: $1) }
-                // Substituted slots are judged by the spec's stage order (same pattern first, even at non-zero stress),
-                // so only the pattern pool is checked for them; a kept slot is checked against pattern then muscle.
-                let wasSwapped = reasonsForDay.contains { $0.kind == .substituted && $0.slotIndex == originalSlots[ex.id]?.index }
-                if own > 0, let current = catalogByName[Self.canon(ex.exerciseId)] {
-                    func lower(_ pool: [CatalogExercise]) -> [CatalogExercise] {
-                        pool.filter { c in
-                            guard let t = ExerciseTraits.traits(for: c.id), !inDay.contains(c.id) else { return false }
-                            return t.isAvailable(with: p.equipment) && p.injuries.reduce(0, { $0 + t.stress(for: $1) }) < own
-                        }
+                let wasSwapped = originalSlots[ex.id].map { slot in
+                    Self.canon(slot.ex.exerciseId) != Self.canon(ex.exerciseId)
+                } ?? false
+                if own > 0, !wasSwapped, let current = catalogByName[Self.canon(ex.exerciseId)] {
+                    let pool = ExerciseCatalog.builtIn.filter {
+                        ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern || $0.primaryMuscle == current.primaryMuscle
                     }
-                    let samePattern = ExerciseCatalog.builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern }
-                    let sameMuscle = ExerciseCatalog.builtIn.filter { $0.primaryMuscle == current.primaryMuscle }
-                    if !lower(samePattern).isEmpty || (!wasSwapped && !lower(sameMuscle).isEmpty) {
-                        fail("\(day.title): \(ex.exerciseId) stressed (\(own)) but a lower-stress option existed")
+                    let lower = pool.filter { c in
+                        guard let t = ExerciseTraits.traits(for: c.id), !inDay.contains(c.id) else { return false }
+                        return t.isAvailable(with: p.equipment) && p.injuries.reduce(0, { $0 + t.stress(for: $1) }) < own
                     }
+                    if !lower.isEmpty { fail("\(day.title): \(ex.exerciseId) kept at stress \(own) but a lower-stress option existed") }
                 }
             }
 
             // duration or an over note
             let seconds = ProgramFitter.estimatedSeconds(day.exerciseTemplates, template: fitted)
+            // budget advice: untrimmed >= fitted >= minimum; minimum fits the budget exactly when there is no over note
+            if let adv = result.advice.days.first(where: { $0.dayNumber == day.dayNumber }) {
+                let fittedMinutes = (seconds + 59) / 60
+                if adv.untrimmedMinutes < fittedMinutes { fail("\(day.title): advice untrimmed \(adv.untrimmedMinutes) < fitted \(fittedMinutes)") }
+                if adv.minimumMinutes > fittedMinutes { fail("\(day.title): advice minimum \(adv.minimumMinutes) > fitted \(fittedMinutes)") }
+                let over = reasonsForDay.contains { $0.kind == .overBudget }
+                if over && adv.minimumMinutes <= p.sessionMinutes { fail("\(day.title): over note but minimum \(adv.minimumMinutes) <= budget") }
+                if !over && adv.minimumMinutes > p.sessionMinutes { fail("\(day.title): within budget but minimum \(adv.minimumMinutes) > budget") }
+            } else { fail("\(day.title): no advice entry") }
             if seconds > p.sessionMinutes * 60 && !reasonsForDay.contains(where: { $0.kind == .overBudget }) {
                 fail("\(day.title): \(seconds / 60) min over \(p.sessionMinutes) with no over reason")
             }
@@ -159,7 +175,16 @@ final class ProgramFitterTests: XCTestCase {
                     if s > o { fail("\(ex.id) week \(i + 1): sets increased \(o)->\(s)") }
                     if s < min(o, 2) { fail("\(ex.id) week \(i + 1): below floor \(o)->\(s)") }
                 }
-                if ex.priority != orig.priority || ex.prescriptions.count != orig.prescriptions.count { fail("\(ex.id): priority/prescriptions changed") }
+                let priorityOK = ex.priority == orig.priority || (demoted.contains(ex.id) && ex.priority == .standard)
+                if !priorityOK || ex.prescriptions.count != orig.prescriptions.count { fail("\(ex.id): priority/prescriptions changed") }
+                // trim steps never touch an anchor: only the beginner step may change its sets
+                if ex.priority == .anchor {
+                    let beginner = p.experience == .new
+                    let expected = orig.setsByWeek.enumerated().map { i, s in
+                        (!beginner || template.rule(forWeek: i + 1)?.isDeload == true || s <= 2) ? s : s - 1
+                    }
+                    if ex.setsByWeek != expected { fail("\(ex.id): anchor sets trimmed \(expected)->\(ex.setsByWeek)") }
+                }
             }
         }
 
@@ -183,6 +208,91 @@ final class ProgramFitterTests: XCTestCase {
         if result.reasons.filter({ $0.kind == .volume }).count > 1 { fail("more than one volume reason") }
         if p.experience != .new && result.reasons.contains(where: { $0.kind == .volume }) { fail("volume reason for non-beginner") }
         for r in result.reasons where r.message.isEmpty { fail("empty reason message") }
+    }
+
+    // MARK: - Stage-local optimality
+
+    /// Re-derives each swap from the documented stage order and checks the fitter chose the optimum of the first
+    /// stage that had any candidate: stage (a) filters to max flagged stress <= 1, stages (b) and (c) to the lowest
+    /// available stress; then the preference is same isCompound, loadable if the original was loaded, lower flagged
+    /// stress, catalog order. Also: never a stress-2 choice on a flagged joint when a later stage offered lower, and
+    /// a loaded slot never gets a bodyweight-only substitute when a loadable safe option of the same kind existed.
+    func test_substitutionStages_areLocallyOptimal() {
+        var failures: [String] = []
+        var staged = [0, 0, 0]
+        var passedOverLoadable = 0
+        let builtIn = ExerciseCatalog.builtIn
+        for template in Self.templates {
+            for preset in Self.presets {
+                for joints in Self.jointCombos {
+                    let prof = profile(preset, joints)
+                    for day in template.dayTemplates {
+                        var used = Set(day.exerciseTemplates.map { Self.canon($0.exerciseId) })
+                        for step in ProgramFitter.substitutionPlan(day, profile: prof) {
+                            let orig = day.exerciseTemplates[step.originalIndex]
+                            guard case .replace(let chosenId, let stage) = step.outcome,
+                                  let traits = ExerciseTraits.traits(for: orig.exerciseId),
+                                  let current = builtIn.first(where: { $0.id == Self.canon(orig.exerciseId) }) else {
+                                if case .replace = step.outcome { failures.append("\(template.name) \(day.title): replace without traits") }
+                                continue
+                            }
+                            let tag = "\(template.name) | \(preset.rawValue) | \(joints.map(\.rawValue).sorted()) | \(day.title) slot \(step.originalIndex)"
+                            let available = traits.isAvailable(with: prof.equipment)
+                            let own = prof.injuries.reduce(0) { $0 + traits.stress(for: $1) }
+                            func sum(_ t: ExerciseTraits) -> Int { prof.injuries.reduce(0) { $0 + t.stress(for: $1) } }
+                            func peak(_ t: ExerciseTraits) -> Int { prof.injuries.map { t.stress(for: $0) }.max() ?? 0 }
+                            func usable(_ pool: [CatalogExercise]) -> [(CatalogExercise, ExerciseTraits, Int)] {
+                                pool.enumerated().compactMap { _, c in
+                                    guard let t = ExerciseTraits.traits(for: c.id), !used.contains(c.id), t.isAvailable(with: prof.equipment),
+                                          !available || sum(t) < own, let idx = builtIn.firstIndex(where: { $0.id == c.id }) else { return nil }
+                                    return (c, t, idx)
+                                }
+                            }
+                            func lowest(_ u: [(CatalogExercise, ExerciseTraits, Int)]) -> [(CatalogExercise, ExerciseTraits, Int)] {
+                                guard let m = u.map({ sum($0.1) }).min() else { return [] }
+                                return u.filter { sum($0.1) == m }
+                            }
+                            func key(_ e: (CatalogExercise, ExerciseTraits, Int)) -> (Int, Int, Int, Int) {
+                                (e.0.isCompound != current.isCompound ? 1 : 0, !current.isBodyweight && e.0.isBodyweight ? 1 : 0, sum(e.1), e.2)
+                            }
+                            func best(_ safe: [(CatalogExercise, ExerciseTraits, Int)]) -> CatalogExercise? { safe.min { key($0) < key($1) }?.0 }
+
+                            let samePattern = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern }
+                            let sameMuscle = builtIn.filter { $0.primaryMuscle == current.primaryMuscle }
+                            let union = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern || $0.primaryMuscle == current.primaryMuscle }
+                            let safeA = usable(samePattern).filter { peak($0.1) <= 1 }
+                            let safeB = lowest(usable(sameMuscle))
+                            let safeC = lowest(usable(union))
+                            let expected: (CatalogExercise?, ProgramFitter.SubstitutionStage, [(CatalogExercise, ExerciseTraits, Int)])
+                            if !safeA.isEmpty { expected = (best(safeA), .pattern, safeA) }
+                            else if !safeB.isEmpty { expected = (best(safeB), .muscle, safeB) }
+                            else { expected = (best(safeC), .fallback, safeC) }
+                            if expected.0?.id != chosenId || expected.1 != stage {
+                                failures.append("\(tag): chose \(chosenId) via \(stage), expected \(expected.0?.id ?? "nil") via \(expected.1)")
+                            }
+                            switch stage { case .pattern: staged[0] += 1; case .muscle: staged[1] += 1; case .fallback: staged[2] += 1 }
+                            if let ct = ExerciseTraits.traits(for: chosenId), peak(ct) >= 2 {
+                                let laterLowest = [best(safeB), best(safeC)].compactMap { $0 }.compactMap { ExerciseTraits.traits(for: $0.id) }.map(sum).min()
+                                if let l = laterLowest, l < sum(ct) { failures.append("\(tag): stress-2 choice \(chosenId) but a later stage had stress \(l)") }
+                            }
+                            if stage == .pattern, let ct = ExerciseTraits.traits(for: chosenId), peak(ct) > 1 {
+                                failures.append("\(tag): stage (a) chose peak stress \(peak(ct))")
+                            }
+                            // loaded slot, bodyweight-only substitute, loadable safe option of the same kind existed
+                            if let chosen = builtIn.first(where: { $0.id == chosenId }), !current.isBodyweight, chosen.isBodyweight {
+                                if expected.2.contains(where: { !$0.0.isBodyweight && $0.0.isCompound == chosen.isCompound }) {
+                                    failures.append("\(tag): loaded slot got bodyweight-only \(chosenId) although a loadable safe option existed")
+                                }
+                                if expected.2.contains(where: { !$0.0.isBodyweight }) { passedOverLoadable += 1 }
+                            }
+                            used.insert(chosenId)
+                        }
+                    }
+                }
+            }
+        }
+        print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) fallback=\(staged[2]) bodyweightOverLoadableOfOtherKind=\(passedOverLoadable) failures=\(failures.count)")
+        XCTAssertTrue(failures.isEmpty, failures.prefix(15).joined(separator: "\n"))
     }
 
     // MARK: - Targeted behaviour
@@ -220,6 +330,50 @@ final class ProgramFitterTests: XCTestCase {
         for m in swaps {
             XCTAssertTrue(m.contains(" -> ") && m.hasSuffix(")"), m)
         }
+    }
+
+    private func twoWeekTemplate(_ exercises: [ProgramExerciseTemplate]) -> ProgramTemplate {
+        ProgramTemplate(id: "t", name: "T", totalWeeks: 2, trainingDaysPerWeek: 1,
+                        weekRules: [.init(weekNumber: 1, wave: .a, notes: nil), .init(weekNumber: 2, wave: .deload, notes: nil)],
+                        dayTemplates: [ProgramDayTemplate(id: "d", dayNumber: 1, title: "Day", role: "", exerciseTemplates: exercises)])
+    }
+
+    func test_anchorReplacedByIsolation_isDemotedToStandard() {
+        let t = twoWeekTemplate([slot("a1", 1, "pec_deck", .anchor), slot("s2", 2, "bench_press", .standard)])
+        let r = ProgramFitter.fit(t, profile: profile(.dumbbellsBench))
+        let ex = r.template.dayTemplates[0].exerciseTemplates[0]
+        XCTAssertEqual(ex.exerciseId, "dumbbell_fly")
+        XCTAssertEqual(ex.priority, .standard)
+        XCTAssertTrue(r.reasons.first { $0.kind == .substituted }?.message.contains("no longer an anchor") == true)
+    }
+
+    func test_trimStepIV_trimsNonAnchorCompoundsOnly_neverAnchors() {
+        let anchor = ProgramExerciseTemplate(id: "a1", order: 1, exerciseId: "bench_press", priority: .anchor, notes: nil,
+                                             prescriptions: slot("x", 1, "bench_press", .anchor).prescriptions, setsByWeek: [5, 2])
+        let std = ProgramExerciseTemplate(id: "s2", order: 2, exerciseId: "incline_dumbbell_press", priority: .standard, notes: nil,
+                                          prescriptions: slot("x", 1, "bench_press", .anchor).prescriptions, setsByWeek: [4, 2])
+        let r = ProgramFitter.fit(twoWeekTemplate([anchor, std]), profile: profile(.fullGym, [], 20))
+        let out = r.template.dayTemplates[0].exerciseTemplates
+        XCTAssertEqual(out[0].setsByWeek, [5, 2], "anchor untouched")
+        XCTAssertEqual(out[1].setsByWeek, [3, 2], "non-anchor compound -1 set in the non-deload week, deload untouched")
+        XCTAssertEqual(r.reasons.filter { $0.kind == .trimmedSets }.count, 1)
+        XCTAssertTrue(r.reasons.contains { $0.kind == .overBudget })
+    }
+
+    func test_budgetAdvice_matchesUntrimmedAndFloor() {
+        for t in Self.templates {
+            let r = ProgramFitter.fit(t, profile: profile(.fullGym, [], 120))
+            let expectedMax = t.dayTemplates.map { (ProgramFitter.estimatedSeconds($0.exerciseTemplates, template: t) + 59) / 60 }.max()
+            XCTAssertEqual(r.advice.untrimmedMaxDayMinutes, expectedMax, t.name)
+            XCTAssertLessThanOrEqual(r.advice.minimumMinutes, r.advice.untrimmedMaxDayMinutes, t.name)
+            XCTAssertGreaterThan(r.advice.minimumMinutes, 0, t.name)
+        }
+        // a tight budget cannot go below the advised minimum; a budget at the minimum has no over note
+        let t = PPL6DayTemplate.template
+        let tight = ProgramFitter.fit(t, profile: profile(.fullGym, [], 45))
+        XCTAssertTrue(tight.reasons.contains { $0.kind == .overBudget })
+        let atMinimum = ProgramFitter.fit(t, profile: profile(.fullGym, [], tight.advice.minimumMinutes))
+        XCTAssertFalse(atMinimum.reasons.contains { $0.kind == .overBudget }, "advised minimum must be achievable")
     }
 
     // MARK: - Goldens (printed for the report)

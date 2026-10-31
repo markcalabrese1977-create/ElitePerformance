@@ -48,9 +48,26 @@ struct FitReason: Equatable {
     }
 }
 
+/// How long the fitted program takes, for a preview that offers "choose N min or fewer days".
+struct FitAdvice: Equatable {
+    struct Day: Equatable {
+        let dayNumber: Int
+        /// Whole minutes for the day after substitution and experience volume, before any time trimming.
+        let untrimmedMinutes: Int
+        /// Whole minutes for the day once every trim step has been applied (anchors are never trimmed).
+        let minimumMinutes: Int
+    }
+    let days: [Day]
+    /// The longest day, untrimmed.
+    var untrimmedMaxDayMinutes: Int { days.map(\.untrimmedMinutes).max() ?? 0 }
+    /// The smallest session length at which no day would be over: the longest day after all trims.
+    var minimumMinutes: Int { days.map(\.minimumMinutes).max() ?? 0 }
+}
+
 struct FitResult {
     let template: ProgramTemplate
     let reasons: [FitReason]
+    let advice: FitAdvice
 }
 
 /// Adapts a program template to a person's equipment, joints, session length and experience.
@@ -61,7 +78,11 @@ enum ProgramFitter {
 
     // MARK: - Time model
 
-    static let warmupSeconds = 8 * 60
+    /// Calibrated against the Oct 30 backup: 27 completed sessions of the current meso with a HealthKit duration.
+    /// With an 8 min warm-up the model ran 2.2 min short on average; at 10 min the mean error is about -0.2 min
+    /// (MAE about 4.6 min). Rests are unchanged. Sessions have near-identical set counts, so rest and warm-up cannot be
+    /// told apart in that data: the warm-up absorbs the bias and the rests stay at their first-principles values.
+    static let warmupSeconds = 10 * 60
     static let workSecondsPerSet = 40
     static let anchorCompoundRest = 180
     static let otherCompoundRest = 120
@@ -73,6 +94,7 @@ enum ProgramFitter {
         var reasons: [FitReason] = []
         var beginnerChanged = false
         var days: [ProgramDayTemplate] = []
+        var adviceDays: [FitAdvice.Day] = []
 
         for day in template.dayTemplates {
             var slots = substitute(day, profile: profile, reasons: &reasons)
@@ -83,7 +105,14 @@ enum ProgramFitter {
                     slots[i].template = reduced
                 }
             }
-            trimForTime(day: day, slots: &slots, template: template, profile: profile, reasons: &reasons)
+            let untrimmed = estimatedSeconds(slots.map(\.template), template: template)
+            var floorSlots = slots
+            var scratch: [FitReason] = []
+            trimForTime(day: day, slots: &floorSlots, template: template, budgetSeconds: 0, reasons: &scratch)
+            adviceDays.append(FitAdvice.Day(dayNumber: day.dayNumber,
+                                            untrimmedMinutes: (untrimmed + 59) / 60,
+                                            minimumMinutes: (estimatedSeconds(floorSlots.map(\.template), template: template) + 59) / 60))
+            trimForTime(day: day, slots: &slots, template: template, budgetSeconds: profile.sessionMinutes * 60, reasons: &reasons)
 
             var exercises = slots.map(\.template)
             if exercises.count != day.exerciseTemplates.count {
@@ -100,7 +129,7 @@ enum ProgramFitter {
         let fitted = ProgramTemplate(id: template.id, name: template.name, totalWeeks: template.totalWeeks,
                                      trainingDaysPerWeek: template.trainingDaysPerWeek,
                                      weekRules: template.weekRules, dayTemplates: days)
-        return FitResult(template: fitted, reasons: reasons)
+        return FitResult(template: fitted, reasons: reasons, advice: FitAdvice(days: adviceDays))
     }
 
     // MARK: - Estimate
@@ -161,57 +190,141 @@ enum ProgramFitter {
         joints.reduce(0) { $0 + traits.stress(for: $1) }
     }
 
-    private static func substitute(_ day: ProgramDayTemplate, profile: FitProfile,
-                                   reasons: inout [FitReason]) -> [Slot] {
+    /// Which stage of the substitution order produced a replacement.
+    enum SubstitutionStage: Equatable {
+        case pattern    // (a) same pattern, max stress on flagged joints <= 1
+        case muscle     // (b) same primary muscle, lowest available stress
+        case fallback   // (c) lowest-stress available option (same pattern or muscle), none under the (a) limit
+    }
+
+    enum SlotOutcome: Equatable {
+        case keep
+        case notEvaluated
+        case replace(exerciseId: String, stage: SubstitutionStage)
+        case keptStressed   // gear fine, joints flagged, nothing lower-stress exists
+        case unfit          // anchor with no available substitute: kept
+        case drop           // (d)
+    }
+
+    struct SlotPlan: Equatable {
+        let originalIndex: Int
+        let outcome: SlotOutcome
+    }
+
+    /// Stage (a) accepts a candidate only if no flagged joint is stressed above this.
+    static let patternStageMaxStress = 1
+
+    private static func maxStress(_ traits: ExerciseTraits, _ joints: Set<InjuryFlag>) -> Int {
+        joints.map { traits.stress(for: $0) }.max() ?? 0
+    }
+
+    /// The substitution decision for every slot of a day, in order. `used` starts as every exercise in the original day
+    /// and grows with each replacement, so a swap never duplicates an exercise. Internal so tests can check each stage.
+    static func substitutionPlan(_ day: ProgramDayTemplate, profile: FitProfile) -> [SlotPlan] {
         var used = Set(day.exerciseTemplates.map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
-        var slots: [Slot] = []
+        var plan: [SlotPlan] = []
 
         for (index, original) in day.exerciseTemplates.enumerated() {
-            func note(_ kind: FitReason.Kind, _ message: String) {
-                reasons.append(FitReason(kind: kind, dayNumber: day.dayNumber, slotIndex: index, message: message))
-            }
-            let name = entry(original.exerciseId)?.exercise.name ?? original.exerciseId
-
             guard let traits = ExerciseTraits.traits(for: original.exerciseId), let current = entry(original.exerciseId) else {
-                if !profile.isUnrestricted { note(.notEvaluated, "\(name) not evaluated for your equipment or joints") }
-                slots.append(Slot(originalIndex: index, template: original))
+                plan.append(SlotPlan(originalIndex: index, outcome: .notEvaluated))
                 continue
             }
-
             let available = traits.isAvailable(with: profile.equipment)
             let ownStress = flaggedStress(traits, profile.injuries)
             if available && ownStress == 0 {
-                slots.append(Slot(originalIndex: index, template: original))
+                plan.append(SlotPlan(originalIndex: index, outcome: .keep))
                 continue
             }
 
-            func best(_ pool: [Candidate]) -> Candidate? {
+            // Usable: available gear, not already in the day, and (when the original is usable) strictly lower-stress.
+            func usable(_ pool: [Candidate]) -> [Candidate] {
                 pool.filter { c in
                     !used.contains(c.exercise.id)
                         && c.traits.isAvailable(with: profile.equipment)
                         && (!available || flaggedStress(c.traits, profile.injuries) < ownStress)
-                }.min { a, b in
-                    let ka = (flaggedStress(a.traits, profile.injuries), a.exercise.isCompound != current.exercise.isCompound ? 1 : 0, a.index)
-                    let kb = (flaggedStress(b.traits, profile.injuries), b.exercise.isCompound != current.exercise.isCompound ? 1 : 0, b.index)
-                    return ka < kb
                 }
             }
+            // Within a stage's safe set prefer: same isCompound, loadable if the original was loaded, lower flagged
+            // stress, then catalog order.
+            let originalLoaded = !current.exercise.isBodyweight
+            func preferred(_ safe: [Candidate]) -> Candidate? {
+                safe.min { a, b in
+                    func key(_ c: Candidate) -> (Int, Int, Int, Int) {
+                        (c.exercise.isCompound != current.exercise.isCompound ? 1 : 0,
+                         originalLoaded && c.exercise.isBodyweight ? 1 : 0,
+                         flaggedStress(c.traits, profile.injuries), c.index)
+                    }
+                    return key(a) < key(b)
+                }
+            }
+            // Stages (b) and (c) first narrow to the lowest available stress.
+            func lowestStress(_ pool: [Candidate]) -> Candidate? {
+                let u = usable(pool)
+                guard let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min() else { return nil }
+                return preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m })
+            }
+            let samePattern = candidates.filter { $0.traits.pattern == traits.pattern }
+            let sameMuscle = candidates.filter { $0.exercise.primaryMuscle == current.exercise.primaryMuscle }
 
-            let chosen = best(candidates.filter { $0.traits.pattern == traits.pattern })
-                ?? best(candidates.filter { $0.exercise.primaryMuscle == current.exercise.primaryMuscle })
-
-            if let chosen {
-                used.insert(chosen.exercise.id)
-                note(.substituted, "\(current.exercise.name) -> \(chosen.exercise.name) (\(cause(traits, available: available, profile: profile)))")
-                slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: chosen.exercise.id)))
-            } else if available {
-                note(.keptStressed, "\(current.exercise.name) kept (no lower-stress option for \(jointList(traits, profile)))")
-                slots.append(Slot(originalIndex: index, template: original))
-            } else if original.priority == .anchor {
-                note(.unfit, "\(current.exercise.name) kept (no substitute for \(cause(traits, available: false, profile: profile)))")
-                slots.append(Slot(originalIndex: index, template: original))
+            let found: (Candidate, SubstitutionStage)?
+            if let c = preferred(usable(samePattern.filter { maxStress($0.traits, profile.injuries) <= patternStageMaxStress })) {
+                found = (c, .pattern)
+            } else if let c = lowestStress(sameMuscle) {
+                found = (c, .muscle)
+            } else if let c = lowestStress(candidates.filter { $0.traits.pattern == traits.pattern || $0.exercise.primaryMuscle == current.exercise.primaryMuscle }) {
+                found = (c, .fallback)
             } else {
-                note(.dropped, "Dropped \(current.exercise.name) (\(cause(traits, available: false, profile: profile)))")
+                found = nil
+            }
+
+            if let (chosen, stage) = found {
+                used.insert(chosen.exercise.id)
+                plan.append(SlotPlan(originalIndex: index, outcome: .replace(exerciseId: chosen.exercise.id, stage: stage)))
+            } else if available {
+                plan.append(SlotPlan(originalIndex: index, outcome: .keptStressed))
+            } else if original.priority == .anchor {
+                plan.append(SlotPlan(originalIndex: index, outcome: .unfit))
+            } else {
+                plan.append(SlotPlan(originalIndex: index, outcome: .drop))
+            }
+        }
+        return plan
+    }
+
+    private static func substitute(_ day: ProgramDayTemplate, profile: FitProfile,
+                                   reasons: inout [FitReason]) -> [Slot] {
+        var slots: [Slot] = []
+        for step in substitutionPlan(day, profile: profile) {
+            let index = step.originalIndex
+            let original = day.exerciseTemplates[index]
+            func note(_ kind: FitReason.Kind, _ message: String) {
+                reasons.append(FitReason(kind: kind, dayNumber: day.dayNumber, slotIndex: index, message: message))
+            }
+            let name = entry(original.exerciseId)?.exercise.name ?? original.exerciseId
+            let traits = ExerciseTraits.traits(for: original.exerciseId)
+            let available = traits?.isAvailable(with: profile.equipment) ?? true
+
+            switch step.outcome {
+            case .keep:
+                slots.append(Slot(originalIndex: index, template: original))
+            case .notEvaluated:
+                if !profile.isUnrestricted { note(.notEvaluated, "\(name) not evaluated for your equipment or joints") }
+                slots.append(Slot(originalIndex: index, template: original))
+            case .replace(let id, let stage):
+                let why = cause(traits!, available: available, profile: profile)
+                // An anchor replaced by an isolation exercise is no longer an anchor: it takes isolation rest and can be trimmed.
+                let demote = original.priority == .anchor && !(entry(id)?.exercise.isCompound ?? true)
+                let suffix = (stage == .fallback ? "; no lower-stress option" : "") + (demote ? "; no longer an anchor" : "")
+                note(.substituted, "\(name) -> \(entry(id)?.exercise.name ?? id) (\(why)\(suffix))")
+                slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
+            case .keptStressed:
+                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))")
+                slots.append(Slot(originalIndex: index, template: original))
+            case .unfit:
+                note(.unfit, "\(name) kept (no substitute for \(cause(traits!, available: false, profile: profile)))")
+                slots.append(Slot(originalIndex: index, template: original))
+            case .drop:
+                note(.dropped, "Dropped \(name) (\(cause(traits!, available: false, profile: profile)))")
             }
         }
         return slots
@@ -269,8 +382,7 @@ enum ProgramFitter {
     // MARK: - Time
 
     private static func trimForTime(day: ProgramDayTemplate, slots: inout [Slot], template: ProgramTemplate,
-                                    profile: FitProfile, reasons: inout [FitReason]) {
-        let budget = profile.sessionMinutes * 60
+                                    budgetSeconds budget: Int, reasons: inout [FitReason]) {
         func over() -> Bool { estimatedSeconds(slots.map(\.template), template: template) > budget }
         func isolation(_ s: Slot) -> Bool { !(entry(s.template.exerciseId)?.exercise.isCompound ?? true) }
         func name(_ s: Slot) -> String { entry(s.template.exerciseId)?.exercise.name ?? s.template.exerciseId }
@@ -300,20 +412,31 @@ enum ProgramFitter {
         while over(), let p = slots.lastIndex(where: { $0.template.priority != .anchor && isolation($0) }) {
             drop(at: p)
         }
+        // (iv) one set off each non-anchor compound slot (floor 2), non-deload weeks only, last first
+        for p in slots.indices.reversed() where over() && slots[p].template.priority != .anchor && !isolation(slots[p]) {
+            let before = slots[p].template.setsByWeek
+            let after = before.enumerated().map { i, s in
+                template.rule(forWeek: i + 1)?.isDeload == true || s <= 2 ? s : s - 1
+            }
+            guard after != before else { continue }
+            slots[p].template = rebuild(slots[p].template, setsByWeek: after)
+            reasons.append(FitReason(kind: .trimmedSets, dayNumber: day.dayNumber, slotIndex: slots[p].originalIndex,
+                                     message: "\(name(slots[p])): -1 set (session length)"))
+        }
         if over() {
             let seconds = estimatedSeconds(slots.map(\.template), template: template) - budget
             let minutes = (seconds + 59) / 60
             reasons.append(FitReason(kind: .overBudget, dayNumber: day.dayNumber, slotIndex: nil,
-                                     message: "\(day.title): estimated \(minutes) min over the \(profile.sessionMinutes) min session"))
+                                     message: "\(day.title): estimated \(minutes) min over the \(budget / 60) min session"))
         }
     }
 
     // MARK: - Rebuild
 
     private static func rebuild(_ ex: ProgramExerciseTemplate, exerciseId: String? = nil, order: Int? = nil,
-                                setsByWeek: [Int]? = nil) -> ProgramExerciseTemplate {
+                                setsByWeek: [Int]? = nil, priority: ExercisePriority? = nil) -> ProgramExerciseTemplate {
         ProgramExerciseTemplate(id: ex.id, order: order ?? ex.order, exerciseId: exerciseId ?? ex.exerciseId,
-                                priority: ex.priority, notes: ex.notes, prescriptions: ex.prescriptions,
+                                priority: priority ?? ex.priority, notes: ex.notes, prescriptions: ex.prescriptions,
                                 setsByWeek: setsByWeek ?? ex.setsByWeek)
     }
 }
