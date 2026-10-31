@@ -60,7 +60,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "weekInMeso", "readinessRaw", "planEdited", "exerciseNameSnapshot", "dayLabel",
         "statusRaw", "exerciseId", "mesoBlockId", "isMaintenance", "totalWeeks",
         "isBodyweight", "dayLabelSnapshot", "mesoBlockNameSnapshot", "name",
-        "programIndex", "appModeRaw", "isPR", "isCompleted", "primaryMuscle",
+        "programIndex", "isPR", "isCompleted", "primaryMuscle",
         "primaryMuscleRaw", "sessionId", "weekIndex", "order", "waveRaw", "priorityRaw",
         "intensifierRaw", "loadOverrideReasonRaw", "title", "subtitle"
     ]
@@ -778,6 +778,19 @@ final class UniversalityGuardTests: XCTestCase {
         ("personal name Mark", #"\bMark\b"#),
         ("personal name Angela", #"\bAngela\b"#),
         ("birth year", #"\b1977\b"#),
+        // Lowercase forms of the two names, as enum cases, raw values or key fragments. Each is anchored so it cannot
+        // hit markdown, bookmark, remark, Marker, mark(x) or `let mark = 1`.
+        ("lowercase name, enum case", #"(?i)\bcase\s+(?:mark|angela)\b"#),
+        ("lowercase name, whole string literal", #"(?i)"(?:mark|angela)""#),
+        ("lowercase name, key fragment", #"(?i)(?<![A-Za-z0-9])(?:mark|angela)(?=_v\d|_)"#),
+        ("lowercase name, bare angela", #"(?i)(?<![A-Za-z0-9])angela(?![A-Za-z0-9])"#),
+    ]
+
+    /// Exact string literals (quoted, whole) that may contain the names. Everything else that matches fails. A literal
+    /// listed here that no longer appears in production code fails the stale check.
+    static let literalExemptions: [String: String] = [
+        "custom_exercises_mark_v1": "legacy migration input for old installs; read-only",
+        "custom_exercises_angela_v1": "legacy migration input for old installs; read-only",
     ]
 
     // MARK: Source access
@@ -873,21 +886,41 @@ final class UniversalityGuardTests: XCTestCase {
         var description: String { "\(file):\(line) [\(pattern)] \(text)" }
     }
 
-    private func scan() throws -> [Hit] {
+    /// Pattern hits in comment-stripped `text`, minus matches that sit entirely inside an exempt quoted literal.
+    /// `used` collects the exemptions that suppressed a match.
+    static func hits(in text: String, file: String, name: String, used: inout Set<String>) throws -> [Hit] {
+        let compiled = try patterns.map { ($0.name, try NSRegularExpression(pattern: $0.regex)) }
         var hits: [Hit] = []
-        let compiled = try Self.patterns.map { ($0.name, try NSRegularExpression(pattern: $0.regex)) }
-        for src in try productionSources() {
-            for (idx, line) in src.text.components(separatedBy: "\n").enumerated() {
-                let range = NSRange(line.startIndex..., in: line)
-                for (name, re) in compiled {
-                    for m in re.matches(in: line, range: range) {
-                        hits.append(Hit(file: src.path, name: src.name, line: idx + 1, pattern: name,
-                                        text: (line as NSString).substring(with: m.range)))
+        for (idx, line) in text.components(separatedBy: "\n").enumerated() {
+            let ns = line as NSString
+            let whole = NSRange(location: 0, length: ns.length)
+            var exempt: [(range: NSRange, literal: String)] = []
+            for literal in literalExemptions.keys {
+                var from = 0
+                while from < ns.length {
+                    let r = ns.range(of: "\"\(literal)\"", range: NSRange(location: from, length: ns.length - from))
+                    if r.location == NSNotFound { break }
+                    exempt.append((r, literal))
+                    from = r.location + r.length
+                }
+            }
+            for (patternName, re) in compiled {
+                for m in re.matches(in: line, range: whole) {
+                    if let e = exempt.first(where: { m.range.location >= $0.range.location
+                        && m.range.location + m.range.length <= $0.range.location + $0.range.length }) {
+                        used.insert(e.literal)
+                        continue
                     }
+                    hits.append(Hit(file: file, name: name, line: idx + 1, pattern: patternName, text: ns.substring(with: m.range)))
                 }
             }
         }
         return hits
+    }
+
+    private func scan() throws -> [Hit] {
+        var used = Set<String>()
+        return try productionSources().flatMap { try Self.hits(in: $0.text, file: $0.path, name: $0.name, used: &used) }
     }
 
     // MARK: Tests
@@ -933,6 +966,60 @@ final class UniversalityGuardTests: XCTestCase {
                 XCTAssertFalse(src.text.range(of: #"\b\#(name)\b"#, options: .regularExpression) != nil,
                                "\(name) is allowlisted yet referenced from \(src.path)")
             }
+        }
+    }
+
+    func test_literalExemptions_areEachUsedAndNotStale() throws {
+        let sources = try productionSources()
+        for (literal, reason) in Self.literalExemptions {
+            XCTAssertFalse(reason.isEmpty, "\(literal) needs a reason")
+            XCTAssertTrue(sources.contains { $0.text.contains("\"\(literal)\"") },
+                          "stale exemption: \"\(literal)\" no longer appears in production code")
+        }
+        var used = Set<String>()
+        for src in sources { _ = try Self.hits(in: src.text, file: src.path, name: src.name, used: &used) }
+        XCTAssertEqual(used, Set(Self.literalExemptions.keys), "every exemption should be suppressing a real match")
+    }
+
+    // MARK: Mutation checks: each shape must fail the guard
+
+    private func offending(_ snippet: String) throws -> [Hit] {
+        var used = Set<String>()
+        return try Self.hits(in: snippet, file: "Probe.swift", name: "Probe", used: &used)
+    }
+
+    func test_mutation_newEnumCaseNamedAngelaOrMark_fails() throws {
+        XCTAssertFalse(try offending("enum Probe { case angela }").isEmpty)
+        XCTAssertFalse(try offending("enum Probe: String {\n    case mark\n}").isEmpty)
+        XCTAssertFalse(try offending("switch x { case .a: break; case Mark: break }").isEmpty)
+    }
+
+    func test_mutation_newWholeLiteralMarkOrAngela_fails() throws {
+        XCTAssertFalse(try offending("let k = \"mark\"").isEmpty)
+        XCTAssertFalse(try offending("let k = \"Angela\"").isEmpty)
+        XCTAssertFalse(try offending("let k = \"ANGELA\"").isEmpty)
+    }
+
+    func test_mutation_newPerNameKeyFragment_fails() throws {
+        XCTAssertFalse(try offending("let k = \"custom_exercises_mark_v2\"").isEmpty)
+        XCTAssertFalse(try offending("let k = \"custom_exercises_angela_v2\"").isEmpty)
+        // The exemption is for the exact legacy literals only, even on the same line.
+        let both = try offending("[\"custom_exercises_mark_v1\", \"custom_exercises_mark_v2\"]")
+        XCTAssertFalse(both.isEmpty)
+        XCTAssertTrue(both.allSatisfy { $0.text.contains("mark") })
+    }
+
+    func test_exemptLegacyLiterals_doNotFail_andOnlyThoseExactLiterals() throws {
+        XCTAssertTrue(try offending("private static let legacyCustomKeys = [\"custom_exercises_mark_v1\", \"custom_exercises_angela_v1\"]").isEmpty)
+        XCTAssertFalse(try offending("let k = \"custom_exercises_mark_v1_copy\"").isEmpty)
+        XCTAssertFalse(try offending("let k = \"x_custom_exercises_mark_v1\"").isEmpty)
+    }
+
+    func test_lowercaseNamePatterns_doNotHitOrdinaryWords() throws {
+        for ok in ["markdown", "bookmark", "remark", "Marker", "landmark_v1", "trademark_v2", "let mark = 1", "mark(x)",
+                   "case markdown", "case marker", "\"markdown\"", "\"bookmark\"", "\"remark\"", "\"Marker\"", "\"a mark\"",
+                   "someAngelaHelper", "x.mark", "AppMode.mark"] {
+            XCTAssertTrue(try offending(ok).isEmpty, "false positive: \(ok)")
         }
     }
 

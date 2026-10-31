@@ -70,7 +70,9 @@ struct AppStateBackupDTO: Codable {
     let mesoAnchorDate: Date?
     let mesoAnchorDayNumber: Int?
 
-    let appModeRaw: String?
+    // appModeRaw was removed from AppState (a dead field: nothing read or wrote it). Kept here, optional, purely so
+    // old backups that carry the key still decode; the importer ignores it and the exporter never writes it.
+    var appModeRaw: String? = nil
     // Added (warm-up card preference). Optional so OLD backups decode with nil: the device keeps its own setting.
     var warmupHidden: Bool? = nil
 }

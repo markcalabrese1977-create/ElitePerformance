@@ -97,3 +97,106 @@ final class BackupFullRoundTripTests: XCTestCase {
         return text(["v": a]) == text(["v": b]) ? "" : "\(path): \(a) vs \(b)"
     }
 }
+
+// MARK: - AppState.appModeRaw removal
+
+/// `AppState.appModeRaw` was a dead field (nothing read or wrote it) and was removed. A store written before the removal
+/// must still open (lightweight migration) with the rest of AppState intact, and an old backup that carries the key must
+/// import without error.
+final class AppModeRemovalTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+    }
+
+    override func tearDown() {
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    /// The AppState entity exactly as it was before the removal (the only other change is the one dropped column).
+    enum OldSchema: VersionedSchema {
+        static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
+        static var models: [any PersistentModel.Type] { [AppState.self] }
+
+        @Model
+        final class AppState {
+            var id: UUID?
+            var createdAt: Date?
+            var updatedAt: Date?
+            var activeMesoStartDate: Date?
+            var scheduledNextMesoStartDate: Date?
+            var mesoPromptSnoozeUntil: Date?
+            var mesoAnchorDate: Date?
+            var mesoAnchorDayNumber: Int?
+            var appModeRaw: String?
+            var warmupHidden: Bool? = nil
+
+            init(id: UUID?, activeMesoStartDate: Date?, mesoAnchorDate: Date?, mesoAnchorDayNumber: Int?,
+                 appModeRaw: String?, warmupHidden: Bool?) {
+                self.id = id
+                self.activeMesoStartDate = activeMesoStartDate
+                self.mesoAnchorDate = mesoAnchorDate
+                self.mesoAnchorDayNumber = mesoAnchorDayNumber
+                self.appModeRaw = appModeRaw
+                self.warmupHidden = warmupHidden
+            }
+        }
+    }
+
+    func test_storeWrittenWithTheOldSchema_opensAndMigrates_withNoDataLoss() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("appmode-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.store")
+
+        let id = UUID()
+        let start = BackupTestSupport.date(1_700_000_000)
+        let anchor = BackupTestSupport.date(1_700_086_400)
+        do {
+            let oldSchema = Schema(versionedSchema: OldSchema.self)
+            let old = try ModelContainer(for: oldSchema, configurations: ModelConfiguration(schema: oldSchema, url: url))
+            let ctx = ModelContext(old)
+            ctx.insert(OldSchema.AppState(id: id, activeMesoStartDate: start, mesoAnchorDate: anchor, mesoAnchorDayNumber: 4,
+                                          appModeRaw: "mark", warmupHidden: true))
+            try ctx.save()
+        }
+
+        let schema = AppSchema.makeSchema()
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url))
+        let rows = try ModelContext(container).fetch(FetchDescriptor<AppState>())
+        XCTAssertEqual(rows.count, 1, "the AppState row survived the migration")
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.id, id)
+        XCTAssertEqual(row.activeMesoStartDate, start)
+        XCTAssertEqual(row.mesoAnchorDate, anchor)
+        XCTAssertEqual(row.mesoAnchorDayNumber, 4)
+        XCTAssertEqual(row.warmupHidden, true)
+    }
+
+    func test_oldBackupCarryingAppModeRaw_importsCleanly_andTheKeyIsIgnored() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: source)
+
+        let exported = try BackupTestSupport.exportFile(source)
+        defer { try? FileManager.default.removeItem(at: exported) }
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: exported)) as? [String: Any])
+        var appState = try XCTUnwrap(json["appState"] as? [String: Any])
+        XCTAssertNil(appState["appModeRaw"], "the exporter no longer writes the key")
+        appState["appModeRaw"] = "mark"
+        json["appState"] = appState
+
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("old-backup-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: old) }
+        try JSONSerialization.data(withJSONObject: json).write(to: old)
+
+        let targetContainer = try BackupTestSupport.makeContainer()
+        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: targetContainer))
+        let restored = try XCTUnwrap(ModelContext(targetContainer).fetch(FetchDescriptor<AppState>()).first)
+        XCTAssertEqual(restored.mesoAnchorDayNumber, 3, "the rest of AppState restored")
+        XCTAssertEqual(restored.warmupHidden, true)
+    }
+}

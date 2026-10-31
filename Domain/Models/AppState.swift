@@ -16,9 +16,6 @@ final class AppState {
     var mesoAnchorDate: Date?
     var mesoAnchorDayNumber: Int?
 
-    // App-level user mode
-    var appModeRaw: String?
-
     // Session screen: warm-up card hidden. A user preference; the UI reads/writes it through UserDefaults
     // (@AppStorage), this is the backed-up copy. nil = never set (card shown).
     var warmupHidden: Bool? = nil
@@ -32,7 +29,6 @@ final class AppState {
         mesoPromptSnoozeUntil: Date? = nil,
         mesoAnchorDate: Date? = nil,
         mesoAnchorDayNumber: Int? = nil,
-        appModeRaw: String? = nil,
         warmupHidden: Bool? = nil
     ) {
         self.id = id
@@ -43,7 +39,6 @@ final class AppState {
         self.mesoPromptSnoozeUntil = mesoPromptSnoozeUntil
         self.mesoAnchorDate = mesoAnchorDate
         self.mesoAnchorDayNumber = mesoAnchorDayNumber
-        self.appModeRaw = appModeRaw
         self.warmupHidden = warmupHidden
     }
 }

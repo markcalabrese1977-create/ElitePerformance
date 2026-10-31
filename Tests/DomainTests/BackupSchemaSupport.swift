@@ -103,7 +103,7 @@ enum PopulatedStoreBuilder {
         ctx.insert(AppState(
             id: UUID(), createdAt: day(-20), updatedAt: day(-19),
             activeMesoStartDate: day(1), scheduledNextMesoStartDate: day(70), mesoPromptSnoozeUntil: day(71),
-            mesoAnchorDate: day(2), mesoAnchorDayNumber: 3, appModeRaw: "probe_mode", warmupHidden: true
+            mesoAnchorDate: day(2), mesoAnchorDayNumber: 3, warmupHidden: true
         ))
 
         let profile = UserProfile(
