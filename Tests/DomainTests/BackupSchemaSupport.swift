@@ -108,11 +108,14 @@ enum PopulatedStoreBuilder {
 
         let profile = UserProfile(
             id: UUID(), createdAt: day(-25), experience: .advanced, primaryGoal: .strength, daysPerWeek: 5,
-            sessionLengthMinutes: 45, equipmentProfile: .homeGym, injuryFlags: [.knees, .wrists],
+            sessionLengthMinutes: 45, equipmentProfile: .homeGym, injuryFlags: [.knees, .wrists, .hips],
             minLoadIncrement: 5.0, bodyWeight: 82.5
         )
         profile.exemptExerciseIds = ["bench_press"]
         profile.birthDateOverride = day(-9_000)
+        // Set the raw columns directly: the preset setter would also rewrite equipmentProfileRaw.
+        profile.equipmentPresetRaw = EquipmentPreset.machinesOnly.rawValue
+        profile.equipmentChecklistRaws = [GearTag.cable.rawValue, GearTag.dumbbell.rawValue]
         ctx.insert(profile)
 
         let archived = MesoBlock(id: UUID(), createdAt: day(-10), updatedAt: day(-9), name: "Probe Block One",
