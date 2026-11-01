@@ -114,6 +114,13 @@ final class ProgramFitterTests: XCTestCase {
                 if case .replace(let id, _) = step.outcome, origDay.exerciseTemplates[step.originalIndex].priority == .anchor,
                    catalogByName[id]?.isCompound == false { demoted.insert(origDay.exerciseTemplates[step.originalIndex].id) }
             }
+            for step in ProgramFitter.substitutionPlan(origDay, profile: p) {
+                guard case .replace = step.outcome, let t = ExerciseTraits.traits(for: origDay.exerciseTemplates[step.originalIndex].exerciseId),
+                      t.isAvailable(with: p.equipment) else { continue }
+                if (p.injuries.map { t.stress(for: $0) }.max() ?? 0) <= 1 {
+                    fail("\(day.title): slot \(step.originalIndex) has gear and stress <= 1 but was swapped")
+                }
+            }
             for slot in origDay.exerciseTemplates where slot.priority == .anchor && !demoted.contains(slot.id) {
                 if !day.exerciseTemplates.contains(where: { $0.id == slot.id }) { fail("\(day.title): anchor \(slot.id) dropped") }
             }
@@ -129,12 +136,13 @@ final class ProgramFitterTests: XCTestCase {
                     let flagged = reasonsForDay.contains { $0.kind == .unfit && $0.slotIndex == slotIndex }
                     fail("\(day.title): \(ex.exerciseId) needs unavailable gear" + (flagged ? " (unfit reason present)" : ""))
                 }
-                // joint stress: a kept (not swapped) exercise with stressed flagged joints means nothing lower-stress existed
+                // joint stress: only a stress-2 original is ever swapped for joints, so a kept stress-2 exercise means nothing lower-stress existed
                 let own = p.injuries.reduce(0) { $0 + traits.stress(for: $1) }
+                let peak = p.injuries.map { traits.stress(for: $0) }.max() ?? 0
                 let wasSwapped = originalSlots[ex.id].map { slot in
                     Self.canon(slot.ex.exerciseId) != Self.canon(ex.exerciseId)
                 } ?? false
-                if own > 0, !wasSwapped, let current = catalogByName[Self.canon(ex.exerciseId)] {
+                if peak >= 2, !wasSwapped, let current = catalogByName[Self.canon(ex.exerciseId)] {
                     let pool = ExerciseCatalog.builtIn.filter {
                         ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern || $0.primaryMuscle == current.primaryMuscle
                     }
@@ -228,7 +236,7 @@ final class ProgramFitterTests: XCTestCase {
                     let prof = profile(preset, joints)
                     for day in template.dayTemplates {
                         var used = Set(day.exerciseTemplates.map { Self.canon($0.exerciseId) })
-                        for step in ProgramFitter.substitutionPlan(day, profile: prof) {
+                        for step in ProgramFitter.substitutionPlan(day, profile: prof).sorted(by: { Self.pickOrder($0.originalIndex, day) < Self.pickOrder($1.originalIndex, day) }) {
                             let orig = day.exerciseTemplates[step.originalIndex]
                             guard case .replace(let chosenId, let stage) = step.outcome,
                                   let traits = ExerciseTraits.traits(for: orig.exerciseId),
@@ -292,6 +300,60 @@ final class ProgramFitterTests: XCTestCase {
         }
         print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) fallback=\(staged[2]) bodyweightOverSafeLoadable=\(passedOverLoadable) failures=\(failures.count)")
         XCTAssertTrue(failures.isEmpty, failures.prefix(15).joined(separator: "\n"))
+    }
+
+    /// Slots choose in priority order (anchor, standard, optional/firstCut), ties by slot index.
+    static func pickOrder(_ index: Int, _ day: ProgramDayTemplate) -> (Int, Int) {
+        switch day.exerciseTemplates[index].priority {
+        case .anchor: return (0, index)
+        case .standard: return (1, index)
+        case .optional, .firstCut: return (2, index)
+        }
+    }
+
+    // MARK: - Priority order and the keep rule
+
+    /// A contested substitute goes to the higher-priority slot even when a lower-priority slot comes earlier.
+    func test_higherPrioritySlotPicksFirst_underTheNoDuplicateRule() {
+        let prof = FitProfile(equipment: [.dumbbell], injuries: [], sessionMinutes: 120)
+        let day = ProgramDayTemplate(id: "d", dayNumber: 1, title: "Day", role: "", exerciseTemplates: [
+            slot("s1", 1, "hack_squat", .optional), slot("s2", 2, "leg_press", .anchor)
+        ])
+        let one = fake("only", 1, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat))
+        let plan = ProgramFitter.substitutionPlan(day, profile: prof, pool: [one])
+        XCTAssertEqual(plan.map(\.originalIndex), [0, 1], "plan stays in slot order")
+        XCTAssertEqual(plan[0].outcome, .drop)
+        guard case .replace(let id, _) = plan[1].outcome else { return XCTFail("anchor should get the only candidate") }
+        XCTAssertEqual(id, "only")
+    }
+
+    /// Lower B (4-day, homeBarbell, lowBack + shoulders): the anchor machine hip thrust picks before the cable glute
+    /// kickback, so the kickback can no longer take the anchor's choice. The anchor's own choice follows the documented
+    /// order (loadable > same isCompound > lower summed stress > catalog order): Glute Bridge (stress 0) outranks
+    /// Barbell Hip Thrust (low back 1), so it is the glute bridge, not the barbell thrust.
+    func test_lowerB_anchorHipThrustSlot_picksFirst_andFollowsTheDocumentedOrder() {
+        let prof = profile(.homeBarbell, [.lowBack, .shoulders], 75)
+        let day = UpperLower4DayTemplate.template.dayTemplates.first { $0.title == "Lower B" }!
+        let plan = ProgramFitter.substitutionPlan(day, profile: prof)
+        let anchor = day.exerciseTemplates.firstIndex { $0.id == "ul_lb_hip_thrust" }!
+        XCTAssertEqual(plan[anchor].outcome, .replace(exerciseId: "glute_bridge", stage: .pattern))
+        let kickback = day.exerciseTemplates.firstIndex { $0.id == "ul_lb_glute_kickback" }
+        if let kickback, case .replace(let id, _) = plan[kickback].outcome { XCTAssertNotEqual(id, "glute_bridge") }
+    }
+
+    /// Keep rule: gear available and max flagged stress <= 1 stays; only stress-2 originals are swapped for joints.
+    func test_keepRule_stressOneIsKept_stressTwoIsSwapped() {
+        let prof = FitProfile(equipment: [.dumbbell], injuries: [.knees], sessionMinutes: 120)
+        for template in Self.templates {
+            for day in template.dayTemplates {
+                for step in ProgramFitter.substitutionPlan(day, profile: prof) {
+                    guard let t = ExerciseTraits.traits(for: day.exerciseTemplates[step.originalIndex].exerciseId), t.isAvailable(with: prof.equipment) else { continue }
+                    let peak = t.stress(for: .knees)
+                    if peak <= 1 { XCTAssertEqual(step.outcome, .keep, "\(template.name) \(day.title) slot \(step.originalIndex)") }
+                    else if case .keep = step.outcome { XCTFail("stress-2 original kept silently") }
+                }
+            }
+        }
     }
 
     // MARK: - Stage (c), synthetic

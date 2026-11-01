@@ -202,7 +202,7 @@ enum ProgramFitter {
         case keep
         case notEvaluated
         case replace(exerciseId: String, stage: SubstitutionStage)
-        case keptStressed   // gear fine, joints flagged, nothing lower-stress exists
+        case keptStressed   // gear fine, a flagged joint at stress 2, nothing lower-stress exists
         case unfit          // anchor with no available substitute: kept
         case drop           // (d)
     }
@@ -226,14 +226,29 @@ enum ProgramFitter {
         var used = Set(day.exerciseTemplates.map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
         var plan: [SlotPlan] = []
 
-        for (index, original) in day.exerciseTemplates.enumerated() {
+        // Higher-priority slots choose first (anchor, standard, optional/firstCut; ties by slot index), so they win
+        // contested substitutes under the no-duplicate rule. The plan is returned in slot order.
+        func rank(_ p: ExercisePriority) -> Int {
+            switch p {
+            case .anchor: return 0
+            case .standard: return 1
+            case .optional, .firstCut: return 2
+            }
+        }
+        let order = day.exerciseTemplates.indices.sorted {
+            (rank(day.exerciseTemplates[$0].priority), $0) < (rank(day.exerciseTemplates[$1].priority), $1)
+        }
+
+        for index in order {
+            let original = day.exerciseTemplates[index]
             guard let traits = ExerciseTraits.traits(for: original.exerciseId), let current = entry(original.exerciseId) else {
                 plan.append(SlotPlan(originalIndex: index, outcome: .notEvaluated))
                 continue
             }
             let available = traits.isAvailable(with: profile.equipment)
             let ownStress = flaggedStress(traits, profile.injuries)
-            if available && ownStress == 0 {
+            // Keep rule: available gear and no flagged joint above stress 1. Joint-driven swaps are for stress-2 originals only.
+            if available && maxStress(traits, profile.injuries) <= patternStageMaxStress {
                 plan.append(SlotPlan(originalIndex: index, outcome: .keep))
                 continue
             }
@@ -290,7 +305,7 @@ enum ProgramFitter {
                 plan.append(SlotPlan(originalIndex: index, outcome: .drop))
             }
         }
-        return plan
+        return plan.sorted { $0.originalIndex < $1.originalIndex }
     }
 
     private static func substitute(_ day: ProgramDayTemplate, profile: FitProfile,
