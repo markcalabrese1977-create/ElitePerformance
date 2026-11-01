@@ -11,7 +11,8 @@ enum ProgramApplicationService {
         overrides: PreviewOverrides? = nil
     ) {
         let weekdays = normalizedWeekdays(from: result)
-        let template = selectTemplate(goal: result.goal, daysPerWeek: weekdays.count)
+        // The same fit the onboarding preview shows; preview overrides are keyed to this fitted template.
+        let template = fittedProgram(for: result).template
 
         do {
             try DUPProgramReplaceService.replacePlannedProgram(
@@ -26,6 +27,33 @@ enum ProgramApplicationService {
         }
 
         writeUserProfile(from: result, context: context)
+    }
+
+    // MARK: - Fit
+
+    /// Gear the fitter may assume: the checklist when one was filled in, else the preset's defaults.
+    static func fitProfile(preset: EquipmentPreset, checklist: [GearTag], injuries: [InjuryFlag],
+                           sessionMinutes: Int, experience: TrainingExperience) -> FitProfile {
+        FitProfile(equipment: checklist.isEmpty ? preset.defaultEquipment : Set(checklist),
+                   injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience)
+    }
+
+    static func fitProfile(for result: OnboardingResult) -> FitProfile {
+        fitProfile(preset: result.equipmentPreset, checklist: result.equipmentChecklist, injuries: result.injuryFlags,
+                   sessionMinutes: result.sessionLengthMinutes, experience: result.experience)
+    }
+
+    /// The program for `result`: the selected template adapted to the person. Preview and seeding both call this.
+    static func fittedProgram(for result: OnboardingResult) -> FitResult {
+        let days = normalizedWeekdays(from: result).count
+        return ProgramFitter.fit(selectTemplate(goal: result.goal, daysPerWeek: days), profile: fitProfile(for: result))
+    }
+
+    /// The session length that makes every day fit: the longest day after all trims, rounded up to the 15 minute
+    /// grid the setup stepper uses. nil when even 120 minutes would not do (fewer training days is the only fix).
+    static func sessionMinutesNeeded(for advice: FitAdvice) -> Int? {
+        let rounded = max((advice.minimumMinutes + 14) / 15 * 15, 30)
+        return rounded <= 120 ? rounded : nil
     }
 
     // MARK: - Template selection
@@ -89,6 +117,8 @@ enum ProgramApplicationService {
             profile.daysPerWeek = result.daysPerWeek
             profile.sessionLengthMinutes = result.sessionLengthMinutes
             profile.equipmentProfile = result.equipmentProfile
+            profile.equipmentPreset = result.equipmentPreset
+            profile.equipmentChecklist = Set(result.equipmentChecklist)
             profile.injuryFlags = result.injuryFlags
             profile.minLoadIncrement = result.minLoadIncrement
         } else {
@@ -101,6 +131,8 @@ enum ProgramApplicationService {
                 injuryFlags: result.injuryFlags,
                 minLoadIncrement: result.minLoadIncrement
             )
+            profile.equipmentPreset = result.equipmentPreset
+            profile.equipmentChecklist = Set(result.equipmentChecklist)
             context.insert(profile)
         }
 

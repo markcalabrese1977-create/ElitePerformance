@@ -94,13 +94,14 @@ enum DUPProgramSeeder {
         let patchedDays = template.dayTemplates.map { day -> ProgramDayTemplate in
 
             // Step 1: filter deleted slots
-            let survivors = day.exerciseTemplates.filter {
-                overrides.slotOverrides[$0.exerciseId]?.isDeleted != true
+            // Slots are addressed by (day, position in the day), so a repeated exerciseId only affects its own slot.
+            let survivors = day.exerciseTemplates.enumerated().filter { index, exercise in
+                overrides.override(dayId: day.id, slotIndex: index, exerciseId: exercise.exerciseId)?.isDeleted != true
             }
 
             // Step 2: transform surviving slots (swap + customize)
-            let transformed: [ProgramExerciseTemplate] = survivors.map { exercise -> ProgramExerciseTemplate in
-                guard let override = overrides.slotOverrides[exercise.exerciseId] else {
+            let transformed: [ProgramExerciseTemplate] = survivors.map { index, exercise -> ProgramExerciseTemplate in
+                guard let override = overrides.override(dayId: day.id, slotIndex: index, exerciseId: exercise.exerciseId) else {
                     return exercise
                 }
 

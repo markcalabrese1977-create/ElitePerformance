@@ -41,6 +41,132 @@ struct OnboardingResult: Codable {
     var minLoadIncrement: Double
     /// User-chosen meso start date from the date picker on the final page.
     var startDate: Date
+    /// Equipment the fitter works from. Defaults (full gym, no checklist) mean "no limits".
+    var equipmentPreset: EquipmentPreset = .fullGym
+    /// Explicit gear checklist; empty means "use the preset's defaults".
+    var equipmentChecklist: [GearTag] = []
+}
+
+extension OnboardingResult {
+    private enum CodingKeys: String, CodingKey {
+        case goal, experience, daysPerWeek, trainingDaysOfWeek, equipmentProfile, sessionLengthMinutes
+        case injuryFlags, minLoadIncrement, startDate, equipmentPreset, equipmentChecklist
+    }
+
+    /// Results encoded before the preset and checklist existed decode as full gym with no checklist.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            goal: try c.decode(Goal.self, forKey: .goal),
+            experience: try c.decode(TrainingExperience.self, forKey: .experience),
+            daysPerWeek: try c.decode(Int.self, forKey: .daysPerWeek),
+            trainingDaysOfWeek: try c.decode([Int].self, forKey: .trainingDaysOfWeek),
+            equipmentProfile: try c.decode(EquipmentProfile.self, forKey: .equipmentProfile),
+            sessionLengthMinutes: try c.decode(Int.self, forKey: .sessionLengthMinutes),
+            injuryFlags: try c.decode([InjuryFlag].self, forKey: .injuryFlags),
+            minLoadIncrement: try c.decode(Double.self, forKey: .minLoadIncrement),
+            startDate: try c.decode(Date.self, forKey: .startDate),
+            equipmentPreset: try c.decodeIfPresent(EquipmentPreset.self, forKey: .equipmentPreset) ?? .fullGym,
+            equipmentChecklist: try c.decodeIfPresent([GearTag].self, forKey: .equipmentChecklist) ?? []
+        )
+    }
+}
+
+// MARK: - Equipment labels and editor
+
+extension EquipmentPreset {
+    var title: String {
+        switch self {
+        case .fullGym:        return "Full gym"
+        case .homeBarbell:    return "Home gym"
+        case .dumbbellsBench: return "Dumbbells + bench"
+        case .machinesOnly:   return "Machines only"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .fullGym:        return "Barbells, dumbbells, machines and cables."
+        case .homeBarbell:    return "Barbell and rack, dumbbells, bench and a pull-up bar."
+        case .dumbbellsBench: return "Dumbbells and a bench, nothing else."
+        case .machinesOnly:   return "Selectorized machines, cables and a Smith machine."
+        }
+    }
+}
+
+extension GearTag {
+    var label: String {
+        switch self {
+        case .barbell:    return "Barbell"
+        case .ezBar:      return "EZ bar"
+        case .dumbbell:   return "Dumbbells"
+        case .bench:      return "Bench"
+        case .rack:       return "Rack"
+        case .cable:      return "Cable machine"
+        case .machine:    return "Machines"
+        case .smith:      return "Smith machine"
+        case .pullUpBar:  return "Pull-up bar"
+        case .dipStation: return "Dip station"
+        }
+    }
+}
+
+/// Preset cards plus a "Customize equipment" checklist pre-filled from the preset. Shared by onboarding and Settings.
+/// The checklist reads as "no checklist" (empty) whenever it equals the preset's defaults.
+struct EquipmentEditor: View {
+    @Binding var preset: EquipmentPreset
+    @Binding var checklist: Set<GearTag>
+    @State private var customizing = false
+
+    /// The gear actually in play: the checklist when present, else the preset's defaults.
+    private var shown: Set<GearTag> { checklist.isEmpty ? preset.defaultEquipment : checklist }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(EquipmentPreset.allCases, id: \.self) { option in
+                Button {
+                    preset = option
+                    checklist = []
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option.title).font(.headline).foregroundColor(.primary)
+                            Text(option.summary).font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: preset == option ? "checkmark.circle.fill" : "circle")
+                            .imageScale(.large)
+                            .foregroundColor(preset == option ? .blue : .secondary)
+                    }
+                    .padding()
+                    .background(RoundedRectangle(cornerRadius: 16)
+                        .fill(preset == option ? Color.blue.opacity(0.08) : Color(.systemGray6)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            DisclosureGroup("Customize equipment", isExpanded: $customizing) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(GearTag.allCases, id: \.self) { gear in
+                        Toggle(gear.label, isOn: Binding(
+                            get: { shown.contains(gear) },
+                            set: { on in
+                                var next = shown
+                                if on { next.insert(gear) } else { next.remove(gear) }
+                                checklist = next == preset.defaultEquipment ? [] : next
+                            }
+                        ))
+                        .font(.subheadline)
+                    }
+                    Text("Starts from the preset. Exercises that need gear you untick are swapped out.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                .padding(.top, 6)
+            }
+            .font(.subheadline.bold())
+            .padding(.top, 4)
+        }
+    }
 }
 
 // MARK: - Flow
@@ -63,7 +189,8 @@ struct OnboardingFlowView: View {
     @State private var selectedWeekdays: Set<Int> = []
 
     // Page 4 — Equipment + Session length
-    @State private var selectedEquipment: EquipmentProfile = .commercial
+    @State private var selectedPreset: EquipmentPreset = .fullGym
+    @State private var selectedChecklist: Set<GearTag> = []
     @State private var sessionLengthMinutes: Int = 60
     @State private var selectedLoadIncrement: Double = 2.5
 
@@ -77,8 +204,11 @@ struct OnboardingFlowView: View {
 
     // Page 6 — Per-exercise overrides, add, and delete
     @State private var previewOverrides: PreviewOverrides = .empty
-    @State private var customizingExercise: (dayId: String, exerciseId: String)? = nil
-    @State private var swappingExercise: (dayId: String, exerciseId: String)? = nil
+    /// Slot targets are (day, position in the fitted day), matching `PreviewOverrides.slotKeyed`.
+    @State private var customizingExercise: (dayId: String, slotIndex: Int)? = nil
+    @State private var swappingExercise: (dayId: String, slotIndex: Int)? = nil
+    /// The profile the current overrides were made against; overrides are dropped when it changes.
+    @State private var overridesSignature: String = ""
     @State private var addingToDayId: String? = nil
     // Staged during picker selection; promoted to pendingNewExercise in picker's onDismiss,
     // which fires only after the picker animation fully completes — eliminating the
@@ -133,6 +263,12 @@ struct OnboardingFlowView: View {
         }
         .navigationTitle("Setup")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: fitSignature) { _, newValue in
+            // The fitted template changed under the overrides: slot positions no longer mean the same slots.
+            if newValue != overridesSignature { previewOverrides = .empty }
+            overridesSignature = newValue
+        }
+        .onAppear { overridesSignature = fitSignature }
     }
 
     // MARK: - Progress bar
@@ -316,39 +452,22 @@ struct OnboardingFlowView: View {
             )
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Where do you train?")
+                Text("What equipment do you have?")
                     .font(.subheadline.bold())
 
-                ForEach(EquipmentProfile.allCases, id: \.self) { profile in
-                    Button {
-                        selectedEquipment = profile
-                        // Auto-set sensible load increment defaults
-                        if selectedLoadIncrement == 2.5 || selectedLoadIncrement == 1.25 || selectedLoadIncrement == 5.0 {
-                            selectedLoadIncrement = defaultLoadIncrement(for: profile)
-                        }
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(equipmentLabel(profile))
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                Text(equipmentSubtitle(profile))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                EquipmentEditor(
+                    preset: Binding(
+                        get: { selectedPreset },
+                        set: { newPreset in
+                            selectedPreset = newPreset
+                            // Auto-set sensible load increment defaults
+                            if selectedLoadIncrement == 2.5 || selectedLoadIncrement == 1.25 || selectedLoadIncrement == 5.0 {
+                                selectedLoadIncrement = defaultLoadIncrement(for: newPreset.legacyProfile)
                             }
-                            Spacer()
-                            Image(systemName: selectedEquipment == profile ? "checkmark.circle.fill" : "circle")
-                                .imageScale(.large)
-                                .foregroundColor(selectedEquipment == profile ? .blue : .secondary)
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(selectedEquipment == profile ? Color.blue.opacity(0.08) : Color(.systemGray6))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+                    ),
+                    checklist: $selectedChecklist
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -389,22 +508,6 @@ struct OnboardingFlowView: View {
             }
 
             Spacer()
-        }
-    }
-
-    private func equipmentLabel(_ profile: EquipmentProfile) -> String {
-        switch profile {
-        case .commercial:     return "Commercial gym"
-        case .homeGym:        return "Home gym"
-        case .dumbbellsOnly:  return "Dumbbells only"
-        }
-    }
-
-    private func equipmentSubtitle(_ profile: EquipmentProfile) -> String {
-        switch profile {
-        case .commercial:     return "Full access to machines, cables, and free weights."
-        case .homeGym:        return "Barbell, rack, and select machines or cables."
-        case .dumbbellsOnly:  return "Dumbbells and bodyweight only."
         }
     }
 
@@ -491,10 +594,9 @@ struct OnboardingFlowView: View {
 
         private var programPreviewPage: some View {
             let weekdays = selectedWeekdays.map { min(max($0, 1), 7) }.sorted()
-            let template = ProgramApplicationService.selectTemplate(
-                goal: selectedGoal,
-                daysPerWeek: weekdays.count
-            )
+            // The same fit seeding runs, so the preview is the program that will be created.
+            let fit = currentFit()
+            let template = fit.template
             let reason = ProgramApplicationService.recommendationReason(
                         goal: selectedGoal,
                         daysPerWeek: weekdays.count
@@ -535,6 +637,10 @@ struct OnboardingFlowView: View {
                         .fill(Color.blue.opacity(0.06))
                 )
 
+                timeAdviceBanner(fit)
+
+                adjustedForYouSection(fit)
+
                 // Week 1 structure
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Week 1 structure")
@@ -552,8 +658,8 @@ struct OnboardingFlowView: View {
                                         .foregroundStyle(.secondary)
                                 }
 
-                                ForEach(day.exerciseTemplates.filter { $0.priority != .optional }, id: \.id) { exercise in
-                                    exerciseRow(day: day, exercise: exercise, template: template)
+                                ForEach(Array(day.exerciseTemplates.enumerated()), id: \.element.id) { index, exercise in
+                                    exerciseRow(day: day, slotIndex: index, exercise: exercise, template: template)
                                 }
 
                                 ForEach(previewOverrides.addedByDay[day.id] ?? []) { added in
@@ -614,30 +720,31 @@ struct OnboardingFlowView: View {
             )) {
                 if let target = customizingExercise,
                    let dayTemplate = template.dayTemplates.first(where: { $0.id == target.dayId }),
-                   // Slot lookup stays on the ORIGINAL exerciseId: a swap replaces
-                   // the exercise but keeps the slot's prescriptions (see
-                   // DUPProgramSeeder.applying), so the original slot is the correct
-                   // baseline to edit against. Only the title follows the swap.
-                   let exerciseTemplate = dayTemplate.exerciseTemplates.first(where: { $0.exerciseId == target.exerciseId }) {
-                    let titleExerciseId = previewOverrides.slotOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
+                   dayTemplate.exerciseTemplates.indices.contains(target.slotIndex) {
+                    // The slot of the fitted template is the baseline to edit against: a swap replaces the
+                    // exercise but keeps the slot's prescriptions (see DUPProgramSeeder.applying). Only the title
+                    // follows the swap.
+                    let exerciseTemplate = dayTemplate.exerciseTemplates[target.slotIndex]
+                    let key = SlotKey(dayId: target.dayId, slotIndex: target.slotIndex)
+                    let titleExerciseId = previewOverrides.slotKeyed[key]?.substituteExerciseId ?? exerciseTemplate.exerciseId
                     ExerciseCustomizationSheet(
                         exerciseId: titleExerciseId,
                         exerciseTemplate: exerciseTemplate,
                         template: template,
-                        existingOverride: previewOverrides.slotOverrides[target.exerciseId],
+                        existingOverride: previewOverrides.slotKeyed[key],
                         onApply: { newOverride in
-                            let existing = previewOverrides.slotOverrides[target.exerciseId] ?? ExerciseWaveOverride()
-                            previewOverrides.slotOverrides[target.exerciseId] = existing.applyingPrescription(
+                            let existing = previewOverrides.slotKeyed[key] ?? ExerciseWaveOverride()
+                            previewOverrides.slotKeyed[key] = existing.applyingPrescription(
                                 wavePrescriptions: newOverride.wavePrescriptions,
                                 setsByWeek: newOverride.setsByWeek
                             )
                         },
                         onReset: {
-                            if let existing = previewOverrides.slotOverrides[target.exerciseId],
+                            if let existing = previewOverrides.slotKeyed[key],
                                existing.substituteExerciseId != nil {
-                                previewOverrides.slotOverrides[target.exerciseId] = existing.prescriptionCleared
+                                previewOverrides.slotKeyed[key] = existing.prescriptionCleared
                             } else {
-                                previewOverrides.slotOverrides.removeValue(forKey: target.exerciseId)
+                                previewOverrides.slotKeyed.removeValue(forKey: key)
                             }
                         }
                     )
@@ -649,14 +756,18 @@ struct OnboardingFlowView: View {
                     if !isPresented { swappingExercise = nil }
                 }
             )) {
-                if let target = swappingExercise {
-                    let displayId = previewOverrides.slotOverrides[target.exerciseId]?.substituteExerciseId ?? target.exerciseId
+                if let target = swappingExercise,
+                   let dayTemplate = template.dayTemplates.first(where: { $0.id == target.dayId }),
+                   dayTemplate.exerciseTemplates.indices.contains(target.slotIndex) {
+                    let key = SlotKey(dayId: target.dayId, slotIndex: target.slotIndex)
+                    let displayId = previewOverrides.slotKeyed[key]?.substituteExerciseId
+                        ?? dayTemplate.exerciseTemplates[target.slotIndex].exerciseId
                     ProgramExerciseSwapSheet(
                         currentExerciseId: displayId,
                         currentExerciseName: ExerciseCatalog.displayName(for: displayId),
                         onSelect: { catalogExercise in
-                            let existing = previewOverrides.slotOverrides[target.exerciseId] ?? ExerciseWaveOverride()
-                            previewOverrides.slotOverrides[target.exerciseId] = existing.applyingSubstitute(catalogExercise.id)
+                            let existing = previewOverrides.slotKeyed[key] ?? ExerciseWaveOverride()
+                            previewOverrides.slotKeyed[key] = existing.applyingSubstitute(catalogExercise.id)
                             swappingExercise = nil
                         },
                         onCancel: {
@@ -794,8 +905,9 @@ struct OnboardingFlowView: View {
             }
         }
 
-        private func exerciseRow(day: ProgramDayTemplate, exercise: ProgramExerciseTemplate, template: ProgramTemplate) -> some View {
-            let override = previewOverrides.slotOverrides[exercise.exerciseId]
+        private func exerciseRow(day: ProgramDayTemplate, slotIndex: Int, exercise: ProgramExerciseTemplate, template: ProgramTemplate) -> some View {
+            let key = SlotKey(dayId: day.id, slotIndex: slotIndex)
+            let override = previewOverrides.slotKeyed[key]
             let isDeleted = override?.isDeleted == true
             let effectiveId = override?.substituteExerciseId ?? exercise.exerciseId
             let isSwapped = !isDeleted && override?.substituteExerciseId != nil
@@ -808,6 +920,15 @@ struct OnboardingFlowView: View {
                             .font(.footnote)
                             .fontWeight(.medium)
                             .strikethrough(isDeleted)
+
+                        if exercise.priority == .optional || exercise.priority == .firstCut {
+                            Text("Optional")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                .foregroundStyle(.secondary)
+                        }
 
                         if isSwapped {
                             Image(systemName: "arrow.left.arrow.right.circle.fill")
@@ -831,8 +952,8 @@ struct OnboardingFlowView: View {
 
                 if isDeleted {
                     Button("Undo") {
-                        let existing = previewOverrides.slotOverrides[exercise.exerciseId]!
-                        previewOverrides.slotOverrides[exercise.exerciseId] = existing.unmarkedDeleted
+                        let existing = previewOverrides.slotKeyed[key]!
+                        previewOverrides.slotKeyed[key] = existing.unmarkedDeleted
                     }
                     .font(.footnote)
                     .buttonStyle(.plain)
@@ -840,7 +961,7 @@ struct OnboardingFlowView: View {
                 } else {
                     HStack(spacing: 8) {
                         Button {
-                            swappingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                            swappingExercise = (dayId: day.id, slotIndex: slotIndex)
                         } label: {
                             Image(systemName: "arrow.left.arrow.right.circle")
                                 .font(.body)
@@ -848,7 +969,7 @@ struct OnboardingFlowView: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            customizingExercise = (dayId: day.id, exerciseId: exercise.exerciseId)
+                            customizingExercise = (dayId: day.id, slotIndex: slotIndex)
                         } label: {
                             Image(systemName: "pencil.circle")
                                 .font(.body)
@@ -856,8 +977,8 @@ struct OnboardingFlowView: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            let existing = previewOverrides.slotOverrides[exercise.exerciseId] ?? ExerciseWaveOverride()
-                            previewOverrides.slotOverrides[exercise.exerciseId] = existing.markedDeleted
+                            let existing = previewOverrides.slotKeyed[key] ?? ExerciseWaveOverride()
+                            previewOverrides.slotKeyed[key] = existing.markedDeleted
                         } label: {
                             Image(systemName: "trash")
                                 .font(.body)
@@ -966,6 +1087,89 @@ struct OnboardingFlowView: View {
 
                 return "\(wave.displayName): \(sets)×\(repMin)-\(repMax) @\(rir)RIR"
             }.joined(separator: "  ")
+        }
+
+        /// The checklist as stored on the result: empty unless it differs from the preset's defaults.
+        private var resultChecklist: [GearTag] {
+            selectedChecklist == selectedPreset.defaultEquipment ? [] : selectedChecklist.sorted { $0.rawValue < $1.rawValue }
+        }
+
+        private var currentWeekdayCount: Int { selectedWeekdays.map { min(max($0, 1), 7) }.count }
+
+        private func currentFit() -> FitResult {
+            let template = ProgramApplicationService.selectTemplate(goal: selectedGoal, daysPerWeek: currentWeekdayCount)
+            return ProgramFitter.fit(template, profile: ProgramApplicationService.fitProfile(
+                preset: selectedPreset, checklist: resultChecklist, injuries: Array(selectedInjuryFlags),
+                sessionMinutes: sessionLengthMinutes, experience: selectedExperience))
+        }
+
+        /// Everything the fit depends on. Slot-keyed overrides only mean something against the same fitted template,
+        /// so they are dropped when this changes.
+        private var fitSignature: String {
+            [selectedGoal.rawValue, String(currentWeekdayCount), selectedPreset.rawValue,
+             resultChecklist.map(\.rawValue).joined(separator: ","),
+             selectedInjuryFlags.map(\.rawValue).sorted().joined(separator: ","),
+             String(sessionLengthMinutes), selectedExperience.rawValue].joined(separator: "|")
+        }
+
+        @ViewBuilder
+        private func timeAdviceBanner(_ fit: FitResult) -> some View {
+            if fit.reasons.contains(where: { $0.kind == .overBudget }) {
+                let needed = ProgramApplicationService.sessionMinutesNeeded(for: fit.advice)
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(
+                        needed.map { "This plan needs about \($0) min per session. Choose \($0) min, or fewer training days." }
+                            ?? "This plan needs more than 2 hours per session. Choose fewer training days.",
+                        systemImage: "clock.badge.exclamationmark"
+                    )
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        if let needed {
+                            Button("Use \(needed) min") { sessionLengthMinutes = needed }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        Button("Change schedule") { withAnimation { pageIndex = 2 } }
+                            .buttonStyle(.bordered)
+                    }
+                    .font(.footnote)
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
+            }
+        }
+
+        @ViewBuilder
+        private func adjustedForYouSection(_ fit: FitResult) -> some View {
+            if !fit.reasons.isEmpty {
+                let titles = Dictionary(uniqueKeysWithValues: fit.template.dayTemplates.map { ($0.dayNumber, $0.title) })
+                let groups: [(title: String, lines: [String])] = {
+                    var result: [(String, [String])] = []
+                    let general = fit.reasons.filter { $0.dayNumber == nil }.map(\.message)
+                    if !general.isEmpty { result.append(("All days", general)) }
+                    for day in fit.template.dayTemplates.sorted(by: { $0.dayNumber < $1.dayNumber }) {
+                        let lines = fit.reasons.filter { $0.dayNumber == day.dayNumber }.map(\.message)
+                        if !lines.isEmpty { result.append((titles[day.dayNumber] ?? day.title, lines)) }
+                    }
+                    return result
+                }()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Adjusted for you")
+                        .font(.subheadline.bold())
+                    ForEach(groups, id: \.title) { group in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(group.title)
+                                .font(.caption.bold())
+                            ForEach(Array(group.lines.enumerated()), id: \.offset) { _, line in
+                                Text("• \(line)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         private func experienceToProgramLevel(_ exp: TrainingExperience) -> ProgramExperienceLevel {
@@ -1091,11 +1295,13 @@ struct OnboardingFlowView: View {
             experience: selectedExperience,
             daysPerWeek: weekdays.count,
             trainingDaysOfWeek: weekdays,
-            equipmentProfile: selectedEquipment,
+            equipmentProfile: selectedPreset.legacyProfile,
             sessionLengthMinutes: sessionLengthMinutes,
             injuryFlags: Array(selectedInjuryFlags),
             minLoadIncrement: selectedLoadIncrement,
-            startDate: mesoStartDate
+            startDate: mesoStartDate,
+            equipmentPreset: selectedPreset,
+            equipmentChecklist: resultChecklist
         )
 
         onComplete(result, previewOverrides)

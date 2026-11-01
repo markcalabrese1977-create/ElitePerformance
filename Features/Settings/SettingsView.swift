@@ -52,15 +52,6 @@ struct SettingsView: View {
                                     }
                                 }
 
-                                Picker("Equipment", selection: Binding(
-                                    get: { profile.equipmentProfile },
-                                    set: { profile.equipmentProfile = $0 }
-                                )) {
-                                    Text("Commercial Gym").tag(EquipmentProfile.commercial)
-                                    Text("Home Gym").tag(EquipmentProfile.homeGym)
-                                    Text("Dumbbells Only").tag(EquipmentProfile.dumbbellsOnly)
-                                }
-
                                 HStack {
                                     Text("Min Load Increment")
                                     Spacer()
@@ -162,6 +153,26 @@ struct SettingsView: View {
                         }
             
 
+
+            // MARK: - Equipment
+            if let profile = profiles.first {
+                Section {
+                    EquipmentEditor(
+                        preset: Binding(
+                            get: { profile.equipmentPreset },
+                            set: { profile.equipmentPreset = $0 }
+                        ),
+                        checklist: Binding(
+                            get: { profile.equipmentChecklist },
+                            set: { profile.equipmentChecklist = $0 }
+                        )
+                    )
+                } header: {
+                    Text("Equipment")
+                } footer: {
+                    Text("Changes apply to your next program. Your current meso is unchanged.")
+                }
+            }
 
             // MARK: - Mesocycle
                         Section("Mesocycle") {

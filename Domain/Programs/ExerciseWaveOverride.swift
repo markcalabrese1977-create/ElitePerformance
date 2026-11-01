@@ -45,12 +45,28 @@ struct AddedExercise: Equatable, Identifiable {
     ]
 }
 
+/// Addresses one slot of a (fitted) template: its day id and its position in that day's exercise list.
+/// Position, not exerciseId, so a template that repeats an exercise across days (DUP10 repeats 5 ids, Hybrid5 4)
+/// overrides exactly the slot the user touched.
+struct SlotKey: Hashable {
+    let dayId: String
+    let slotIndex: Int
+}
+
 /// Replaces ExerciseOverrideMap as the single currency passed through the pipeline.
-/// `slotOverrides` carries per-slot swap/customize/delete flags keyed by the
-/// template exerciseId. `addedByDay` carries net-new exercises keyed by dayId.
+/// `slotKeyed` carries per-slot swap/customize/delete flags keyed by (day, slot index) of the template the
+/// overrides are applied to (the fitted template). `slotOverrides` is the older exerciseId-keyed form, kept for
+/// tests and callers that do not need slot precision: it applies to every slot with that exerciseId, and a
+/// slot-keyed entry wins over it. `addedByDay` carries net-new exercises keyed by dayId.
 struct PreviewOverrides: Equatable {
     var slotOverrides: [String: ExerciseWaveOverride]
     var addedByDay: [String: [AddedExercise]]
+    var slotKeyed: [SlotKey: ExerciseWaveOverride] = [:]
+
+    /// The override for the slot at `index` of `day`: slot-keyed first, then the exerciseId-keyed form.
+    func override(dayId: String, slotIndex: Int, exerciseId: String) -> ExerciseWaveOverride? {
+        slotKeyed[SlotKey(dayId: dayId, slotIndex: slotIndex)] ?? slotOverrides[exerciseId]
+    }
 
     static let empty = PreviewOverrides(slotOverrides: [:], addedByDay: [:])
 }
