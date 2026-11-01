@@ -75,3 +75,4 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Replaced, kept for history: "Deinit fix (feat/nonisolated-deinit): own install after Oct 21; then remove B10/F6/M7 from Tests/known_failures.txt and delete the parking workaround." (done, see Done)
 - Replaced, kept for history: "Coach-message honesty: non-exempt reduce text says \"next session\"; \"N sets in. Finish the session.\" appears on completed sessions with incomplete evidence; blocked-write wording." (see Open)
 - Fixture-dependent tests (CarryForwardAudit, DUPMesoLengthConversion fixture, LastSameLetter fixture, InsertDeloadRealBackup...): 4 fail against the Oct 30 backup because they pin old data. Make them backup-agnostic (assert invariants, not specific dates/loads) or retire them; then run them with the latest backup in the gate.
+- Store the weekday pattern on UserProfile so Change Program prefills it (today it falls back to the default pattern for the day count).
