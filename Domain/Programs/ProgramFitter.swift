@@ -215,6 +215,14 @@ enum ProgramFitter {
     /// Stage (a) accepts a candidate only if no flagged joint is stressed above this.
     static let patternStageMaxStress = 1
 
+    /// Gear that holds added load. Bench, rack, pull-up bar and dip station alone do not make an exercise loadable.
+    static let loadBearingGear: Set<GearTag> = [.barbell, .dumbbell, .ezBar, .cable, .machine, .smith]
+
+    /// Loadable = the traits list load-bearing gear (not the catalog isBodyweight flag, which marks logging behaviour).
+    static func isLoadable(_ traits: ExerciseTraits) -> Bool {
+        !traits.equipment.isDisjoint(with: loadBearingGear)
+    }
+
     private static func maxStress(_ traits: ExerciseTraits, _ joints: Set<InjuryFlag>) -> Int {
         joints.map { traits.stress(for: $0) }.max() ?? 0
     }
@@ -263,10 +271,10 @@ enum ProgramFitter {
             }
             // Every stage orders its candidates the same way: loadable (when the original was loaded), then same
             // isCompound, then lower summed flagged stress, then catalog order.
-            let originalLoaded = !current.exercise.isBodyweight
+            let originalLoaded = isLoadable(traits)
             func preferred(_ safe: [Candidate]) -> Candidate? {
                 func key(_ c: Candidate) -> (Int, Int, Int, Int) {
-                    (originalLoaded && c.exercise.isBodyweight ? 1 : 0,
+                    (originalLoaded && !isLoadable(c.traits) ? 1 : 0,
                      c.exercise.isCompound != current.exercise.isCompound ? 1 : 0,
                      flaggedStress(c.traits, profile.injuries), c.index)
                 }

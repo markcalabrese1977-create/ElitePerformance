@@ -261,7 +261,7 @@ final class ProgramFitterTests: XCTestCase {
                                 return u.filter { sum($0.1) == m }
                             }
                             func key(_ e: (CatalogExercise, ExerciseTraits, Int)) -> (Int, Int, Int, Int) {
-                                (!current.isBodyweight && e.0.isBodyweight ? 1 : 0, e.0.isCompound != current.isCompound ? 1 : 0, sum(e.1), e.2)
+                                (ProgramFitter.isLoadable(traits) && !ProgramFitter.isLoadable(e.1) ? 1 : 0, e.0.isCompound != current.isCompound ? 1 : 0, sum(e.1), e.2)
                             }
                             func best(_ safe: [(CatalogExercise, ExerciseTraits, Int)]) -> CatalogExercise? { safe.min { key($0) < key($1) }?.0 }
 
@@ -287,8 +287,8 @@ final class ProgramFitterTests: XCTestCase {
                                 failures.append("\(tag): stage \(stage) chose peak stress \(peak(ct))")
                             }
                             // a loaded original never gets a bodyweight-only substitute while any safe loadable candidate exists
-                            if let chosen = builtIn.first(where: { $0.id == chosenId }), !current.isBodyweight, chosen.isBodyweight,
-                               expected.2.contains(where: { !$0.0.isBodyweight }) {
+                            if let chosenTraits = ExerciseTraits.traits(for: chosenId), ProgramFitter.isLoadable(traits), !ProgramFitter.isLoadable(chosenTraits),
+                               expected.2.contains(where: { ProgramFitter.isLoadable($0.1) }) {
                                 failures.append("\(tag): loaded slot got bodyweight-only \(chosenId) although a safe loadable candidate existed")
                                 passedOverLoadable += 1
                             }
@@ -327,18 +327,21 @@ final class ProgramFitterTests: XCTestCase {
         XCTAssertEqual(id, "only")
     }
 
-    /// Lower B (4-day, homeBarbell, lowBack + shoulders): the anchor machine hip thrust picks before the cable glute
-    /// kickback, so the kickback can no longer take the anchor's choice. The anchor's own choice follows the documented
-    /// order (loadable > same isCompound > lower summed stress > catalog order): Glute Bridge (stress 0) outranks
-    /// Barbell Hip Thrust (low back 1), so it is the glute bridge, not the barbell thrust.
-    func test_lowerB_anchorHipThrustSlot_picksFirst_andFollowsTheDocumentedOrder() {
+    /// Lower B (4-day, homeBarbell, lowBack + shoulders): the anchor machine hip thrust picks first and, with loadable
+    /// meaning load-bearing gear in the traits, takes the barbell hip thrust over the bodyweight glute bridge.
+    func test_lowerB_anchorHipThrustSlot_getsBarbellHipThrust() {
         let prof = profile(.homeBarbell, [.lowBack, .shoulders], 75)
         let day = UpperLower4DayTemplate.template.dayTemplates.first { $0.title == "Lower B" }!
         let plan = ProgramFitter.substitutionPlan(day, profile: prof)
         let anchor = day.exerciseTemplates.firstIndex { $0.id == "ul_lb_hip_thrust" }!
-        XCTAssertEqual(plan[anchor].outcome, .replace(exerciseId: "glute_bridge", stage: .pattern))
-        let kickback = day.exerciseTemplates.firstIndex { $0.id == "ul_lb_glute_kickback" }
-        if let kickback, case .replace(let id, _) = plan[kickback].outcome { XCTAssertNotEqual(id, "glute_bridge") }
+        XCTAssertEqual(plan[anchor].outcome, .replace(exerciseId: "barbell_hip_thrust", stage: .pattern))
+    }
+
+    /// Classification is by traits: bench, rack, pull-up bar and dip station alone are not load-bearing.
+    func test_loadable_isDefinedByLoadBearingGear() {
+        XCTAssertTrue(ProgramFitter.isLoadable(ExerciseTraits.table["barbell_hip_thrust"]!))
+        XCTAssertFalse(ProgramFitter.isLoadable(ExerciseTraits.table["glute_bridge"]!))
+        XCTAssertFalse(ProgramFitter.isLoadable(ExerciseTraits(equipment: [.bench, .rack, .pullUpBar, .dipStation], pattern: .squat)))
     }
 
     /// Keep rule: gear available and max flagged stress <= 1 stays; only stress-2 originals are swapped for joints.
