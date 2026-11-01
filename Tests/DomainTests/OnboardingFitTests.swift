@@ -212,4 +212,53 @@ final class OnboardingFitTests: XCTestCase {
             XCTAssertFalse(ProgramApplicationService.fittedProgram(for: next).reasons.contains { $0.kind == .overBudget }, "\(days) days at \(n) min")
         }
     }
+
+    // MARK: - Prefill from the saved profile
+
+    func test_noProfile_draftIsTodaysDefaults() {
+        let draft = OnboardingDraft(profile: nil)
+        XCTAssertEqual(draft, OnboardingDraft())
+        XCTAssertEqual(draft.goal, .hypertrophy)
+        XCTAssertEqual(draft.experience, .intermediate)
+        XCTAssertEqual(draft.daysPerWeek, 4)
+        XCTAssertEqual(draft.preset, .fullGym)
+        XCTAssertTrue(draft.checklist.isEmpty)
+        XCTAssertEqual(draft.sessionLengthMinutes, 60)
+        XCTAssertEqual(draft.loadIncrement, 2.5)
+        XCTAssertTrue(draft.injuryFlags.isEmpty)
+    }
+
+    func test_savedProfile_tappingStraightThrough_leavesResultUnchanged() throws {
+        let context = try makeContext()
+        let saved = OnboardingResult(
+            goal: .strength, experience: .new, daysPerWeek: 4,
+            trainingDaysOfWeek: Self.weekdays(4), equipmentProfile: EquipmentPreset.homeBarbell.legacyProfile,
+            sessionLengthMinutes: 75, injuryFlags: [.lowBack, .shoulders, .hips], minLoadIncrement: 5,
+            startDate: Date(), equipmentPreset: .homeBarbell, equipmentChecklist: [.barbell, .dumbbell, .bench]
+        )
+        ProgramApplicationService.writeUserProfile(from: saved, context: context)
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+
+        let again = OnboardingDraft(profile: profile).result(startDate: saved.startDate)
+        XCTAssertEqual(again.goal, saved.goal)
+        XCTAssertEqual(again.experience, saved.experience)
+        XCTAssertEqual(again.daysPerWeek, saved.daysPerWeek)
+        XCTAssertEqual(again.trainingDaysOfWeek, saved.trainingDaysOfWeek)
+        XCTAssertEqual(again.equipmentProfile, saved.equipmentProfile)
+        XCTAssertEqual(again.sessionLengthMinutes, saved.sessionLengthMinutes)
+        XCTAssertEqual(Set(again.injuryFlags), Set(saved.injuryFlags))
+        XCTAssertEqual(again.minLoadIncrement, saved.minLoadIncrement)
+        XCTAssertEqual(again.equipmentPreset, saved.equipmentPreset)
+        XCTAssertEqual(Set(again.equipmentChecklist), Set(saved.equipmentChecklist))
+    }
+
+    func test_savedProfile_withDefaultChecklist_roundTripsAsEmpty() throws {
+        let context = try makeContext()
+        ProgramApplicationService.writeUserProfile(from: result(preset: .machinesOnly, joints: [.hips]), context: context)
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+        let again = OnboardingDraft(profile: profile).result(startDate: Date())
+        XCTAssertEqual(again.equipmentPreset, .machinesOnly)
+        XCTAssertTrue(again.equipmentChecklist.isEmpty)
+        XCTAssertEqual(again.injuryFlags, [.hips])
+    }
 }

@@ -160,12 +160,72 @@ struct EquipmentEditor: View {
                     }
                     Text("Starts from the preset. Exercises that need gear you untick are swapped out.")
                         .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 6)
             }
             .font(.subheadline.bold())
             .padding(.top, 4)
         }
+    }
+}
+
+// MARK: - Draft
+
+/// The answers onboarding starts from: the saved profile when one exists, today's defaults on first run.
+struct OnboardingDraft: Equatable {
+    var goal: Goal = .hypertrophy
+    var experience: TrainingExperience = .intermediate
+    var daysPerWeek: Int = 4
+    var preset: EquipmentPreset = .fullGym
+    var checklist: Set<GearTag> = []
+    var sessionLengthMinutes: Int = 60
+    var loadIncrement: Double = 2.5
+    var injuryFlags: Set<InjuryFlag> = []
+
+    init() {}
+
+    init(profile: UserProfile?) {
+        guard let profile else { return }
+        goal = Goal(rawValue: profile.primaryGoal.rawValue) ?? .hypertrophy
+        experience = profile.experience
+        daysPerWeek = min(max(profile.daysPerWeek, 2), 6)
+        preset = profile.equipmentPreset
+        checklist = profile.equipmentChecklist
+        sessionLengthMinutes = profile.sessionLengthMinutes
+        loadIncrement = profile.minLoadIncrement
+        injuryFlags = Set(profile.injuryFlags)
+    }
+
+    /// Weekdays (1 = Sunday ... 7 = Saturday) used when the lifter has not picked any.
+    static func defaultTrainingDays(for days: Int) -> Set<Int> {
+        switch days {
+        case 2:  return [2, 5]
+        case 3:  return [2, 4, 6]
+        case 4:  return [2, 3, 5, 6]
+        case 5:  return [2, 3, 4, 5, 6]
+        case 6:  return [2, 3, 4, 5, 6, 7]
+        default: return [2, 4, 6]
+        }
+    }
+
+    /// What tapping straight through produces.
+    func result(startDate: Date, weekdays: Set<Int> = []) -> OnboardingResult {
+        let days = (weekdays.isEmpty ? Self.defaultTrainingDays(for: daysPerWeek) : weekdays)
+            .map { min(max($0, 1), 7) }.sorted()
+        return OnboardingResult(
+            goal: goal,
+            experience: experience,
+            daysPerWeek: days.count,
+            trainingDaysOfWeek: days,
+            equipmentProfile: preset.legacyProfile,
+            sessionLengthMinutes: sessionLengthMinutes,
+            injuryFlags: Array(injuryFlags),
+            minLoadIncrement: loadIncrement,
+            startDate: startDate,
+            equipmentPreset: preset,
+            equipmentChecklist: checklist == preset.defaultEquipment ? [] : checklist.sorted { $0.rawValue < $1.rawValue }
+        )
     }
 }
 
@@ -179,23 +239,23 @@ struct OnboardingFlowView: View {
     @State private var pageIndex: Int = 0
 
     // Page 1 — Goal
-    @State private var selectedGoal: Goal = .hypertrophy
+    @State private var selectedGoal: Goal
 
     // Page 2 — Experience
-    @State private var selectedExperience: TrainingExperience = .intermediate
+    @State private var selectedExperience: TrainingExperience
 
     // Page 3 — Schedule
-    @State private var daysPerWeek: Int = 4
+    @State private var daysPerWeek: Int
     @State private var selectedWeekdays: Set<Int> = []
 
     // Page 4 — Equipment + Session length
-    @State private var selectedPreset: EquipmentPreset = .fullGym
-    @State private var selectedChecklist: Set<GearTag> = []
-    @State private var sessionLengthMinutes: Int = 60
-    @State private var selectedLoadIncrement: Double = 2.5
+    @State private var selectedPreset: EquipmentPreset
+    @State private var selectedChecklist: Set<GearTag>
+    @State private var sessionLengthMinutes: Int
+    @State private var selectedLoadIncrement: Double
 
     // Page 5 — Joint limitations
-    @State private var selectedInjuryFlags: Set<InjuryFlag> = []
+    @State private var selectedInjuryFlags: Set<InjuryFlag>
 
     // Page 6 — Start date picker. Seeded by init(initialStartDate:) so a date
     // chosen upstream (meso summary) survives into this flow.
@@ -228,9 +288,19 @@ struct OnboardingFlowView: View {
     ///   - onComplete: receives the finished result and the preview overrides.
     init(
         initialStartDate: Date = Date(),
+        profile: UserProfile? = nil,
         onComplete: @escaping (OnboardingResult, PreviewOverrides) -> Void
     ) {
         self.onComplete = onComplete
+        let draft = OnboardingDraft(profile: profile)
+        _selectedGoal = State(initialValue: draft.goal)
+        _selectedExperience = State(initialValue: draft.experience)
+        _daysPerWeek = State(initialValue: draft.daysPerWeek)
+        _selectedPreset = State(initialValue: draft.preset)
+        _selectedChecklist = State(initialValue: draft.checklist)
+        _sessionLengthMinutes = State(initialValue: draft.sessionLengthMinutes)
+        _selectedLoadIncrement = State(initialValue: draft.loadIncrement)
+        _selectedInjuryFlags = State(initialValue: draft.injuryFlags)
         let calendar = Calendar.current
         _mesoStartDate = State(
             initialValue: max(
@@ -1242,16 +1312,7 @@ struct OnboardingFlowView: View {
 
     private var weekdaySymbols: [String] { Self.weekdaySymbolsStatic }
 
-    private func defaultTrainingDays(for days: Int) -> Set<Int> {
-        switch days {
-        case 2:  return [2, 5]
-        case 3:  return [2, 4, 6]
-        case 4:  return [2, 3, 5, 6]
-        case 5:  return [2, 3, 4, 5, 6]
-        case 6:  return [2, 3, 4, 5, 6, 7]
-        default: return [2, 4, 6]
-        }
-    }
+    private func defaultTrainingDays(for days: Int) -> Set<Int> { OnboardingDraft.defaultTrainingDays(for: days) }
 
     private func syncSelectedWeekdaysWithDaysPerWeek() {
         let desired = daysPerWeek
@@ -1286,23 +1347,16 @@ struct OnboardingFlowView: View {
             selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
         }
 
-        let weekdays = selectedWeekdays
-            .map { min(max($0, 1), 7) }
-            .sorted()
-
-        let result = OnboardingResult(
-            goal: selectedGoal,
-            experience: selectedExperience,
-            daysPerWeek: weekdays.count,
-            trainingDaysOfWeek: weekdays,
-            equipmentProfile: selectedPreset.legacyProfile,
-            sessionLengthMinutes: sessionLengthMinutes,
-            injuryFlags: Array(selectedInjuryFlags),
-            minLoadIncrement: selectedLoadIncrement,
-            startDate: mesoStartDate,
-            equipmentPreset: selectedPreset,
-            equipmentChecklist: resultChecklist
-        )
+        var draft = OnboardingDraft()
+        draft.goal = selectedGoal
+        draft.experience = selectedExperience
+        draft.daysPerWeek = daysPerWeek
+        draft.preset = selectedPreset
+        draft.checklist = selectedChecklist
+        draft.sessionLengthMinutes = sessionLengthMinutes
+        draft.loadIncrement = selectedLoadIncrement
+        draft.injuryFlags = selectedInjuryFlags
+        let result = draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
 
         onComplete(result, previewOverrides)
         dismiss()

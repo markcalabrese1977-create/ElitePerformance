@@ -8,6 +8,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query private var mesoBlocks: [MesoBlock]
+    @Query private var profiles: [UserProfile]
 
     @State private var showingChangeProgram = false
 
@@ -56,7 +57,7 @@ struct HomeView: View {
                 }
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView(initialStartDate: pendingMesoStartDate) { result, overrides in
+                        OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides in
                             pendingOnboardingResult = result
                             pendingExerciseOverrides = overrides
                         }
