@@ -1850,3 +1850,172 @@ extension SessionItemEditService {
         return RestTodayResult(sessionsMoved: live.moves.count, summary: summary)
     }
 }
+
+// MARK: - Lower remaining planned loads to a max
+
+/// A max load was set or lowered: every remaining planned, safe item of that exercise in the active meso whose
+/// suggested or per-set load (back-off and top slots) is above it is set to the max. Same shape as the other edits:
+/// a pure `planClampToMax` for the preview, then `applyClampToMax`, which re-plans against live state, writes,
+/// verifies, and saves once (or restores every field and throws).
+///
+/// Never touched: completed or in-progress sessions, a planned session with anything logged, an item the lifter
+/// edited by hand (`planEdited`), fixed-load and bodyweight exercises (a max does not apply to them), and any
+/// load already at or below the max.
+extension SessionItemEditService {
+
+    struct MaxLoadTarget {
+        let session: Session
+        let item: SessionItem
+        let date: Date
+        let weekIndex: Int
+        let waveRaw: String?
+        let beforeSuggested: Double
+        let beforeLoads: [Double]
+        /// Row indices (into the per-set arrays) that are above the max.
+        let slotsAbove: [Int]
+        let suggestedAbove: Bool
+        let hasTop: Bool
+
+        /// "suggested 320 -> 315, top 335 -> 315" style detail for the preview list.
+        func detail(max: Double) -> String {
+            func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+            var parts: [String] = []
+            if suggestedAbove { parts.append("load \(n(beforeSuggested)) -> \(n(max))") }
+            let topRows = Set(item.topRowIndices)
+            let top = slotsAbove.filter { topRows.contains($0) }
+            let backOffs = slotsAbove.filter { !topRows.contains($0) }
+            if !backOffs.isEmpty && !suggestedAbove {
+                parts.append("sets \(backOffs.map { n(beforeLoads[$0]) }.joined(separator: ", ")) -> \(n(max))")
+            }
+            if let t = top.first { parts.append("top \(n(beforeLoads[t])) -> \(n(max))") }
+            return parts.joined(separator: ", ")
+        }
+    }
+
+    struct MaxLoadPlan {
+        let meso: MesoBlock?
+        let exerciseId: String          // canonical
+        let max: Double
+        let now: Date
+        let targets: [MaxLoadTarget]
+
+        var isApplicable: Bool { !targets.isEmpty }
+    }
+
+    /// The active (non-maintenance first) block, or nil when none is active.
+    static func activeMeso(in context: ModelContext) -> MesoBlock? {
+        let blocks = ((try? context.fetch(FetchDescriptor<MesoBlock>())) ?? []).filter { $0.status == .active }
+        return blocks.first { !$0.isMaintenance } ?? blocks.first
+    }
+
+    /// Plan (no writes). `meso` nil means no active block: nothing to do.
+    static func planClampToMax(
+        meso: MesoBlock?,
+        exerciseId: String,
+        max: Double,
+        now: Date = Date()
+    ) -> MaxLoadPlan {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        func empty() -> MaxLoadPlan { MaxLoadPlan(meso: meso, exerciseId: canonical, max: max, now: now, targets: []) }
+        guard let meso, meso.status == .active, max > 0 else { return empty() }
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        var targets: [MaxLoadTarget] = []
+        for session in meso.sessions.sorted(by: { $0.date < $1.date }) {
+            guard session.status == .planned, session.date >= startOfToday,
+                  SessionEditSafety.isSafeToModify(session) else { continue }
+            for item in session.items where ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == canonical {
+                guard !item.planEdited else { continue }
+                let slots = item.plannedLoadsBySet.indices.filter { item.plannedLoadsBySet[$0] > max }
+                let suggestedAbove = item.suggestedLoad > max
+                guard !slots.isEmpty || suggestedAbove else { continue }
+                targets.append(MaxLoadTarget(
+                    session: session, item: item, date: session.date, weekIndex: session.weekIndex, waveRaw: item.waveRaw,
+                    beforeSuggested: item.suggestedLoad, beforeLoads: item.plannedLoadsBySet,
+                    slotsAbove: slots, suggestedAbove: suggestedAbove, hasTop: item.hasTopSet
+                ))
+            }
+        }
+        return MaxLoadPlan(meso: meso, exerciseId: canonical, max: max, now: now, targets: targets)
+    }
+
+    /// "3 planned sessions above 315 will be set to 315"
+    static func clampPreviewText(count: Int, max: Double) -> String {
+        let n = max == max.rounded() ? String(Int(max)) : String(format: "%.1f", max)
+        return "\(count) planned session\(count == 1 ? "" : "s") above \(n) will be set to \(n)"
+    }
+
+    @discardableResult
+    static func applyClampToMax(_ plan: MaxLoadPlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> ApplyResult {
+        guard plan.isApplicable else { throw ReplaceError.nothingToReplace }
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        // The plan is a preview; trust only live state.
+        let live = planClampToMax(meso: plan.meso, exerciseId: plan.exerciseId, max: plan.max, now: plan.now)
+        let plannedIDs = plan.targets.map { $0.item.persistentModelID }
+        let liveIDs = live.targets.map { $0.item.persistentModelID }
+        guard plannedIDs == liveIDs else {
+            throw ReplaceError.planStale(planned: plannedIDs.count, live: liveIDs.count)
+        }
+
+        if context.hasChanges {
+            print("SessionItemEdit: context had pending changes; saved them before applying so a rollback stays exact")
+            try context.save()
+        }
+
+        let restorePoints = live.targets.map { ItemRestorePoint($0.item) }
+        func abandon() {
+            for point in restorePoints { point.restore() }
+            context.rollback()
+        }
+
+        var summary: [String] = []
+        for target in live.targets {
+            let item = target.item
+            if item.suggestedLoad > plan.max { item.suggestedLoad = plan.max }
+            item.plannedLoadsBySet = item.plannedLoadsBySet.map { Swift.min($0, plan.max) }
+            // planEdited is left alone: this is an automatic cap, not a hand edit.
+            let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") wk\(target.weekIndex) "
+                + "wave=\(target.waveRaw ?? "-") \(plan.exerciseId) \(target.detail(max: plan.max))"
+            summary.append(line)
+            print(line)
+        }
+
+        var problems: [String] = []
+        for (target, point) in zip(live.targets, restorePoints) {
+            let i = target.item
+            func check<T: Equatable>(_ name: String, _ expected: T, _ actual: T) {
+                if expected != actual { problems.append("\(i.exerciseId) wk\(target.weekIndex): \(name): expected \(expected), found \(actual)") }
+            }
+            check("suggestedLoad", Swift.min(point.suggestedLoad, plan.max), i.suggestedLoad)
+            check("plannedLoads", point.plannedLoads.map { Swift.min($0, plan.max) }, i.plannedLoadsBySet)
+            if i.suggestedLoad > plan.max || i.plannedLoadsBySet.contains(where: { $0 > plan.max }) {
+                problems.append("\(i.exerciseId) wk\(target.weekIndex): a load is still above the max")
+            }
+            // Nothing else about the item moved.
+            check("planEdited", point.planEdited, i.planEdited)
+            check("actualLoads", point.actualLoads, i.actualLoads); check("actualReps", point.actualReps, i.actualReps)
+            check("actualRIRs", point.actualRIRs, i.actualRIRs); check("isCompleted", point.isCompleted, i.isCompleted)
+            check("targetSets", point.targetSets, i.targetSets); check("prescribedSets", point.prescribedSets, i.prescribedSets)
+            check("plannedReps", point.plannedReps, i.plannedRepsBySet); check("plannedRIRs", point.plannedRIRs, i.plannedRIRsBySet)
+            check("roles", point.roles, i.setRolesBySet); check("exerciseId", point.exerciseId, i.exerciseId)
+            check("session status", SessionStatus.planned, target.session.status)
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw ReplaceError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw ReplaceError.saveFailed("\(error)")
+        }
+        return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
+    }
+}
