@@ -369,6 +369,51 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         XCTAssertEqual(m.change.topSet, .remove)
         XCTAssertTrue(m.change.isValid)
     }
+
+    // MARK: M1. Max load on seeds
+
+    func test_M1_replaceSeed_isClampedToTheReplacementsMax() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let now = Date(timeIntervalSince1970: 0)
+        let used = Set(block.sessions.flatMap(\.items).map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
+        let y = try XCTUnwrap(ExerciseCatalog.all.first { !used.contains($0.id) && !ExerciseCatalog.isBodyweight(exerciseId: $0.id) }).id
+        let hist = SessionItem(order: 1, exerciseId: y, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        hist.actualLoads = [300, 300, 300]; hist.actualReps = [8, 8, 8]; hist.actualRIRs = [2, 2, 2]
+        ctx.insert(Session(date: Date(timeIntervalSince1970: -86_400 * 30), status: .completed, weekIndex: 1, items: [hist]))
+        try ctx.save()
+
+        let free = SvcB5.planReplace(meso: block, dayLabel: lift.day, from: lift.id, to: y, scope: .allRemaining, context: ctx, now: now)
+        let freeSeed = try XCTUnwrap(free.targets.first?.seedLoad)
+        XCTAssertGreaterThan(freeSeed, 100)
+
+        let profile = UserProfile(); profile.setMaxLoad(100, exerciseId: y); ctx.insert(profile)
+        try ctx.save()
+        let capped = SvcB5.planReplace(meso: block, dayLabel: lift.day, from: lift.id, to: y, scope: .allRemaining, context: ctx, now: now)
+        XCTAssertFalse(capped.targets.isEmpty)
+        XCTAssertTrue(capped.targets.allSatisfy { $0.seedLoad == 100 }, "\(capped.targets.map { $0.seedLoad as Any })")
+        try SvcB5.apply(capped, in: ctx)
+        XCTAssertTrue(capped.targets.allSatisfy { $0.item.suggestedLoad == 100 && $0.item.plannedLoadsBySet.allSatisfy { $0 <= 100 } })
+    }
+
+    func test_M1_newTopSetSeed_isClampedToTheMax() throws {
+        let (ctx, block) = try makeBlock()
+        let lift = try liftB5(block)
+        let doneItem = try XCTUnwrap(lift.session.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == lift.id })
+        doneItem.actualLoads = [200, 200, 200]; doneItem.actualReps = [8, 8, 8]; doneItem.actualRIRs = [2, 2, 2]
+        lift.session.status = .completed
+        try ctx.save()
+        let uncapped = try XCTUnwrap(HistorySeedLoad.load(for: lift.id, goalReps: 4, targetRIR: 2, in: block.sessions.map { $0 },
+                                                          loadIncrement: 2.5, role: .top))
+        let cap = uncapped - 10
+        let profile = UserProfile(); profile.setMaxLoad(cap, exerciseId: lift.id); ctx.insert(profile)
+        let plan = SvcB5.planChangePrescription(meso: block, dayLabel: lift.day, exerciseId: lift.id, scope: .allRemaining,
+                                                change: PrescriptionChange(topSet: .set(topSpecB5)), now: Date(timeIntervalSince1970: 0))
+        try SvcB5.applyChange(plan, in: ctx)
+        let targets = plan.targets.map(\.item)
+        XCTAssertFalse(targets.isEmpty)
+        for item in targets { XCTAssertEqual(item.plannedLoadsBySet.last, cap) }
+    }
 }
 
 // MARK: - Change the note under an exercise for the remaining sessions

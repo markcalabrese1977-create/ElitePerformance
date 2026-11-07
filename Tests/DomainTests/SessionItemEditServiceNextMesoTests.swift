@@ -780,4 +780,25 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
         laterItem.prescribedSets = nil
         XCTAssertEqual(Service.prescribedSetCount(of: laterItem, in: later, among: sessions(block)), laterItem.targetSets)
     }
+
+    // MARK: - Max load
+
+    func test_next_seeds_areClampedToTheMax() throws {
+        let (ctx, block) = try makeBlock(convert12: true)
+        let p = try pick(block)
+        let first = try XCTUnwrap(sessions(block).first { $0.dayLabel == p.day })
+        let it = try XCTUnwrap(item(first, p.x))
+        complete(first, item: it, load: 200, reps: 6)
+        try ctx.save()
+        let now = first.date.addingTimeInterval(86400 * 2)
+        func seed(_ plan: Service.NextMesoPlan) -> Double? {
+            plan.sessions.first { $0.dayLabel == p.day && $0.weekIndex == 1 }?.items
+                .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: p.x) }?.seed
+        }
+        let free = try XCTUnwrap(seed(nextPlan(block, ctx, now: now)))
+        XCTAssertGreaterThan(free, 150)
+        let profile = UserProfile(); profile.setMaxLoad(150, exerciseId: p.x); ctx.insert(profile)
+        try ctx.save()
+        XCTAssertEqual(try XCTUnwrap(seed(nextPlan(block, ctx, now: now))), 150)
+    }
 }

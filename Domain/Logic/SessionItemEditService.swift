@@ -147,10 +147,11 @@ enum SessionItemEditService {
             if session.items.contains(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == to }) {
                 refusals.append(Refusal(session: session, reason: .alreadyContainsReplacement)); continue
             }
+            // The seed never exceeds the lifter's max for the replacement (no max / fixed-load / bodyweight: unchanged).
             let seed = HistorySeedLoad.load(
                 for: to, goalReps: item.targetReps, targetRIR: item.targetRIR, in: allSessions,
                 loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
-            )
+            ).map { UserProfile.clampedLoad($0, exerciseId: to, profile: profile, customExercises: custom) }
             targets.append(Target(
                 session: session, item: item, date: session.date, weekIndex: session.weekIndex,
                 waveRaw: item.waveRaw, prescription: prescriptionSummary(item), seedLoad: seed
@@ -746,11 +747,11 @@ extension SessionItemEditService {
         var seedCache: [TopSetSpec: Double] = [:]
         func topSeed(_ spec: TopSetSpec) -> Double {
             if let hit = seedCache[spec] { return hit }
-            let v = HistorySeedLoad.load(
+            let v = UserProfile.clampedLoad(HistorySeedLoad.load(
                 for: plan.exerciseId, goalReps: spec.repMin, targetRIR: spec.rir, in: allSessions,
                 loadIncrement: profile?.minLoadIncrement ?? 2.5, bodyWeight: profile?.bodyWeight,
                 customExercises: custom, referenceDate: plan.now, role: .top
-            ) ?? 0
+            ) ?? 0, exerciseId: plan.exerciseId, profile: profile, customExercises: custom)
             seedCache[spec] = v
             return v
         }
@@ -1137,11 +1138,11 @@ extension SessionItemEditService {
                 } else if UserProfile.isProgressionExempt(exerciseId: i.exerciseId, profile: profile) {
                     load = lastCompletedLoad(for: i.exerciseId, in: allSessions) ?? 0
                 } else {
-                    load = HistorySeedLoad.load(
+                    load = UserProfile.clampedLoad(HistorySeedLoad.load(
                         for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
                         loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom,
                         referenceDate: now
-                    ) ?? 0
+                    ) ?? 0, exerciseId: i.exerciseId, profile: profile, customExercises: custom)
                 }
                 // A deload is straight sets: the top set is dropped (the new items carry no roles) and the
                 // sets and the load come from the back-offs only.

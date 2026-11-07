@@ -110,6 +110,13 @@ struct PlanMemoryEngine {
                 continue
             }
 
+            // Max load: every load this path writes onto the (empty) target stays within the lifter's cap.
+            // Runs when this iteration ends, after all the writes below (fixed-load and bodyweight: no cap).
+            defer { Self.enforceMax(on: targetItem, profile: profile, customExercises: customExercises) }
+            let loadCap = CoachingEngine.LoadCap.resolve(
+                for: sourceItem, in: session, allSessions: allSessions, profile: profile, customExercises: customExercises
+            )
+
             // FIX B — Bodyweight exercises never carry a numeric load forward. After the
             // one-time migration their suggestedLoad/plannedLoadsBySet are already 0, but
             // this guard makes sure a stray nonzero phantom (from any pre-fix path) can't
@@ -238,7 +245,8 @@ struct PlanMemoryEngine {
                 // message may name it. Only nextSuggestedLoad is consumed below —
                 // this keeps the message correct for any future caller of it.
                 carryForwardTarget: .exists,
-                isProgressionExempt: isProgressionExempt
+                isProgressionExempt: isProgressionExempt,
+                loadCap: loadCap
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
                 targetItem.suggestedLoad = recommendedLoad
                 targetItem.plannedLoadsBySet = Self.propagatedPlan(
@@ -255,7 +263,8 @@ struct PlanMemoryEngine {
                 peakE1RM: projection?.peakE1RM,
                 lastKnownLoad: projection?.lastLoad,
                 carryForwardTarget: .exists,
-                isProgressionExempt: isProgressionExempt
+                isProgressionExempt: isProgressionExempt,
+                loadCap: loadCap
             ), let topLoad = recommendation.nextTopLoad {
                 // No back-off verdict (e.g. a skipped back-off) but the top set was logged: it writes
                 // its own slot and leaves the back-off slots as carried.
@@ -453,6 +462,7 @@ struct PlanMemoryEngine {
         ) { top = load }
         guard backOff != nil || top != nil else { return }
         Self.applyPropagatedLoad(backOff, top: top, to: targetItem)
+        Self.enforceMax(on: targetItem, profile: currentProfile(), customExercises: customExercises)
         // planEdited intentionally left false — this is an automatic write.
     }
 
@@ -511,7 +521,10 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,
-            isProgressionExempt: isProgressionExempt
+            isProgressionExempt: isProgressionExempt,
+            loadCap: CoachingEngine.LoadCap.resolve(
+                for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
+            )
         ), let topLoad = recommendation.nextTopLoad else {
             return .skip("no top-set load (pain flag, no baseline or flagged top-of-range)")
         }
@@ -590,7 +603,10 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
-            isProgressionExempt: isProgressionExempt
+            isProgressionExempt: isProgressionExempt,
+            loadCap: CoachingEngine.LoadCap.resolve(
+                for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
+            )
         ), let recommendedLoad = recommendation.nextSuggestedLoad else {
             return .skip("no recommendation load (pain flag, no baseline or flagged top-of-range)")
         }
@@ -598,6 +614,21 @@ struct PlanMemoryEngine {
         // Every recommendation with a load propagates — bump, hold or reduce — onto an
         // unedited target: the target tracks the latest same-letter evidence.
         return .write(recommendedLoad)
+    }
+
+    private func currentProfile() -> UserProfile? {
+        try? context.fetch(FetchDescriptor<UserProfile>()).first
+    }
+
+    /// Caps every plan-written load of `target` (suggested + every per-set slot, both roles) at the lifter's max
+    /// for that exercise. A no-op without a max, and for fixed-load and bodyweight exercises.
+    static func enforceMax(on target: SessionItem, profile: UserProfile?, customExercises: [CustomExercise]) {
+        guard let cap = UserProfile.effectiveMaxLoad(for: target.exerciseId, profile: profile,
+                                                     customExercises: customExercises) else { return }
+        if target.suggestedLoad > cap { target.suggestedLoad = cap }
+        if target.plannedLoadsBySet.contains(where: { $0 > cap }) {
+            target.plannedLoadsBySet = target.plannedLoadsBySet.map { Swift.min($0, cap) }
+        }
     }
 
     /// The per-set plan a propagated load produces for `targetItem`. Back-off slots (the first

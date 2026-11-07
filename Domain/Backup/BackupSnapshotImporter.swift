@@ -41,6 +41,8 @@ enum BackupSnapshotImporter {
             // Fixed-load exemptions. An old backup without the key decodes to nil and
             // restores to the default (empty), so assign explicitly.
             profile.exemptExerciseIds = dto.exemptExerciseIds ?? UserProfile.defaultExemptExerciseIds
+            // Per-exercise max loads. nil (an old backup, or no caps ever set) stays nil.
+            profile.maxLoadByExerciseStored = dto.maxLoadByExercise
             profile.birthDateOverride = dto.birthDateOverride
             profile.equipmentPresetRaw = dto.equipmentPresetRaw
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws

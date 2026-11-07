@@ -35,6 +35,8 @@ struct ExerciseNoteSheet: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 12)
 
+                    MaxLoadRow(profile: profile, exerciseId: exerciseId)
+
                     Divider().padding(.top, 8)
                 }
 
@@ -124,5 +126,61 @@ struct ExerciseNoteSheet: View {
         }
 
         onClose()
+    }
+}
+
+
+/// "Max load" under the Fixed load toggle: an optional per-exercise cap on the loads the plan writes.
+private struct MaxLoadRow: View {
+    @Environment(\.modelContext) private var modelContext
+    let profile: UserProfile
+    let exerciseId: String
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Max load")
+                    .font(.subheadline)
+                Spacer()
+                TextField("None", text: $text)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 90)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .onChange(of: text) { _, newValue in commit(newValue) }
+                if !text.isEmpty {
+                    Button {
+                        text = ""
+                        profile.setMaxLoad(nil, exerciseId: exerciseId)
+                        try? modelContext.save()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear max load")
+                }
+            }
+            Text("The plan never writes a heavier load; once you reach it, progress with reps or tempo.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .onAppear {
+            if let cap = profile.maxLoad(for: exerciseId) {
+                text = cap == cap.rounded() ? String(Int(cap)) : String(cap)
+            }
+        }
+    }
+
+    private func commit(_ raw: String) {
+        let cleaned = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        let value = Double(cleaned)
+        profile.setMaxLoad(value, exerciseId: exerciseId)
+        try? modelContext.save()
     }
 }

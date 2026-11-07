@@ -71,6 +71,7 @@ enum BackupSnapshotExporter {
                     unitPreferenceRaw: nil,
                     bodyWeight: $0.bodyWeight,
                     exemptExerciseIds: $0.exemptExerciseIds,
+                    maxLoadByExercise: $0.maxLoadByExerciseStored,
                     birthDateOverride: $0.birthDateOverride,
                     equipmentPresetRaw: $0.equipmentPresetRaw,
                     equipmentChecklistRaws: $0.equipmentChecklistRaws

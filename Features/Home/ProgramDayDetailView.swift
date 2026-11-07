@@ -320,7 +320,10 @@ struct ProgramDayDetailView: View {
 
                                         if let projection = projection, projection.suggestedLoad > 0 {
                                             foundHistory = true
-                                            item.suggestedLoad = projection.suggestedLoad
+                                            item.suggestedLoad = UserProfile.clampedLoad(
+                                                projection.suggestedLoad, exerciseId: item.exerciseId, profile: profile,
+                                                customExercises: customExercises
+                                            )
                                         } else {
                                             seedSuggestedLoadIfNeeded(item)
                                         }

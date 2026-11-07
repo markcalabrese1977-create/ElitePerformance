@@ -21,6 +21,7 @@ enum BackupSchemaMap {
         "Session.meso": "mesoBlockId",
         "MesoBlock.status": "statusRaw",
         "UserProfile.exemptExerciseIdsStored": "exemptExerciseIds",
+        "UserProfile.maxLoadByExerciseStored": "maxLoadByExercise",
     ]
 
     /// Non-zero model defaults, "Entity.dtoKey" -> default. Zero, false, "", [] and nil are always defaults.
@@ -112,6 +113,7 @@ enum PopulatedStoreBuilder {
             minLoadIncrement: 5.0, bodyWeight: 82.5
         )
         profile.exemptExerciseIds = ["bench_press"]
+        profile.maxLoadByExercise = ["back_squat": 405.0, "cable_tricep_rope_pushdown": 130.0]
         profile.birthDateOverride = day(-9_000)
         // Set the raw columns directly: the preset setter would also rewrite equipmentProfileRaw.
         profile.equipmentPresetRaw = EquipmentPreset.machinesOnly.rawValue

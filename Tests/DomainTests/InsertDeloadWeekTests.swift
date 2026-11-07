@@ -528,4 +528,24 @@ final class InsertDeloadWeekTests: XCTestCase {
         let s = Session(date: Date(timeIntervalSince1970: 1_000), status: .completed, weekIndex: 1, items: [item])
         XCTAssertEqual(Service.lastCompletedLoad(for: "leg_extension", in: [s]), 100)
     }
+
+    // MARK: - Max load
+
+    /// Deload loads solve from history; a max load caps them like every other seed.
+    func test_deloadLoads_areClampedToTheMax() throws {
+        let (ctx, block) = try makeDUPBlock()
+        let now = completeFirstFourWeeks(block, load: 100)
+        let target = try XCTUnwrap(week(block, 5).flatMap(\.items).first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) }).exerciseId
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: target)
+        func loads(_ plan: Service.InsertDeloadPlan) -> [Double] {
+            plan.deloadSessions.flatMap(\.items).filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }.map(\.load)
+        }
+        let free = loads(Service.planInsertDeloadWeek(meso: block, context: ctx, now: now))
+        XCTAssertFalse(free.isEmpty)
+        XCTAssertTrue(free.allSatisfy { $0 > 40 }, "\(free)")
+        let profile = UserProfile(); profile.setMaxLoad(40, exerciseId: target); ctx.insert(profile)
+        try ctx.save()
+        let capped = loads(Service.planInsertDeloadWeek(meso: block, context: ctx, now: now))
+        XCTAssertTrue(capped.allSatisfy { $0 == 40 }, "\(capped)")
+    }
 }

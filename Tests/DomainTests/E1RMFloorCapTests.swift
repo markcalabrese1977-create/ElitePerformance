@@ -791,3 +791,331 @@ final class FixedLoadExemptTests: XCTestCase {
             "Reps came in well under the bottom of the range across multiple sets. Backing the load down to 47.5 next session to rebuild in range.")
     }
 }
+
+// MARK: - Per-exercise max load
+
+final class MaxLoadTests: XCTestCase {
+
+    private static var parked: [AnyObject] = []
+    private let lift = "leg_extension"
+    private var cal: Calendar { Calendar.current }
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: Date())! }
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        Self.parked.append(c)
+        return ModelContext(c)
+    }
+
+    private func profile(max: Double? = nil, exempt: Bool = false, id: String? = nil) -> UserProfile {
+        let p = UserProfile()
+        if let max { p.setMaxLoad(max, exerciseId: id ?? lift) }
+        if exempt { p.setProgressionExempt(true, exerciseId: id ?? lift) }
+        return p
+    }
+
+    /// 3 sets of `reps` at `load`, RIR 3, rep range 10-12.
+    private func item(_ id: String? = nil, wave: String? = nil, reps: [Int], load: Double, suggested: Double? = nil,
+                      planned: [Double]? = nil) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id ?? lift, targetReps: 12, targetSets: reps.count, targetRIR: 3,
+                            suggestedLoad: suggested ?? load, waveRaw: wave, repMin: 10, repMax: 12)
+        i.actualReps = reps
+        i.actualLoads = reps.map { $0 > 0 ? load : 0 }
+        i.actualRIRs = Array(repeating: 3, count: reps.count)
+        i.plannedLoadsBySet = planned ?? Array(repeating: suggested ?? load, count: reps.count)
+        i.setFeedbackBySet = Array(repeating: "", count: reps.count)
+        return i
+    }
+
+    // MARK: Profile
+
+    func test_profile_setClearAndCanonicalLookup() {
+        let p = UserProfile()
+        XCTAssertNil(p.maxLoadByExerciseStored)
+        XCTAssertNil(p.maxLoad(for: lift))
+        p.setMaxLoad(300, exerciseId: lift)
+        XCTAssertEqual(p.maxLoad(for: lift), 300)
+        XCTAssertEqual(UserProfile.maxLoad(for: lift, profile: p), 300)
+        XCTAssertNil(UserProfile.maxLoad(for: lift, profile: nil))
+        p.setMaxLoad(250, exerciseId: lift)
+        XCTAssertEqual(p.maxLoadByExercise.count, 1, "setting again replaces, never duplicates")
+        p.setMaxLoad(nil, exerciseId: lift)
+        XCTAssertNil(p.maxLoad(for: lift))
+        p.setMaxLoad(0, exerciseId: lift)
+        XCTAssertNil(p.maxLoad(for: lift), "a non-positive value is no cap")
+    }
+
+    func test_clamp_noCap_belowCap_atCap_aboveCap() {
+        let p = profile(max: 100)
+        XCTAssertEqual(UserProfile.clampedLoad(90, exerciseId: lift, profile: p), 90)
+        XCTAssertEqual(UserProfile.clampedLoad(100, exerciseId: lift, profile: p), 100)
+        XCTAssertEqual(UserProfile.clampedLoad(120, exerciseId: lift, profile: p), 100)
+        XCTAssertEqual(UserProfile.clampedLoad(120, exerciseId: "hammer_curl", profile: p), 120, "other exercises are uncapped")
+        XCTAssertEqual(UserProfile.clampedLoad(120, exerciseId: lift, profile: nil), 120)
+    }
+
+    func test_clamp_fixedLoadWins_andBodyweightIsUnaffected() throws {
+        let fixed = profile(max: 50, exempt: true)
+        XCTAssertNil(UserProfile.effectiveMaxLoad(for: lift, profile: fixed))
+        XCTAssertEqual(UserProfile.clampedLoad(60, exerciseId: lift, profile: fixed), 60, "a fixed load is never changed, up or down")
+        let bw = try XCTUnwrap(ExerciseCatalog.all.first { ExerciseCatalog.isBodyweight(exerciseId: $0.id) }).id
+        let p = profile(max: 5, id: bw)
+        XCTAssertNil(UserProfile.effectiveMaxLoad(for: bw, profile: p))
+        XCTAssertEqual(UserProfile.clampedLoad(0, exerciseId: bw, profile: p), 0)
+    }
+
+    // MARK: Coaching
+
+    func test_coach_belowMax_progressionUnchanged() throws {
+        let i = item(reps: [12, 12, 12], load: 100)
+        let free = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists))
+        let capped = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                            loadCap: .init(max: 200)))
+        XCTAssertEqual(capped.message, free.message)
+        XCTAssertEqual(try XCTUnwrap(capped.nextSuggestedLoad), 105, accuracy: 0.001)
+    }
+
+    func test_coach_earnedLoadPastMax_holdsAtMax_withTheMessage() throws {
+        let i = item(reps: [12, 12, 12], load: 100)
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                         loadCap: .init(max: 100)))
+        XCTAssertEqual(rec.nextSuggestedLoad, 100)
+        XCTAssertEqual(rec.message, "At your max load (100). Progress with reps or tempo.")
+        // A partial step to a max that is not on the increment.
+        let part = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                          loadCap: .init(max: 102.5)))
+        XCTAssertEqual(part.nextSuggestedLoad, 102.5)
+        XCTAssertEqual(part.message, "At your max load (102.5). Progress with reps or tempo.")
+        // Over-performed path too.
+        let over = item(reps: [14, 14, 14], load: 100)
+        let r2 = try XCTUnwrap(CoachingEngine.recommend(for: over, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                        loadCap: .init(max: 100)))
+        XCTAssertEqual(r2.nextSuggestedLoad, 100)
+        XCTAssertTrue(r2.message.hasPrefix("At your max load (100)."))
+    }
+
+    func test_coach_secondConsecutiveSessionAtMax_addsTheRepRangeHint() throws {
+        let i = item(reps: [12, 12, 12], load: 100)
+        let first = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                           loadCap: .init(max: 100, priorToppedStreak: 0)))
+        XCTAssertFalse(first.message.contains("Consider"))
+        let second = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                            loadCap: .init(max: 100, priorToppedStreak: 1)))
+        XCTAssertEqual(second.message, "At your max load (100). Progress with reps or tempo. Consider a higher rep range or a different exercise.")
+        XCTAssertEqual(second.nextSuggestedLoad, 100, "no automatic change: the load simply holds")
+    }
+
+    func test_coach_loadAboveTheMax_isClampedEvenWhenHolding() throws {
+        // The max was lowered below what was lifted: a hold becomes the max.
+        let i = item(reps: [10, 10, 10], load: 120)   // in range, not at the top: a hold
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists,
+                                                         loadCap: .init(max: 100)))
+        XCTAssertEqual(rec.nextSuggestedLoad, 100)
+    }
+
+    func test_coach_topSetRole_isCappedToo() throws {
+        let i = SessionItem(order: 1, exerciseId: lift, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100,
+                            repMin: 6, repMax: 8)
+        i.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+        i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+        i.actualReps = [7, 7, 7, 6]; i.actualLoads = [100, 100, 100, 200]; i.actualRIRs = [2, 2, 2, 2]
+        i.setFeedbackBySet = ["", "", "", ""]
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, loadCap: .init(max: 200)))
+        XCTAssertEqual(rec.nextTopLoad, 200, "the earned 205 stops at the max")
+        XCTAssertTrue(rec.message.contains("At your max load (200). Progress with reps or tempo."), rec.message)
+        XCTAssertLessThan(try XCTUnwrap(rec.nextSuggestedLoad), 200, "the back-offs below the max are not affected")
+        // Below the max the top still earns its step.
+        let free = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, loadCap: .init(max: 300)))
+        XCTAssertEqual(free.nextTopLoad, 205)
+    }
+
+    // MARK: Resolving the cap
+
+    func test_resolve_nilForNoMax_fixedLoad_bodyweight_andCountsTheStreak() throws {
+        let i = item(wave: "b", reps: [12, 12, 12], load: 100)
+        XCTAssertNil(CoachingEngine.LoadCap.resolve(for: i, in: nil, allSessions: [], profile: nil))
+        XCTAssertNil(CoachingEngine.LoadCap.resolve(for: i, in: nil, allSessions: [], profile: profile(max: 100, exempt: true)))
+        XCTAssertEqual(CoachingEngine.LoadCap.resolve(for: i, in: nil, allSessions: [], profile: profile(max: 100)),
+                       CoachingEngine.LoadCap(max: 100, priorToppedStreak: 0))
+
+        let ctx = try makeContext()
+        // Oldest -> newest: a miss, then two sessions that topped the range at 100, then today's.
+        let miss = Session(date: day(-30), status: .completed, weekIndex: 1, dayLabel: "Day A", items: [item(wave: "b", reps: [10, 10, 10], load: 100)])
+        let t1 = Session(date: day(-20), status: .completed, weekIndex: 2, dayLabel: "Day A", items: [item(wave: "b", reps: [12, 12, 12], load: 100)])
+        let t2 = Session(date: day(-10), status: .completed, weekIndex: 3, dayLabel: "Day A", items: [item(wave: "b", reps: [12, 12, 12], load: 100)])
+        let otherLetter = Session(date: day(-5), status: .completed, weekIndex: 4, dayLabel: "Day A", items: [item(wave: "a", reps: [8, 8, 8], load: 50)])
+        let today = Session(date: day(0), status: .inProgress, weekIndex: 5, dayLabel: "Day A", items: [i])
+        [miss, t1, t2, otherLetter, today].forEach(ctx.insert)
+        try ctx.save()
+        let cap = try XCTUnwrap(CoachingEngine.LoadCap.resolve(for: i, in: today, allSessions: [miss, t1, t2, otherLetter, today],
+                                                               profile: profile(max: 100)))
+        XCTAssertEqual(cap.priorToppedStreak, 2, "two consecutive same-letter sessions topped the range at the max; the miss and the other letter do not count")
+    }
+
+    // MARK: Carry-forward write sites
+
+    private func carryForward(exempt: Bool = false, max: Double?, srcLoad: Double = 60, tgtPlanned: Double? = nil,
+                              wave: String? = nil) throws -> SessionItem {
+        let ctx = try makeContext()
+        ctx.insert(profile(max: max, exempt: exempt))
+        let hist = item(wave: wave, reps: [12, 12, 12], load: srcLoad, suggested: srcLoad)
+        let histSession = Session(date: day(-14), status: .completed, weekIndex: 1, dayLabel: "Day A", items: [hist])
+        let src = item(wave: wave, reps: [12, 12, 12], load: srcLoad, suggested: srcLoad)
+        let srcSession = Session(date: day(-1), status: .completed, weekIndex: 2, dayLabel: "Day A", items: [src])
+        let tgtLoad = tgtPlanned ?? 0
+        let tgt = item(wave: wave, reps: [0, 0, 0], load: 0, suggested: tgtLoad, planned: [tgtLoad, tgtLoad, tgtLoad])
+        let tgtSession = Session(date: day(1), status: .planned, weekIndex: 3, dayLabel: "Day A", items: [tgt])
+        [histSession, srcSession, tgtSession].forEach(ctx.insert)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: srcSession)
+        return tgt
+    }
+
+    func test_carryForward_emptyTargetSeed_isClamped_belowMaxUnchanged() throws {
+        let capped = try carryForward(max: 60)
+        XCTAssertEqual(capped.suggestedLoad, 60, accuracy: 0.001)
+        XCTAssertTrue(capped.plannedLoadsBySet.allSatisfy { $0 <= 60 }, "\(capped.plannedLoadsBySet)")
+        let free = try carryForward(max: 100)
+        XCTAssertEqual(free.suggestedLoad, 62.5, accuracy: 0.001, "below the max the earned step is unchanged")
+        let none = try carryForward(max: nil)
+        XCTAssertEqual(none.suggestedLoad, free.suggestedLoad, accuracy: 0.001)
+    }
+
+    func test_carryForward_materializedTargetWrite_isClamped() throws {
+        let capped = try carryForward(max: 60, tgtPlanned: 55)
+        XCTAssertEqual(capped.suggestedLoad, 60, accuracy: 0.001)
+        XCTAssertEqual(capped.plannedLoadsBySet, [60, 60, 60])
+        let free = try carryForward(max: 100, tgtPlanned: 55)
+        XCTAssertEqual(free.suggestedLoad, 62.5, accuracy: 0.001)
+    }
+
+    func test_carryForward_fixedLoadWinsOverMax() throws {
+        let tgt = try carryForward(exempt: true, max: 50)
+        XCTAssertEqual(tgt.suggestedLoad, 60, accuracy: 0.001, "a fixed-load exercise keeps exactly the last lifted load, over the max")
+    }
+
+    /// The same exercise in two letters: A sits at the max and holds, B (lighter) keeps progressing.
+    func test_carryForward_perLetter_BAndCKeepProgressingWhileAIsCapped() throws {
+        let ctx = try makeContext()
+        ctx.insert(profile(max: 100))
+        let srcA = Session(date: day(-10), status: .completed, weekIndex: 1, dayLabel: "Day A",
+                           items: [item(wave: "a", reps: [12, 12, 12], load: 100)])
+        let srcB = Session(date: day(-9), status: .completed, weekIndex: 2, dayLabel: "Day A",
+                           items: [item(wave: "b", reps: [12, 12, 12], load: 80)])
+        let tgtA = item(wave: "a", reps: [0, 0, 0], load: 0, suggested: 0, planned: [0, 0, 0])
+        let tgtB = item(wave: "b", reps: [0, 0, 0], load: 0, suggested: 0, planned: [0, 0, 0])
+        let sA = Session(date: day(5), status: .planned, weekIndex: 4, dayLabel: "Day A", items: [tgtA])
+        let sB = Session(date: day(6), status: .planned, weekIndex: 5, dayLabel: "Day A", items: [tgtB])
+        [srcA, srcB, sA, sB].forEach(ctx.insert)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: srcA)
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: srcB)
+        XCTAssertEqual(tgtA.suggestedLoad, 100, accuracy: 0.001, "A holds at the max")
+        XCTAssertEqual(tgtB.suggestedLoad, 82.5, accuracy: 0.001, "B is below the max and earns its step")
+    }
+
+    func test_carryForward_topSetRole_isCapped() throws {
+        let ctx = try makeContext()
+        ctx.insert(profile(max: 100))
+        func roleItem(logged: Bool) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: lift, targetReps: 12, targetSets: 3, targetRIR: 3, suggestedLoad: 55,
+                                waveRaw: "a", repMin: 10, repMax: 12)
+            i.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+            i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+            i.plannedLoadsBySet = [55, 55, 55, 95]
+            i.plannedRepsBySet = [12, 12, 12, 4]; i.plannedRIRsBySet = [3, 3, 3, 2]
+            i.setFeedbackBySet = ["", "", "", ""]
+            if logged {
+                i.actualReps = [12, 12, 12, 6]; i.actualLoads = [60, 60, 60, 100]; i.actualRIRs = [3, 3, 3, 2]
+            }
+            return i
+        }
+        let srcItem = roleItem(logged: true)
+        let tgtItem = roleItem(logged: false)
+        let src = Session(date: day(-1), status: .completed, weekIndex: 2, dayLabel: "Day A", items: [srcItem])
+        let tgt = Session(date: day(1), status: .planned, weekIndex: 3, dayLabel: "Day A", items: [tgtItem])
+        ctx.insert(src); ctx.insert(tgt)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: src)
+        XCTAssertEqual(tgtItem.plannedLoadsBySet.last, 100, "the top's earned 102.5 stops at the max")
+        XCTAssertEqual(tgtItem.plannedLoadsBySet.first, 62.5, "the back-offs below the max progress")
+    }
+
+    func test_enforceMax_isANoOpForFixedLoadAndNoMax() {
+        let i = item(reps: [12, 12, 12], load: 120)
+        PlanMemoryEngine.enforceMax(on: i, profile: profile(max: 100, exempt: true), customExercises: [])
+        XCTAssertEqual(i.suggestedLoad, 120)
+        PlanMemoryEngine.enforceMax(on: i, profile: nil, customExercises: [])
+        XCTAssertEqual(i.suggestedLoad, 120)
+        PlanMemoryEngine.enforceMax(on: i, profile: profile(max: 100), customExercises: [])
+        XCTAssertEqual(i.suggestedLoad, 100)
+        XCTAssertTrue(i.plannedLoadsBySet.allSatisfy { $0 == 100 })
+    }
+
+    // MARK: Seeds
+
+    func test_anchorLoadsForNewMeso_isClamped() throws {
+        let ctx = try makeContext()
+        ctx.insert(profile(max: 150))
+        let hist = item(reps: [8, 8, 8], load: 200, suggested: 200)
+        let past = Session(date: day(-30), status: .completed, weekIndex: 1, dayLabel: "Day A", items: [hist])
+        let block = MesoBlock(name: "New", startDate: day(1), status: .active, totalWeeks: 4)
+        let fresh = item(reps: [0, 0, 0], load: 0, suggested: 0, planned: [0, 0, 0])
+        let next = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Day A", items: [fresh])
+        ctx.insert(past); ctx.insert(block); ctx.insert(next)
+        next.meso = block
+        try ctx.save()
+        ProgramGenerator.anchorLoadsForNewMeso(mesoBlock: block, context: ctx)
+        XCTAssertEqual(fresh.suggestedLoad, 150, "the anchor from a 200 x 8 history stops at the 150 max")
+        XCTAssertTrue(fresh.plannedLoadsBySet.allSatisfy { $0 <= 150 })
+    }
+
+    // MARK: Backup
+
+    private func backupContainer() throws -> ModelContainer {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
+            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        Self.parked.append(c)
+        return c
+    }
+
+    func test_backup_roundTrip_withAndWithoutMaxLoads() throws {
+        func roundTrip(_ configure: (UserProfile) -> Void) throws -> UserProfile {
+            let src = try backupContainer()
+            let sctx = ModelContext(src)
+            let p = UserProfile(); configure(p); sctx.insert(p)
+            try sctx.save()
+            let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: sctx)
+            defer { try? FileManager.default.removeItem(at: result.url) }
+            let dst = try backupContainer()
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: result.url, modelContainer: dst)
+            return try XCTUnwrap(try ModelContext(dst).fetch(FetchDescriptor<UserProfile>()).first)
+        }
+        let with = try roundTrip { $0.setMaxLoad(405, exerciseId: "back_squat"); $0.setMaxLoad(132.5, exerciseId: "hammer_curl") }
+        XCTAssertEqual(with.maxLoad(for: "back_squat"), 405)
+        XCTAssertEqual(with.maxLoad(for: "hammer_curl"), 132.5)
+        let without = try roundTrip { _ in }
+        XCTAssertNil(without.maxLoadByExerciseStored, "no caps stays nil, not an empty map")
+        XCTAssertNil(without.maxLoad(for: "back_squat"))
+    }
+
+    func test_backup_oldBackupWithoutTheKey_restoresWithNoCaps() throws {
+        let json = """
+        {"version":1,"exportedAt":"2026-01-01T00:00:00Z","mesoBlocks":[],"sessions":[],
+         "sessionHistory":[],"exerciseNotes":[],"customExercises":[],
+         "userProfile":{"profileId":"11111111-1111-1111-1111-111111111111","daysPerWeek":5}}
+        """
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let c = try backupContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: c)
+        let p = try XCTUnwrap(try ModelContext(c).fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertNil(p.maxLoadByExerciseStored)
+    }
+}

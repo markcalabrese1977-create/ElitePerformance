@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 // COACHING AUTHORITY — TRUTH PASS v1
 // Canonical target: CoachingEngine (message path)
@@ -29,6 +30,22 @@ struct CoachingRecommendation {
 }
 
 struct CoachingEngine {
+
+    /// A per-exercise max load as the CALLER resolved it (`UserProfile.effectiveMaxLoad`): nil is passed for no
+    /// cap, a fixed-load exercise or a bodyweight one. The engine never reads the profile.
+    struct LoadCap: Equatable {
+        let max: Double
+        /// Earlier consecutive same-letter sessions that topped the rep range at the cap
+        /// (`LoadCap.priorToppedStreak`). Two in a row (this one included) earns the "different rep range" hint.
+        var priorToppedStreak: Int = 0
+
+        /// "At your max load (N). Progress with reps or tempo." (+ the hint after two consecutive sessions).
+        func message(streakHint: Bool) -> String {
+            let n = max == max.rounded() ? String(Int(max)) : String(format: "%.1f", max)
+            let base = "At your max load (\(n)). Progress with reps or tempo."
+            return streakHint && priorToppedStreak >= 1 ? base + " Consider a higher rep range or a different exercise." : base
+        }
+    }
 
     // CUT 2 (input-only): project()'s data fields are plumbed in as optional
     // parameters so a future cut can let CoachingEngine consume project() as its
@@ -184,20 +201,48 @@ struct CoachingEngine {
         peakE1RM: Double? = nil,
         lastKnownLoad: Double? = nil,
         carryForwardTarget: CarryForwardTarget = .unresolved,
-        isProgressionExempt: Bool = false
+        isProgressionExempt: Bool = false,
+        loadCap: LoadCap? = nil
+    ) -> CoachingRecommendation? {
+        let rec = recommendRoles(
+            for: item, minLoadIncrement: minLoadIncrement, mesoPhase: mesoPhase,
+            consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
+            peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
+            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
+        )
+        // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
+        // is already turned into a hold at the cap, with its message, further down).
+        guard let rec, let cap = loadCap, !isProgressionExempt else { return rec }
+        func clamp(_ v: Double?) -> Double? { v.map { Swift.min($0, cap.max) } }
+        return CoachingRecommendation(message: rec.message, nextSuggestedLoad: clamp(rec.nextSuggestedLoad),
+                                      nextTopLoad: clamp(rec.nextTopLoad))
+    }
+
+    private static func recommendRoles(
+        for item: SessionItem,
+        minLoadIncrement: Double?,
+        mesoPhase: MesoPhase,
+        consecutiveCleanCount: Int,
+        e1rmFloorLoad: Double?,
+        peakE1RM: Double?,
+        lastKnownLoad: Double?,
+        carryForwardTarget: CarryForwardTarget,
+        isProgressionExempt: Bool,
+        loadCap: LoadCap?
     ) -> CoachingRecommendation? {
         let back = recommendBackOffs(
             for: item, minLoadIncrement: minLoadIncrement, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
-            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt
+            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
         )
         guard item.hasTopSet else { return back }
         // Deload keeps its maintenance message; a pain flag stops every call, top set included.
         if item.waveRaw?.lowercased() == "deload" { return back }
         let painFlagged = item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
         if painFlagged { return back }
-        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, isProgressionExempt: isProgressionExempt) else {
+        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, isProgressionExempt: isProgressionExempt,
+                                loadCap: loadCap) else {
             return back
         }
         let message = [top.message, back?.message].compactMap { $0 }.joined(separator: " ")
@@ -208,7 +253,8 @@ struct CoachingEngine {
 
     /// Judges the logged top rows: reps against topRepMin/Max, RIR against topRIR. Hold, or a
     /// one-increment bump when every top row is at the top of its range at the target difficulty.
-    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, isProgressionExempt: Bool) -> TopRead? {
+    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, isProgressionExempt: Bool,
+                                loadCap: LoadCap? = nil) -> TopRead? {
         let rows = topWorkingIndices(for: item)
         guard let lastRow = rows.last else { return nil }
         let reps = rows.map { item.actualReps[$0] }
@@ -244,6 +290,10 @@ struct CoachingEngine {
             }
             let step = loadIncrement(for: item, base: load, minLoadIncrement: minLoadIncrement)
             let next = min(load + step, load * 2.0)
+            if let cap = loadCap, next > cap.max {
+                // The earned increase would pass the max: hold at the max.
+                return TopRead(message: "\(what), top of the range. \(cap.message(streakHint: false))", nextTopLoad: cap.max)
+            }
             return TopRead(message: "\(what), top of the range — increase earned. Next top set: \(compactLoad(next)).", nextTopLoad: next)
         }
         return TopRead(message: "\(what), on target — hold.", nextTopLoad: load)
@@ -258,7 +308,8 @@ struct CoachingEngine {
         peakE1RM: Double? = nil,
         lastKnownLoad: Double? = nil,
         carryForwardTarget: CarryForwardTarget = .unresolved,
-        isProgressionExempt: Bool = false
+        isProgressionExempt: Bool = false,
+        loadCap: LoadCap? = nil
     ) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
@@ -652,6 +703,9 @@ struct CoachingEngine {
         // 5a) Over-performed: all sets ≥ repMax+2 at target RIR → bump (floor-aware) [was path 4]
         if overPerformed && rirOnTarget {
             let target = qualifyingBump()
+            if let cap = loadCap, target > cap.max {
+                return CoachingRecommendation(message: cap.message(streakHint: true), nextSuggestedLoad: cap.max)
+            }
             let lead = "Reps came in well above the top of your range with room to spare."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
@@ -671,6 +725,9 @@ struct CoachingEngine {
         //     The core double-progression bump [replaces paths 3.5 / 5.5].
         if allSetsAtTop && rirOnTarget {
             let target = qualifyingBump()
+            if let cap = loadCap, target > cap.max {
+                return CoachingRecommendation(message: cap.message(streakHint: true), nextSuggestedLoad: cap.max)
+            }
             let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
@@ -706,5 +763,53 @@ struct CoachingEngine {
     private static func formatLoad(_ value: Double) -> String {
         if value == 0 { return "0" }
         return String(format: "%.1f", value)
+    }
+}
+
+// MARK: - Resolving a load cap
+
+extension CoachingEngine.LoadCap {
+
+    /// The cap for `item`'s exercise, or nil when none applies (no max set, a fixed-load exercise, a bodyweight one).
+    /// `priorToppedStreak` counts, most recent first, the consecutive earlier completed sessions of the SAME block,
+    /// day type and wave letter whose back-off sets all reached the top of the rep range at the cap load.
+    static func resolve(
+        for item: SessionItem,
+        in session: Session?,
+        allSessions: [Session],
+        profile: UserProfile?,
+        customExercises: [CustomExercise] = []
+    ) -> CoachingEngine.LoadCap? {
+        guard let cap = UserProfile.effectiveMaxLoad(for: item.exerciseId, profile: profile, customExercises: customExercises) else {
+            return nil
+        }
+        var streak = 0
+        if let session {
+            let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            let wave = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            let mesoID = session.meso?.persistentModelID
+            let earlier = allSessions
+                .filter { $0 !== session && $0.status == .completed && $0.date < session.date
+                    && $0.meso?.persistentModelID == mesoID
+                    && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
+                .sorted { $0.date > $1.date }
+            for s in earlier {
+                guard let match = s.items.first(where: {
+                    ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
+                        && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == wave
+                }) else { continue }
+                guard toppedRangeAtCap(match, cap: cap) else { break }
+                streak += 1
+            }
+        }
+        return CoachingEngine.LoadCap(max: cap, priorToppedStreak: streak)
+    }
+
+    private static func toppedRangeAtCap(_ item: SessionItem, cap: Double) -> Bool {
+        let rows = CoachingEngine.plannedWorkingSetIndices(for: item)
+        guard rows.count >= CoachingEngine.requiredPrimarySets(for: item) else { return false }
+        let topReps = item.repMax ?? item.targetReps
+        let primary = rows.prefix(min(Swift.max(1, item.targetSets), 3))
+        return primary.allSatisfy { item.actualReps[$0] >= topReps && item.actualLoads[$0] >= cap - 0.001 }
     }
 }

@@ -48,6 +48,8 @@ struct UserProfileBackupDTO: Codable {
     // still decode (synthesized Codable maps an absent key to nil); the importer
     // maps nil to UserProfile.defaultExemptExerciseIds (empty: nothing is fixed-load by default).
     var exemptExerciseIds: [String]? = nil
+    /// Per-exercise max load (canonical id -> load). nil in old backups: no caps.
+    var maxLoadByExercise: [String: Double]? = nil
     // Added (optional birthdate for age-based heart-rate zones). Absent in older backups.
     var birthDateOverride: Date? = nil
     // Added (equipment preset + checklist). Optional so OLD backups decode with nil: preset derives from

@@ -1443,6 +1443,10 @@ final class SessionScreenViewModel: ObservableObject {
                         isProgressionExempt: UserProfile.isProgressionExempt(
                             exerciseId: matchingItem.exerciseId,
                             profile: recProfile
+                        ),
+                        loadCap: CoachingEngine.LoadCap.resolve(
+                            for: matchingItem, in: session, allSessions: allSessionsForRec,
+                            profile: recProfile, customExercises: recCustomExercises
                         )
                     ) {
                         exercise.coachMessage = recommendation.message
@@ -1717,10 +1721,14 @@ final class SessionScreenViewModel: ObservableObject {
         // coaching after a swap. BW guard lives inside lastKnownLoad — swapping in a
         // bodyweight exercise cannot re-manufacture the phantom Fix B eliminated.
         // persist() propagates these values to item.suggestedLoad and item.plannedLoadsBySet.
-        let recentLoad = LoadProjectionService.lastKnownLoad(
-            for: catalogExercise.id,
-            currentSession: session,
-            context: context
+        let recentLoad = UserProfile.clampedLoad(
+            LoadProjectionService.lastKnownLoad(
+                for: catalogExercise.id,
+                currentSession: session,
+                context: context
+            ),
+            exerciseId: catalogExercise.id,
+            profile: try? context.fetch(FetchDescriptor<UserProfile>()).first
         )
         if recentLoad > 0 {
             for i in exercise.sets.indices {
@@ -1754,10 +1762,14 @@ final class SessionScreenViewModel: ObservableObject {
         let defaultSets = 3
         let defaultRIR = 2
         let defaultReps = catalogExercise.isCompound ? 10 : 12
-        let defaultLoad = LoadProjectionService.lastKnownLoad(
-            for: catalogExercise.id,
-            currentSession: session,
-            context: context
+        let defaultLoad = UserProfile.clampedLoad(
+            LoadProjectionService.lastKnownLoad(
+                for: catalogExercise.id,
+                currentSession: session,
+                context: context
+            ),
+            exerciseId: catalogExercise.id,
+            profile: try? context.fetch(FetchDescriptor<UserProfile>()).first
         )
 
         // Maintenance sessions need the deload-style prescription so the coaching

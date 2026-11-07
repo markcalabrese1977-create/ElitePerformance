@@ -81,7 +81,10 @@ enum ProgramGenerator {
                 guard decayWeighted > 0 else { continue }
 
                 let rawLoad = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
-                let anchored = E1RMCalculator.rounded(rawLoad, increment: loadIncrement)
+                let anchored = UserProfile.clampedLoad(
+                    E1RMCalculator.rounded(rawLoad, increment: loadIncrement),
+                    exerciseId: item.exerciseId, profile: profile
+                )
                 guard anchored > 0 else { continue }
 
                 item.suggestedLoad = anchored

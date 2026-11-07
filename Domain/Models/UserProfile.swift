@@ -129,6 +129,60 @@ final class UserProfile {
 
     static let defaultExemptExerciseIds: [String] = []
 
+    /// Per-exercise "max load": the heaviest load the plan may write or seed for an exercise (canonical
+    /// exerciseId -> load, in the lifter's unit). No entry means no cap. Stored OPTIONAL so the additive
+    /// SwiftData migration (existing rows get nil) and an old backup without the field both read as
+    /// "no caps". Use `maxLoadByExercise` / `maxLoad(for:)`, never this raw column.
+    var maxLoadByExerciseStored: [String: Double]? = nil
+
+    var maxLoadByExercise: [String: Double] {
+        get { maxLoadByExerciseStored ?? [:] }
+        set { maxLoadByExerciseStored = newValue }
+    }
+
+    /// The cap for `exerciseId` (any legacy alias spelling), or nil when there is none.
+    func maxLoad(for exerciseId: String) -> Double? {
+        Self.maxLoad(for: exerciseId, in: maxLoadByExercise)
+    }
+
+    /// Profile-optional variant for callers that may run before a profile exists: no profile, no cap.
+    static func maxLoad(for exerciseId: String, profile: UserProfile?) -> Double? {
+        maxLoad(for: exerciseId, in: profile?.maxLoadByExercise ?? [:])
+    }
+
+    private static func maxLoad(for exerciseId: String, in map: [String: Double]) -> Double? {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        for (key, value) in map where value > 0 && ExerciseCatalog.canonicalExerciseId(for: key) == canonical {
+            return value
+        }
+        return nil
+    }
+
+    /// Set (or, with nil / a non-positive value, clear) the cap for one exercise (canonical-id aware).
+    func setMaxLoad(_ value: Double?, exerciseId: String) {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        var map = maxLoadByExercise.filter { ExerciseCatalog.canonicalExerciseId(for: $0.key) != canonical }
+        if let value, value > 0 { map[canonical] = value }
+        maxLoadByExercise = map
+    }
+
+    /// The cap that applies to PLAN-WRITTEN loads of `exerciseId`: nil when there is no cap, and nil for a
+    /// fixed-load exercise (its load never moves, so a cap must not move it either) or a bodyweight one.
+    static func effectiveMaxLoad(for exerciseId: String, profile: UserProfile?,
+                                 customExercises: [CustomExercise] = []) -> Double? {
+        guard let cap = maxLoad(for: exerciseId, profile: profile) else { return nil }
+        if isProgressionExempt(exerciseId: exerciseId, profile: profile) { return nil }
+        if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return nil }
+        return cap
+    }
+
+    /// `min(load, cap)` when a cap applies to this exercise; `load` otherwise.
+    static func clampedLoad(_ load: Double, exerciseId: String, profile: UserProfile?,
+                            customExercises: [CustomExercise] = []) -> Double {
+        guard let cap = effectiveMaxLoad(for: exerciseId, profile: profile, customExercises: customExercises) else { return load }
+        return min(load, cap)
+    }
+
     /// Optional birthdate the lifter enters when HealthKit has no date of birth; HealthKit's wins when
     /// both exist. Only used for age-based heart-rate zones; nil means no age is assumed.
     var birthDateOverride: Date? = nil

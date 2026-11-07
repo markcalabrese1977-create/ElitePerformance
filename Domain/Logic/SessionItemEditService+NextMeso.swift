@@ -314,8 +314,10 @@ extension SessionItemEditService {
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
                 factor: peakFactor, customExercises: custom, referenceDate: now
             )
-            seedCache[key] = r
-            return r
+            // A max load caps the seed (a fixed-load exercise or one without a max is unchanged).
+            let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
+            seedCache[key] = capped
+            return capped
         }
 
         func topSeedLoad(_ exerciseId: String, reps: Int, rir: Int) -> Double {
@@ -327,8 +329,9 @@ extension SessionItemEditService {
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
                 factor: peakFactor, customExercises: custom, referenceDate: now, role: .top
             )
-            seedCache[key] = r
-            return r.load
+            let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
+            seedCache[key] = capped
+            return capped.0
         }
 
         // Layout

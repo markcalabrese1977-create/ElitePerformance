@@ -454,6 +454,7 @@ enum MaintenanceProgramSeeder {
             sortBy: [SortDescriptor(\.date, order: .forward)]
         )
         guard let allSessions = try? context.fetch(allSessionsDescriptor) else { return }
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
 
         let mesoSessionIDs = Set(mesoBlock.sessions.map { $0.persistentModelID })
         // Excludes maintenance-block sessions from the anchoring pool — see
@@ -496,7 +497,8 @@ enum MaintenanceProgramSeeder {
                 // Maintenance targets RIR 3-4 — back-calculate at the deload
                 // prescription's target reps/RIR for this exercise.
                 let load = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
-                let rounded = E1RMCalculator.rounded(load, increment: 2.5)
+                let rounded = UserProfile.clampedLoad(E1RMCalculator.rounded(load, increment: 2.5),
+                                                      exerciseId: item.exerciseId, profile: profile)
                 guard rounded > 0 else { continue }
 
                 item.suggestedLoad = rounded
