@@ -271,7 +271,8 @@ struct ProgramDayDetailView: View {
 
             let profileDescriptor = FetchDescriptor<UserProfile>()
             let profile = try? modelContext.fetch(profileDescriptor).first
-            let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
+            let loadUnit = profile?.loadUnit ?? .lb
+            let loadIncrement: Double = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: loadUnit)
             let bodyWeight = profile?.bodyWeight
             let customExercises = (try? modelContext.fetch(FetchDescriptor<CustomExercise>())) ?? []
 
@@ -314,6 +315,7 @@ struct ProgramDayDetailView: View {
                                             allSessions: sessions,
                                             activeMesoSessionIDs: activeMesoIDs,
                                             loadIncrement: loadIncrement,
+                                            unit: loadUnit,
                                             bodyWeight: bodyWeight,
                                             customExercises: customExercises
                                         )

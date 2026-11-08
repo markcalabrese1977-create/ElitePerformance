@@ -137,7 +137,8 @@ enum SessionItemEditService {
         let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? 2.5
+        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
+        let unit = profile?.loadUnit ?? .lb
 
         var targets: [Target] = []
         for (session, item) in candidates {
@@ -150,7 +151,7 @@ enum SessionItemEditService {
             // The seed never exceeds the lifter's max for the replacement (no max / fixed-load / bodyweight: unchanged).
             let seed = HistorySeedLoad.load(
                 for: to, goalReps: item.targetReps, targetRIR: item.targetRIR, in: allSessions,
-                loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
+                loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
             ).map { UserProfile.clampedLoad($0, exerciseId: to, profile: profile, customExercises: custom) }
             targets.append(Target(
                 session: session, item: item, date: session.date, weekIndex: session.weekIndex,
@@ -749,7 +750,7 @@ extension SessionItemEditService {
             if let hit = seedCache[spec] { return hit }
             let v = UserProfile.clampedLoad(HistorySeedLoad.load(
                 for: plan.exerciseId, goalReps: spec.repMin, targetRIR: spec.rir, in: allSessions,
-                loadIncrement: profile?.minLoadIncrement ?? 2.5, bodyWeight: profile?.bodyWeight,
+                loadIncrement: profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb), unit: profile?.loadUnit ?? .lb, bodyWeight: profile?.bodyWeight,
                 customExercises: custom, referenceDate: plan.now, role: .top
             ) ?? 0, exerciseId: plan.exerciseId, profile: profile, customExercises: custom)
             seedCache[spec] = v
@@ -1126,7 +1127,8 @@ extension SessionItemEditService {
         // The deload week: W's sessions, same dates, half the volume.
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? 2.5
+        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
+        let unit = profile?.loadUnit ?? .lb
         let sources = (byWeek[week] ?? []).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
         let deloadSessions: [DeloadSessionPlan] = sources.map { s in
             let items: [DeloadItemPlan] = s.items.sorted { $0.order < $1.order }.map { i in
@@ -1140,7 +1142,7 @@ extension SessionItemEditService {
                 } else {
                     load = UserProfile.clampedLoad(HistorySeedLoad.load(
                         for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
-                        loadIncrement: increment, bodyWeight: profile?.bodyWeight, customExercises: custom,
+                        loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
                         referenceDate: now
                     ) ?? 0, exerciseId: i.exerciseId, profile: profile, customExercises: custom)
                 }

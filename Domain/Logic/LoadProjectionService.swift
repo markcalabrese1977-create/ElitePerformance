@@ -156,6 +156,7 @@ enum LoadProjectionService {
         allSessions: [Session],
         activeMesoSessionIDs: Set<PersistentIdentifier>,
         loadIncrement: Double = 2.5,
+        unit: LoadUnit = .lb,
         referenceDate: Date = Date(),
         bodyWeight: Double? = nil,
         customExercises: [CustomExercise] = []
@@ -255,7 +256,7 @@ enum LoadProjectionService {
         let e1rmFloorLoad: Double = {
             guard bestE1RM > 0 else { return 0 }
             let raw = E1RMCalculator.load(for: bestE1RM, reps: effectiveTargetReps, targetRIR: targetRIR)
-            return E1RMCalculator.rounded(raw, increment: loadIncrement)
+            return E1RMCalculator.rounded(raw, increment: loadIncrement, unit: unit)
         }()
 
         // MARK: - Same-wave sessions with consecutive clean tracking
@@ -365,19 +366,22 @@ enum LoadProjectionService {
             Double(lastValidRIRs.reduce(0, +)) / Double(lastValidRIRs.count)
         let hadExtraReserve = lastAvgRIR > Double(lastItem.targetRIR) + 0.5
 
+        // `loadIncrement` is in `unit`; loads are stored lb, so a step added to a load is converted first.
+        let stepLb = UnitAwareRounding.stepLb(loadIncrement, unit: unit)
+        func snap(_ lb: Double) -> Double { UnitAwareRounding.round(lb, increment: loadIncrement, unit: unit) }
         let sameWaveLoad: Double = {
             if tooMuchFatigue {
-                return (lastLoad * 0.95 / loadIncrement).rounded() * loadIncrement
+                return snap(lastLoad * 0.95)
             }
             // Extra reserve last session (actual RIR well above target) + clean = increase now.
             // Standard path requires 2 consecutive clean sessions.
             if consecutiveClean >= 1 && hadExtraReserve {
-                return ((lastLoad + loadIncrement) / loadIncrement).rounded() * loadIncrement
+                return snap(lastLoad + stepLb)
             }
             if consecutiveClean >= 2 {
-                return ((lastLoad + loadIncrement) / loadIncrement).rounded() * loadIncrement
+                return snap(lastLoad + stepLb)
             }
-            return (lastLoad / loadIncrement).rounded() * loadIncrement
+            return snap(lastLoad)
         }()
 
         let sameWaveBasis: LoadProjectionBasis = (consecutiveClean >= 2 || (consecutiveClean >= 1 && hadExtraReserve))
@@ -639,16 +643,12 @@ enum HistorySeedLoad {
     /// short of the next increment, the next increment is the seed (319.2 at 5 -> 320). The window is a share of
     /// the STEP, not of the load, so it is the same size for a 30 lb and a 300 lb lift: at 5 lb, 318.5 -> 315 and
     /// 104 -> 100 (exactly one lb short is not "less than").
-    static func roundedDown(_ load: Double, increment: Double) -> Double {
-        guard increment > 0 else { return load }
-        let floored = ((load / increment) + 1e-9).rounded(.down) * increment
-        let next = floored + increment
-        if next - load < nearMissIncrementFraction * increment - 1e-9 { return next }
-        return floored
+    static func roundedDown(_ load: Double, increment: Double, unit: LoadUnit = .lb) -> Double {
+        UnitAwareRounding.round(load, increment: increment, unit: unit, mode: .nearMissDown)
     }
 
     /// How close to the next increment, as a share of the increment itself, a computed load must be to take it.
-    static let nearMissIncrementFraction = 0.2
+    static let nearMissIncrementFraction = UnitAwareRounding.nearMissFraction
 
     static let maxCreditedRIR = 4
     /// Sets lighter than this share of the session's heaviest set are warm-ups.
@@ -688,6 +688,7 @@ enum HistorySeedLoad {
         targetRIR: Int,
         in sessions: [Session],
         loadIncrement: Double,
+        unit: LoadUnit = .lb,
         bodyWeight: Double? = nil,
         customExercises: [CustomExercise] = [],
         referenceDate: Date = Date(),
@@ -718,7 +719,7 @@ enum HistorySeedLoad {
 
         let e1rm = E1RMCalculator.decayWeightedE1RM(from: candidates, referenceDate: referenceDate)
         let raw = E1RMCalculator.load(for: e1rm, reps: goalReps, targetRIR: targetRIR)
-        let seeded = roundedDown(raw, increment: loadIncrement)
+        let seeded = roundedDown(raw, increment: loadIncrement, unit: unit)
         return seeded > 0 ? seeded : nil
     }
 
@@ -748,6 +749,7 @@ enum HistorySeedLoad {
         targetRIR: Int,
         in sessions: [Session],
         loadIncrement: Double,
+        unit: LoadUnit = .lb,
         factor: Double = 0.95,
         customExercises: [CustomExercise] = [],
         role: Role = .backOff
@@ -755,7 +757,7 @@ enum HistorySeedLoad {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return 0 }
         guard let peak = peakE1RM(for: exerciseId, in: sessions, role: role) else { return nil }
         let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
-                                 increment: loadIncrement)
+                                 increment: loadIncrement, unit: unit)
         return seeded > 0 ? seeded : nil
     }
 
@@ -795,6 +797,7 @@ enum HistorySeedLoad {
         previousMeso: [Session],
         allSessions: [Session],
         loadIncrement: Double,
+        unit: LoadUnit = .lb,
         bodyWeight: Double? = nil,
         isFixedLoad: Bool,
         factor: Double = 0.95,
@@ -810,11 +813,11 @@ enum HistorySeedLoad {
             return (0, .none)
         }
         if let peak = peakLoad(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: previousMeso,
-                               loadIncrement: loadIncrement, factor: factor, customExercises: customExercises, role: role) {
+                               loadIncrement: loadIncrement, unit: unit, factor: factor, customExercises: customExercises, role: role) {
             return (peak, .peak)
         }
         if let h = load(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: allSessions,
-                        loadIncrement: loadIncrement, bodyWeight: bodyWeight, customExercises: customExercises,
+                        loadIncrement: loadIncrement, unit: unit, bodyWeight: bodyWeight, customExercises: customExercises,
                         referenceDate: referenceDate, role: role) {
             return (h, .history)
         }
@@ -833,7 +836,8 @@ enum HistorySeedLoad {
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         return load(
             for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: sessions,
-            loadIncrement: profile?.minLoadIncrement ?? 2.5,
+            loadIncrement: profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb),
+            unit: profile?.loadUnit ?? .lb,
             bodyWeight: profile?.bodyWeight,
             customExercises: custom
         )

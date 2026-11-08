@@ -85,7 +85,8 @@ struct SessionView: View {
                                 firstExercisePlannedLoad: (first.sets.first?.plannedLoad ?? 0) > 0
                                     ? first.sets.first?.plannedLoad
                                     : nil,
-                                rounding: warmupRounding(for: first.name)
+                                rounding: warmupRounding(for: first.name),
+                                unit: warmupUnit
                             )
                         }
                     }
@@ -405,6 +406,11 @@ struct SessionView: View {
         return raw
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: ",", with: "")
+    }
+
+    /// The lifter's unit, for the warm-up ramp rounding.
+    private var warmupUnit: LoadUnit {
+        (try? modelContext.fetch(FetchDescriptor<UserProfile>()).first?.loadUnit) ?? .lb
     }
 
     private func warmupRounding(for exerciseName: String) -> WarmupCardView.LoadRounding {
@@ -1388,7 +1394,8 @@ final class SessionScreenViewModel: ObservableObject {
                     // step (e.g. 2.5) + e1rm floor — two paths, two numbers.
                     let allSessionsForRec = (try? context.fetch(FetchDescriptor<Session>())) ?? []
                     let recProfile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-                    let recLoadIncrement = recProfile?.minLoadIncrement ?? 2.5
+                    let recUnit = recProfile?.loadUnit ?? .lb
+                    let recLoadIncrement = recProfile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: recUnit)
                     let recCustomExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
                     let cleanCount = LoadProjectionService.consecutiveCleanCount(
                         exerciseId: matchingItem.exerciseId,
@@ -1428,12 +1435,14 @@ final class SessionScreenViewModel: ObservableObject {
                         allSessions: allSessionsForRec,
                         activeMesoSessionIDs: LoadProjectionService.activeMesoSessionIDs(from: context),
                         loadIncrement: recLoadIncrement,
+                        unit: recUnit,
                         bodyWeight: recProfile?.bodyWeight,
                         customExercises: recCustomExercises
                     )
                     if let recommendation = CoachingEngine.recommend(
                         for: matchingItem,
                         minLoadIncrement: recLoadIncrement,
+                        unit: recUnit,
                         mesoPhase: session.mesoPhase,
                         consecutiveCleanCount: cleanCount,
                         e1rmFloorLoad: recProjection?.e1rmFloorLoad,

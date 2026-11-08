@@ -149,6 +149,24 @@ final class LoadUnitTests: XCTestCase {
         XCTAssertEqual(UnitAwareRounding.bumpFallbackIncrement(forBaseLb: LoadUnit.kg.toStoredLb(20), unit: .kg), 1.25)
     }
 
+    func test_warmupRamp_lbMatchesTheOldArithmeticAndKgUsesKgSteps() {
+        for v in [0.0, 47.3, 112.6, 183.9, 301.2] {
+            XCTAssertEqual(UnitAwareRounding.warmupRamp(v, coarse: true, unit: .lb), (v / 5.0).rounded() * 5.0)
+            XCTAssertEqual(UnitAwareRounding.warmupRamp(v, coarse: false, unit: .lb), (v / 2.5).rounded() * 2.5)
+        }
+        for kg in [37.3, 61.1, 83.4, 118.9] {
+            let lb = LoadUnit.kg.toStoredLb(kg)
+            let barbell = LoadUnit.kg.fromStoredLb(UnitAwareRounding.warmupRamp(lb, coarse: true, unit: .kg)) / 2.5
+            let light = LoadUnit.kg.fromStoredLb(UnitAwareRounding.warmupRamp(lb, coarse: false, unit: .kg)) / 1.25
+            XCTAssertEqual(barbell, barbell.rounded(), accuracy: 1e-9)
+            XCTAssertEqual(light, light.rounded(), accuracy: 1e-9)
+        }
+        // 33.9 kg: nearest 2.5 kg barbell step is 35, nearest 1.25 kg step is 33.75.
+        let lb33 = LoadUnit.kg.toStoredLb(33.9)
+        XCTAssertEqual(LoadUnit.kg.fromStoredLb(UnitAwareRounding.warmupRamp(lb33, coarse: true, unit: .kg)), 35, accuracy: 1e-9)
+        XCTAssertEqual(LoadUnit.kg.fromStoredLb(UnitAwareRounding.warmupRamp(lb33, coarse: false, unit: .kg)), 33.75, accuracy: 1e-9)
+    }
+
     func test_catalogLbIncrementsMapToKgSteps() {
         for lbStep in [10.0, 5.0, 2.5, 1.0, 0.0] {
             XCTAssertEqual(UnitAwareRounding.increment(fromLb: lbStep, unit: .lb), lbStep)

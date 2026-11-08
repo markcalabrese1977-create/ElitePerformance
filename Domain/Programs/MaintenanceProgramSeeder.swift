@@ -497,7 +497,7 @@ enum MaintenanceProgramSeeder {
                 // Maintenance targets RIR 3-4 — back-calculate at the deload
                 // prescription's target reps/RIR for this exercise.
                 let load = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
-                let rounded = UserProfile.clampedLoad(E1RMCalculator.rounded(load, increment: 2.5),
+                let rounded = UserProfile.clampedLoad(E1RMCalculator.rounded(load, increment: UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb), unit: profile?.loadUnit ?? .lb),
                                                       exerciseId: item.exerciseId, profile: profile)
                 guard rounded > 0 else { continue }
 

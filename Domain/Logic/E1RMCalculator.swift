@@ -20,10 +20,9 @@ struct E1RMCalculator {
         return (e1rm / (1.0 + Double(reps) / 30.0)) * rirFactor
     }
 
-    /// Round a load to the nearest increment (e.g. 2.5, 5.0).
-    static func rounded(_ load: Double, increment: Double) -> Double {
-        guard increment > 0 else { return load }
-        return (load / increment).rounded() * increment
+    /// Round a stored (lb) load to the nearest increment, where `increment` is in `unit` (e.g. 2.5, 5.0 lb; 1.25, 2.5 kg).
+    static func rounded(_ load: Double, increment: Double, unit: LoadUnit = .lb) -> Double {
+        UnitAwareRounding.round(load, increment: increment, unit: unit, mode: .nearest)
     }
 
     /// Resolves the load to use for volume/e1RM math: the logged actual load if any,

@@ -8,6 +8,10 @@ enum MechanicalLoadSharedStore {
 
     static let appGroupID = "group.com.markcalabrese.eliteperformance"
     static let keyPrefix = "mechanicalLoad."
+    /// The unit the day totals are in. Totals are summed from stored loads, so this is always "lb" whatever unit the
+    /// lifter sees; a reader (the HealthDashboard) converts for display. Not a date key: no reader mistakes it for a day.
+    static let unitKey = "mechanicalLoad.unit"
+    static let storedUnit = "lb"
 
     private static var sharedDefaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
@@ -21,6 +25,7 @@ enum MechanicalLoadSharedStore {
             return
         }
         let key = keyPrefix + dateKey(for: date)
+        defaults.set(storedUnit, forKey: unitKey)
         if total > 0 {
             defaults.set(total, forKey: key)
         } else {
@@ -53,6 +58,7 @@ enum MechanicalLoadSharedStore {
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(keyPrefix) {
             defaults.removeObject(forKey: key)
         }
+        defaults.set(storedUnit, forKey: unitKey)
     }
 
     private static func dateKey(for date: Date) -> String {

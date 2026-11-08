@@ -14,6 +14,8 @@ struct WarmupCardView: View {
     let firstExerciseName: String
     let firstExercisePlannedLoad: Double?   // nil => show % guidance
     let rounding: LoadRounding
+    /// The lifter's unit: the ramp steps round to 5 / 2.5 lb or 2.5 / 1.25 kg. Loads here are stored lb.
+    let unit: LoadUnit
 
     @AppStorage private var crankyJoint: Bool
     @AppStorage private var doneRaw: String
@@ -22,12 +24,14 @@ struct WarmupCardView: View {
         sessionKey: String,
         firstExerciseName: String,
         firstExercisePlannedLoad: Double?,
-        rounding: LoadRounding
+        rounding: LoadRounding,
+        unit: LoadUnit = .lb
     ) {
         self.sessionKey = sessionKey
         self.firstExerciseName = firstExerciseName
         self.firstExercisePlannedLoad = firstExercisePlannedLoad
         self.rounding = rounding
+        self.unit = unit
 
         self._crankyJoint = AppStorage(wrappedValue: false, "warmup_crankyJoint_\(sessionKey)")
         self._doneRaw     = AppStorage(wrappedValue: "",    "warmup_done_\(sessionKey)")
@@ -186,11 +190,9 @@ struct WarmupCardView: View {
     private func rounded(_ value: Double) -> Double {
         switch rounding {
         case .barbell:
-            let step = 5.0
-            return (value / step).rounded() * step
+            return UnitAwareRounding.warmupRamp(value, coarse: true, unit: unit)
         case .dumbbell, .machine:
-            let step = 2.5
-            return (value / step).rounded() * step
+            return UnitAwareRounding.warmupRamp(value, coarse: false, unit: unit)
         }
     }
 

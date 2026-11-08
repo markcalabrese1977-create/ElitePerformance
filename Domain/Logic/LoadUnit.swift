@@ -87,6 +87,12 @@ enum UnitAwareRounding {
         return unit.toStoredLb(r)
     }
 
+    /// A warm-up ramp load: barbell ramps step by the coarse default (lb 5, kg 2.5), dumbbell / machine / cable by the
+    /// fine one (lb 2.5, kg 1.25). The ramp is a fixed convention, not the lifter's `minLoadIncrement`.
+    static func warmupRamp(_ storedLb: Double, coarse: Bool, unit: LoadUnit) -> Double {
+        round(storedLb, increment: defaultIncrement(unit: unit, coarse: coarse), unit: unit)
+    }
+
     /// One step, as a stored-lb amount, for adding to or subtracting from a stored load.
     static func stepLb(_ increment: Double, unit: LoadUnit) -> Double {
         unit.toStoredLb(increment)

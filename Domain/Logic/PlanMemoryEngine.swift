@@ -26,6 +26,8 @@ struct PlanMemoryEngine {
     struct LoadPolicyInputs {
         let profile: UserProfile?
         let loadIncrement: Double
+        /// The unit `loadIncrement` is in (loads themselves are stored lb).
+        let unit: LoadUnit
         let bodyWeight: Double?
         let customExercises: [CustomExercise]
         let progressionEnabled: Bool
@@ -36,7 +38,8 @@ struct PlanMemoryEngine {
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         return LoadPolicyInputs(
             profile: profile,
-            loadIncrement: profile?.minLoadIncrement ?? 2.5,
+            loadIncrement: profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb),
+            unit: profile?.loadUnit ?? .lb,
             bodyWeight: profile?.bodyWeight,
             customExercises: (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? [],
             progressionEnabled: (try? context.fetch(FetchDescriptor<User>()).first?.progressionEnabled) ?? true,
@@ -52,6 +55,7 @@ struct PlanMemoryEngine {
         let inputs = loadPolicyInputs()
         let profile = inputs.profile
         let loadIncrement = inputs.loadIncrement
+        let unit = inputs.unit
         let bodyWeight = inputs.bodyWeight
         let customExercises = inputs.customExercises
         let progressionEnabled = inputs.progressionEnabled
@@ -153,10 +157,10 @@ struct PlanMemoryEngine {
             if targetItem.waveRaw?.lowercased() == "deload" {
                 targetItem.suggestedLoad = E1RMCalculator.rounded(
                     targetItem.suggestedLoad * deloadLoadReductionFactor,
-                    increment: loadIncrement
+                    increment: loadIncrement, unit: unit
                 )
                 targetItem.plannedLoadsBySet = targetItem.plannedLoadsBySet.map {
-                    E1RMCalculator.rounded($0 * deloadLoadReductionFactor, increment: loadIncrement)
+                    E1RMCalculator.rounded($0 * deloadLoadReductionFactor, increment: loadIncrement, unit: unit)
                 }
                 continue
             }
@@ -173,6 +177,7 @@ struct PlanMemoryEngine {
                 allSessions: allSessions,
                 activeMesoSessionIDs: activeMesoIDs,
                 loadIncrement: loadIncrement,
+                unit: unit,
                 bodyWeight: bodyWeight,
                 customExercises: customExercises
             )
@@ -206,7 +211,7 @@ struct PlanMemoryEngine {
                     guard let lastLoad = projection.lastLoad, lastLoad > 0 else {
                         return isProgressionExempt ? nil : projection.suggestedLoad
                     }
-                    let step = isProgressionExempt ? 0 : loadIncrement
+                    let step = isProgressionExempt ? 0 : UnitAwareRounding.stepLb(loadIncrement, unit: unit)
                     return min(projection.suggestedLoad, lastLoad + step)
                 }()
                 if let floorCapped {
@@ -233,6 +238,7 @@ struct PlanMemoryEngine {
             if let recommendation = CoachingEngine.recommend(
                 for: sourceItem,
                 minLoadIncrement: loadIncrement,
+                unit: unit,
                 mesoPhase: session.mesoPhase,
                 consecutiveCleanCount: consecutiveCleanCount,
                 // CUT 2 (input-only): hand project()'s already-computed data to
@@ -257,6 +263,7 @@ struct PlanMemoryEngine {
             } else if targetItem.hasTopSet, let recommendation = CoachingEngine.recommend(
                 for: sourceItem,
                 minLoadIncrement: loadIncrement,
+                unit: unit,
                 mesoPhase: session.mesoPhase,
                 consecutiveCleanCount: consecutiveCleanCount,
                 e1rmFloorLoad: projection?.e1rmFloorLoad,
@@ -502,6 +509,7 @@ struct PlanMemoryEngine {
             allSessions: allSessions,
             activeMesoSessionIDs: activeMesoIDs,
             loadIncrement: loadIncrement,
+            unit: currentProfile()?.loadUnit ?? .lb,
             bodyWeight: bodyWeight,
             customExercises: customExercises
         )
@@ -515,6 +523,7 @@ struct PlanMemoryEngine {
         guard let recommendation = CoachingEngine.recommend(
             for: sourceItem,
             minLoadIncrement: loadIncrement,
+            unit: currentProfile()?.loadUnit ?? .lb,
             mesoPhase: session.mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount,
             e1rmFloorLoad: projection?.e1rmFloorLoad,
@@ -582,6 +591,7 @@ struct PlanMemoryEngine {
             allSessions: allSessions,
             activeMesoSessionIDs: activeMesoIDs,
             loadIncrement: loadIncrement,
+            unit: currentProfile()?.loadUnit ?? .lb,
             bodyWeight: bodyWeight,
             customExercises: customExercises
         )
@@ -597,6 +607,7 @@ struct PlanMemoryEngine {
         guard let recommendation = CoachingEngine.recommend(
             for: sourceItem,
             minLoadIncrement: loadIncrement,
+            unit: currentProfile()?.loadUnit ?? .lb,
             mesoPhase: session.mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount,
             e1rmFloorLoad: projection?.e1rmFloorLoad,

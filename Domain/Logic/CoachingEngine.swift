@@ -142,14 +142,21 @@ struct CoachingEngine {
         !topWorkingIndices(for: item).isEmpty
     }
 
-    static func loadIncrement(for item: SessionItem, base: Double, minLoadIncrement: Double?) -> Double {
+    /// The step for this exercise, in `unit` (`minLoadIncrement` is in `unit` too). Add it to a stored lb load only
+    /// through `UnitAwareRounding.stepLb`.
+    static func loadIncrement(for item: SessionItem, base: Double, minLoadIncrement: Double?, unit: LoadUnit = .lb) -> Double {
         if let increment = minLoadIncrement, increment > 0 { return increment }
         if let cluster = ExerciseCatalog.cluster(for: item.exerciseId) {
-            return ChestArmsLowBackMesoProfile.config(for: cluster).primaryLoadIncrement
+            return UnitAwareRounding.increment(fromLb: ChestArmsLowBackMesoProfile.config(for: cluster).primaryLoadIncrement, unit: unit)
         }
-        if base >= 200 { return 5.0 }
-        if base >= 100 { return 2.5 }
-        return 2.0
+        return UnitAwareRounding.fallbackIncrement(forBaseLb: base, unit: unit)
+    }
+
+    /// `base` plus one `step` (in `unit`). lb: the plain sum, unrounded, exactly as before. kg: snapped to the kg step, so
+    /// a base that is not on a kg step (an old lb value) still produces a load a kg lifter can put on the bar.
+    static func steppedUp(_ base: Double, step: Double, unit: LoadUnit) -> Double {
+        let sum = base + UnitAwareRounding.stepLb(step, unit: unit)
+        return unit == .lb ? sum : UnitAwareRounding.round(sum, increment: step, unit: unit)
     }
 
     /// Back-off working sets = any back-off set with both load and reps > 0, minus warmups (< 50% of
@@ -195,6 +202,7 @@ struct CoachingEngine {
     static func recommend(
         for item: SessionItem,
         minLoadIncrement: Double? = nil,
+        unit: LoadUnit = .lb,
         mesoPhase: MesoPhase = .early,
         consecutiveCleanCount: Int = 0,
         e1rmFloorLoad: Double? = nil,
@@ -205,7 +213,7 @@ struct CoachingEngine {
         loadCap: LoadCap? = nil
     ) -> CoachingRecommendation? {
         let rec = recommendRoles(
-            for: item, minLoadIncrement: minLoadIncrement, mesoPhase: mesoPhase,
+            for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
@@ -221,6 +229,7 @@ struct CoachingEngine {
     private static func recommendRoles(
         for item: SessionItem,
         minLoadIncrement: Double?,
+        unit: LoadUnit,
         mesoPhase: MesoPhase,
         consecutiveCleanCount: Int,
         e1rmFloorLoad: Double?,
@@ -231,7 +240,7 @@ struct CoachingEngine {
         loadCap: LoadCap?
     ) -> CoachingRecommendation? {
         let back = recommendBackOffs(
-            for: item, minLoadIncrement: minLoadIncrement, mesoPhase: mesoPhase,
+            for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
@@ -241,7 +250,7 @@ struct CoachingEngine {
         if item.waveRaw?.lowercased() == "deload" { return back }
         let painFlagged = item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
         if painFlagged { return back }
-        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, isProgressionExempt: isProgressionExempt,
+        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, unit: unit, isProgressionExempt: isProgressionExempt,
                                 loadCap: loadCap) else {
             return back
         }
@@ -253,7 +262,7 @@ struct CoachingEngine {
 
     /// Judges the logged top rows: reps against topRepMin/Max, RIR against topRIR. Hold, or a
     /// one-increment bump when every top row is at the top of its range at the target difficulty.
-    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, isProgressionExempt: Bool,
+    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, unit: LoadUnit, isProgressionExempt: Bool,
                                 loadCap: LoadCap? = nil) -> TopRead? {
         let rows = topWorkingIndices(for: item)
         guard let lastRow = rows.last else { return nil }
@@ -288,8 +297,8 @@ struct CoachingEngine {
             if item.loadOverrideReason?.suppressesEarnedProgression == true {
                 return TopRead(message: "\(what), top of the range at a reduced load — no increase earned.", nextTopLoad: nil)
             }
-            let step = loadIncrement(for: item, base: load, minLoadIncrement: minLoadIncrement)
-            let next = min(load + step, load * 2.0)
+            let step = loadIncrement(for: item, base: load, minLoadIncrement: minLoadIncrement, unit: unit)
+            let next = min(steppedUp(load, step: step, unit: unit), load * 2.0)
             if let cap = loadCap, next > cap.max {
                 // The earned increase would pass the max: hold at the max.
                 return TopRead(message: "\(what), top of the range. \(cap.message(streakHint: false))", nextTopLoad: cap.max)
@@ -302,6 +311,7 @@ struct CoachingEngine {
     private static func recommendBackOffs(
         for item: SessionItem,
         minLoadIncrement: Double? = nil,
+        unit: LoadUnit = .lb,
         mesoPhase: MesoPhase = .early,
         consecutiveCleanCount: Int = 0,
         e1rmFloorLoad: Double? = nil,
@@ -452,7 +462,7 @@ struct CoachingEngine {
         }()
 
         func loadStep(for base: Double) -> Double {
-            loadIncrement(for: item, base: base, minLoadIncrement: minLoadIncrement)
+            loadIncrement(for: item, base: base, minLoadIncrement: minLoadIncrement, unit: unit)
         }
 
         let primaryWorkPhrase: String = {
@@ -610,13 +620,11 @@ struct CoachingEngine {
             if let m = minLoadIncrement, m > 0 { return m }
             let step = loadStep(for: baseLoad)
             if step > 0 { return step }
-            if baseLoad >= 200 { return 5.0 }
-            if baseLoad >= 100 { return 2.5 }
-            return 2.5
+            return UnitAwareRounding.bumpFallbackIncrement(forBaseLb: baseLoad, unit: unit)
         }()
         func qualifyingBump() -> Double {
-            let ceiling = baseLoad + bumpIncrement                                // one increment, no more
-            let roundedFloor = e1rmFloorLoad.map { E1RMCalculator.rounded($0, increment: bumpIncrement) }
+            let ceiling = Self.steppedUp(baseLoad, step: bumpIncrement, unit: unit)                                // one increment, no more
+            let roundedFloor = e1rmFloorLoad.map { E1RMCalculator.rounded($0, increment: bumpIncrement, unit: unit) }
             let bumpTarget = max(ceiling, roundedFloor ?? ceiling)                // floor can only raise
             return min(bumpTarget, ceiling, baseLoad * 2.0)                       // capped at the ceiling; RULE 6 2× cap preserved
         }
@@ -634,7 +642,7 @@ struct CoachingEngine {
         if bestReps < repMin {
             let badMisses = primaryReps.filter { $0 < (repMin - 1) }.count
             if badMisses >= 2 {
-                let reduced = E1RMCalculator.rounded(baseLoad * 0.95, increment: minLoadIncrement ?? 2.5)
+                let reduced = E1RMCalculator.rounded(baseLoad * 0.95, increment: minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit), unit: unit)
                 let msg: String
                 let lead = "Reps came in well under the bottom of the range across multiple sets."
                 if isProgressionExempt {
@@ -798,18 +806,21 @@ extension CoachingEngine.LoadCap {
                     ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
                         && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == wave
                 }) else { continue }
-                guard toppedRangeAtCap(match, cap: cap) else { break }
+                guard toppedRangeAtCap(match, cap: cap, unit: profile?.loadUnit ?? .lb) else { break }
                 streak += 1
             }
         }
         return CoachingEngine.LoadCap(max: cap, priorToppedStreak: streak)
     }
 
-    private static func toppedRangeAtCap(_ item: SessionItem, cap: Double) -> Bool {
+    /// Equal-to-the-cap check with a tolerance in lb: 0.001 for lb (as before); for kg, half of the 0.01 kg a
+    /// kg display can hide (0.005 kg is 0.011 lb), so a logged "45.36" still counts as the cap.
+    private static func toppedRangeAtCap(_ item: SessionItem, cap: Double, unit: LoadUnit = .lb) -> Bool {
+        let tolerance = unit == .lb ? 0.001 : 0.012
         let rows = CoachingEngine.plannedWorkingSetIndices(for: item)
         guard rows.count >= CoachingEngine.requiredPrimarySets(for: item) else { return false }
         let topReps = item.repMax ?? item.targetReps
         let primary = rows.prefix(min(Swift.max(1, item.targetSets), 3))
-        return primary.allSatisfy { item.actualReps[$0] >= topReps && item.actualLoads[$0] >= cap - 0.001 }
+        return primary.allSatisfy { item.actualReps[$0] >= topReps && item.actualLoads[$0] >= cap - tolerance }
     }
 }

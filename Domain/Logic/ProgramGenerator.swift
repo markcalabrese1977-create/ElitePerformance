@@ -25,7 +25,8 @@ enum ProgramGenerator {
     static func anchorLoadsForNewMeso(mesoBlock: MesoBlock, context: ModelContext) {
         let profileDescriptor = FetchDescriptor<UserProfile>()
         let profile = try? context.fetch(profileDescriptor).first
-        let loadIncrement: Double = profile?.minLoadIncrement ?? 2.5
+        let unit = profile?.loadUnit ?? .lb
+        let loadIncrement: Double = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit)
         let bodyWeight = profile?.bodyWeight
 
         let allSessionsDescriptor = FetchDescriptor<Session>(
@@ -82,7 +83,7 @@ enum ProgramGenerator {
 
                 let rawLoad = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
                 let anchored = UserProfile.clampedLoad(
-                    E1RMCalculator.rounded(rawLoad, increment: loadIncrement),
+                    E1RMCalculator.rounded(rawLoad, increment: loadIncrement, unit: unit),
                     exerciseId: item.exerciseId, profile: profile
                 )
                 guard anchored > 0 else { continue }
