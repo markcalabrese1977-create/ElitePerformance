@@ -152,6 +152,15 @@ struct CoachingEngine {
         return UnitAwareRounding.fallbackIncrement(forBaseLb: base, unit: unit)
     }
 
+    /// The recommendation with the lifter's own step and unit, as carry-forward uses them. The recap reads this so the
+    /// "next" it shows is the load carry-forward writes (it used to omit the increment and fall back to a base-scaled step).
+    static func recommend(for item: SessionItem, profile: UserProfile?) -> CoachingRecommendation? {
+        let unit = profile?.loadUnit ?? .lb
+        return recommend(for: item,
+                         minLoadIncrement: profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit),
+                         unit: unit)
+    }
+
     /// `base` plus one `step` (in `unit`). lb: the plain sum, unrounded, exactly as before. kg: snapped to the kg step, so
     /// a base that is not on a kg step (an old lb value) still produces a load a kg lifter can put on the bar.
     static func steppedUp(_ base: Double, step: Double, unit: LoadUnit) -> Double {

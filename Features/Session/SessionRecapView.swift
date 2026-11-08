@@ -5,6 +5,7 @@ import SwiftData
 /// end-of-session readiness + notes, and per-set breakdowns.
 struct SessionRecapView: View {
     @Environment(\.dismiss) private var dismiss
+    @Query private var profiles: [UserProfile]
     @Bindable var session: Session
 
     var body: some View {
@@ -131,7 +132,7 @@ struct SessionRecapView: View {
     /// Items for which the coaching engine has a concrete next-load suggestion.
     private var itemsWithRecommendations: [SessionItem] {
         sortedItems.filter {
-            if let rec = CoachingEngine.recommend(for: $0),
+            if let rec = CoachingEngine.recommend(for: $0, profile: profiles.first),
                rec.nextSuggestedLoad != nil {
                 return true
             }
@@ -312,7 +313,7 @@ struct SessionRecapView: View {
                     .foregroundColor(.secondary)
             } else {
                 ForEach(itemsWithRecommendations) { item in
-                    if let rec = CoachingEngine.recommend(for: item),
+                    if let rec = CoachingEngine.recommend(for: item, profile: profiles.first),
                        let next = rec.nextSuggestedLoad {
 
                         let exerciseName = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
@@ -443,6 +444,7 @@ struct LoadOverridePromptRow: View {
 // MARK: - Per-exercise recap row
 
 struct ExerciseRecapRow: View {
+    @Query private var profiles: [UserProfile]
     let item: SessionItem
 
     private var exercise: CatalogExercise? {
@@ -485,7 +487,7 @@ struct ExerciseRecapRow: View {
 
     /// CoachingEngine-driven recommendation for this exercise, based on plan vs actual.
     private var coachingRecommendation: CoachingRecommendation? {
-        CoachingEngine.recommend(for: item)
+        CoachingEngine.recommend(for: item, profile: profiles.first)
     }
 
     var body: some View {

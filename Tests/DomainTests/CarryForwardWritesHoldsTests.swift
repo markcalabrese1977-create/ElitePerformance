@@ -209,6 +209,24 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         XCTAssertEqual(tgt.suggestedLoad, 317.5, accuracy: 0.001, "no recommendation load on a pain flag")
     }
 
+    // MARK: - The recap shows the load carry-forward writes
+
+    /// A lift under 200 lb with a 5 lb increment: the recap used to omit the increment and step by the base-scaled
+    /// 2.5 (152.5), while carry-forward wrote 155. Both now use the profile's increment.
+    func test_recapNext_equalsTheLoadCarryForwardWrites() throws {
+        let ctx = try makeContext()
+        ctx.insert(UserProfile(minLoadIncrement: 5))
+        let src = source(load: 150, reps: [12, 12, 12])
+        let tgt = target(seed: 150)
+        let run = try run(src, tgt, context: ctx)
+        let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let recap = try XCTUnwrap(CoachingEngine.recommend(for: src, profile: profile)?.nextSuggestedLoad)
+        XCTAssertEqual(tgt.suggestedLoad, 155, accuracy: 0.001)
+        XCTAssertEqual(recap, tgt.suggestedLoad, accuracy: 0.001, "recap and carry-forward disagree")
+        XCTAssertNotEqual(CoachingEngine.recommend(for: src)?.nextSuggestedLoad ?? 0, 155, "the old recap call was not the profile's step")
+        _ = run
+    }
+
     // MARK: - Cross-letter isolation
 
     func test_lowerHold_writesOnlyTheSameLetterSession() throws {
