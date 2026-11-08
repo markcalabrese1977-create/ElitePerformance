@@ -47,6 +47,11 @@ struct StoredLoadField: View {
                 text = stored.map { LoadFormatter(unit: unit).number($0) } ?? ""
                 seeded = true
             }
+            // A unit switch changes how the same stored load reads: show it in the new unit. The text then equals what the
+            // stored load displays as, so the edit rules below see no change and write nothing.
+            .onChange(of: unit) { _, newUnit in
+                text = stored.map { LoadFormatter(unit: newUnit).number($0) } ?? ""
+            }
             .onChange(of: text) { _, newValue in
                 guard seeded else { return }
                 switch LoadInput.edit(newValue, unit: unit, current: stored) {

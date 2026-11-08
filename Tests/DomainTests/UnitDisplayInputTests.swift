@@ -29,6 +29,8 @@ final class UnitDisplayInputTests: XCTestCase {
         XCTAssertEqual(K.whole(lb(100)), "100");       XCTAssertEqual(K.truncated(lb(80)), "80")
         XCTAssertEqual(K.volumeInt(lb(1000)), "1000"); XCTAssertEqual(K.text(lb(60)), "60 kg")
         XCTAssertEqual(K.compact(102.5), "46.49")
+        XCTAssertEqual(L.setLoad(211.6), "212", "lb set rows stay whole")
+        XCTAssertEqual(K.setLoad(lb(91.25)), "91.25", "kg set rows keep their decimals")
     }
 
     func test_loadDisplayAndCaptionFollowTheUnit() {

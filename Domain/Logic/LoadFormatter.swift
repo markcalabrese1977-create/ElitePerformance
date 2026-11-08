@@ -41,6 +41,12 @@ struct LoadFormatter {
         String(format: "%.0f", unit.fromStoredLb(storedLb))
     }
 
+    /// A logged set's load in a list: lb keeps the whole-number format it always had; kg keeps its decimals (a 1.25 kg
+    /// step would otherwise read as the wrong whole number).
+    func setLoad(_ storedLb: Double) -> String {
+        unit == .lb ? whole(storedLb) : compact(storedLb)
+    }
+
     /// lb: `String(Int(x))` (truncates). kg: trimmed.
     func truncated(_ storedLb: Double) -> String {
         unit == .lb ? String(Int(storedLb)) : Self.trimmed(unit.fromStoredLb(storedLb), maxDecimals: 2)

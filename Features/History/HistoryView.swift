@@ -148,7 +148,7 @@ private struct HistorySetDetail: Identifiable {
 
     private func loadText(_ load: Double) -> String {
         if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
-        return LoadFormatter(unit: unit).whole(load)
+        return LoadFormatter(unit: unit).setLoad(load)
     }
 
     var lineText: String {

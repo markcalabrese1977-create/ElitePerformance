@@ -209,7 +209,10 @@ private struct MaxLoadRow: View {
                     .frame(maxWidth: 90)
                     .textFieldStyle(.roundedBorder)
                     .focused($focused)
-                    .onChange(of: text) { _, newValue in commit(newValue) }
+                    .onChange(of: unit) { _, newUnit in
+                if let cap = profile.maxLoad(for: exerciseId) { text = LoadFormatter(unit: newUnit).number(cap) }
+            }
+            .onChange(of: text) { _, newValue in commit(newValue) }
                     .onChange(of: focused) { _, isFocused in if !isFocused { onCommitted() } }
                     .onSubmit { onCommitted() }
                 if !text.isEmpty {

@@ -20,6 +20,7 @@ import Combine
 /// ```
 struct SessionView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.loadUnit) private var loadUnitEnv
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: SessionScreenViewModel
     @State private var hasDisabledIdleTimer = false
@@ -264,6 +265,11 @@ struct SessionView: View {
             if newPhase == .active {
                 viewModel.refreshFromSession()
             }
+        }
+        // A unit switch (Settings) re-reads the screen: every load text is shown in the new unit.
+        .onChange(of: loadUnitEnv) { _ in
+            viewModel.refreshFromSession()
+            lastLetterCaptions = viewModel.lastLetterCaptions(context: modelContext)
         }
         .sheet(item: $activeSheet) { sheet in
             sheetView(for: sheet)

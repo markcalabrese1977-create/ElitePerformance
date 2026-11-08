@@ -1017,6 +1017,9 @@ private struct ProgramExercisePlanRow: View {
             normalizeArraySizes()
             syncLoadTextsFromItem()
         }
+        .onChange(of: unit) { _ in
+            syncLoadTextsFromItem()
+        }
         .onChange(of: item.targetSets) { _ in
             normalizeArraySizes()
             syncLoadTextsFromItem()
