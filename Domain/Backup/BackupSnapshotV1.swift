@@ -40,8 +40,9 @@ struct UserProfileBackupDTO: Codable {
     let minLoadIncrement: Double?
     // Q18 cleanup: usesKilograms/unitPreferenceRaw removed from UserProfile.
     // Kept here, still Optional, purely so old backups that have this key
-    // still decode without error — BackupSnapshotImporter now ignores the
+    // still decode without error — BackupSnapshotImporter ignores the
     // decoded value entirely, and BackupSnapshotExporter always writes nil.
+    // The load unit is the separate `unitRaw` key below.
     let unitPreferenceRaw: String?
     let bodyWeight: Double?
     // Added (fixed-load exemptions). Optional so OLD backups that predate this key
@@ -56,6 +57,9 @@ struct UserProfileBackupDTO: Codable {
     // equipmentProfileRaw, checklist empty.
     var equipmentPresetRaw: String? = nil
     var equipmentChecklistRaws: [String]? = nil
+    // Added (kg support): "lb" | "kg". Optional so OLD backups decode with nil, which means lb. Loads in a backup are
+    // always lb; only minLoadIncrement is in this unit.
+    var unitRaw: String? = nil
 }
 
 // MARK: - AppState

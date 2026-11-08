@@ -68,13 +68,15 @@ enum BackupSnapshotExporter {
                     // Q18 cleanup: UserProfile.unitPreferenceRaw no longer
                     // exists — the DTO field stays (Optional already) so old
                     // app versions importing a new export still decode fine.
+                    // The load unit travels in `unitRaw`.
                     unitPreferenceRaw: nil,
                     bodyWeight: $0.bodyWeight,
                     exemptExerciseIds: $0.exemptExerciseIds,
                     maxLoadByExercise: $0.maxLoadByExerciseStored,
                     birthDateOverride: $0.birthDateOverride,
                     equipmentPresetRaw: $0.equipmentPresetRaw,
-                    equipmentChecklistRaws: $0.equipmentChecklistRaws
+                    equipmentChecklistRaws: $0.equipmentChecklistRaws,
+                    unitRaw: $0.unitRaw
                 )
             },
             mesoBlocks: mesoBlocks.map { block in

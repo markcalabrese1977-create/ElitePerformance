@@ -98,7 +98,8 @@ enum GearTag: String, Codable, CaseIterable, Hashable {
 // MARK: - UserProfile model
 //
 // Q18 cleanup: unitPreferenceRaw (the actual stored attribute backing the
-// now-removed usesKilograms computed property) was dropped here. This
+// now-removed usesKilograms computed property) was dropped here. kg support later added `unitRaw`
+// (a different column; the old backup key `unitPreferenceRaw` is still ignored on import). This
 // codebase has no VersionedSchema/SchemaMigrationPlan anywhere — UserProfile
 // is registered via a plain Schema([...]) + ModelContainer(for:configurations:)
 // in App/ElitePerformanceApp.swift — so SwiftData's lightweight/automatic
@@ -117,6 +118,17 @@ final class UserProfile {
     var injuryFlagRaws: [String]
     var minLoadIncrement: Double
     var bodyWeight: Double?
+
+    /// The unit the lifter sees and types loads in. nil = lb (every existing row, every old backup, a fresh
+    /// install that never picked). Stored OPTIONAL so the additive SwiftData migration needs no backfill.
+    /// Every load the app stores (planned, actual, max load, bodyWeight) stays in lb whatever this says;
+    /// only `minLoadIncrement` is stored in this unit. Use `loadUnit`, never this raw column.
+    var unitRaw: String? = nil
+
+    var loadUnit: LoadUnit {
+        get { LoadUnit(rawValue: unitRaw ?? "") ?? .lb }
+        set { unitRaw = newValue == .lb ? nil : newValue.rawValue }
+    }
 
     /// Per-exercise "fixed load" exemptions: canonical exerciseIds whose load never
     /// auto-progresses (fixed-load track; the lifter raises it).
@@ -283,7 +295,8 @@ final class UserProfile {
         equipmentProfile: EquipmentProfile = .commercial,
         injuryFlags: [InjuryFlag] = [],
         minLoadIncrement: Double = 2.5,
-        bodyWeight: Double? = nil
+        bodyWeight: Double? = nil,
+        unit: LoadUnit = .lb
     ) {
         self.profileId = id
         self.createdAt = createdAt
@@ -295,5 +308,6 @@ final class UserProfile {
         self.injuryFlagRaws = injuryFlags.map { $0.rawValue }
         self.minLoadIncrement = minLoadIncrement
         self.bodyWeight = bodyWeight
+        self.unitRaw = unit == .lb ? nil : unit.rawValue
     }
 }

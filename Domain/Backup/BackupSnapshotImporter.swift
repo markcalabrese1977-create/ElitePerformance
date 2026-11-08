@@ -36,6 +36,7 @@ enum BackupSnapshotImporter {
                 // Q18 cleanup: usesKilograms removed — dto.unitPreferenceRaw
                 // is decoded (for old backups that still have it) and
                 // intentionally dropped here, never written anywhere.
+                // The load unit is restored from dto.unitRaw below.
                 bodyWeight: dto.bodyWeight
             )
             // Fixed-load exemptions. An old backup without the key decodes to nil and
@@ -46,6 +47,8 @@ enum BackupSnapshotImporter {
             profile.birthDateOverride = dto.birthDateOverride
             profile.equipmentPresetRaw = dto.equipmentPresetRaw
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
+            // nil (old backup, or a lb lifter) stays nil = lb.
+            profile.unitRaw = dto.unitRaw
             modelContext.insert(profile)
         }
 

@@ -115,6 +115,7 @@ enum PopulatedStoreBuilder {
         profile.exemptExerciseIds = ["bench_press"]
         profile.maxLoadByExercise = ["back_squat": 405.0, "cable_tricep_rope_pushdown": 130.0]
         profile.birthDateOverride = day(-9_000)
+        profile.loadUnit = .kg
         // Set the raw columns directly: the preset setter would also rewrite equipmentProfileRaw.
         profile.equipmentPresetRaw = EquipmentPreset.machinesOnly.rawValue
         profile.equipmentChecklistRaws = [GearTag.cable.rawValue, GearTag.dumbbell.rawValue]
