@@ -14,6 +14,13 @@ struct ExerciseNoteSheet: View {
 
     @State private var text: String = ""
 
+    // Max-load confirmation, shown INLINE in this sheet (a second sheet cannot present from inside a sheet that
+    // is being dismissed: "view is not in the window hierarchy").
+    @State private var clampPlan: SessionItemEditService.MaxLoadPlan?
+    @State private var clampError: String?
+    /// The max the prompt was already offered for: each max is offered once, whatever the answer.
+    @State private var offeredCap: Double?
+
     private var existingNote: ExerciseNote? {
         allNotes.first(where: { $0.exerciseId == exerciseId })
     }
@@ -35,7 +42,20 @@ struct ExerciseNoteSheet: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 12)
 
-                    MaxLoadRow(profile: profile, exerciseId: exerciseId)
+                    MaxLoadRow(
+                        profile: profile,
+                        exerciseId: exerciseId,
+                        onCommitted: { _ = offerClampIfNeeded() },
+                        onCleared: { offeredCap = nil; clampPlan = nil; clampError = nil }
+                    )
+
+                    if let plan = clampPlan {
+                        MaxLoadClampPrompt(
+                            plan: plan, errorMessage: clampError,
+                            onConfirm: confirmClamp,
+                            onKeep: { clampPlan = nil; clampError = nil }
+                        )
+                    }
 
                     Divider().padding(.top, 8)
                 }
@@ -50,7 +70,7 @@ struct ExerciseNoteSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
-                        onClose()
+                        closeOrOffer()
                     }
                 }
 
@@ -109,7 +129,7 @@ struct ExerciseNoteSheet: View {
             print("⚠️ Failed to save exercise note: \(error)")
         }
 
-        onClose()
+        closeOrOffer()
     }
 
     private func clearNote() {
@@ -125,22 +145,55 @@ struct ExerciseNoteSheet: View {
             print("⚠️ Failed to clear exercise note: \(error)")
         }
 
+        closeOrOffer()
+    }
+
+    /// Leaving the sheet: if planned loads above the max remain and this max has not been offered yet, show the
+    /// confirmation here instead of closing (the next Close leaves). Otherwise close.
+    private func closeOrOffer() {
+        if offerClampIfNeeded() { return }
         onClose()
+    }
+
+    /// Plans the clamp for the saved max and, when it has work to do and this max was not offered before, shows it.
+    /// Returns true when the prompt was just shown.
+    private func offerClampIfNeeded() -> Bool {
+        guard let profile = profiles.first,
+              let cap = UserProfile.effectiveMaxLoad(for: exerciseId, profile: profile),
+              offeredCap != cap else { return false }
+        let found = SessionItemEditService.planClampToMax(
+            meso: SessionItemEditService.activeMeso(in: modelContext), exerciseId: exerciseId, max: cap
+        )
+        guard found.isApplicable else { return false }
+        offeredCap = cap
+        clampError = nil
+        clampPlan = found
+        return true
+    }
+
+    private func confirmClamp() {
+        guard let plan = clampPlan else { return }
+        do {
+            try SessionItemEditService.applyClampToMax(plan, in: modelContext)
+            clampPlan = nil
+            clampError = nil
+        } catch {
+            clampError = "Nothing was changed: \(error)"
+        }
     }
 }
 
 
-/// "Max load" under the Fixed load toggle: an optional per-exercise cap on the loads the plan writes.
-/// When a max is set or lowered, the remaining planned sessions above it are listed and, on confirm, set to it.
+/// "Max load" under the Fixed load toggle: an optional per-exercise cap on the loads the plan writes. The owning
+/// sheet is told when the field is committed (return or focus lost) so it can offer to lower planned loads.
 private struct MaxLoadRow: View {
     @Environment(\.modelContext) private var modelContext
     let profile: UserProfile
     let exerciseId: String
+    let onCommitted: () -> Void
+    let onCleared: () -> Void
 
     @State private var text: String = ""
-    @State private var lastReviewed: Double?
-    @State private var plan: SessionItemEditService.MaxLoadPlan?
-    @State private var errorMessage: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -156,14 +209,14 @@ private struct MaxLoadRow: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focused)
                     .onChange(of: text) { _, newValue in commit(newValue) }
-                    .onChange(of: focused) { _, isFocused in if !isFocused { review() } }
-                    .onSubmit { review() }
+                    .onChange(of: focused) { _, isFocused in if !isFocused { onCommitted() } }
+                    .onSubmit { onCommitted() }
                 if !text.isEmpty {
                     Button {
                         text = ""
                         profile.setMaxLoad(nil, exerciseId: exerciseId)
-                        lastReviewed = nil
                         try? modelContext.save()
+                        onCleared()
                     } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
@@ -180,13 +233,6 @@ private struct MaxLoadRow: View {
         .onAppear {
             if let cap = profile.maxLoad(for: exerciseId) {
                 text = cap == cap.rounded() ? String(Int(cap)) : String(cap)
-                lastReviewed = cap
-            }
-        }
-        .sheet(isPresented: Binding(get: { plan != nil }, set: { if !$0 { plan = nil } })) {
-            if let plan {
-                MaxLoadClampSheet(plan: plan, errorMessage: errorMessage, onConfirm: confirm, onCancel: { self.plan = nil })
-                    .presentationDetents([.medium, .large])
             }
         }
     }
@@ -196,65 +242,52 @@ private struct MaxLoadRow: View {
         profile.setMaxLoad(Double(cleaned), exerciseId: exerciseId)
         try? modelContext.save()
     }
-
-    /// A max was set or lowered: offer to bring the remaining planned loads above it down to it.
-    private func review() {
-        // A fixed-load or bodyweight exercise ignores a max, so there is nothing to lower.
-        guard let cap = UserProfile.effectiveMaxLoad(for: exerciseId, profile: profile) else { return }
-        if let lastReviewed, cap >= lastReviewed { self.lastReviewed = cap; return }
-        lastReviewed = cap
-        errorMessage = nil
-        let found = SessionItemEditService.planClampToMax(
-            meso: SessionItemEditService.activeMeso(in: modelContext), exerciseId: exerciseId, max: cap
-        )
-        if found.isApplicable { plan = found }
-    }
-
-    private func confirm() {
-        guard let plan else { return }
-        do {
-            try SessionItemEditService.applyClampToMax(plan, in: modelContext)
-            self.plan = nil
-        } catch {
-            errorMessage = "Nothing was changed: \(error)"
-        }
-    }
 }
 
-private struct MaxLoadClampSheet: View {
+/// The confirmation, inline in the note sheet: what will be lowered, then Set to max / Keep plan.
+private struct MaxLoadClampPrompt: View {
     let plan: SessionItemEditService.MaxLoadPlan
     let errorMessage: String?
     let onConfirm: () -> Void
-    let onCancel: () -> Void
+    let onKeep: () -> Void
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Text(SessionItemEditService.clampPreviewText(count: plan.targets.count, max: plan.max))
-                        .font(.subheadline.weight(.semibold))
-                }
-                Section("Sessions") {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Lower planned loads?")
+                .font(.subheadline.weight(.semibold))
+            Text(SessionItemEditService.clampPreviewText(count: plan.targets.count, max: plan.max))
+                .font(.footnote)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(plan.targets.enumerated()), id: \.offset) { _, t in
-                        VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline) {
                             Text(t.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                                .font(.caption.weight(.semibold))
                             Text(t.detail(max: plan.max)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
-                if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red).font(.callout) }
-                }
-                Section { } footer: {
-                    Text("Unchanged: completed and started sessions, loads at or below the max. Plans you edited are lowered too (marked), and stay marked as edited.")
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationTitle("Lower planned loads?")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Keep plan", action: onCancel) }
-                ToolbarItem(placement: .confirmationAction) { Button("Set to max", action: onConfirm).fontWeight(.semibold) }
+            .frame(maxHeight: 130)
+            if let errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(.red)
             }
+            HStack {
+                Button("Keep plan", action: onKeep)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Set to max", action: onConfirm)
+                    .buttonStyle(.borderedProminent)
+            }
+            Text("Unchanged: completed and started sessions, loads at or below the max. Plans you edited are lowered too (marked), and stay marked as edited.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(12)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 }
