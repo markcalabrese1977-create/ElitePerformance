@@ -1882,8 +1882,8 @@ extension SessionItemEditService {
         let edited: Bool
 
         /// "suggested 320 -> 315, top 335 -> 315" style detail for the preview list.
-        func detail(max: Double) -> String {
-            func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        func detail(max: Double, unit: LoadUnit = .lb) -> String {
+            func n(_ v: Double) -> String { LoadFormatter(unit: unit).compact(v) }
             var parts: [String] = []
             if suggestedAbove { parts.append("load \(n(beforeSuggested)) -> \(n(max))") }
             let topRows = Set(item.topRowIndices)
@@ -1945,8 +1945,8 @@ extension SessionItemEditService {
     }
 
     /// "3 planned sessions above 315 will be set to 315"
-    static func clampPreviewText(count: Int, max: Double) -> String {
-        let n = max == max.rounded() ? String(Int(max)) : String(format: "%.1f", max)
+    static func clampPreviewText(count: Int, max: Double, unit: LoadUnit = .lb) -> String {
+        let n = LoadFormatter(unit: unit).compact(max)
         return "\(count) planned session\(count == 1 ? "" : "s") above \(n) will be set to \(n)"
     }
 
@@ -1984,7 +1984,7 @@ extension SessionItemEditService {
             item.plannedLoadsBySet = item.plannedLoadsBySet.map { Swift.min($0, plan.max) }
             // planEdited is left alone (verified below): lowering to the max neither sets nor clears it.
             let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") wk\(target.weekIndex) "
-                + "wave=\(target.waveRaw ?? "-") \(plan.exerciseId) \(target.detail(max: plan.max))"
+                + "wave=\(target.waveRaw ?? "-") \(plan.exerciseId) \(target.detail(max: plan.max, unit: (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb))"
             summary.append(line)
             print(line)
         }

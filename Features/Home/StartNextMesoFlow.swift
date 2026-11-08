@@ -104,9 +104,9 @@ struct StartNextMesoModel {
         let items: [ItemRow]
     }
 
-    static func loadText(_ item: Service.NextMesoItem) -> String {
+    static func loadText(_ item: Service.NextMesoItem, unit: LoadUnit = .lb) -> String {
         if item.isBodyweight { return "BW" }
-        return item.seed > 0 ? "\(LoadFormatter.number(item.seed)) \(LoadFormatter.unitLabel)" : "enter on the day"
+        return item.seed > 0 ? LoadFormatter(unit: unit).text(item.seed) : "enter on the day"
     }
 
     static func sourceText(_ item: Service.NextMesoItem, factor: Double) -> String {
@@ -126,7 +126,7 @@ struct StartNextMesoModel {
                 date: s.date, dayLabel: s.dayLabel ?? "Session", letter: s.letter.isEmpty ? "" : s.letter.uppercased(),
                 items: s.items.map {
                     ItemRow(name: ExerciseCatalog.displayName(for: $0.exerciseId), prescription: $0.prescription,
-                            load: loadText($0), source: sourceText($0, factor: plan.peakFactor))
+                            load: loadText($0, unit: plan.unit), source: sourceText($0, factor: plan.peakFactor))
                 }
             )
         }

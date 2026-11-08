@@ -516,7 +516,9 @@ struct LastLetterPerformance: Equatable {
 
     /// "Last A: 315 x 5, 6, 5, 5" — consecutive sets at one load are grouped, a new group starts
     /// when the load changes ("Last B: 290 x 8, 7, 6 · 315 x 5"); bodyweight: "Last A: 5, 5, 5, 5 reps".
-    var caption: String {
+    var caption: String { caption(unit: .lb) }
+
+    func caption(unit: LoadUnit) -> String {
         if isBodyweight {
             return "Last \(letter): \(sets.map { String($0.reps) }.joined(separator: ", ")) reps"
         }
@@ -529,13 +531,13 @@ struct LastLetterPerformance: Equatable {
             }
         }
         let body = groups
-            .map { "\(Self.formatLoad($0.load)) x \($0.reps.map(String.init).joined(separator: ", "))" }
+            .map { "\(Self.formatLoad($0.load, unit: unit)) x \($0.reps.map(String.init).joined(separator: ", "))" }
             .joined(separator: " · ")
         return "Last \(letter): \(body)"
     }
 
-    private static func formatLoad(_ v: Double) -> String {
-        v == v.rounded() ? String(Int(v)) : String(format: "%g", v)
+    private static func formatLoad(_ v: Double, unit: LoadUnit) -> String {
+        LoadFormatter(unit: unit).number(v)
     }
 }
 
@@ -604,12 +606,13 @@ enum LastSameLetterPerformance {
     static func captions(
         for session: Session,
         allSessions: [Session],
-        customExercises: [CustomExercise] = []
+        customExercises: [CustomExercise] = [],
+        unit: LoadUnit = .lb
     ) -> [String: String] {
         var out: [String: String] = [:]
         for item in session.items where out[item.exerciseId] == nil {
             if let r = find(for: item, in: session, allSessions: allSessions, customExercises: customExercises) {
-                out[item.exerciseId] = r.caption
+                out[item.exerciseId] = r.caption(unit: unit)
             }
         }
         return out

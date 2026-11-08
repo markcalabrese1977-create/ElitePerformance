@@ -124,6 +124,8 @@ extension SessionItemEditService {
         let remainingOldSessions: [Session]
         let collisions: [NextMesoCollision]
         let refusals: [NextMesoRefusal]
+        /// The lifter's unit, for the preview text only (the seeds themselves are stored lb).
+        var unit: LoadUnit = .lb
 
         var isApplicable: Bool { refusals.isEmpty && !sessions.isEmpty }
         var isMaintenance: Bool { oldMeso.isMaintenance }
@@ -148,7 +150,7 @@ extension SessionItemEditService {
                 out.append("  \(s.dayLabel ?? "?") / \(s.letter.isEmpty ? "-" : s.letter.uppercased()) (first week \(s.weekIndex), \(day(s.date)))")
                 for i in s.items {
                     out.append("    \(ExerciseCatalog.displayName(for: i.exerciseId)): \(i.prescription), seed "
-                               + "\(LoadFormatter.number(i.seed)) [\(i.seedSource.label(factor: peakFactor))]"
+                               + "\(LoadFormatter(unit: unit).number(i.seed)) [\(i.seedSource.label(factor: peakFactor))]"
                                + (SessionItemEditService.noteText(i).map { " — \($0)" } ?? ""))
                 }
             }
@@ -227,10 +229,12 @@ extension SessionItemEditService {
         let toDelete = endOldMesoNow ? all.filter { $0.status == .planned && $0.date >= startOfToday && SessionEditSafety.isSafeToModify($0) } : []
 
         func plan(sessions: [NextMesoSession] = [], weeks: Int = 0, collisions: [NextMesoCollision] = []) -> NextMesoPlan {
-            NextMesoPlan(oldMeso: meso, name: name, startDate: startDay, endOldMesoNow: endOldMesoNow, peakFactor: peakFactor,
-                         now: now, sessions: sessions, weeks: weeks, endDate: sessions.map(\.date).max(),
-                         sessionsToDelete: toDelete, remainingOldSessions: remaining, collisions: collisions,
-                         refusals: refusals)
+            var built = NextMesoPlan(oldMeso: meso, name: name, startDate: startDay, endOldMesoNow: endOldMesoNow, peakFactor: peakFactor,
+                                     now: now, sessions: sessions, weeks: weeks, endDate: sessions.map(\.date).max(),
+                                     sessionsToDelete: toDelete, remainingOldSessions: remaining, collisions: collisions,
+                                     refusals: refusals)
+            built.unit = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
+            return built
         }
 
         let sources = all.filter { $0.insertedDeload != true }

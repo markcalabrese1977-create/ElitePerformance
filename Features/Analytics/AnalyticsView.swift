@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AnalyticsView: View {
+    @Environment(\.loadUnit) private var unit
     @Query(sort: \Session.date, order: .reverse) private var sessions: [Session]
 
     @State private var selectedExerciseId: String? = nil
@@ -172,7 +173,7 @@ struct AnalyticsView: View {
                 exerciseId: a.exerciseId,
                 exerciseName: a.exerciseName,
                 loggedEntries: a.loggedEntries,
-                estimatedVolumeK: Int((a.volume / 1000.0).rounded())
+                estimatedVolumeK: Int((unit.fromStoredLb(a.volume) / 1000.0).rounded())
             )
         }
         .sorted {

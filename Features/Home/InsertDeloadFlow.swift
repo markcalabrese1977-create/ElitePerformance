@@ -83,17 +83,17 @@ struct InsertDeloadModel {
         let items: [ItemRow]
     }
 
-    static func loadText(_ item: Service.DeloadItemPlan) -> String {
+    static func loadText(_ item: Service.DeloadItemPlan, unit: LoadUnit = .lb) -> String {
         if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId) { return "BW" }
-        return item.load > 0 ? "\(LoadFormatter.number(item.load)) \(LoadFormatter.unitLabel)" : "enter on the day"
+        return item.load > 0 ? LoadFormatter(unit: unit).text(item.load) : "enter on the day"
     }
 
-    static func rows(_ plan: Service.InsertDeloadPlan) -> [SessionRow] {
+    static func rows(_ plan: Service.InsertDeloadPlan, unit: LoadUnit = .lb) -> [SessionRow] {
         plan.deloadSessions.map { s in
             SessionRow(
                 date: s.date, dayLabel: s.dayLabel ?? "Session",
                 items: s.items.map {
-                    ItemRow(name: ExerciseCatalog.displayName(for: $0.exerciseId), prescription: $0.prescription, load: loadText($0))
+                    ItemRow(name: ExerciseCatalog.displayName(for: $0.exerciseId), prescription: $0.prescription, load: loadText($0, unit: unit))
                 }
             )
         }
@@ -131,6 +131,7 @@ struct InsertDeloadModel {
 
 /// "Insert deload week": a preview of the deload sessions and the schedule shift, then apply.
 struct InsertDeloadFlow: View {
+    @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var modelContext
 
     let meso: MesoBlock
@@ -184,7 +185,7 @@ struct InsertDeloadFlow: View {
                         Text(InsertDeloadModel.unchangedFooter)
                     }
 
-                    ForEach(Array(InsertDeloadModel.rows(plan).enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(InsertDeloadModel.rows(plan, unit: unit).enumerated()), id: \.offset) { _, row in
                         Section {
                             ForEach(Array(row.items.enumerated()), id: \.offset) { _, item in
                                 VStack(alignment: .leading, spacing: 2) {

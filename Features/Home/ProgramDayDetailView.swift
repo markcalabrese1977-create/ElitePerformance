@@ -982,6 +982,7 @@ struct ProgramExerciseSwapSheet: View {
 // MARK: - Per-exercise plan row
 
 private struct ProgramExercisePlanRow: View {
+    @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var modelContext
     @Bindable var item: SessionItem
 
@@ -1444,10 +1445,8 @@ private struct ProgramExercisePlanRow: View {
 
             if value == 0 {
                 loadTexts[idx] = ""
-            } else if value.truncatingRemainder(dividingBy: 1) == 0 {
-                loadTexts[idx] = String(format: "%.0f", value)
             } else {
-                loadTexts[idx] = String(format: "%.1f", value)
+                loadTexts[idx] = LoadFormatter(unit: unit).compact(value)
             }
         }
     }
@@ -1473,7 +1472,10 @@ private struct ProgramExercisePlanRow: View {
                 normalizeArraySizes()
 
                 let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-                let doubleValue = Double(trimmed) ?? 0
+                let current: Double? = index < item.plannedLoadsBySet.count ? item.plannedLoadsBySet[index] : nil
+                // nil = the text a stored load already shows (a kg lifter's 102.5 lb reads "46.49"): nothing to
+                // write, so the load keeps its exact value and planEdited stays as it was.
+                guard let doubleValue = LoadInput.plannedLoadWrite(trimmed, unit: unit, current: current) else { return }
 
                 // The one plan edit that sets planEdited: a hand-set load must not be overwritten.
                 PlanStepperEdits.setPlannedLoad(item, at: index, to: doubleValue)

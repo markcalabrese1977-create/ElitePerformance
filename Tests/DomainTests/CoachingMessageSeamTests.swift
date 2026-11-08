@@ -824,10 +824,10 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: ctx, fileName: "b5_\(UUID().uuidString).csv")
         defer { try? FileManager.default.removeItem(at: result.url) }
         let lines = try String(contentsOf: result.url, encoding: .utf8).split(separator: "\n").map(String.init)
-        XCTAssertTrue(lines[0].hasSuffix(",coach_note,set_role"), lines[0])
+        XCTAssertTrue(lines[0].hasSuffix(",coach_note,set_role,load_unit"), lines[0])
         XCTAssertEqual(lines.count, 5)
-        XCTAssertTrue(lines[4].hasSuffix(",top"), lines[4])
-        XCTAssertTrue(lines[1].hasSuffix(","), "back-off rows have an empty role: \(lines[1])")
+        XCTAssertTrue(lines[4].hasSuffix(",top,lb"), lines[4])
+        XCTAssertTrue(lines[1].hasSuffix(",,lb"), "back-off rows have an empty role: \(lines[1])")
     }
 
 

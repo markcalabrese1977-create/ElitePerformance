@@ -82,6 +82,7 @@ struct HistoryView: View {
 // MARK: - History Row
 
 private struct HistoryRow: View {
+    @Environment(\.loadUnit) private var unit
     let history: SessionHistory
 
     private var shortDate: String {
@@ -110,7 +111,7 @@ private struct HistoryRow: View {
             HStack(spacing: 16) {
                 Label("\(history.totalExercises) lifts", systemImage: "dumbbell")
                 Label("\(history.totalSets) sets", systemImage: "square.grid.2x2")
-                Label("\(Int(history.totalVolume)) lb", systemImage: "scalemass")
+                Label("\(LoadFormatter(unit: unit).volumeInt(history.totalVolume)) \(unit.label)", systemImage: "scalemass")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -141,12 +142,13 @@ private struct HistorySetDetail: Identifiable {
     let rpPattern: String
     /// A top-set row: labelled "Top set" instead of "Set N".
     var isTop: Bool = false
+    var unit: LoadUnit = .lb
 
     private var setLabel: String { isTop ? "Top set" : "Set \(index)" }
 
     private func loadText(_ load: Double) -> String {
         if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
-        return String(format: "%.0f", load)
+        return LoadFormatter(unit: unit).whole(load)
     }
 
     var lineText: String {
@@ -206,6 +208,7 @@ private struct HistoryExerciseDetail: Identifiable {
 // MARK: - Day Detail
 
 private struct HistoryDayDetailView: View {
+    @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var context
     let history: SessionHistory
 
@@ -339,7 +342,8 @@ private struct HistoryDayDetailView: View {
                                                         exerciseId: uiEx.exerciseId,
                                                         rpUsed: set.usedRestPause,
                                                         rpPattern: set.restPausePattern,
-                                                        isTop: set.isTop
+                                                        isTop: set.isTop,
+                                                        unit: unit
                                                     )
                                                 )
                     } else if plannedReps > 0 {
@@ -355,7 +359,8 @@ private struct HistoryDayDetailView: View {
                                                         exerciseId: uiEx.exerciseId,
                                                         rpUsed: false,
                                                         rpPattern: "",
-                                                        isTop: set.isTop
+                                                        isTop: set.isTop,
+                                                        unit: unit
                                                     )
                                                 )
                     }
@@ -468,7 +473,7 @@ private struct HistoryDayDetailView: View {
 
                 VStack(alignment: .leading) {
                     Text("Total volume").font(.caption).foregroundStyle(.secondary)
-                    Text("\(Int(history.totalVolume))").font(.headline)
+                    Text(LoadFormatter(unit: unit).volumeInt(history.totalVolume)).font(.headline)
                 }
             }
 
@@ -476,7 +481,7 @@ private struct HistoryDayDetailView: View {
                 HStack {
                     Text("Mechanical load").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text(String(format: "%.0f", mechLoad)).font(.caption)
+                    Text(LoadFormatter(unit: unit).whole(mechLoad)).font(.caption)
                 }
             }
 
@@ -628,7 +633,7 @@ private struct HistoryDayDetailView: View {
                             if let primary = ex.primaryMuscle { Text(primary) }
                             Text("Sets: \(ex.totalSets)")
                             Text("Reps: \(ex.totalReps)")
-                            Text("Vol: \(Int(ex.totalVolume))")
+                            Text("Vol: \(LoadFormatter(unit: unit).volumeInt(ex.totalVolume))")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

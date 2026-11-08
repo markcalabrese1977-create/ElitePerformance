@@ -5,6 +5,7 @@ import SwiftData
 /// end-of-session readiness + notes, and per-set breakdowns.
 struct SessionRecapView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.loadUnit) private var unit
     @Query private var profiles: [UserProfile]
     @Bindable var session: Session
 
@@ -280,7 +281,7 @@ struct SessionRecapView: View {
                 HStack {
                     Text("Mechanical load")
                     Spacer()
-                    Text(String(format: "%.0f", mechanicalLoad))
+                    Text(LoadFormatter(unit: unit).whole(mechanicalLoad))
                         .fontWeight(.semibold)
                 }
             }
@@ -336,11 +337,11 @@ struct SessionRecapView: View {
 
                             VStack(alignment: .trailing, spacing: 2) {
                                 if let base = baseline, base > 0 {
-                                    Text(String(format: "%.1f → %.1f", base, next))
+                                    Text("\(LoadFormatter(unit: unit).oneDecimal(base)) → \(LoadFormatter(unit: unit).oneDecimal(next))")
                                         .font(.caption)
                                         .fontWeight(.semibold)
                                 } else {
-                                    Text(String(format: "Next: %.1f lb", next))
+                                    Text("Next: \(LoadFormatter(unit: unit).oneDecimal(next)) \(unit.label)")
                                         .font(.caption)
                                         .fontWeight(.semibold)
                                 }
@@ -356,7 +357,8 @@ struct SessionRecapView: View {
         }
     }
 
-    private func formattedVolume(_ volume: Double) -> String {
+    private func formattedVolume(_ storedVolume: Double) -> String {
+        let volume = unit.fromStoredLb(storedVolume)
         if volume >= 10_000 {
             return String(format: "%.1fk", volume / 1000.0)
         } else {
@@ -444,6 +446,7 @@ struct LoadOverridePromptRow: View {
 // MARK: - Per-exercise recap row
 
 struct ExerciseRecapRow: View {
+    @Environment(\.loadUnit) private var unit
     @Query private var profiles: [UserProfile]
     let item: SessionItem
 
@@ -533,7 +536,7 @@ struct ExerciseRecapRow: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
-                if let top = item.bestSetDescription {
+                if let top = item.bestSetDescription(unit: unit) {
                     Text("Top set: \(top)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -576,7 +579,7 @@ struct ExerciseRecapRow: View {
                                 .font(.caption2)
                                 .frame(width: 46, alignment: .leading)
 
-                            Text(String(format: "%.1f x %d", load, reps))
+                            Text("\(LoadFormatter(unit: unit).oneDecimal(load)) x \(reps)")
                                 .font(.caption2)
 
                             if let rir {
@@ -590,7 +593,7 @@ struct ExerciseRecapRow: View {
                                     .font(.caption2)
                                     .foregroundColor(.blue)
                             }
-                            if let drop = item.dropSetDescription(forSetAt: idx) {
+                            if let drop = item.dropSetDescription(forSetAt: idx, unit: unit) {
                                 Text(drop)
                                     .font(.caption2)
                                     .foregroundColor(.orange)
@@ -611,7 +614,7 @@ struct ExerciseRecapRow: View {
                     .padding(.top, 4)
 
                 if let next = rec.nextSuggestedLoad {
-                    Text("Next time target: \(next, specifier: "%.1f") lb")
+                    Text("Next time target: \(LoadFormatter(unit: unit).oneDecimal(next)) \(unit.label)")
                         .font(.caption2)
                         .foregroundColor(.blue)
                 }
@@ -620,7 +623,8 @@ struct ExerciseRecapRow: View {
         .padding(.vertical, 6)
     }
 
-    private func formattedVolume(_ volume: Double) -> String {
+    private func formattedVolume(_ storedVolume: Double) -> String {
+        let volume = unit.fromStoredLb(storedVolume)
         if volume >= 10_000 {
             return String(format: "%.1fk", volume / 1000.0)
         } else {
@@ -719,7 +723,9 @@ extension SessionItem {
     }
 
     /// Human-readable description of the top set, including RP pattern if used.
-    var bestSetDescription: String? {
+    var bestSetDescription: String? { bestSetDescription(unit: .lb) }
+
+    func bestSetDescription(unit: LoadUnit) -> String? {
         guard let idx = bestSetIndex else { return nil }
         guard idx < actualLoads.count, idx < actualReps.count else { return nil }
 
@@ -727,13 +733,13 @@ extension SessionItem {
         let reps = actualReps[idx]
         guard reps > 0, load > 0 else { return nil }
 
-        let base = String(format: "%.1f x %d", load, reps)
+        let base = "\(LoadFormatter(unit: unit).oneDecimal(load)) x \(reps)"
 
         let usedRP = idx < usedRestPauseFlags.count ? usedRestPauseFlags[idx] : false
         let pattern = idx < restPausePatternsBySet.count ? restPausePatternsBySet[idx] : ""
 
         let usedDrop = idx < dropSetPatternsBySet.count ? !dropSetPatternsBySet[idx].isEmpty : false
-        let dropPattern = idx < dropSetPatternsBySet.count ? dropSetPatternsBySet[idx] : ""
+        let dropPattern = idx < dropSetPatternsBySet.count ? Self.shownDropPattern(dropSetPatternsBySet[idx], unit: unit) : ""
 
         if usedRP && !pattern.isEmpty && usedDrop {
             return base + " (RP: \(pattern)) + Drop: \(dropPattern)"
@@ -759,11 +765,17 @@ extension SessionItem {
         }
     }
 
-    func dropSetDescription(forSetAt index: Int) -> String? {
+    /// A stored drop pattern ("120x12,100x10", lb) shown in `unit`. lb: the pattern as stored.
+    static func shownDropPattern(_ pattern: String, unit: LoadUnit) -> String {
+        guard unit != .lb else { return pattern }
+        return DropSetEntry.parse(from: pattern, unit: unit).map { "\($0.loadText)x\($0.repsText)" }.joined(separator: ",")
+    }
+
+    func dropSetDescription(forSetAt index: Int, unit: LoadUnit = .lb) -> String? {
         guard index < dropSetPatternsBySet.count else { return nil }
         let pattern = dropSetPatternsBySet[index]
         guard !pattern.isEmpty else { return nil }
-        let entries = DropSetEntry.parse(from: pattern)
+        let entries = DropSetEntry.parse(from: pattern, unit: unit)
         if entries.isEmpty { return "Drop set" }
         return entries.enumerated().map { i, entry in
             "Drop \(i + 1): \(entry.loadText) × \(entry.repsText)"

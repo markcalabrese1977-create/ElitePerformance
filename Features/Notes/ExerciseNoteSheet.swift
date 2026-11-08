@@ -188,6 +188,7 @@ struct ExerciseNoteSheet: View {
 /// sheet is told when the field is committed (return or focus lost) so it can offer to lower planned loads.
 private struct MaxLoadRow: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.loadUnit) private var unit
     let profile: UserProfile
     let exerciseId: String
     let onCommitted: () -> Void
@@ -232,20 +233,26 @@ private struct MaxLoadRow: View {
         .padding(.top, 8)
         .onAppear {
             if let cap = profile.maxLoad(for: exerciseId) {
-                text = cap == cap.rounded() ? String(Int(cap)) : String(cap)
+                text = LoadFormatter(unit: unit).number(cap)
             }
         }
     }
 
     private func commit(_ raw: String) {
-        let cleaned = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-        profile.setMaxLoad(Double(cleaned), exerciseId: exerciseId)
+        // Typed in the lifter's unit, stored lb. Text that shows the stored max as it is (a kg lifter's 220.46 lb
+        // reads "100") is no edit: nothing is written, so the stored value never drifts.
+        switch LoadInput.maxLoadWrite(raw, unit: unit, current: profile.maxLoad(for: exerciseId)) {
+        case .set(let v): profile.setMaxLoad(v, exerciseId: exerciseId)
+        case .clear: profile.setMaxLoad(nil, exerciseId: exerciseId)   // empty or unreadable clears the max, as before
+        case .none: return
+        }
         try? modelContext.save()
     }
 }
 
 /// The confirmation, inline in the note sheet: what will be lowered, then Set to max / Keep plan.
 private struct MaxLoadClampPrompt: View {
+    @Environment(\.loadUnit) private var unit
     let plan: SessionItemEditService.MaxLoadPlan
     let errorMessage: String?
     let onConfirm: () -> Void
@@ -255,7 +262,7 @@ private struct MaxLoadClampPrompt: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Lower planned loads?")
                 .font(.subheadline.weight(.semibold))
-            Text(SessionItemEditService.clampPreviewText(count: plan.targets.count, max: plan.max))
+            Text(SessionItemEditService.clampPreviewText(count: plan.targets.count, max: plan.max, unit: unit))
                 .font(.footnote)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -263,7 +270,7 @@ private struct MaxLoadClampPrompt: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(t.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
                                 .font(.caption.weight(.semibold))
-                            Text(t.detail(max: plan.max)).font(.caption).foregroundStyle(.secondary)
+                            Text(t.detail(max: plan.max, unit: unit)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }

@@ -55,28 +55,26 @@ struct SettingsView: View {
                                 HStack {
                                     Text("Min Load Increment")
                                     Spacer()
-                                    TextField(LoadFormatter.unitLabel, value: Binding(
+                                    TextField(profile.loadUnit.label, value: Binding(
                                         get: { profile.minLoadIncrement },
                                         set: { profile.minLoadIncrement = $0 }
                                     ), format: .number)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text(LoadFormatter.unitLabel)
+                                    Text(profile.loadUnit.label)
                                         .foregroundStyle(.secondary)
                                 }
 
                                 HStack {
                                     Text("Body Weight")
                                     Spacer()
-                                    TextField("0", value: Binding(
-                                        get: { profile.bodyWeight ?? 0 },
-                                        set: { profile.bodyWeight = $0 > 0 ? $0 : nil }
-                                    ), format: .number)
-                                    .keyboardType(.decimalPad)
+                                    StoredLoadField(placeholder: "0", unit: profile.loadUnit, stored: profile.bodyWeight) {
+                                        profile.bodyWeight = ($0 ?? 0) > 0 ? $0 : nil
+                                    }
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 60)
-                                    Text(LoadFormatter.unitLabel)
+                                    Text(profile.loadUnit.label)
                                         .foregroundStyle(.secondary)
                                 }
 
@@ -520,6 +518,7 @@ struct SettingsView: View {
         }
 
         var repairedDetails: [String] = []
+        let repairUnit = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
 
         for upcoming in upcomingSessions {
             for item in upcoming.items {
@@ -537,7 +536,7 @@ struct SettingsView: View {
                 item.plannedLoadsBySet = mostRecentCompletedItem.actualLoads
 
                 let name = item.exerciseNameSnapshot ?? item.exerciseId
-                repairedDetails.append("\(name): \(String(format: "%.1f", oldLoad)) → \(String(format: "%.1f", actualLoad))")
+                repairedDetails.append("\(name): \(LoadFormatter(unit: repairUnit).oneDecimal(oldLoad)) → \(LoadFormatter(unit: repairUnit).oneDecimal(actualLoad))")
             }
         }
 

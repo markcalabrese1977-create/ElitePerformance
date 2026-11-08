@@ -197,10 +197,6 @@ struct WarmupCardView: View {
     }
 
     private func format(_ value: Double) -> String {
-        if value.truncatingRemainder(dividingBy: 1) == 0 {
-            return "\(Int(value))"
-        } else {
-            return String(format: "%.1f", value)
-        }
+        LoadFormatter(unit: unit).compact(value)
     }
 }

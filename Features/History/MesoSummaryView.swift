@@ -16,6 +16,7 @@ enum NextBlockChoice {
 // MARK: - Main View
 
 struct MesoSummaryView: View {
+    @Environment(\.loadUnit) private var unit
     let meso: MesoBlock
     let onNextBlock: (NextBlockChoice) -> Void
 
@@ -473,7 +474,7 @@ struct MesoSummaryView: View {
                 ForEach(analysis.weeklyVolume, id: \.weekIndex) { week in
                     BarMark(
                         x: .value("Week", "W\(week.weekIndex)"),
-                        y: .value("Volume", week.totalVolume)
+                        y: .value("Volume", unit.fromStoredLb(week.totalVolume))
                     )
                     .foregroundStyle(Color.blue.gradient)
                     .cornerRadius(4)
@@ -484,7 +485,7 @@ struct MesoSummaryView: View {
                 AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
                     AxisValueLabel {
                         if let v = value.as(Double.self) {
-                            Text(formatVolume(v))
+                            Text(formatVolumeInUnit(v))
                                 .font(.caption2)
                         }
                     }
@@ -588,7 +589,7 @@ struct MesoSummaryView: View {
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                                 Spacer()
-                                                Text(String(format: "%.0f", peak))
+                                                Text(LoadFormatter(unit: unit).whole(peak))
                                                     .font(.caption)
                                                     .fontWeight(.semibold)
                                             }
@@ -611,14 +612,14 @@ struct MesoSummaryView: View {
                             ForEach(Array(summary.e1rmBySession.enumerated()), id: \.offset) { idx, point in
                                 LineMark(
                                     x: .value("Session", idx),
-                                    y: .value("e1RM", point.e1rm)
+                                    y: .value("e1RM", unit.fromStoredLb(point.e1rm))
                                 )
                                 .foregroundStyle(Color.blue)
                                 .interpolationMethod(.catmullRom)
 
                                 PointMark(
                                     x: .value("Session", idx),
-                                    y: .value("e1RM", point.e1rm)
+                                    y: .value("e1RM", unit.fromStoredLb(point.e1rm))
                                 )
                                 .foregroundStyle(Color.blue)
                                 .symbolSize(25)
@@ -816,10 +817,16 @@ struct MesoSummaryView: View {
     }
 
     private func formatLoad(_ load: Double) -> String {
-        load == load.rounded() ? "\(Int(load))" : String(format: "%.1f", load)
+        LoadFormatter(unit: unit).compact(load)
     }
 
-    private func formatVolume(_ volume: Double) -> String {
+    /// A stored (lb·reps) volume, shown in the lifter's unit.
+    private func formatVolume(_ storedVolume: Double) -> String {
+        formatVolumeInUnit(unit.fromStoredLb(storedVolume))
+    }
+
+    /// A volume that is already in the lifter's unit (chart axis values).
+    private func formatVolumeInUnit(_ volume: Double) -> String {
         if volume >= 1_000_000 {
             return String(format: "%.1fM", volume / 1_000_000)
         } else if volume >= 1_000 {

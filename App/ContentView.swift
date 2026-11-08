@@ -12,6 +12,7 @@ struct ContentView: View {
 
     var body: some View {
         MainTabView()
+            .injectLoadUnit()
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
                     OnboardingFlowView { result, overrides in

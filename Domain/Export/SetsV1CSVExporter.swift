@@ -18,6 +18,8 @@ enum SetsV1CSVExporter {
             FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)])
         )
 
+        // Load columns are in the lifter's unit (stored lb, converted here); `load_unit` says which.
+        let unit = (try? modelContext.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
         let completed = sessions
             .filter { $0.status == .completed }
             .sorted { $0.date < $1.date }
@@ -43,7 +45,8 @@ enum SetsV1CSVExporter {
             "rest_pause_pattern",
             "is_pr",
             "coach_note",
-            "set_role"
+            "set_role",
+            "load_unit"
         ]
 
         var rows: [String] = []
@@ -73,7 +76,7 @@ enum SetsV1CSVExporter {
                 let targetSets = String(item.targetSets)
                 let targetReps = String(item.targetReps)
                 let targetRIR  = String(item.targetRIR)
-                let suggestedLoad = formatDouble(item.suggestedLoad)
+                let suggestedLoad = formatDouble(unit.fromStoredLb(item.suggestedLoad))
                 let isPR = item.isPR ? "true" : "false"
                 let coachNote = item.coachNote ?? ""
 
@@ -89,10 +92,10 @@ enum SetsV1CSVExporter {
                     let setIndex = String(idx0 + 1)
 
                     let plannedReps = item.plannedRepsBySet.safeInt(at: idx0).map(String.init) ?? ""
-                    let plannedLoad = item.plannedLoadsBySet.safeDouble(at: idx0).map(formatDouble) ?? ""
+                    let plannedLoad = item.plannedLoadsBySet.safeDouble(at: idx0).map { formatDouble(unit.fromStoredLb($0)) } ?? ""
 
                     let actualReps = item.actualReps.safeInt(at: idx0).map(String.init) ?? ""
-                    let actualLoad = item.actualLoads.safeDouble(at: idx0).map(formatDouble) ?? ""
+                    let actualLoad = item.actualLoads.safeDouble(at: idx0).map { formatDouble(unit.fromStoredLb($0)) } ?? ""
                     let actualRIR  = item.actualRIRs.safeInt(at: idx0).map(String.init) ?? ""
 
                     let usedRP = item.usedRestPauseFlags.safeBool(at: idx0).map { $0 ? "true" : "false" } ?? ""
@@ -119,7 +122,8 @@ enum SetsV1CSVExporter {
                         rpPattern,
                         isPR,
                         coachNote,
-                        item.isTopRow(idx0) ? "top" : ""
+                        item.isTopRow(idx0) ? "top" : "",
+                        unit.label
                     ]
 
                     rows.append(fields.map(csvEscape).joined(separator: ","))

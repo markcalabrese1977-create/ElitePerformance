@@ -6,6 +6,7 @@ import SwiftData
 /// - Groups data by exercise
 /// - Shows best e1RM, total volume, and last trained date.
 struct HistorySummaryView: View {
+    @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: \Session.date, order: .forward)
@@ -195,10 +196,10 @@ struct HistorySummaryView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Volume (lb·reps)")
+                    Text("Volume (\(unit.label)·reps)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(String(format: "%.0f", totals.volume))
+                    Text(LoadFormatter(unit: unit).whole(totals.volume))
                         .font(.title3.bold())
                 }
             }
@@ -274,7 +275,7 @@ struct HistorySummaryView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f", summary.bestE1RM))
+                Text(LoadFormatter(unit: unit).whole(summary.bestE1RM))
                     .font(.title3.bold())
                 Text("est. 1RM")
                     .font(.caption2)
@@ -347,14 +348,14 @@ struct HistorySummaryView: View {
                                     .foregroundStyle(.secondary)
 
                             case .volume:
-                                Text(String(format: "%.0f", summary.totalVolume))
+                                Text(LoadFormatter(unit: unit).whole(summary.totalVolume))
                                     .font(.body.bold())
                                 Text("volume")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
 
                             case .e1rm:
-                                Text(String(format: "%.0f", summary.bestE1RM))
+                                Text(LoadFormatter(unit: unit).whole(summary.bestE1RM))
                                     .font(.body.bold())
                                 Text("e1RM")
                                     .font(.caption2)

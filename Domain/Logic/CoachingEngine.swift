@@ -40,8 +40,8 @@ struct CoachingEngine {
         var priorToppedStreak: Int = 0
 
         /// "At your max load (N). Progress with reps or tempo." (+ the hint after two consecutive sessions).
-        func message(streakHint: Bool) -> String {
-            let n = max == max.rounded() ? String(Int(max)) : String(format: "%.1f", max)
+        func message(streakHint: Bool, unit: LoadUnit = .lb) -> String {
+            let n = LoadFormatter(unit: unit).compact(max)
             let base = "At your max load (\(n)). Progress with reps or tempo."
             return streakHint && priorToppedStreak >= 1 ? base + " Consider a higher rep range or a different exercise." : base
         }
@@ -102,8 +102,8 @@ struct CoachingEngine {
     }
 
     /// "300" for a whole load, "317.5" otherwise — the landing text reads as a number, not a gauge.
-    private static func compactLoad(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    private static func compactLoad(_ value: Double, unit: LoadUnit) -> String {
+        LoadFormatter(unit: unit).compact(value)
     }
 
     private enum Forward {
@@ -282,7 +282,7 @@ struct CoachingEngine {
         let targetRIR = item.topRIR ?? item.targetRIR
         let rirs = rows.compactMap { $0 < item.actualRIRs.count ? item.actualRIRs[$0] : nil }
         let avgRIR: Double? = rirs.isEmpty ? nil : Double(rirs.reduce(0, +)) / Double(rirs.count)
-        let what = "Top set: \(compactLoad(load)) x \(reps.map(String.init).joined(separator: ", "))"
+        let what = "Top set: \(compactLoad(load, unit: unit)) x \(reps.map(String.init).joined(separator: ", "))"
         let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
 
         let fatigue = rows.contains { idx in
@@ -310,9 +310,9 @@ struct CoachingEngine {
             let next = min(steppedUp(load, step: step, unit: unit), load * 2.0)
             if let cap = loadCap, next > cap.max {
                 // The earned increase would pass the max: hold at the max.
-                return TopRead(message: "\(what), top of the range. \(cap.message(streakHint: false))", nextTopLoad: cap.max)
+                return TopRead(message: "\(what), top of the range. \(cap.message(streakHint: false, unit: unit))", nextTopLoad: cap.max)
             }
-            return TopRead(message: "\(what), top of the range — increase earned. Next top set: \(compactLoad(next)).", nextTopLoad: next)
+            return TopRead(message: "\(what), top of the range — increase earned. Next top set: \(compactLoad(next, unit: unit)).", nextTopLoad: next)
         }
         return TopRead(message: "\(what), on target — hold.", nextTopLoad: load)
     }
@@ -411,7 +411,7 @@ struct CoachingEngine {
             guard !isProgressionExempt else { return "" }
             switch carryForwardTarget {
             case .exists where !writeBlocked:
-                return " \(landingName(for: item)): \(compactLoad(load)), same load, reps-first."
+                return " \(landingName(for: item)): \(compactLoad(load, unit: unit)), same load, reps-first."
             case .existsEdited:
                 return " Your edited plan for \(landingName(for: item)) stays as set."
             default:
@@ -546,7 +546,7 @@ struct CoachingEngine {
             if dropPercent >= 0.10, firstLoad == maxLoad, lastLoad == minLoad, minLoad < maxLoad {
                 // The from/to numbers describe what just happened and always stay;
                 // only the forward-looking number is gated on a target existing.
-                let observed = "Load dropped from \(Int(maxLoad)) to \(Int(minLoad)) across your working sets — you opened above your repeatable baseline."
+                let observed = "Load dropped from \(LoadFormatter(unit: unit).truncated(maxLoad)) to \(LoadFormatter(unit: unit).truncated(minLoad)) across your working sets — you opened above your repeatable baseline."
                 let msg: String
                 if isProgressionExempt {
                     // Fixed-load: no "Next Week X starts at N" promise; observed facts only.
@@ -554,7 +554,7 @@ struct CoachingEngine {
                 } else {
                     switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
                     case .lands(let landing):
-                        msg = "\(observed) \(landing) starts at \(Int(minLoad)). Build from there."
+                        msg = "\(observed) \(landing) starts at \(LoadFormatter(unit: unit).truncated(minLoad)). Build from there."
                     case .editedKept(let kept):
                         msg = "\(observed) \(kept)"
                     case .endOfChain:
@@ -575,7 +575,7 @@ struct CoachingEngine {
             let remaining = plannedWorkingSetCount - completedWorkingSetCount
             if completedGrowthSetCount == 1 {
                 let setLabel = (item.hasTopSet ? "Back-off set " : "Set ") + "\(primaryIndices[0] + 1)"
-                let currentLoadText = String(format: "%.1f", baseLoad)
+                let currentLoadText = LoadFormatter(unit: unit).oneDecimal(baseLoad)
                 let currentReps = primaryReps[0]
                 if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
                     let msg = "\(setLabel) at \(currentLoadText) × \(currentReps) is already harder than the target RIR. Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
@@ -659,11 +659,11 @@ struct CoachingEngine {
                     // any target state — carry-forward never writes an exempt exercise's plan.
                     msg = "\(lead) Load is fixed on this exercise; change it yourself if you want to rebuild in range."
                 } else if case .unresolved = carryForwardTarget {
-                    msg = "\(lead) Backing the load down to \(String(format: "%.1f", reduced)) next session to rebuild in range."
+                    msg = "\(lead) Backing the load down to \(LoadFormatter(unit: unit).oneDecimal(reduced)) next session to rebuild in range."
                 } else {
                     switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
                     case .lands(let landing):
-                        msg = "\(lead) Backing the load down to rebuild in range. \(landing): \(compactLoad(reduced))."
+                        msg = "\(lead) Backing the load down to rebuild in range. \(landing): \(compactLoad(reduced, unit: unit))."
                     case .editedKept(let kept):
                         msg = "\(lead) Backing the load down to rebuild in range. \(kept)"
                     case .endOfChain:
@@ -721,13 +721,13 @@ struct CoachingEngine {
         if overPerformed && rirOnTarget {
             let target = qualifyingBump()
             if let cap = loadCap, target > cap.max {
-                return CoachingRecommendation(message: cap.message(streakHint: true), nextSuggestedLoad: cap.max)
+                return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
             let lead = "Reps came in well above the top of your range with room to spare."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):
-                msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
+                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target)).\(pumpNote)"
             case .editedKept(let kept):
                 msg = "\(lead) \(kept)\(pumpNote)"
             case .endOfChain:
@@ -743,13 +743,13 @@ struct CoachingEngine {
         if allSetsAtTop && rirOnTarget {
             let target = qualifyingBump()
             if let cap = loadCap, target > cap.max {
-                return CoachingRecommendation(message: cap.message(streakHint: true), nextSuggestedLoad: cap.max)
+                return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
             let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):
-                msg = "\(lead) \(landing): \(String(format: "%.1f", target)).\(pumpNote)"
+                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target)).\(pumpNote)"
             case .editedKept(let kept):
                 msg = "\(lead) \(kept)\(pumpNote)"
             case .endOfChain:
@@ -766,7 +766,7 @@ struct CoachingEngine {
         if bestReps >= repMin && rirOnTarget {
             let msg = isProgressionExempt
                 ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when you're ready."
-                : "On target and in range — hold \(String(format: "%.1f", baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
+                : "On target and in range — hold \(LoadFormatter(unit: unit).oneDecimal(baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."
             return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
         }
 
@@ -775,11 +775,6 @@ struct CoachingEngine {
             ? "Effort was off the target. Hold this load; it is fixed on this exercise, so change it yourself when you're ready."
             : "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up."
         return CoachingRecommendation(message: msg + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
-    }
-
-    private static func formatLoad(_ value: Double) -> String {
-        if value == 0 { return "0" }
-        return String(format: "%.1f", value)
     }
 }
 

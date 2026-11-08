@@ -36,6 +36,45 @@ enum LoadInput {
         return v
     }
 
+    /// What typing `text` means for a stored load.
+    enum Edit: Equatable {
+        /// A real edit: write this stored (lb) load.
+        case set(Double)
+        /// The field was emptied.
+        case clear
+        /// The text shows the current value as it already displays: write nothing.
+        case unchanged
+        /// Not a number.
+        case invalid
+    }
+
+    static func edit(_ text: String, unit: LoadUnit, current: Double?) -> Edit {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .clear }
+        guard number(from: text) != nil else { return .invalid }
+        guard let stored = storedLb(from: text, unit: unit, currentStoredLb: current) else { return .unchanged }
+        return .set(stored)
+    }
+
+    /// The Program tab's per-set load: the stored load to write, or nil for no write. Empty or unreadable text writes 0
+    /// (as it always did); text that shows the stored load as it is writes nothing, so planEdited stays as it was.
+    static func plannedLoadWrite(_ text: String, unit: LoadUnit, current: Double?) -> Double? {
+        switch edit(text, unit: unit, current: current) {
+        case .set(let v): return v
+        case .clear, .invalid: return 0
+        case .unchanged: return nil
+        }
+    }
+
+    /// The Max load field: set, clear, or leave alone.
+    enum MaxWrite: Equatable { case set(Double), clear, none }
+    static func maxLoadWrite(_ text: String, unit: LoadUnit, current: Double?) -> MaxWrite {
+        switch edit(text, unit: unit, current: current) {
+        case .set(let v): return .set(v)
+        case .clear, .invalid: return .clear
+        case .unchanged: return .none
+        }
+    }
+
     /// The stored lb load for `text` typed in `unit`, or nil when nothing should be written: the text is empty or
     /// invalid, or it shows the same value `currentStoredLb` already displays as. The second rule is what stops
     /// edit -> save from rewriting a stored 102.5 lb as the 46.49 kg it displays as (drift).

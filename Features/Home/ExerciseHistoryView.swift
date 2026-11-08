@@ -19,6 +19,7 @@ struct ExerciseHistoryEntry: Identifiable {
 ///   • Use its load + reps to compute an estimated 1RM (Epley: 1RM = w * (1 + reps/30))
 ///   • Display that as the entry’s “best e1RM” for that day
 struct ExerciseHistoryView: View {
+    @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var context
 
     let exerciseId: String
@@ -177,6 +178,6 @@ struct ExerciseHistoryView: View {
     // MARK: - Formatting
 
     private func formatLoad(_ value: Double) -> String {
-        value == 0 ? "0" : String(format: "%.1f", value)
+        LoadFormatter(unit: unit).zeroOrOneDecimal(value)
     }
 }

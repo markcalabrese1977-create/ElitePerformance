@@ -1,14 +1,13 @@
 import Foundation
 
 enum LoadDisplay {
-    static func string(load: Double, exerciseId: String) -> String {
+    static func string(load: Double, exerciseId: String, unit: LoadUnit = .lb) -> String {
         // Only show BW for known bodyweight movements
         if load == 0, isBodyweightExercise(exerciseId) {
             return "BW"
         }
 
-        if load == floor(load) { return String(format: "%.0f", load) }
-        return String(format: "%.1f", load)
+        return LoadFormatter(unit: unit).compact(load)
     }
 
     private static func isBodyweightExercise(_ id: String) -> Bool {

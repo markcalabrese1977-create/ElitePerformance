@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct ExerciseHistorySheet: View {
+    @Environment(\.loadUnit) private var unit
     let exerciseId: String
     let exerciseName: String
     let currentWave: String?
@@ -131,14 +132,14 @@ struct ExerciseHistorySheet: View {
                     ForEach(Array(chartEntries.enumerated()), id: \.element.id) { idx, entry in
                         LineMark(
                             x: .value("Session", idx),
-                            y: .value("e1RM", entry.bestE1RM ?? 0)
+                            y: .value("e1RM", unit.fromStoredLb(entry.bestE1RM ?? 0))
                         )
                         .foregroundStyle(waveColor(entry.waveLabel))
                         .interpolationMethod(.catmullRom)
 
                         PointMark(
                             x: .value("Session", idx),
-                            y: .value("e1RM", entry.bestE1RM ?? 0)
+                            y: .value("e1RM", unit.fromStoredLb(entry.bestE1RM ?? 0))
                         )
                         .foregroundStyle(waveColor(entry.waveLabel))
                         .symbolSize(30)
@@ -287,7 +288,7 @@ struct ExerciseHistorySheet: View {
 
                 if let e1 = entry.bestE1RM {
                     HStack(spacing: 6) {
-                        Text("Top est 1RM: \(Int(e1.rounded()))")
+                        Text("Top est 1RM: \(Int(unit.fromStoredLb(e1).rounded()))")
                             .font(.caption2)
                             .fontWeight(.semibold)
                         if isBest {
@@ -315,8 +316,8 @@ struct ExerciseHistorySheet: View {
         let isPositive = delta > 0.5
         let isNegative = delta < -0.5
         let label: String = {
-            if isPositive { return "↑ +\(Int(delta.rounded())) e1RM" }
-            if isNegative { return "↓ \(Int(delta.rounded())) e1RM" }
+            if isPositive { return "↑ +\(Int(unit.fromStoredLb(delta).rounded())) e1RM" }
+            if isNegative { return "↓ \(Int(unit.fromStoredLb(delta).rounded())) e1RM" }
             return "→ same"
         }()
         let color: Color = isPositive ? .green : (isNegative ? .orange : .secondary)
@@ -474,15 +475,14 @@ struct ExerciseHistorySheet: View {
     }
 
     private func formatVolume(_ v: Double) -> String {
-        let iv = Int(v.rounded())
+        let iv = Int(unit.fromStoredLb(v).rounded())
         return NumberFormatter.localizedString(from: NSNumber(value: iv), number: .decimal)
     }
 
     private func formatSetToken(load: Double, reps: Int, rir: Int?, usedRP: Bool, rpPattern: String) -> String {
         let loadString: String = {
             if load == 0, ExerciseCatalog.isBodyweight(exerciseId: exerciseId) { return "BW" }
-            if load == floor(load) { return String(format: "%.0f", load) }
-            return String(format: "%.1f", load)
+            return LoadFormatter(unit: unit).compact(load)
         }()
         var s = "\(loadString)×\(reps)"
         if let rir { s += " @ RIR \(rir)" }

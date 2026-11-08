@@ -817,6 +817,7 @@ private struct SessionExerciseCardView: View {
 // MARK: - Set Row
 
 private struct SessionSetRowView: View {
+    @Environment(\.loadUnit) private var unit
     let uiSet: UISessionSet
     let repRange: RepRange
     /// A row past the planned set count: shown as an extra set, with no suggested load.
@@ -846,7 +847,7 @@ private struct SessionSetRowView: View {
         }
 
     private func formattedWeight(_ value: Double) -> String {
-        value == floor(value) ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        LoadFormatter(unit: unit).compact(value)
     }
 
 
@@ -908,7 +909,7 @@ private struct SessionSetRowView: View {
                         .foregroundStyle(.secondary)
                     if isBodyweightExercise {
                         if let bodyWeight, bodyWeight > 0 {
-                            Text("BW (\(formattedWeight(bodyWeight)) lb)")
+                            Text("BW (\(formattedWeight(bodyWeight)) \(unit.label))")
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         } else {
@@ -1248,6 +1249,8 @@ final class SessionScreenViewModel: ObservableObject {
     @Published var title: String
     @Published var subtitle: String
     @Published var exercises: [UISessionExercise]
+    /// The lifter's unit. Every load in this model is stored lb; only the text fields are in this unit.
+    var loadUnit: LoadUnit = .lb
 
     var currentWaveLabel: String? {
             let wave = session.items.compactMap({ $0.waveRaw }).first
@@ -1275,7 +1278,7 @@ final class SessionScreenViewModel: ObservableObject {
     func lastLetterCaptions(context: ModelContext) -> [String: String] {
         let all = (try? context.fetch(FetchDescriptor<Session>())) ?? []
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
-        return LastSameLetterPerformance.captions(for: session, allSessions: all, customExercises: custom)
+        return LastSameLetterPerformance.captions(for: session, allSessions: all, customExercises: custom, unit: loadUnit)
     }
 
     // The app target builds with SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, which makes this class
@@ -1294,6 +1297,7 @@ final class SessionScreenViewModel: ObservableObject {
         self.title = refreshed.title
         self.subtitle = refreshed.subtitle
         self.exercises = refreshed.exercises
+        self.loadUnit = refreshed.loadUnit
     }
 
     /// Summary line under the header.
@@ -1327,7 +1331,8 @@ final class SessionScreenViewModel: ObservableObject {
 
         var set = exercise.sets[setIdx]
 
-        let parsedLoad = Double(set.actualLoadText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let parsedLoad = LoadInput.storedLb(from: set.actualLoadText, unit: loadUnit,
+                                            currentStoredLb: set.actualLoad ?? set.plannedLoad)
         let parsedReps = Int(set.actualRepsText.trimmingCharacters(in: .whitespacesAndNewlines))
 
         if let reps = parsedReps, reps > 0 {
@@ -1383,7 +1388,7 @@ final class SessionScreenViewModel: ObservableObject {
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
                     matchingItem.dropSetPatternsBySet[idx] = set.usedDropSet && !set.dropSets.isEmpty
-                        ? set.dropSets.map { $0.serialized }.joined(separator: ",")
+                        ? set.dropSets.map { $0.serialized(unit: loadUnit) }.joined(separator: ",")
                         : ""
 
                     // Size the bump with the SAME inputs the write-back path
@@ -1484,7 +1489,9 @@ final class SessionScreenViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             exercises[exerciseIdx].sets[setIdx].actualLoad = nil
-        } else if let value = Double(trimmed) {
+        } else if let value = LoadInput.storedLb(from: trimmed, unit: loadUnit,
+                                                 currentStoredLb: exercises[exerciseIdx].sets[setIdx].actualLoad) {
+            // nil = unreadable, or the text a stored load already displays as: no write (no drift).
             exercises[exerciseIdx].sets[setIdx].actualLoad = max(0, value)
         }
     }
@@ -1620,7 +1627,7 @@ final class SessionScreenViewModel: ObservableObject {
         let isBodyweight = ExerciseCatalog.isBodyweight(exerciseId: exercises[exerciseIdx].exerciseId)
         exercises[exerciseIdx].sets[setIdx].actualLoadText = (isBodyweight || exercises[exerciseIdx].sets[setIdx].plannedLoad == 0)
             ? "0"
-            : String(format: "%.1f", exercises[exerciseIdx].sets[setIdx].plannedLoad)
+            : LoadFormatter(unit: loadUnit).oneDecimal(exercises[exerciseIdx].sets[setIdx].plannedLoad)
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
 
         persist(using: context)
@@ -1665,7 +1672,8 @@ final class SessionScreenViewModel: ObservableObject {
             actualRIR: nil,
             status: .notStarted,
             usedRestPause: false,
-            restPausePattern: ""
+            restPausePattern: "",
+            unit: loadUnit
         )
 
         exercise.targetSets += 1
@@ -1856,7 +1864,8 @@ final class SessionScreenViewModel: ObservableObject {
                 actualLoad: nil,
                 actualReps: nil,
                 actualRIR: nil,
-                status: .notStarted
+                status: .notStarted,
+                unit: loadUnit
             )
         }
 
@@ -2071,7 +2080,7 @@ final class SessionScreenViewModel: ObservableObject {
                                     item.pumpRatingsBySet[idx] = uiSet.pumpRating.rawValue
                                     // Drop set tracking
                                     if uiSet.usedDropSet && !uiSet.dropSets.isEmpty {
-                                        item.dropSetPatternsBySet[idx] = uiSet.dropSets.map { $0.serialized }.joined(separator: ",")
+                                        item.dropSetPatternsBySet[idx] = uiSet.dropSets.map { $0.serialized(unit: loadUnit) }.joined(separator: ",")
                                     } else {
                                         item.dropSetPatternsBySet[idx] = ""
                                     }
@@ -2215,7 +2224,7 @@ final class SessionScreenViewModel: ObservableObject {
 
 
     private func formatLoad(_ value: Double) -> String {
-        value == 0 ? "0" : String(format: "%.1f", value)
+        LoadFormatter(unit: loadUnit).zeroOrOneDecimal(value)
     }
 
     // MARK: - Recap + Persistence (History)
@@ -2401,6 +2410,7 @@ final class SessionScreenViewModel: ObservableObject {
 
 extension SessionScreenViewModel {
     convenience init(session: Session) {
+        let unit: LoadUnit = session.modelContext.flatMap { try? $0.fetch(FetchDescriptor<UserProfile>()).first?.loadUnit } ?? .lb
         let title = session.date.formatted(date: .abbreviated, time: .omitted)
         let subtitle = session.weekDayLabel
         let items = session.items.sorted { $0.order < $1.order }
@@ -2512,7 +2522,7 @@ extension SessionScreenViewModel {
 
                 let dropEntries: [DropSetEntry] = {
                     if idx < item.dropSetPatternsBySet.count {
-                        return DropSetEntry.parse(from: item.dropSetPatternsBySet[idx])
+                        return DropSetEntry.parse(from: item.dropSetPatternsBySet[idx], unit: unit)
                     }
                     return []
                 }()
@@ -2561,7 +2571,8 @@ extension SessionScreenViewModel {
                                         usedDropSet: dropUsed,
                                         dropSets: dropEntries,
                                         pumpRating: pumpRating,
-                                        isTop: isTop
+                                        isTop: isTop,
+                                        unit: unit
                                     )
                                 )
             }
@@ -2611,6 +2622,7 @@ extension SessionScreenViewModel {
             subtitle: subtitle,
             exercises: exercises
         )
+        self.loadUnit = unit
     }
 }
 
@@ -2837,6 +2849,9 @@ struct UISessionSet: Identifiable {
     var dropSets: [DropSetEntry]
     var pumpRating: PumpRating
     
+    /// The unit the *Text fields below are shown in (loads themselves are stored lb).
+    var unit: LoadUnit = .lb
+
     var plannedLoadText: String
     var plannedRepsText: String
     var actualLoadText: String
@@ -2857,8 +2872,10 @@ struct UISessionSet: Identifiable {
         usedDropSet: Bool = false,
         dropSets: [DropSetEntry] = [],
         pumpRating: PumpRating = .none,
-        isTop: Bool = false
+        isTop: Bool = false,
+        unit: LoadUnit = .lb
     ) {
+        self.unit = unit
         self.isTop = isTop
         self.index = index
         self.plannedLoad = plannedLoad
@@ -2877,14 +2894,14 @@ struct UISessionSet: Identifiable {
         if plannedLoad == 0 {
             planLoadString = "0"
         } else {
-            planLoadString = String(format: "%.1f", plannedLoad)
+            planLoadString = LoadFormatter(unit: unit).oneDecimal(plannedLoad)
         }
         
         self.plannedLoadText = planLoadString
         self.plannedRepsText = "\(plannedReps)"
         
         if let actualLoad {
-            self.actualLoadText = String(format: "%.1f", actualLoad)
+            self.actualLoadText = LoadFormatter(unit: unit).oneDecimal(actualLoad)
         } else if ExerciseCatalog.isBodyweight(exerciseId: exerciseId) {
             // BW: no external load entered = bodyweight-only. Store 0 so effectiveLoad() returns bodyweight at read time.
             // LANDMINE: weighted-BW (belt plate) support, when built, must seed the added-weight value here instead of 0.
@@ -2934,7 +2951,7 @@ struct UISessionSet: Identifiable {
         if plannedLoad == 0 {
             loadText = isBodyweight ? "BW" : "—"
         } else {
-            loadText = String(format: "%.1f", plannedLoad)
+            loadText = LoadFormatter(unit: unit).oneDecimal(plannedLoad)
         }
         
         // Show range with the top flagged as the goal when min and max differ,
@@ -3036,6 +3053,7 @@ struct UISessionSet: Identifiable {
     }
     
     private struct SessionRecapSheet: View {
+        @Environment(\.loadUnit) private var unit
         let recap: SessionRecap
         let onDone: () -> Void
         
@@ -3048,7 +3066,7 @@ struct UISessionSet: Identifiable {
         
         private func e1RMString(_ value: Double?) -> String {
             guard let value else { return "—" }
-            return String(format: "%.0f", value)
+            return LoadFormatter(unit: unit).whole(value)
         }
         
         var body: some View {
@@ -3176,7 +3194,7 @@ struct UISessionSet: Identifiable {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(String(format: "%.0f", recap.mechanicalLoad))
+                        Text(LoadFormatter(unit: unit).whole(recap.mechanicalLoad))
                             .font(.caption)
                     }
                 }

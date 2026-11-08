@@ -91,9 +91,9 @@ struct ReplaceExerciseModel {
         }
     }
 
-    static func loadText(_ seed: Double?) -> String {
+    static func loadText(_ seed: Double?, unit: LoadUnit = .lb) -> String {
         guard let seed else { return enterOnTheDay }
-        return "Starts at \(LoadFormatter.text(seed))"
+        return "Starts at \(LoadFormatter(unit: unit).text(seed))"
     }
 
     struct Row: Equatable {
@@ -103,8 +103,8 @@ struct ReplaceExerciseModel {
         let load: String
     }
 
-    static func rows(_ plan: SessionItemEditService.ReplacePlan) -> [Row] {
-        plan.targets.map { Row(date: $0.date, wave: letter($0.waveRaw), prescription: $0.prescription, load: loadText($0.seedLoad)) }
+    static func rows(_ plan: SessionItemEditService.ReplacePlan, unit: LoadUnit = .lb) -> [Row] {
+        plan.targets.map { Row(date: $0.date, wave: letter($0.waveRaw), prescription: $0.prescription, load: loadText($0.seedLoad, unit: unit)) }
     }
 
     static func reasonText(_ reason: SessionItemEditService.RefusalReason) -> String {
@@ -194,6 +194,7 @@ struct ReplaceExerciseFlow: View {
 }
 
 private struct ReplacePreviewSheet: View {
+    @Environment(\.loadUnit) private var unit
     let model: ReplaceExerciseModel
     let surface: ReplaceExerciseSurface
     let onBack: () -> Void
@@ -235,7 +236,7 @@ private struct ReplacePreviewSheet: View {
                         if plan.targets.isEmpty {
                             Text("Nothing to replace in this scope.").foregroundStyle(.secondary)
                         }
-                        ForEach(Array(ReplaceExerciseModel.rows(plan).enumerated()), id: \.offset) { _, row in
+                        ForEach(Array(ReplaceExerciseModel.rows(plan, unit: unit).enumerated()), id: \.offset) { _, row in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(row.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())

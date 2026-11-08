@@ -321,7 +321,7 @@ struct PlanMemoryEngine {
 
                         // Progression coaching note — only if no higher-priority note already set
                         if let projection = projection, targetItem.coachNote == nil, !isProgressionExempt {
-                            let loadStr = String(format: "%.1f", projection.suggestedLoad)
+                            let loadStr = LoadFormatter(unit: unit).oneDecimal(projection.suggestedLoad)
                             switch projection.basis {
                             case .consecutiveCleanProgression:
                                 targetItem.coachNote = "✅ Two clean sessions confirmed. Load stepping up to \(loadStr)."

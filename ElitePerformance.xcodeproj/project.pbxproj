@@ -24,6 +24,7 @@
 		21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */; };
 		EB651817D14BF0BBD8475B8D /* LoadUnitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */; };
 		B735C4CD2415F4E063B3E17D /* KgRoundingMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */; };
+		DA2AEDBECF2059385D474BC6 /* UnitDisplayInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */; };
 		344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */; };
 		3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */; };
 		4935C5EEE6864668BB05A199 /* CoachingEngineGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */; };
@@ -158,6 +159,7 @@
 		01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculatorTests.swift; sourceTree = "<group>"; };
 		E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadUnitTests.swift; sourceTree = "<group>"; };
 		2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KgRoundingMatrixTests.swift; sourceTree = "<group>"; };
+		E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitDisplayInputTests.swift; sourceTree = "<group>"; };
 		066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubTests.swift; sourceTree = "<group>"; };
 		0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyAssertions.swift; sourceTree = "<group>"; };
 		1C01689FFC4F4E1A9265EF0E /* CoachingEngineGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineGuardTests.swift; sourceTree = "<group>"; };
@@ -623,6 +625,7 @@
 				01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */,
 				E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */,
 				2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */,
+				E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */,
 				066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */,
 				9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */,
 				1EF8578542787CFF5DF06EDC /* JourneyFixture.swift */,
@@ -907,6 +910,7 @@
 				21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */,
 				EB651817D14BF0BBD8475B8D /* LoadUnitTests.swift in Sources */,
 				B735C4CD2415F4E063B3E17D /* KgRoundingMatrixTests.swift in Sources */,
+				DA2AEDBECF2059385D474BC6 /* UnitDisplayInputTests.swift in Sources */,
 				F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */,
 				88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */,
 				1983FD96D3E2298656699395 /* JourneyFixture.swift in Sources */,
