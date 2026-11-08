@@ -1858,9 +1858,10 @@ extension SessionItemEditService {
 /// a pure `planClampToMax` for the preview, then `applyClampToMax`, which re-plans against live state, writes,
 /// verifies, and saves once (or restores every field and throws).
 ///
-/// Never touched: completed or in-progress sessions, a planned session with anything logged, an item the lifter
-/// edited by hand (`planEdited`), fixed-load and bodyweight exercises (a max does not apply to them), and any
-/// load already at or below the max.
+/// A hand-edited plan (`planEdited`) IS included: the lifter's own number above their own max is still above it. It
+/// is marked "(edited by you)" in the preview, and `planEdited` stays exactly as it was. Never touched: completed or
+/// in-progress sessions, a planned session with anything logged, fixed-load and bodyweight exercises (a max does not
+/// apply to them), and any load already at or below the max.
 extension SessionItemEditService {
 
     struct MaxLoadTarget {
@@ -1875,6 +1876,8 @@ extension SessionItemEditService {
         let slotsAbove: [Int]
         let suggestedAbove: Bool
         let hasTop: Bool
+        /// The lifter hand-edited this plan (`planEdited`); its loads are lowered all the same.
+        let edited: Bool
 
         /// "suggested 320 -> 315, top 335 -> 315" style detail for the preview list.
         func detail(max: Double) -> String {
@@ -1888,6 +1891,7 @@ extension SessionItemEditService {
                 parts.append("sets \(backOffs.map { n(beforeLoads[$0]) }.joined(separator: ", ")) -> \(n(max))")
             }
             if let t = top.first { parts.append("top \(n(beforeLoads[t])) -> \(n(max))") }
+            if edited { parts.append("(edited by you)") }
             return parts.joined(separator: ", ")
         }
     }
@@ -1924,14 +1928,14 @@ extension SessionItemEditService {
             guard session.status == .planned, session.date >= startOfToday,
                   SessionEditSafety.isSafeToModify(session) else { continue }
             for item in session.items where ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == canonical {
-                guard !item.planEdited else { continue }
                 let slots = item.plannedLoadsBySet.indices.filter { item.plannedLoadsBySet[$0] > max }
                 let suggestedAbove = item.suggestedLoad > max
                 guard !slots.isEmpty || suggestedAbove else { continue }
                 targets.append(MaxLoadTarget(
                     session: session, item: item, date: session.date, weekIndex: session.weekIndex, waveRaw: item.waveRaw,
                     beforeSuggested: item.suggestedLoad, beforeLoads: item.plannedLoadsBySet,
-                    slotsAbove: slots, suggestedAbove: suggestedAbove, hasTop: item.hasTopSet
+                    slotsAbove: slots, suggestedAbove: suggestedAbove, hasTop: item.hasTopSet,
+                    edited: item.planEdited
                 ))
             }
         }
@@ -1976,7 +1980,7 @@ extension SessionItemEditService {
             let item = target.item
             if item.suggestedLoad > plan.max { item.suggestedLoad = plan.max }
             item.plannedLoadsBySet = item.plannedLoadsBySet.map { Swift.min($0, plan.max) }
-            // planEdited is left alone: this is an automatic cap, not a hand edit.
+            // planEdited is left alone (verified below): lowering to the max neither sets nor clears it.
             let line = "SessionItemEdit: \(isoDay(target.date)) \(target.session.dayLabel ?? "?") wk\(target.weekIndex) "
                 + "wave=\(target.waveRaw ?? "-") \(plan.exerciseId) \(target.detail(max: plan.max))"
             summary.append(line)

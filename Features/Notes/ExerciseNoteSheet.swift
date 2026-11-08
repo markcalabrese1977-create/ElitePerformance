@@ -246,7 +246,7 @@ private struct MaxLoadClampSheet: View {
                     Section { Text(errorMessage).foregroundStyle(.red).font(.callout) }
                 }
                 Section { } footer: {
-                    Text("Unchanged: completed and started sessions, plans you edited by hand, loads at or below the max.")
+                    Text("Unchanged: completed and started sessions, loads at or below the max. Plans you edited are lowered too (marked), and stay marked as edited.")
                 }
             }
             .navigationTitle("Lower planned loads?")

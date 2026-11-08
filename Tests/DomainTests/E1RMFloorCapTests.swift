@@ -1174,14 +1174,14 @@ final class MaxLoadTests: XCTestCase {
         XCTAssertEqual(items[0].setRolesBySet, SessionItem.roles(backOffs: 3, tops: 1))
     }
 
-    func test_M2_neverTouches_completed_inProgress_started_orHandEditedItems() throws {
+    func test_M2_neverTouches_completed_inProgress_orStartedItems_butLowersHandEditedPlans() throws {
         let ctx = try makeContext()
         let (block, items, sessions) = try mesoWith(ctx, [
-            ("a", 120, [120, 120, 120], false),   // 0 planned and clean: the only target
+            ("a", 120, [120, 120, 120], false),   // 0 planned and clean: a target
             ("a", 120, [120, 120, 120], false),   // 1 completed
             ("a", 120, [120, 120, 120], false),   // 2 in progress
             ("a", 120, [120, 120, 120], false),   // 3 planned but started (a logged set)
-            ("a", 120, [120, 120, 120], false),   // 4 planned, hand-edited plan
+            ("a", 120, [120, 120, 120], false),   // 4 planned, hand-edited plan: a target too (M3)
         ])
         sessions[1].status = .completed
         sessions[2].status = .inProgress
@@ -1189,10 +1189,16 @@ final class MaxLoadTests: XCTestCase {
         items[4].planEdited = true
         try ctx.save()
         let plan = Service.planClampToMax(meso: block, exerciseId: lift, max: 100)
-        XCTAssertEqual(plan.targets.map { $0.weekIndex }, [1])
+        XCTAssertEqual(plan.targets.map { $0.weekIndex }, [1, 5])
+        XCTAssertEqual(plan.targets.map { $0.edited }, [false, true])
+        XCTAssertFalse(plan.targets[0].detail(max: 100).contains("(edited by you)"))
+        XCTAssertTrue(plan.targets[1].detail(max: 100).hasSuffix("(edited by you)"), plan.targets[1].detail(max: 100))
         try Service.applyClampToMax(plan, in: ctx)
         XCTAssertEqual(items[0].suggestedLoad, 100)
-        for i in 1...4 {
+        XCTAssertFalse(items[0].planEdited)
+        XCTAssertEqual(items[4].suggestedLoad, 100); XCTAssertEqual(items[4].plannedLoadsBySet, [100, 100, 100])
+        XCTAssertTrue(items[4].planEdited, "lowering to the max leaves planEdited as it was")
+        for i in 1...3 {
             XCTAssertEqual(items[i].suggestedLoad, 120); XCTAssertEqual(items[i].plannedLoadsBySet, [120, 120, 120], "item \(i)")
         }
     }
@@ -1218,11 +1224,11 @@ final class MaxLoadTests: XCTestCase {
         let ctx = try makeContext()
         let (block, items, _) = try mesoWith(ctx, [("a", 120, [120, 120, 120], false)])
         let plan = Service.planClampToMax(meso: block, exerciseId: lift, max: 100)
-        items[0].planEdited = true            // the lifter edits it before confirming
+        items[0].suggestedLoad = 90; items[0].plannedLoadsBySet = [90, 90, 90]   // moved under the preview: no longer above the max
         XCTAssertThrowsError(try Service.applyClampToMax(plan, in: ctx)) {
             guard case Service.ReplaceError.planStale = $0 else { return XCTFail("\($0)") }
         }
-        XCTAssertEqual(items[0].suggestedLoad, 120)
+        XCTAssertEqual(items[0].suggestedLoad, 90, "a stale plan writes nothing")
     }
 
     func test_M2_noAboveMaxLoads_meansNoPlan_andPreviewWording() throws {
