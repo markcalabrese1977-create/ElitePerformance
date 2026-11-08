@@ -147,9 +147,9 @@ enum UnitAwareRounding {
         }
     }
 
-    /// Onboarding chip values, in `unit`.
+    /// Onboarding chip values, in `unit` (lb 1.25 / 2.5 / 5; kg 1.25 / 2.5 / 5, defaults 1.25 / 2.5 and 2.5 / 5).
     static func incrementChoices(unit: LoadUnit) -> [Double] {
-        unit == .lb ? [1.25, 2.5, 5.0] : [0.5, 1.25, 2.5]
+        [1.25, 2.5, 5.0]
     }
 
     /// Base-scaled fallback when the lifter has no increment on file (in `unit`). lb: >=200 -> 5, >=100 -> 2.5, else 2.

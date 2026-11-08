@@ -52,6 +52,8 @@ struct SettingsView: View {
                                     }
                                 }
 
+                                UnitSection(profile: profile)
+
                                 HStack {
                                     Text("Min Load Increment")
                                     Spacer()

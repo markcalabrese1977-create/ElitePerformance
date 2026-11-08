@@ -24,6 +24,7 @@
 		21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */; };
 		EB651817D14BF0BBD8475B8D /* LoadUnitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */; };
 		B735C4CD2415F4E063B3E17D /* KgRoundingMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */; };
+		F4E84E23ED9206233A1DB18C /* UnitSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D447E5337D1D77F70746CC /* UnitSwitchTests.swift */; };
 		DA2AEDBECF2059385D474BC6 /* UnitDisplayInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */; };
 		344A0BE4770D87E12F7DDA64 /* CrossBlockContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */; };
 		3DE14C7A5205080C6EEDBC9D /* JourneyCanaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B7EE26536E25A4AD8BFE7B /* JourneyCanaryTests.swift */; };
@@ -102,6 +103,7 @@
 		D5E293692EC410DD00034D78 /* Readiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2934D2EC410DD00034D78 /* Readiness.swift */; };
 		D5E2936A2EC410DD00034D78 /* ElitePerformanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293492EC410DD00034D78 /* ElitePerformanceApp.swift */; };
 		D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2935C2EC410DD00034D78 /* SettingsView.swift */; };
+		F46F5A1658B5ACC82E75CF9C /* UnitSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9AF13869B278F9B8C36D75 /* UnitSection.swift */; };
 		D5E2936D2EC410DD00034D78 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293502EC410DD00034D78 /* Session.swift */; };
 		D5E2936F2EC410DD00034D78 /* SessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E2935A2EC410DD00034D78 /* SessionView.swift */; };
 		D5E293712EC410DD00034D78 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293562EC410DD00034D78 /* HomeView.swift */; };
@@ -159,6 +161,7 @@
 		01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMCalculatorTests.swift; sourceTree = "<group>"; };
 		E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadUnitTests.swift; sourceTree = "<group>"; };
 		2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KgRoundingMatrixTests.swift; sourceTree = "<group>"; };
+		59D447E5337D1D77F70746CC /* UnitSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitSwitchTests.swift; sourceTree = "<group>"; };
 		E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitDisplayInputTests.swift; sourceTree = "<group>"; };
 		066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubTests.swift; sourceTree = "<group>"; };
 		0AD39C0427E5CD6CE84FC558 /* JourneyAssertions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JourneyAssertions.swift; sourceTree = "<group>"; };
@@ -247,6 +250,7 @@
 		D5E293562EC410DD00034D78 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D5E2935A2EC410DD00034D78 /* SessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionView.swift; sourceTree = "<group>"; };
 		D5E2935C2EC410DD00034D78 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2D9AF13869B278F9B8C36D75 /* UnitSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitSection.swift; sourceTree = "<group>"; };
 		D5E293752EC4110700034D78 /* ProgressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionTests.swift; sourceTree = "<group>"; };
 		D5E293762EC4110700034D78 /* ReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadinessTests.swift; sourceTree = "<group>"; };
 		D5E293832EC6B59700034D78 /* SwapMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwapMap.swift; sourceTree = "<group>"; };
@@ -567,6 +571,7 @@
 			children = (
 				D58477142F42851700FE3F46 /* MesoRolloverGuardSheet.swift */,
 				D5E2935C2EC410DD00034D78 /* SettingsView.swift */,
+				2D9AF13869B278F9B8C36D75 /* UnitSection.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -625,6 +630,7 @@
 				01D6AF5B5E514DC7A33FE054 /* E1RMCalculatorTests.swift */,
 				E056F9E2B49B8D5D8132BB67 /* LoadUnitTests.swift */,
 				2857EC9311418397E36CD580 /* KgRoundingMatrixTests.swift */,
+				59D447E5337D1D77F70746CC /* UnitSwitchTests.swift */,
 				E3C7251BF2CB059763DAF7C3 /* UnitDisplayInputTests.swift */,
 				066CBF7C76DD4D24BC85F1E1 /* StubTests.swift */,
 				9EAFEBBB6E3C4C7FA7333DE1 /* TestOpenQuestions.swift */,
@@ -807,6 +813,7 @@
 				D5846D622FB4ECA700797E98 /* CustomExercise.swift in Sources */,
 				D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */,
 				D5E2936B2EC410DD00034D78 /* SettingsView.swift in Sources */,
+				F46F5A1658B5ACC82E75CF9C /* UnitSection.swift in Sources */,
 				D53214222FC218F100E01E39 /* FlowLayout.swift in Sources */,
 				D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */,
 				D5839A4B2FDF0B640074635A /* MechanicalLoadHealthKitService.swift in Sources */,
@@ -910,6 +917,7 @@
 				21FD187947C247CEB845E943 /* E1RMCalculatorTests.swift in Sources */,
 				EB651817D14BF0BBD8475B8D /* LoadUnitTests.swift in Sources */,
 				B735C4CD2415F4E063B3E17D /* KgRoundingMatrixTests.swift in Sources */,
+				F4E84E23ED9206233A1DB18C /* UnitSwitchTests.swift in Sources */,
 				DA2AEDBECF2059385D474BC6 /* UnitDisplayInputTests.swift in Sources */,
 				F372A1507F1D4522BC9526D7 /* StubTests.swift in Sources */,
 				88AB06C99F324E7BB528B957 /* TestOpenQuestions.swift in Sources */,

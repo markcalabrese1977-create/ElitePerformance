@@ -121,6 +121,7 @@ enum ProgramApplicationService {
             profile.equipmentChecklist = Set(result.equipmentChecklist)
             profile.injuryFlags = result.injuryFlags
             profile.minLoadIncrement = result.minLoadIncrement
+            profile.loadUnit = result.unit
         } else {
             let profile = UserProfile(
                 experience: result.experience,
@@ -129,7 +130,8 @@ enum ProgramApplicationService {
                 sessionLengthMinutes: result.sessionLengthMinutes,
                 equipmentProfile: result.equipmentProfile,
                 injuryFlags: result.injuryFlags,
-                minLoadIncrement: result.minLoadIncrement
+                minLoadIncrement: result.minLoadIncrement,
+                unit: result.unit
             )
             profile.equipmentPreset = result.equipmentPreset
             profile.equipmentChecklist = Set(result.equipmentChecklist)

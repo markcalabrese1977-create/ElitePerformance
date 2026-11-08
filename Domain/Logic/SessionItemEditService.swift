@@ -2025,3 +2025,162 @@ extension SessionItemEditService {
         return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
     }
 }
+
+// MARK: - Round planned loads to the lifter's unit steps (after a unit switch)
+
+extension SessionItemEditService {
+
+    struct RoundTarget {
+        let session: Session
+        let item: SessionItem
+        let date: Date
+        let weekIndex: Int
+        let waveRaw: String?
+        let beforeSuggested: Double
+        let beforeLoads: [Double]
+        let afterSuggested: Double
+        let afterLoads: [Double]
+        /// Loads (suggested + per-set) whose value moves.
+        let changedLoads: Int
+    }
+
+    struct RoundPlan {
+        let meso: MesoBlock?
+        let unit: LoadUnit
+        /// In `unit`.
+        let increment: Double
+        let now: Date
+        let targets: [RoundTarget]
+
+        var isApplicable: Bool { !targets.isEmpty }
+        /// Distinct loads that move (the "N" of "Round N planned loads").
+        var loadCount: Int { targets.reduce(0) { $0 + $1.changedLoads } }
+    }
+
+    /// "Round 18 planned loads to kg steps" (the confirm title).
+    static func roundPreviewTitle(_ plan: RoundPlan) -> String {
+        "Round \(plan.loadCount) planned load\(plan.loadCount == 1 ? "" : "s") to \(plan.unit.label) steps"
+    }
+
+    /// "In 6 planned sessions, to the nearest 1.25 kg. Completed and started sessions are not touched."
+    static func roundPreviewDetail(_ plan: RoundPlan) -> String {
+        "In \(plan.targets.count) planned exercise\(plan.targets.count == 1 ? "" : "s"), to the nearest "
+            + "\(LoadFormatter(unit: plan.unit).textInUnit(plan.increment)). Completed and started sessions are not touched."
+    }
+
+    /// The load after rounding: nearest `increment` in `unit`, never above the exercise's max load. Zero (bodyweight,
+    /// unset) stays zero.
+    private static func roundedForUnit(_ load: Double, item: SessionItem, plan unit: LoadUnit, increment: Double,
+                                       profile: UserProfile?, custom: [CustomExercise]) -> Double {
+        guard load > 0 else { return load }
+        let rounded = UnitAwareRounding.round(load, increment: increment, unit: unit, mode: .nearest)
+        return UserProfile.clampedLoad(rounded, exerciseId: item.exerciseId, profile: profile, customExercises: custom)
+    }
+
+    /// Plan (no writes): the active block's planned, untouched sessions dated today or later. Fixed-load lifts keep the
+    /// load the lifter set. `meso` nil: nothing to do.
+    static func planRoundToUnit(
+        meso: MesoBlock?, unit: LoadUnit, increment: Double, profile: UserProfile?,
+        customExercises: [CustomExercise] = [], now: Date = Date()
+    ) -> RoundPlan {
+        func empty() -> RoundPlan { RoundPlan(meso: meso, unit: unit, increment: increment, now: now, targets: []) }
+        guard let meso, meso.status == .active, increment > 0 else { return empty() }
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        var targets: [RoundTarget] = []
+        for session in meso.sessions.sorted(by: { $0.date < $1.date }) {
+            guard session.status == .planned, session.date >= startOfToday,
+                  SessionEditSafety.isSafeToModify(session) else { continue }
+            for item in session.items {
+                if UserProfile.isProgressionExempt(exerciseId: item.exerciseId, profile: profile) { continue }
+                if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId, customExercises: customExercises) { continue }
+                func r(_ v: Double) -> Double {
+                    roundedForUnit(v, item: item, plan: unit, increment: increment, profile: profile, custom: customExercises)
+                }
+                let afterSuggested = r(item.suggestedLoad)
+                let afterLoads = item.plannedLoadsBySet.map(r)
+                var changed = 0
+                if abs(afterSuggested - item.suggestedLoad) > 1e-9 { changed += 1 }
+                for (a, b) in zip(afterLoads, item.plannedLoadsBySet) where abs(a - b) > 1e-9 { changed += 1 }
+                guard changed > 0 else { continue }
+                targets.append(RoundTarget(
+                    session: session, item: item, date: session.date, weekIndex: session.weekIndex, waveRaw: item.waveRaw,
+                    beforeSuggested: item.suggestedLoad, beforeLoads: item.plannedLoadsBySet,
+                    afterSuggested: afterSuggested, afterLoads: afterLoads, changedLoads: changed
+                ))
+            }
+        }
+        return RoundPlan(meso: meso, unit: unit, increment: increment, now: now, targets: targets)
+    }
+
+    /// Applies the plan to live state only; verifies each item (loads are the rounded ones, planEdited and everything
+    /// else untouched) and restores everything on any problem.
+    @discardableResult
+    static func applyRoundToUnit(
+        _ plan: RoundPlan, profile: UserProfile?, customExercises: [CustomExercise] = [],
+        in context: ModelContext, hooks: ApplyHooks = ApplyHooks()
+    ) throws -> ApplyResult {
+        guard plan.isApplicable else { throw ReplaceError.nothingToReplace }
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let live = planRoundToUnit(meso: plan.meso, unit: plan.unit, increment: plan.increment, profile: profile,
+                                   customExercises: customExercises, now: plan.now)
+        let plannedIDs = plan.targets.map { $0.item.persistentModelID }
+        let liveIDs = live.targets.map { $0.item.persistentModelID }
+        guard plannedIDs == liveIDs else {
+            throw ReplaceError.planStale(planned: plannedIDs.count, live: liveIDs.count)
+        }
+
+        if context.hasChanges { try context.save() }
+
+        let restorePoints = live.targets.map { ItemRestorePoint($0.item) }
+        func abandon() {
+            for point in restorePoints { point.restore() }
+            context.rollback()
+        }
+
+        var summary: [String] = []
+        for target in live.targets {
+            target.item.suggestedLoad = target.afterSuggested
+            target.item.plannedLoadsBySet = target.afterLoads
+            // planEdited is left alone (verified below): re-rounding to the unit's steps neither sets nor clears it.
+            let line = "SessionItemEdit: round \(isoDay(target.date)) \(target.session.dayLabel ?? "?") wk\(target.weekIndex) "
+                + "\(target.item.exerciseId) \(target.changedLoads) load(s) to \(plan.unit.label) steps"
+            summary.append(line)
+            print(line)
+        }
+
+        var problems: [String] = []
+        for (target, point) in zip(live.targets, restorePoints) {
+            let i = target.item
+            func check<T: Equatable>(_ name: String, _ expected: T, _ actual: T) {
+                if expected != actual { problems.append("\(i.exerciseId) wk\(target.weekIndex): \(name): expected \(expected), found \(actual)") }
+            }
+            check("suggestedLoad", target.afterSuggested, i.suggestedLoad)
+            check("plannedLoads", target.afterLoads, i.plannedLoadsBySet)
+            check("planEdited", point.planEdited, i.planEdited)
+            check("actualLoads", point.actualLoads, i.actualLoads); check("actualReps", point.actualReps, i.actualReps)
+            check("actualRIRs", point.actualRIRs, i.actualRIRs); check("isCompleted", point.isCompleted, i.isCompleted)
+            check("targetSets", point.targetSets, i.targetSets); check("prescribedSets", point.prescribedSets, i.prescribedSets)
+            check("plannedReps", point.plannedReps, i.plannedRepsBySet); check("plannedRIRs", point.plannedRIRs, i.plannedRIRsBySet)
+            check("roles", point.roles, i.setRolesBySet); check("exerciseId", point.exerciseId, i.exerciseId)
+            check("session status", SessionStatus.planned, target.session.status)
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+
+        guard problems.isEmpty else {
+            abandon()
+            throw ReplaceError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw ReplaceError.saveFailed("\(error)")
+        }
+        return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
+    }
+}

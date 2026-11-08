@@ -45,12 +45,14 @@ struct OnboardingResult: Codable {
     var equipmentPreset: EquipmentPreset = .fullGym
     /// Explicit gear checklist; empty means "use the preset's defaults".
     var equipmentChecklist: [GearTag] = []
+    /// The unit the lifter sees loads in; `minLoadIncrement` is in this unit. Results encoded before kg support decode as lb.
+    var unit: LoadUnit = .lb
 }
 
 extension OnboardingResult {
     private enum CodingKeys: String, CodingKey {
         case goal, experience, daysPerWeek, trainingDaysOfWeek, equipmentProfile, sessionLengthMinutes
-        case injuryFlags, minLoadIncrement, startDate, equipmentPreset, equipmentChecklist
+        case injuryFlags, minLoadIncrement, startDate, equipmentPreset, equipmentChecklist, unit
     }
 
     /// Results encoded before the preset and checklist existed decode as full gym with no checklist.
@@ -67,7 +69,8 @@ extension OnboardingResult {
             minLoadIncrement: try c.decode(Double.self, forKey: .minLoadIncrement),
             startDate: try c.decode(Date.self, forKey: .startDate),
             equipmentPreset: try c.decodeIfPresent(EquipmentPreset.self, forKey: .equipmentPreset) ?? .fullGym,
-            equipmentChecklist: try c.decodeIfPresent([GearTag].self, forKey: .equipmentChecklist) ?? []
+            equipmentChecklist: try c.decodeIfPresent([GearTag].self, forKey: .equipmentChecklist) ?? [],
+            unit: try c.decodeIfPresent(LoadUnit.self, forKey: .unit) ?? .lb
         )
     }
 }
@@ -181,6 +184,7 @@ struct OnboardingDraft: Equatable {
     var checklist: Set<GearTag> = []
     var sessionLengthMinutes: Int = 60
     var loadIncrement: Double = 2.5
+    var unit: LoadUnit = .lb
     var injuryFlags: Set<InjuryFlag> = []
 
     init() {}
@@ -194,6 +198,7 @@ struct OnboardingDraft: Equatable {
         checklist = profile.equipmentChecklist
         sessionLengthMinutes = profile.sessionLengthMinutes
         loadIncrement = profile.minLoadIncrement
+        unit = profile.loadUnit
         injuryFlags = Set(profile.injuryFlags)
     }
 
@@ -224,7 +229,8 @@ struct OnboardingDraft: Equatable {
             minLoadIncrement: loadIncrement,
             startDate: startDate,
             equipmentPreset: preset,
-            equipmentChecklist: checklist == preset.defaultEquipment ? [] : checklist.sorted { $0.rawValue < $1.rawValue }
+            equipmentChecklist: checklist == preset.defaultEquipment ? [] : checklist.sorted { $0.rawValue < $1.rawValue },
+            unit: unit
         )
     }
 }
@@ -253,6 +259,7 @@ struct OnboardingFlowView: View {
     @State private var selectedChecklist: Set<GearTag>
     @State private var sessionLengthMinutes: Int
     @State private var selectedLoadIncrement: Double
+    @State private var selectedUnit: LoadUnit
 
     // Page 5 — Joint limitations
     @State private var selectedInjuryFlags: Set<InjuryFlag>
@@ -300,6 +307,7 @@ struct OnboardingFlowView: View {
         _selectedChecklist = State(initialValue: draft.checklist)
         _sessionLengthMinutes = State(initialValue: draft.sessionLengthMinutes)
         _selectedLoadIncrement = State(initialValue: draft.loadIncrement)
+        _selectedUnit = State(initialValue: draft.unit)
         _selectedInjuryFlags = State(initialValue: draft.injuryFlags)
         let calendar = Calendar.current
         _mesoStartDate = State(
@@ -531,13 +539,31 @@ struct OnboardingFlowView: View {
                         set: { newPreset in
                             selectedPreset = newPreset
                             // Auto-set sensible load increment defaults
-                            if selectedLoadIncrement == 2.5 || selectedLoadIncrement == 1.25 || selectedLoadIncrement == 5.0 {
+                            if UnitAwareRounding.incrementChoices(unit: selectedUnit).contains(selectedLoadIncrement) {
                                 selectedLoadIncrement = defaultLoadIncrement(for: newPreset.legacyProfile)
                             }
                         }
                     ),
                     checklist: $selectedChecklist
                 )
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Units")
+                    .font(.subheadline.bold())
+
+                Picker("Units", selection: Binding(
+                    get: { selectedUnit },
+                    set: { newUnit in
+                        guard newUnit != selectedUnit else { return }
+                        selectedUnit = newUnit
+                        // The increment is in the lifter's unit: reset it to the new unit's default for this gear.
+                        selectedLoadIncrement = defaultLoadIncrement(for: selectedPreset.legacyProfile)
+                    }
+                )) {
+                    ForEach(LoadUnit.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -549,7 +575,7 @@ struct OnboardingFlowView: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
-                    ForEach([1.25, 2.5, 5.0], id: \.self) { increment in
+                    ForEach(UnitAwareRounding.incrementChoices(unit: selectedUnit), id: \.self) { increment in
                         Button {
                             selectedLoadIncrement = increment
                         } label: {
@@ -582,15 +608,12 @@ struct OnboardingFlowView: View {
     }
 
     private func defaultLoadIncrement(for profile: EquipmentProfile) -> Double {
-        switch profile {
-        case .commercial:    return 2.5
-        case .homeGym:       return 2.5
-        case .dumbbellsOnly: return 5.0
-        }
+        // lb: 2.5, or 5 for dumbbells only. kg: 1.25, or 2.5 for dumbbells only.
+        UnitAwareRounding.defaultIncrement(unit: selectedUnit, coarse: profile == .dumbbellsOnly)
     }
 
     private func formatIncrement(_ value: Double) -> String {
-        value == 1.25 ? "1.25 lb" : value == 2.5 ? "2.5 lb" : "5 lb"
+        LoadFormatter(unit: selectedUnit).textInUnit(value)
     }
 
     // MARK: - Page 5: Joint limitations
@@ -1355,6 +1378,7 @@ struct OnboardingFlowView: View {
         draft.checklist = selectedChecklist
         draft.sessionLengthMinutes = sessionLengthMinutes
         draft.loadIncrement = selectedLoadIncrement
+        draft.unit = selectedUnit
         draft.injuryFlags = selectedInjuryFlags
         let result = draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
 
