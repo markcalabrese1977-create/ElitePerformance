@@ -56,6 +56,8 @@ struct UnitSection: View {
             }
         }
         .onAppear { refreshOffer() }
+        // The offer is worded for the current increment: editing it re-plans the rounding.
+        .onChange(of: profile.minLoadIncrement) { _, _ in refreshOffer() }
         .alert(confirmTitle, isPresented: Binding(get: { pendingUnit != nil }, set: { if !$0 { pendingUnit = nil } })) {
             Button("Switch") { if let unit = pendingUnit { switchTo(unit) } }
             Button("Cancel", role: .cancel) { pendingUnit = nil }
