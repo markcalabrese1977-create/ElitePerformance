@@ -41,6 +41,12 @@ struct LoadFormatter {
         String(format: "%.0f", unit.fromStoredLb(storedLb))
     }
 
+    /// A volume (lb·reps) in thousands, in this unit, rounded: 24,000 lb·reps is 11 in kg.
+    func volumeK(_ storedVolume: Double) -> Int { Int((unit.fromStoredLb(storedVolume) / 1000.0).rounded()) }
+
+    /// "11k kg" / "11k lb".
+    func volumeKText(_ k: Int) -> String { "\(k)k \(unit.label)" }
+
     /// A logged set's load in a list: lb keeps the whole-number format it always had; kg keeps its decimals (a 1.25 kg
     /// step would otherwise read as the wrong whole number).
     func setLoad(_ storedLb: Double) -> String {

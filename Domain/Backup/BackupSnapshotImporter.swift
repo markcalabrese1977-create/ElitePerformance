@@ -49,6 +49,9 @@ enum BackupSnapshotImporter {
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
             // nil (old backup, or a lb lifter) stays nil = lb.
             profile.unitRaw = dto.unitRaw
+            profile.savedIncrementLb = dto.savedIncrementLb
+            profile.savedIncrementKg = dto.savedIncrementKg
+            profile.roundOfferPending = dto.roundOfferPending
             modelContext.insert(profile)
         }
 

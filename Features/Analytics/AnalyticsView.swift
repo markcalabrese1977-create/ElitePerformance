@@ -95,7 +95,7 @@ struct AnalyticsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(r.estimatedVolumeK)k")
+                Text(LoadFormatter(unit: unit).volumeKText(r.estimatedVolumeK))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -173,7 +173,7 @@ struct AnalyticsView: View {
                 exerciseId: a.exerciseId,
                 exerciseName: a.exerciseName,
                 loggedEntries: a.loggedEntries,
-                estimatedVolumeK: Int((unit.fromStoredLb(a.volume) / 1000.0).rounded())
+                estimatedVolumeK: LoadFormatter(unit: unit).volumeK(a.volume)
             )
         }
         .sorted {

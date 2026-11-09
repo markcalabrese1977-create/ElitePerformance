@@ -130,6 +130,39 @@ final class UserProfile {
         set { unitRaw = newValue == .lb ? nil : newValue.rawValue }
     }
 
+    /// The last `minLoadIncrement` the lifter had in each unit, remembered when they switch away from it (the live
+    /// value is `minLoadIncrement`, in the current unit). nil = never switched away: the unit's default applies.
+    var savedIncrementLb: Double? = nil
+    var savedIncrementKg: Double? = nil
+
+    /// True from a unit switch until the lifter answers the "round planned loads" offer (Round or Keep as is).
+    /// nil / false = nothing to offer, so a lifter who never switched is never prompted.
+    var roundOfferPending: Bool? = nil
+
+    func savedIncrement(for unit: LoadUnit) -> Double? { unit == .lb ? savedIncrementLb : savedIncrementKg }
+
+    /// Remembers the live increment as `unit`'s last value.
+    func rememberIncrement(for unit: LoadUnit) {
+        if unit == .lb { savedIncrementLb = minLoadIncrement } else { savedIncrementKg = minLoadIncrement }
+    }
+
+    /// The increment a unit starts with the first time it is chosen: lb 2.5 (5 for dumbbells only), kg 1.25 (2.5).
+    func defaultIncrement(for unit: LoadUnit) -> Double {
+        UnitAwareRounding.defaultIncrement(unit: unit, coarse: equipmentProfile == .dumbbellsOnly)
+    }
+
+    /// Switches how loads are shown and typed. Stored loads are lb and never change here. The increment (stored in the
+    /// current unit) is remembered for the unit being left and restored for the one being entered (its default the
+    /// first time). The round offer is raised: the planned loads may now be off the new unit's steps.
+    func switchLoadUnit(to new: LoadUnit) {
+        let old = loadUnit
+        guard new != old else { return }
+        rememberIncrement(for: old)
+        loadUnit = new
+        minLoadIncrement = savedIncrement(for: new) ?? defaultIncrement(for: new)
+        roundOfferPending = true
+    }
+
     /// Per-exercise "fixed load" exemptions: canonical exerciseIds whose load never
     /// auto-progresses (fixed-load track; the lifter raises it).
     ///

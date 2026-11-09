@@ -2055,17 +2055,39 @@ extension SessionItemEditService {
         var isApplicable: Bool { !targets.isEmpty }
         /// Distinct loads that move (the "N" of "Round N planned loads").
         var loadCount: Int { targets.reduce(0) { $0 + $1.changedLoads } }
+        /// Upcoming sessions that hold at least one of them (the "M" of "across M upcoming sessions").
+        var sessionCount: Int { Set(targets.map { $0.session.persistentModelID }).count }
     }
 
-    /// "Round 18 planned loads to kg steps" (the confirm title).
+    /// "Round 18 planned loads to kg steps — across 6 upcoming sessions." (the confirm title).
     static func roundPreviewTitle(_ plan: RoundPlan) -> String {
         "Round \(plan.loadCount) planned load\(plan.loadCount == 1 ? "" : "s") to \(plan.unit.label) steps"
+            + " — across \(plan.sessionCount) upcoming session\(plan.sessionCount == 1 ? "" : "s")."
     }
 
-    /// "In 6 planned sessions, to the nearest 1.25 kg. Completed and started sessions are not touched."
+    /// "To the nearest 1.25 kg. Completed and started sessions are not touched."
     static func roundPreviewDetail(_ plan: RoundPlan) -> String {
-        "In \(plan.targets.count) planned exercise\(plan.targets.count == 1 ? "" : "s"), to the nearest "
-            + "\(LoadFormatter(unit: plan.unit).textInUnit(plan.increment)). Completed and started sessions are not touched."
+        "To the nearest \(LoadFormatter(unit: plan.unit).textInUnit(plan.increment)). Completed and started sessions are not touched."
+    }
+
+    /// The round offer to show now, or nil. It is open from a unit switch until answered: Round (which leaves nothing
+    /// off-step) or Keep as is (`dismissRoundOffer`). An offer with nothing left to round closes itself. A lifter who
+    /// never switched has no open offer, so loads that are simply typed off-step never prompt.
+    static func pendingRoundOffer(profile: UserProfile, in context: ModelContext, now: Date = Date()) -> RoundPlan? {
+        guard profile.roundOfferPending == true else { return nil }
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let plan = planRoundToUnit(meso: activeMeso(in: context), unit: profile.loadUnit,
+                                   increment: profile.minLoadIncrement, profile: profile, customExercises: custom, now: now)
+        if plan.isApplicable { return plan }
+        profile.roundOfferPending = nil
+        try? context.save()
+        return nil
+    }
+
+    /// "Keep as is": the offer stays closed until the next unit switch.
+    static func dismissRoundOffer(profile: UserProfile, in context: ModelContext) {
+        profile.roundOfferPending = nil
+        try? context.save()
     }
 
     /// The load after rounding: nearest `increment` in `unit`, never above the exercise's max load. Zero (bodyweight,

@@ -95,7 +95,9 @@ final class UnitSwitchTests: XCTestCase {
         let plan = SessionItemEditService.planRoundToUnit(meso: w.meso, unit: .kg, increment: 2.5, profile: w.profile)
         XCTAssertEqual(plan.targets.count, 2, "bench and row move; the unset leg extension and logged items do not")
         XCTAssertEqual(plan.loadCount, 8, "2 items x (suggested + 3 slots)")
-        XCTAssertEqual(SessionItemEditService.roundPreviewTitle(plan), "Round 8 planned loads to kg steps")
+        XCTAssertEqual(plan.sessionCount, 1)
+        XCTAssertEqual(SessionItemEditService.roundPreviewTitle(plan), "Round 8 planned loads to kg steps — across 1 upcoming session.")
+        XCTAssertEqual(SessionItemEditService.roundPreviewDetail(plan), "To the nearest 2.5 kg. Completed and started sessions are not touched.")
         let result = try SessionItemEditService.applyRoundToUnit(plan, profile: w.profile, in: w.ctx)
         XCTAssertEqual(result.sessionsChanged, 2)
 
@@ -159,6 +161,113 @@ final class UnitSwitchTests: XCTestCase {
         let plan = SessionItemEditService.planRoundToUnit(meso: w.meso, unit: .kg, increment: 2.5, profile: w.profile)
         XCTAssertFalse(plan.isApplicable)
         XCTAssertThrowsError(try SessionItemEditService.applyRoundToUnit(plan, profile: w.profile, in: w.ctx))
+    }
+
+    // MARK: Increment memory
+
+    func test_incrementIsRememberedPerUnit() throws {
+        let w = try makeWorld()
+        w.profile.minLoadIncrement = 5                                  // a lb lifter on 5 lb
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertEqual(w.profile.minLoadIncrement, 1.25, "first visit to kg: its default")
+        XCTAssertEqual(w.profile.savedIncrementLb, 5)
+        w.profile.switchLoadUnit(to: .lb)
+        XCTAssertEqual(w.profile.minLoadIncrement, 5, "lb 5 -> kg -> lb restores 5")
+        XCTAssertEqual(w.profile.savedIncrementKg, 1.25)
+        w.profile.switchLoadUnit(to: .kg)
+        w.profile.minLoadIncrement = 2.5                                // the lifter picks 2.5 kg
+        w.profile.switchLoadUnit(to: .lb)
+        XCTAssertEqual(w.profile.minLoadIncrement, 5)
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertEqual(w.profile.minLoadIncrement, 2.5, "kg restores its own last value")
+        let before = w.profile.minLoadIncrement
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertEqual(w.profile.minLoadIncrement, before, "switching to the current unit is a no-op")
+    }
+
+    func test_firstSwitchUsesTheUnitDefault_dumbbellsOnlyIsCoarser() throws {
+        let w = try makeWorld()
+        w.profile.equipmentProfile = .dumbbellsOnly
+        w.profile.minLoadIncrement = 5
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertEqual(w.profile.minLoadIncrement, 2.5)
+        let fresh = UserProfile()
+        fresh.switchLoadUnit(to: .kg)
+        XCTAssertEqual(fresh.minLoadIncrement, 1.25)
+        XCTAssertNil(UserProfile().savedIncrementKg)
+    }
+
+    func test_reOnboardingInAnotherUnit_remembersTheOldIncrement() throws {
+        let w = try makeWorld()
+        w.profile.minLoadIncrement = 5
+        var draft = OnboardingDraft()
+        draft.unit = .kg; draft.loadIncrement = 1.25
+        ProgramApplicationService.writeUserProfile(from: draft.result(startDate: Date()), context: w.ctx)
+        XCTAssertEqual(w.profile.loadUnit, .kg)
+        XCTAssertEqual(w.profile.savedIncrementLb, 5)
+        w.profile.switchLoadUnit(to: .lb)
+        XCTAssertEqual(w.profile.minLoadIncrement, 5)
+    }
+
+    // MARK: The round offer persists until answered
+
+    func test_offerIsOpenFromTheSwitchUntilAnswered() throws {
+        let w = try makeWorld()
+        XCTAssertNil(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx),
+                     "a lifter who never switched is never prompted, even with off-step loads")
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertEqual(w.profile.roundOfferPending, true)
+        let first = try XCTUnwrap(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        XCTAssertEqual(first.unit, .kg)
+        // Settings closed and reopened without answering: offered again.
+        let again = try XCTUnwrap(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        XCTAssertEqual(again.loadCount, first.loadCount)
+        // Keep as is: closed.
+        SessionItemEditService.dismissRoundOffer(profile: w.profile, in: w.ctx)
+        XCTAssertNil(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        // The next switch raises it again, per switch.
+        w.profile.switchLoadUnit(to: .lb)
+        XCTAssertEqual(w.profile.roundOfferPending, true)
+        w.profile.switchLoadUnit(to: .kg)
+        XCTAssertNotNil(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+    }
+
+    func test_offerClosesAfterRound_andWhenNothingIsOffStep() throws {
+        let w = try makeWorld()
+        w.profile.switchLoadUnit(to: .kg)
+        let plan = try XCTUnwrap(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        try SessionItemEditService.applyRoundToUnit(plan, profile: w.profile, in: w.ctx)
+        SessionItemEditService.dismissRoundOffer(profile: w.profile, in: w.ctx)
+        XCTAssertNil(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        // An open offer with nothing off-step closes itself.
+        w.profile.roundOfferPending = true
+        XCTAssertNil(SessionItemEditService.pendingRoundOffer(profile: w.profile, in: w.ctx))
+        XCTAssertNil(w.profile.roundOfferPending)
+    }
+
+    func test_backup_carriesTheMemoryAndTheOpenOffer() throws {
+        let w = try makeWorld()
+        w.profile.minLoadIncrement = 5
+        w.profile.switchLoadUnit(to: .kg)
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: w.ctx)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        let dto = try XCTUnwrap(json["userProfile"] as? [String: Any])
+        XCTAssertEqual(dto["savedIncrementLb"] as? Double, 5)
+        XCTAssertEqual(dto["roundOfferPending"] as? Bool, true)
+        // An old backup (keys absent) restores with no memory and no open offer.
+        let decoded = try JSONDecoder().decode(UserProfileBackupDTO.self, from: Data("{}".utf8))
+        XCTAssertNil(decoded.savedIncrementLb); XCTAssertNil(decoded.savedIncrementKg); XCTAssertNil(decoded.roundOfferPending)
+    }
+
+    // MARK: Analytics volume
+
+    func test_analyticsVolume_convertedAndLabelled() {
+        let lb = LoadFormatter(unit: .lb), kg = LoadFormatter(unit: .kg)
+        XCTAssertEqual(lb.volumeK(24_000), 24)
+        XCTAssertEqual(lb.volumeKText(lb.volumeK(24_000)), "24k lb", "lb gains only the unit label")
+        XCTAssertEqual(kg.volumeK(24_000), 11, "24,000 lb·reps = 10,886 kg·reps")
+        XCTAssertEqual(kg.volumeKText(kg.volumeK(24_000)), "11k kg")
+        XCTAssertEqual(lb.volumeK(499), 0)
     }
 
     // MARK: Onboarding

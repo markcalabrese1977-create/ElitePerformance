@@ -60,6 +60,11 @@ struct UserProfileBackupDTO: Codable {
     // Added (kg support): "lb" | "kg". Optional so OLD backups decode with nil, which means lb. Loads in a backup are
     // always lb; only minLoadIncrement is in this unit.
     var unitRaw: String? = nil
+    // Added (kg support): each unit's last increment, and whether the round-planned-loads offer is still open. Optional,
+    // so old backups decode with nil (no remembered increment, no open offer).
+    var savedIncrementLb: Double? = nil
+    var savedIncrementKg: Double? = nil
+    var roundOfferPending: Bool? = nil
 }
 
 // MARK: - AppState

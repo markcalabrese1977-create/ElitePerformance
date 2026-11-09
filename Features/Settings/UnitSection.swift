@@ -2,9 +2,10 @@ import SwiftUI
 import SwiftData
 
 /// Settings > Units. Switching changes how every load is shown and typed, right away: stored loads are always lb, so
-/// history is never rewritten. The smallest increment (stored in the lifter's unit) resets to the new unit's default
-/// after a confirm, and the planned loads can then be rounded to the new unit's steps (inline preview, like the max
-/// clamp). Cancel writes nothing.
+/// history is never rewritten. The smallest increment (stored in the lifter's unit) is restored to that unit's last
+/// value after a confirm (its default the first time), and the planned loads can then be rounded to the new unit's
+/// steps (inline preview, like the max clamp). The offer stays open until answered and is shown again whenever Settings
+/// opens; "Keep as is" closes it until the next switch. Cancel writes nothing.
 struct UnitSection: View {
     @Bindable var profile: UserProfile
     @Environment(\.modelContext) private var modelContext
@@ -40,7 +41,10 @@ struct UnitSection: View {
                         Text(roundError).font(.caption).foregroundStyle(.red)
                     }
                     HStack {
-                        Button("Keep as is") { roundPlan = nil; roundError = nil }
+                        Button("Keep as is") {
+                            SessionItemEditService.dismissRoundOffer(profile: profile, in: modelContext)
+                            roundPlan = nil; roundError = nil
+                        }
                             .buttonStyle(.bordered)
                         Spacer()
                         Button("Round") { applyRound(plan) }
@@ -51,39 +55,41 @@ struct UnitSection: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
             }
         }
+        .onAppear { refreshOffer() }
         .alert(confirmTitle, isPresented: Binding(get: { pendingUnit != nil }, set: { if !$0 { pendingUnit = nil } })) {
             Button("Switch") { if let unit = pendingUnit { switchTo(unit) } }
             Button("Cancel", role: .cancel) { pendingUnit = nil }
         } message: {
             if let unit = pendingUnit {
                 Text("Loads are shown and typed in \(unit.label) from now on. Logged history is not changed. "
-                     + "Your smallest increment resets to \(LoadFormatter(unit: unit).textInUnit(defaultIncrement(for: unit))).")
+                     + "Your smallest increment becomes \(LoadFormatter(unit: unit).textInUnit(incrementOnEntering(unit))).")
             }
         }
     }
 
-    private func defaultIncrement(for unit: LoadUnit) -> Double {
-        UnitAwareRounding.defaultIncrement(unit: unit, coarse: profile.equipmentProfile == .dumbbellsOnly)
+    /// What the increment will be after switching: that unit's last value, else its default.
+    private func incrementOnEntering(_ unit: LoadUnit) -> Double {
+        profile.savedIncrement(for: unit) ?? profile.defaultIncrement(for: unit)
     }
 
     private func switchTo(_ unit: LoadUnit) {
         pendingUnit = nil
         roundError = nil
-        profile.loadUnit = unit
-        profile.minLoadIncrement = defaultIncrement(for: unit)
+        profile.switchLoadUnit(to: unit)
         try? modelContext.save()
-        let custom = (try? modelContext.fetch(FetchDescriptor<CustomExercise>())) ?? []
-        let plan = SessionItemEditService.planRoundToUnit(
-            meso: SessionItemEditService.activeMeso(in: modelContext), unit: unit,
-            increment: profile.minLoadIncrement, profile: profile, customExercises: custom
-        )
-        roundPlan = plan.isApplicable ? plan : nil
+        refreshOffer()
+    }
+
+    /// Shows the round offer while one is open (from a switch until answered), so it survives leaving and reopening Settings.
+    private func refreshOffer() {
+        roundPlan = SessionItemEditService.pendingRoundOffer(profile: profile, in: modelContext)
     }
 
     private func applyRound(_ plan: SessionItemEditService.RoundPlan) {
         let custom = (try? modelContext.fetch(FetchDescriptor<CustomExercise>())) ?? []
         do {
             try SessionItemEditService.applyRoundToUnit(plan, profile: profile, customExercises: custom, in: modelContext)
+            SessionItemEditService.dismissRoundOffer(profile: profile, in: modelContext)
             roundPlan = nil
             roundError = nil
         } catch {

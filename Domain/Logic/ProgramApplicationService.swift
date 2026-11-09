@@ -120,6 +120,8 @@ enum ProgramApplicationService {
             profile.equipmentPreset = result.equipmentPreset
             profile.equipmentChecklist = Set(result.equipmentChecklist)
             profile.injuryFlags = result.injuryFlags
+            // Re-onboarding in another unit: remember the increment of the unit being left.
+            if profile.loadUnit != result.unit { profile.rememberIncrement(for: profile.loadUnit) }
             profile.minLoadIncrement = result.minLoadIncrement
             profile.loadUnit = result.unit
         } else {
