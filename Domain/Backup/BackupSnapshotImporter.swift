@@ -283,6 +283,8 @@ enum BackupSnapshotImporter {
                 createdAt: dto.createdAt,
                 isBodyweight: dto.isBodyweight ?? false
             )
+            custom.fineMuscleRaw = dto.fineMuscleRaw
+            custom.fineSecondaryShares = dto.fineSecondaryShares
             modelContext.insert(custom)
         }
 

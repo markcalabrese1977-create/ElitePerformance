@@ -290,4 +290,7 @@ struct CustomExerciseBackupDTO: Codable {
     let isCompound: Bool
     let createdAt: Date
     let isBodyweight: Bool?
+    /// Analytics fine-muscle mapping. Absent in old backups: not mapped.
+    var fineMuscleRaw: String? = nil
+    var fineSecondaryShares: [String: Double]? = nil
 }

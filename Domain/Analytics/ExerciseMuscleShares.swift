@@ -6,7 +6,7 @@ import Foundation
 /// muscle can credit indirect work (a bench press trains triceps and front delts) without double counting everything at
 /// full value. The table is data; the review CSV (`ExerciseMuscleShares.csv()`) lists every row for checking.
 ///
-/// A custom exercise has no row: it is credited 1.0 to the fine primary of its coarse group (`FineMuscle.primary(forCoarse:)`).
+/// A custom exercise has no row: its mapping is `CustomExercise.fineShares` (set by the lifter), else it is "unmapped".
 enum ExerciseMuscleShares {
 
     /// Canonical exercise id -> fine muscle -> share (primary 1.0, secondary 0.25 ... 0.5).
@@ -65,7 +65,7 @@ enum ExerciseMuscleShares {
         "russian_twist|abs 1",
         "decline_sit_up|abs 1",
         "toes_to_bar|abs 1, lats .25, forearms .25",
-        "hack_squat|quads 1, glutes .5",
+        "hack_squat|quads 1, glutes .5, adductors .25",
         "leg_press|quads 1, glutes .5, adductors .25",
         "bulgarian_split_squat|quads 1, glutes .5, adductors .25",
         "walking_lunge|quads 1, glutes .5, adductors .25",
@@ -102,7 +102,7 @@ enum ExerciseMuscleShares {
         "pull_up|lats 1, biceps .5, upperBack .25",
         "chin_up|lats 1, biceps .5, upperBack .25",
         "assisted_pull_up|lats 1, biceps .5, upperBack .25",
-        "cable_pullover|lats 1",
+        "cable_pullover|lats 1, triceps .25",
         "incline_rear_delt_fly|rearDelts 1, upperBack .5",
         "dumbbell_lateral_raise|sideDelts 1",
         "seated_smith_machine_shoulder_press|frontDelts 1, sideDelts .5, triceps .5",
@@ -137,12 +137,10 @@ enum ExerciseMuscleShares {
         "dumbbell_pullover|lats 1, chest .5, triceps .25",
     ]
 
-    /// The shares for an exercise (any legacy id spelling). A custom or unknown exercise falls back to its coarse group;
-    /// `.fullBody` and an unknown group have no attribution (empty).
-    static func shares(for exerciseId: String, coarse: MuscleGroup?) -> [FineMuscle: Double] {
-        if let row = table[ExerciseCatalog.canonicalExerciseId(for: exerciseId)] { return row }
-        if let coarse, let primary = FineMuscle.primary(forCoarse: coarse) { return [primary: 1.0] }
-        return [:]
+    /// The built-in shares for an exercise (any legacy id spelling); nil for a custom or unknown exercise, whose mapping
+    /// is the lifter's (`CustomExercise.fineShares`) - never guessed here.
+    static func shares(for exerciseId: String) -> [FineMuscle: Double]? {
+        table[ExerciseCatalog.canonicalExerciseId(for: exerciseId)]
     }
 
     /// Review CSV: one row per built-in exercise, the shares in the fixed muscle order of `FineMuscle.allCases`.

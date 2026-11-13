@@ -45,15 +45,65 @@ final class MuscleVolumeTests: XCTestCase {
         XCTAssertTrue(ExerciseMuscleShares.table.values.contains { $0[.adductors] != nil })
     }
 
-    func test_customExercise_mapsItsCoarseGroupToAFinePrimary() {
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "custom-xyz", coarse: .back), [.lats: 1])
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "custom-xyz", coarse: .shoulders), [.sideDelts: 1])
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "custom-xyz", coarse: .core), [.abs: 1])
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "custom-xyz", coarse: .fullBody), [:], "no single muscle: not attributed")
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "custom-xyz", coarse: nil), [:])
+    func test_customExercise_hasNoRowUntilTheLifterMapsIt() {
+        XCTAssertNil(ExerciseMuscleShares.shares(for: "custom-xyz"), "no guess")
+        XCTAssertEqual(ExerciseMuscleShares.shares(for: "bench_press")?[.chest], 1)
+        XCTAssertEqual(ExerciseMuscleShares.shares(for: "bench-press-legacy-alias-that-does-not-exist"), nil)
+        let c = CustomExercise(id: "custom_a", name: "X", primaryMuscleRaw: "back", isCompound: true)
+        XCTAssertNil(c.fineShares, "unmapped")
+        c.fineMuscleRaw = "upperBack"
+        XCTAssertEqual(c.fineShares, [.upperBack: 1])
+        c.fineSecondaryShares = ["lats": 0.5, "rearDelts": 0.25, "upperBack": 0.5, "biceps": 0.9, "bogus": 0.5, "chest": 0]
+        XCTAssertEqual(c.fineShares, [.upperBack: 1, .lats: 0.5, .rearDelts: 0.25], "the primary is not re-credited; out-of-range and unknown ignored")
+        c.fineMuscleRaw = "notAMuscle"
+        XCTAssertNil(c.fineShares)
         for g in MuscleGroup.allCases where g != .fullBody { XCTAssertNotNil(FineMuscle.primary(forCoarse: g), "\(g)") }
-        // a built-in keeps its row even when a coarse group is passed
-        XCTAssertEqual(ExerciseMuscleShares.shares(for: "bench_press", coarse: .back)[.chest], 1)
+    }
+
+    func test_suggester_copiesTheClosestBuiltIn_andSaysHowSure() {
+        func sug(_ n: String, _ g: MuscleGroup) -> MuscleSuggestion? { MuscleSuggester.suggest(name: n, coarse: g) }
+        XCTAssertEqual(sug("Smith Machine Hip Thrust", .glutes)?.primary, .glutes)
+        XCTAssertEqual(sug("Smith Machine Hip Thrust", .glutes)?.confidence, .exact, "equipment words are ignored")
+        XCTAssertEqual(sug("Chest Supported Barbell Row", .back)?.primary, .upperBack)
+        XCTAssertEqual(sug("Single Leg Press", .quads)?.basedOn, "Leg Press")
+        XCTAssertEqual(sug("Leg Press [Gym]", .quads)?.confidence, .exact, "bracketed notes are ignored")
+        XCTAssertEqual(sug("Seated Smith Machine Calf Raise", .calves)?.basedOn, "Seated Calf Raise")
+        XCTAssertEqual(sug("Smith Machine Romanian Deadlift", .hamstrings)?.basedOn, "Romanian Deadlift")
+        XCTAssertNil(sug("Prone Y-Raise", .shoulders), "only one of its three words matches anything: no suggestion")
+        XCTAssertNil(sug("Zercher Carry Thing", .core))
+        XCTAssertNil(sug("Hip Thrust", .chest), "other muscle groups are not candidates")
+        // equally good matches that disagree on the primary muscle are flagged
+        XCTAssertEqual(sug("Row", .back)?.confidence, .ambiguous)
+    }
+
+    func test_unmappedCustoms_areListedNotGuessedIntoTotals() {
+        let all = sets(0, "bench_press", rows: 2) + sets(0, "custom_row", coarse: .back, rows: 3)
+        let none = MuscleVolume.weekly(in: snap(all), asOf: day(30))
+        XCTAssertEqual(none[0].sets[.chest], 2)
+        XCTAssertNil(none[0].sets[.lats], "an unmapped custom credits no muscle")
+        XCTAssertEqual(none[0].unmappedSets, 3)
+        XCTAssertEqual(none[0].unmappedByExercise, ["custom_row": 3])
+        let mapped = MuscleVolume.weekly(in: snap(all), asOf: day(30), customShares: ["custom_row": [.upperBack: 1, .lats: 0.5]])
+        XCTAssertEqual(mapped[0].sets[.upperBack], 3)
+        XCTAssertEqual(mapped[0].sets[.lats], 1.5)
+        XCTAssertEqual(mapped[0].unmappedSets, 0)
+        XCTAssertEqual(MuscleVolume.customShares(from: [CustomExercise(id: "c", name: "n", primaryMuscleRaw: "back", isCompound: false)]), [:])
+    }
+
+    func test_weekAdherence_flagsWeeksUnder70PercentOfPlannedSessions() {
+        func rec(_ key: String, _ d: Int, _ status: SessionStatus, deload: Bool = false) -> SessionRecord {
+            SessionRecord(key: key, date: day(d), plannedDate: day(d), plannedDateIsExact: true, completedAt: nil, status: status,
+                          weekIndex: 1, dayLabel: nil, mesoKey: "m1", mesoName: nil, isMaintenance: false, isInsertedDeload: false,
+                          isDeloadWeek: deload, readiness: .normal, readinessStars: 0, hkDuration: 0)
+        }
+        // week of Mon 13 Oct: 3 planned, 2 done (67%) ; week of 20 Oct: 3 planned, 3 done
+        let snapshot = AnalyticsSnapshot(
+            sessions: [rec("a", 4, .completed), rec("b", 6, .completed), rec("c", 8, .planned), rec("d", 11, .completed), rec("e", 13, .completed), rec("f", 15, .completed)],
+            sets: sets(4, "leg_extension") + sets(6, "leg_extension") + sets(11, "leg_extension") + sets(13, "leg_extension") + sets(15, "leg_extension"))
+        let w = MuscleVolume.weekly(in: snapshot, asOf: day(30))
+        XCTAssertEqual(w.map(\.plannedSessions), [3, 3])
+        XCTAssertEqual(w.map(\.completedSessions), [2, 3])
+        XCTAssertEqual(w.map(\.isIncomplete), [true, false])
     }
 
     func test_csvHasOneRowPerBuiltIn_andTheMuscleColumns() {
@@ -105,11 +155,6 @@ final class MuscleVolumeTests: XCTestCase {
         all += sets(1, "bench_press", rows: 5, status: .planned)
         let w = MuscleVolume.weekly(in: snap(all), asOf: day(30))
         XCTAssertEqual(w.first?.sets[.chest], 2)
-    }
-
-    func test_customExerciseIsCreditedByItsCoarseGroup_andFullBodyNotAtAll() {
-        let w = MuscleVolume.weekly(in: snap(sets(0, "my-row", coarse: .back) + sets(0, "my-complex", coarse: .fullBody)), asOf: day(30))
-        XCTAssertEqual(w[0].sets, [.lats: 3])
     }
 
     func test_weeksAreIsoWeeks_blockFilter_andCompleteness() {
@@ -207,48 +252,73 @@ final class MuscleVolumeTests: XCTestCase {
         let asOf = (snapshot.sessions.filter { $0.status == .completed }.map(\.date).max() ?? Date()).addingTimeInterval(86_400)
         guard let meso = MuscleVolume.currentMesoKey(in: snapshot) else { return XCTFail("no completed session") }
         let mesoName = snapshot.sessions.first { $0.mesoKey == meso }?.mesoName ?? "?"
-        let ranges = (profile?.muscleSetRanges) ?? MuscleVolumeRanges.defaults
-
-        // Which logged exercises have no share row (customs, unknown)?
-        let ids = Set(snapshot.sets.filter(\.countsAsHardSet).map(\.exerciseId))
-        let unmapped = ids.filter { ExerciseMuscleShares.table[$0] == nil }
-        log("fixture: \(URL(fileURLWithPath: path).lastPathComponent) · as of \(asOf.formatted(date: .abbreviated, time: .omitted)) · current block: \(mesoName)")
-        log("exercises with hard sets: \(ids.count) · without a share row (custom: credited 1.0 to the fine primary of its coarse group): \(unmapped.count)")
-        for id in unmapped.sorted() {
-            let rec = snapshot.sets.first { $0.exerciseId == id }
-            let n = snapshot.sets.filter { $0.exerciseId == id && $0.countsAsHardSet }.count
-            let fine = ExerciseMuscleShares.shares(for: id, coarse: rec?.muscle).keys.first?.displayName ?? "not attributed"
-            log("   \(rec?.exerciseName ?? id) · \(rec?.muscle?.rawValue ?? "?") -> \(fine) · \(n) hard sets all time")
-        }
-        log("")
-
-        let weeks = MuscleVolume.weekly(in: snapshot, mesoKey: meso, asOf: asOf)
-        let complete = weeks.filter(\.isComplete)
-        let last4 = Array(complete.suffix(4))
-        let partial = weeks.first { !$0.isComplete }
+        let ranges = profile?.muscleSetRanges ?? MuscleVolumeRanges.defaults
         func d(_ x: Date) -> String { x.formatted(.dateTime.month(.abbreviated).day()) }
-        log("weeks in the current block: \(weeks.count) (complete \(complete.count)); reporting the last \(last4.count) complete weeks: " + last4.map { "wk of \(d($0.weekStart)) (\($0.sessions) sessions)" }.joined(separator: ", "))
-        if let partial { log("current partial week of \(d(partial.weekStart)): \(partial.sessions) sessions so far (not in the averages)") }
+        func pad(_ x: String, _ n: Int) -> String { x.padding(toLength: n, withPad: " ", startingAt: 0) }
+        func f(_ v: Double) -> String { pad(String(format: "%.1f", v), 7) }
+
+        let explicit = MuscleVolume.customShares(from: customs)
+        let suggested = MuscleVolume.suggestedShares(for: customs)
+        let base = MuscleVolume.weekly(in: snapshot, mesoKey: meso, asOf: asOf, customShares: explicit)
+        let last4 = Array(base.filter(\.isComplete).suffix(4))
+        log("fixture: \(URL(fileURLWithPath: path).lastPathComponent) · as of \(asOf.formatted(date: .abbreviated, time: .omitted)) · current block: \(mesoName)")
+        log("last 4 elapsed weeks: " + last4.map { "wk \(d($0.weekStart)) \($0.completedSessions)/\($0.plannedSessions) sessions\($0.hasDeload ? " DELOAD" : "")\($0.isIncomplete ? " INCOMPLETE" : "")" }.joined(separator: " | "))
         log("")
-        let header = "muscle".padding(toLength: 12, withPad: " ", startingAt: 0) + last4.map { d($0.weekStart).padding(toLength: 7, withPad: " ", startingAt: 0) }.joined()
-            + "avg    direct  range      status"
-        log(header)
-        var below: [String] = [], above: [String] = []
-        for m in FineMuscle.allCases {
-            let vals = last4.map { $0.sets[m] ?? 0 }
-            let avg = vals.isEmpty ? 0 : vals.reduce(0, +) / Double(vals.count)
-            let direct = last4.isEmpty ? 0 : last4.map { $0.directSets[m] ?? 0 }.reduce(0, +) / Double(last4.count)
-            let r = ranges[m] ?? MuscleVolumeRanges.defaults[m]!
-            let st = MuscleVolume.status(avg, range: r)
-            if st == .below { below.append(m.displayName) }
-            if st == .above { above.append(m.displayName) }
-            func f(_ v: Double) -> String { String(format: "%.1f", v).padding(toLength: 7, withPad: " ", startingAt: 0) }
-            log(m.displayName.padding(toLength: 12, withPad: " ", startingAt: 0) + vals.map(f).joined() + f(avg) + f(direct)
-                + "\(Int(r.min))-\(Int(r.max))".padding(toLength: 10, withPad: " ", startingAt: 0) + st.rawValue)
+
+        // The customs.
+        let weekStarts = Set(last4.map(\.weekStart))
+        let usedIds = Set(snapshot.sets.filter(\.countsAsHardSet).map(\.exerciseId)).filter { ExerciseMuscleShares.table[$0] == nil }
+        log("== custom exercises with hard sets (\(usedIds.count)); mapped by you: \(usedIds.filter { explicit[$0] != nil }.count), unmapped: \(usedIds.filter { explicit[$0] == nil }.count)")
+        log(pad("exercise", 42) + pad("coarse", 11) + pad("suggested primary", 19) + pad("conf.", 10) + pad("based on", 30) + "sets last4wk / all-time")
+        func nameOf(_ id: String) -> String { customs.first { $0.id == id }?.name ?? id }
+        for id in usedIds.sorted(by: { nameOf($0) < nameOf($1) }) {
+            let c = customs.first { $0.id == id }
+            let coarse = MuscleGroup(rawValue: c?.primaryMuscleRaw ?? "") ?? .chest
+            let sug = MuscleSuggester.suggest(name: c?.name ?? id, coarse: coarse)
+            let rows = snapshot.sets.filter { $0.exerciseId == id && $0.countsAsHardSet }
+            let recent = rows.filter { weekStarts.contains(FatigueMonitor.weekStart($0.sessionDate)) && $0.mesoKey == meso }.count
+            let who: String = explicit[id] != nil ? "(yours)" : (sug?.primary?.displayName ?? "none")
+            var row: String = pad(c?.name ?? id, 42)
+            row += pad(coarse.rawValue, 11)
+            row += pad(who, 19)
+            row += pad(sug?.confidence.rawValue ?? "-", 10)
+            row += pad(sug?.basedOn ?? "-", 30)
+            row += "\(recent) / \(rows.count)"
+            log(row)
         }
         log("")
-        log("below range: \(below)")
-        log("above range: \(above)")
-        XCTAssertFalse(weeks.isEmpty)
+
+        func table(_ title: String, _ shares: [String: [FineMuscle: Double]]) {
+            let weeks = MuscleVolume.weekly(in: snapshot, mesoKey: meso, asOf: asOf, customShares: shares)
+            let w4 = Array(weeks.filter(\.isComplete).suffix(4))
+            let full = w4.filter { !$0.isIncomplete && !$0.hasDeload }
+            let held = w4.filter { $0.isIncomplete || $0.hasDeload }
+            log("== \(title)")
+            log(pad("muscle", 12) + w4.map { pad(d($0.weekStart) + ($0.hasDeload ? "D" : ($0.isIncomplete ? "*" : "")), 8) }.joined() + "avg(full wks: \(full.count))  direct  range    status")
+            var below: [String] = [], above: [String] = []
+            for m in FineMuscle.allCases {
+                let vals = w4.map { $0.sets[m] ?? 0 }
+                let avg = full.isEmpty ? 0 : full.map { $0.sets[m] ?? 0 }.reduce(0, +) / Double(full.count)
+                let direct = full.isEmpty ? 0 : full.map { $0.directSets[m] ?? 0 }.reduce(0, +) / Double(full.count)
+                let r = ranges[m] ?? MuscleVolumeRanges.defaults[m]!
+                let st = MuscleVolume.status(avg, range: r)
+                if st == .below { below.append(m.displayName) }
+                if st == .above { above.append(m.displayName) }
+                let cells: String = vals.map { pad(String(format: "%.1f", $0), 8) }.joined()
+                var row: String = pad(m.displayName, 12) + cells
+                row += pad(String(format: "%.1f", avg), 20)
+                row += f(direct)
+                row += pad("\(Int(r.min))-\(Int(r.max))", 9)
+                row += st.rawValue
+                log(row)
+            }
+            log(pad("unmapped", 12) + w4.map { pad(String(format: "%.0f", $0.unmappedSets), 8) }.joined() + "(sets in no muscle's total)")
+            log("   * = fewer than 70% of planned sessions done, D = deload week: shown, not in the average. held out: \(held.map { d($0.weekStart) })")
+            log("   below: \(below)   above: \(above)")
+            log("")
+        }
+        table("A. as the app counts it today (only your own mappings; \(usedIds.filter { explicit[$0] == nil }.count) unmapped customs are in no total)", explicit)
+        table("B. WITH SUGGESTIONS APPLIED (suggestion = closest built-in by name; unreviewed; \(suggested.keys.filter { usedIds.contains($0) }.count) of \(usedIds.filter { explicit[$0] == nil }.count) unmapped customs get one, the rest stay unmapped)", explicit.merging(suggested) { mine, _ in mine })
+        XCTAssertFalse(base.isEmpty)
     }
 }

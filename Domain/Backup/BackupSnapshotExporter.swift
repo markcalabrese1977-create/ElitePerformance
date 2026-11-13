@@ -236,7 +236,9 @@ enum BackupSnapshotExporter {
                     primaryMuscleRaw: ex.primaryMuscleRaw,
                     isCompound: ex.isCompound,
                     createdAt: ex.createdAt,
-                    isBodyweight: ex.isBodyweight
+                    isBodyweight: ex.isBodyweight,
+                    fineMuscleRaw: ex.fineMuscleRaw,
+                    fineSecondaryShares: ex.fineSecondaryShares
                 )
             },
             user: user.map {

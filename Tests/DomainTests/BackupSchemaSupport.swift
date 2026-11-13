@@ -162,8 +162,11 @@ enum PopulatedStoreBuilder {
         ctx.insert(history)
 
         ctx.insert(ExerciseNote(id: UUID(), createdAt: day(-4), updatedAt: day(-3), exerciseId: "bench_press", note: "probe note"))
-        ctx.insert(CustomExercise(id: "probe_custom_one", name: "Probe Custom Lift", primaryMuscleRaw: "back",
-                                  isCompound: true, createdAt: day(-15), isBodyweight: true))
+        let probeCustom = CustomExercise(id: "probe_custom_one", name: "Probe Custom Lift", primaryMuscleRaw: "back",
+                                         isCompound: true, createdAt: day(-15), isBodyweight: true)
+        probeCustom.fineMuscleRaw = "upperBack"
+        probeCustom.fineSecondaryShares = ["lats": 0.5, "rearDelts": 0.25]
+        ctx.insert(probeCustom)
         try ctx.save()
     }
 
