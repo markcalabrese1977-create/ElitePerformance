@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		EA2200000000000000000000 /* AnalyticsFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1100000000000000000000 /* AnalyticsFoundationTests.swift */; };
 		EA2201000000000000000000 /* AnalyticsImpactReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1101000000000000000000 /* AnalyticsImpactReportTests.swift */; };
+		EA2202000000000000000000 /* FatigueMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1102000000000000000000 /* FatigueMonitorTests.swift */; };
+		EA2203000000000000000000 /* FatigueBacktestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1103000000000000000000 /* FatigueBacktestTests.swift */; };
 		EA2204000000000000000000 /* PlannedDateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1104000000000000000000 /* PlannedDateTests.swift */; };
 		DF6AB5D455449C744E8B4919 /* RestTodayFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6AB5D455449C744E8B4919 /* RestTodayFlow.swift */; };
 		DF36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift */; };
@@ -152,6 +154,8 @@
 /* Begin PBXFileReference section */
 		EA1100000000000000000000 /* AnalyticsFoundationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalyticsFoundationTests.swift; sourceTree = "<group>"; };
 		EA1101000000000000000000 /* AnalyticsImpactReportTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnalyticsImpactReportTests.swift; sourceTree = "<group>"; };
+		EA1102000000000000000000 /* FatigueMonitorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FatigueMonitorTests.swift; sourceTree = "<group>"; };
+		EA1103000000000000000000 /* FatigueBacktestTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FatigueBacktestTests.swift; sourceTree = "<group>"; };
 		EA1104000000000000000000 /* PlannedDateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlannedDateTests.swift; sourceTree = "<group>"; };
 		DE6AB5D455449C744E8B4919 /* RestTodayFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTodayFlow.swift; sourceTree = "<group>"; };
 		DE36E8CFCA7D57CE27A7F23D /* RestTodayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTodayTests.swift; sourceTree = "<group>"; };
@@ -658,6 +662,8 @@
 				BA01708B42FCBAFAEEEB5835 /* BackupSchemaCompletenessTests.swift */,
 				EA1100000000000000000000 /* AnalyticsFoundationTests.swift */,
 				EA1101000000000000000000 /* AnalyticsImpactReportTests.swift */,
+				EA1102000000000000000000 /* FatigueMonitorTests.swift */,
+				EA1103000000000000000000 /* FatigueBacktestTests.swift */,
 				EA1104000000000000000000 /* PlannedDateTests.swift */,
 				BA01C59A040AB79A890B7F48 /* BackupFullRoundTripTests.swift */,
 				BA0156FDF8A9858CD42D7409 /* PersistedKeyRegistryTests.swift */,
@@ -945,6 +951,8 @@
 				A1B2C3D4E5F60718293A4B01 /* BackupRoundTripHarnessTests.swift in Sources */,
 				EA2200000000000000000000 /* AnalyticsFoundationTests.swift in Sources */,
 				EA2201000000000000000000 /* AnalyticsImpactReportTests.swift in Sources */,
+				EA2202000000000000000000 /* FatigueMonitorTests.swift in Sources */,
+				EA2203000000000000000000 /* FatigueBacktestTests.swift in Sources */,
 				EA2204000000000000000000 /* PlannedDateTests.swift in Sources */,
 				BA023869D6BC4C0CB75ACF06 /* BackupTestSupport.swift in Sources */,
 				BA02B474E66CCF7BD7DE5D89 /* BackupRestoreFixesTests.swift in Sources */,
