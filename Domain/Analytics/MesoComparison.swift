@@ -120,6 +120,8 @@ enum MesoComparer {
         snapshot: AnalyticsSnapshot, infos: [MesoInfo], currentKey: String,
         customs: [CustomExercise], profile: UserProfile?, asOf: Date, stalledLifts: [String]
     ) -> MesoComparison? {
+        let unit = profile?.loadUnit ?? .lb
+        let incrementLb = unit.toStoredLb(profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit))
         guard let current = infos.first(where: { $0.key == currentKey }),
               let previous = MesoInfo.previous(of: currentKey, in: infos) else { return nil }
 
@@ -244,7 +246,9 @@ enum MesoComparer {
         notes.musclesBelowRange = muscles.filter { $0.currentAverage < $0.range.min }
             .map { ($0.muscle, $0.currentAverage, $0.range.min) }
         notes.stalledLifts = stalledLifts
-        notes.earnedSetCandidates = earnedSetCandidates(sets: curSets)
+        notes.earnedSetCandidates = earnedSetCandidates(
+            sets: curSets, maxLoad: { UserProfile.effectiveMaxLoad(for: $0, profile: profile, customExercises: customs) },
+            incrementLb: incrementLb)
 
         return MesoComparison(
             current: current, previous: previous, lifts: lifts, newLifts: refs(added), droppedLifts: refs(dropped),
@@ -253,24 +257,36 @@ enum MesoComparer {
             previousWeeksAveraged: pm.weeks, currentWeeksAveraged: cm.weeks)
     }
 
-    /// Lifts whose mean reps per set at the lift's latest load rose by at least one rep between the first and the latest
-    /// exposure at that load (same letter, within the block, at least two such exposures).
-    static func earnedSetCandidates(sets: [SetRecord], loadToleranceLb: Double = 5) -> [EarnedSetCandidate] {
+    /// Lifts whose mean reps per set at the lift's latest load rose across the block: candidates for an extra (earned) set.
+    /// Same letter, within the block, at least two exposures at that load, and:
+    /// - a lift/letter whose working-set count INCREASED during the block is excluded (the extra set was already added,
+    ///   deliberately);
+    /// - a lift at its max load (`maxLoad`, within half an increment) needs reps up on at least two consecutive same-letter
+    ///   exposures at the cap (so three exposures, rising twice in a row); one noisy session at the cap is not evidence;
+    /// - otherwise reps up by at least one between the first and the latest exposure at that load.
+    static func earnedSetCandidates(
+        sets: [SetRecord], loadToleranceLb: Double = 5, maxLoad: (String) -> Double? = { _ in nil }, incrementLb: Double = 5
+    ) -> [EarnedSetCandidate] {
         let exposures = Exposures.build(from: sets)
         struct K: Hashable { let id: String; let letter: String; let isTop: Bool }
         var out: [EarnedSetCandidate] = []
         for (k, list) in Dictionary(grouping: exposures, by: { K(id: $0.chain.exerciseId, letter: $0.chain.letter, isTop: $0.chain.isTop) }) {
             if k.isTop { continue }
             let chain = list.sorted { $0.date < $1.date }
-            guard let last = chain.last, !last.isBodyweight, last.heaviestLoad > 0 else { continue }
+            guard let first = chain.first, let last = chain.last, !last.isBodyweight, last.heaviestLoad > 0 else { continue }
+            if chain.contains(where: { $0.sets.count > first.sets.count }) { continue }      // set count went up: deliberate
             func mean(_ e: Exposure) -> Double? {
                 let r = e.sets.filter { abs($0.load - last.heaviestLoad) <= loadToleranceLb }.map(\.reps)
                 return r.isEmpty ? nil : Double(r.reduce(0, +)) / Double(r.count)
             }
             let atLoad = chain.compactMap { e in mean(e).map { (e, $0) } }
-            guard atLoad.count >= 2, let first = atLoad.first, let lastV = atLoad.last, lastV.1 - first.1 >= 1 else { continue }
+            guard atLoad.count >= 2, let f = atLoad.first, let l = atLoad.last, l.1 - f.1 >= 1 else { continue }
+            if let cap = maxLoad(k.id), last.heaviestLoad >= cap - 0.5 * incrementLb {
+                let v = atLoad.map(\.1)
+                guard v.count >= 3, v[v.count - 1] > v[v.count - 2], v[v.count - 2] > v[v.count - 3] else { continue }
+            }
             out.append(EarnedSetCandidate(exerciseId: k.id, name: last.exerciseName, letter: k.letter, load: last.heaviestLoad,
-                                          firstReps: first.1, lastReps: lastV.1))
+                                          firstReps: f.1, lastReps: l.1))
         }
         return out.sorted { ($0.name, $0.letter) < ($1.name, $1.letter) }
     }

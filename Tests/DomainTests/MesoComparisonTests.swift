@@ -163,6 +163,31 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(cands.first?.lastReps ?? 0, 31.0 / 3, accuracy: 1e-9)
     }
 
+    func test_earnedSets_excludeALiftWhoseSetCountWentUp() {
+        var all: [SetRecord] = []
+        all += sets(110, "cable_curl", load: 50, reps: [8, 8, 7], meso: "new")
+        all += sets(117, "cable_curl", load: 50, reps: [9, 9, 8], meso: "new")
+        all += sets(124, "cable_curl", load: 50, reps: [11, 10, 10, 10], meso: "new")      // a 4th set was added
+        XCTAssertTrue(MesoComparer.earnedSetCandidates(sets: all).isEmpty, "the extra set was already added deliberately")
+        // same-count lifts are still found
+        let same = sets(110, "cable_curl", load: 50, reps: [8, 8, 7], meso: "new") + sets(124, "cable_curl", load: 50, reps: [11, 10, 10], meso: "new")
+        XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: same).count, 1)
+    }
+
+    func test_earnedSets_atTheMaxLoad_needTwoConsecutiveRepGains() {
+        func series(_ reps: [[Int]]) -> [SetRecord] { reps.enumerated().flatMap { i, r in sets(110 + i * 7, "leg_press", load: 300, reps: r, meso: "new", coarse: .quads) } }
+        let cap: (String) -> Double? = { _ in 300 }
+        // 8 -> 10 in one step at the cap: one jump is not evidence
+        XCTAssertTrue(MesoComparer.earnedSetCandidates(sets: series([[8, 8, 8], [8, 8, 8], [10, 10, 10]]), maxLoad: cap).isEmpty)
+        XCTAssertTrue(MesoComparer.earnedSetCandidates(sets: series([[8, 8, 8], [10, 10, 10]]), maxLoad: cap).isEmpty, "only two exposures")
+        // 8 -> 9 -> 10: two consecutive gains
+        XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: series([[8, 8, 8], [9, 9, 9], [10, 10, 10]]), maxLoad: cap).count, 1)
+        // 9 -> 8 -> 10: not consecutive gains
+        XCTAssertTrue(MesoComparer.earnedSetCandidates(sets: series([[9, 9, 9], [8, 8, 8], [10, 10, 10]]), maxLoad: cap).isEmpty)
+        // below the cap the plain rule applies
+        XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: series([[8, 8, 8], [10, 10, 10]]), maxLoad: { _ in 400 }).count, 1)
+    }
+
     func test_noPreviousBlock_noComparison() {
         let all = sets(110, "bench_press", load: 205, meso: "new")
         XCTAssertNil(compare(all, infos: [info("new", start: 100)]))
