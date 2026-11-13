@@ -426,7 +426,7 @@ struct MesoSummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                verdictBadge(analysis.overallVerdict)
+                verdictBadge(analysis.overallVerdict, scope: "most lifts, whole block")
             }
 
             Text(analysis.verdictNarrative)
@@ -574,7 +574,7 @@ struct MesoSummaryView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
-                                            verdictBadge(summary.verdict)
+                                            verdictBadge(summary.verdict, scope: "first → last session")
 
                                             if summary.repsBased, let o = summary.openingReps, let c = summary.closingReps {
                                                 Text("\(String(format: "%.1f", o)) → \(String(format: "%.1f", c)) reps/set")
@@ -828,7 +828,8 @@ struct MesoSummaryView: View {
 
     // MARK: - Helpers
 
-    private func verdictBadge(_ verdict: ExerciseVerdict) -> some View {
+    /// The chip names what it measures: the trend between the block's first and last session (±3%), not the latest session.
+    private func verdictBadge(_ verdict: ExerciseVerdict, scope: String) -> some View {
         let (label, color): (String, Color) = {
             switch verdict {
             case .progressing:  return ("↑ Progressing", .green)
@@ -838,7 +839,7 @@ struct MesoSummaryView: View {
             }
         }()
 
-        return Text(label)
+        return Text(verdict == .insufficient ? label : "\(label) · \(scope)")
             .font(.caption2)
             .fontWeight(.semibold)
             .foregroundColor(color)
@@ -924,7 +925,7 @@ struct MesoComparisonSection: View {
     private func summaryRows(_ c: MesoComparison) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             row("Sessions done", "\(c.adherencePrevious.completed)/\(c.adherencePrevious.planned) → \(c.adherenceCurrent.completed)/\(c.adherenceCurrent.planned)")
-            row("PRs set", "\(c.prsPrevious) → \(c.prsCurrent)")
+            row("Record-setting sessions", "\(c.prsPrevious) → \(c.prsCurrent)")
             let up = c.lifts.filter { $0.peakChange > 0.005 }.count, down = c.lifts.filter { $0.peakChange < -0.005 }.count
             row("Lift peaks (\(c.lifts.count) lift×letter)", "\(up) up · \(down) down")
         }
