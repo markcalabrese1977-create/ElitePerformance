@@ -77,7 +77,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
         ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
         ("PrescribedSetsBackfill", { PrescribedSetsBackfill.runIfNeeded(in: $0) }),
-        ("PlannedDateBackfill", { PlannedDateBackfill.runIfNeeded(in: $0) })
+        ("PlannedDateBackfill", { PlannedDateBackfill.runIfNeeded(in: $0) }),
+        ("PRIndexRuleBackfill", { PRIndexRuleBackfill.runIfNeeded(in: $0) })
     ]
 
 
@@ -93,6 +94,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
         ("PrescribedSetsBackfill", "prescribedSetsBackfill.v1.completed"),
         ("PlannedDateBackfill", "plannedDateBackfill.v1.completed"),
+        ("PRIndexRuleBackfill", "prIndexTwelveRepRule.v1.completed"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 

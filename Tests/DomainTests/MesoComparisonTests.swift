@@ -407,6 +407,101 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(LoadFormatter(unit: .lb).wholeGrouped(1027.6), "1,028")
     }
 
+    // MARK: - PRs under the 12-rep rule
+
+    func test_prs_countOnlySetsOf12RepsOrFewer_acrossRecordsEventsSuspectsAndTheService() throws {
+        // a 20-rep set (150 x 20: raw Epley 250) beats the 5 x 200 set (233) on raw e1RM, but is not a record
+        let all = sets(10, "curl", load: 200, reps: [5], meso: "old") + sets(17, "curl", load: 150, reps: [20, 20], meso: "old")
+        let best = PersonalRecords.bests(from: all)["curl"]
+        XCTAssertEqual(best?.reps, 5)
+        XCTAssertEqual(best?.load, 200)
+        XCTAssertEqual(best?.e1RM ?? 0, E1RMCalculator.e1RM(load: 200, reps: 5), accuracy: 1e-9)
+        let events = PersonalRecords.events(from: all)
+        XCTAssertEqual(events.map(\.isBaseline), [true], "the 20-rep session is no record event")
+        // a lift with only long sets has no record at all
+        let long = sets(10, "fly", load: 30, reps: [20, 18], meso: "old")
+        XCTAssertNil(PersonalRecords.bests(from: long)["fly"])
+        XCTAssertTrue(PersonalRecords.events(from: long).isEmpty)
+        // 12 reps is still a record set, 13 is not
+        XCTAssertNotNil(PersonalRecords.bests(from: sets(10, "x", load: 100, reps: [12], meso: "old"))["x"])
+        XCTAssertNil(PersonalRecords.bests(from: sets(10, "x", load: 100, reps: [13], meso: "old"))["x"])
+        // suspects use the same e1RM: a long set cannot make a record look 1.25x its neighbours
+        let sus = sets(10, "y", load: 100, reps: [8], meso: "old") + sets(17, "y", load: 100, reps: [8], meso: "old") + sets(24, "y", load: 100, reps: [25], meso: "old")
+        XCTAssertTrue(PersonalRecords.suspects(from: sus).isEmpty)
+    }
+
+    func test_prService_bestSet_usesTheSameRule() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let it = item("cable_curl", reps: [5, 20, 20], loads: [200, 150, 150])
+        ctx.insert(it)
+        let best = try XCTUnwrap(PRService.bestSet(in: it))
+        XCTAssertEqual(best.reps, 5)
+        XCTAssertEqual(best.load, 200)
+        let longOnly = item("cable_fly", reps: [20, 18], loads: [30, 30])
+        XCTAssertNil(PRService.bestSet(in: longOnly), "only sets of more than 12 reps: no PR")
+        // the index: a later 20-rep set at a heavier load is not a PR over a 5 x 200
+        PRService.updatePR(for: it, in: ctx)
+        let again = item("cable_curl", reps: [20], loads: [190])
+        ctx.insert(again)
+        PRService.updatePR(for: again, in: ctx)
+        XCTAssertFalse(again.isPR)
+    }
+
+    func test_prIndexRuleBackfill_rebuildsOnceUnderTheRule_andDoesNothingOnAnEmptyStore() throws {
+        let key = "prIndexTwelveRepRule.v1.completed"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        PRIndexRuleBackfill.runIfNeeded(in: ctx)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: key), "no sessions: not marked done")
+        // a stale index row holding an inflated 20-rep "best"
+        ctx.insert(PRIndex(exerciseId: "cable_curl", exerciseName: "Cable Curl", bestSetVolume: 3000, bestLoad: 150, bestReps: 20, bestDate: day(0)))
+        let it = item("cable_curl", reps: [5, 20], loads: [200, 150])
+        let sess = Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "D", items: [it])
+        ctx.insert(sess)
+        try ctx.save()
+        PRIndexRuleBackfill.runIfNeeded(in: ctx)
+        let rows = try ctx.fetch(FetchDescriptor<PRIndex>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.bestReps, 5)
+        XCTAssertEqual(rows.first?.bestLoad, 200)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+    }
+
+    // MARK: - PR definition report (old vs new; report only)
+
+    func test_report_prsUnderTheTwelveRepRule() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
+              let out = ProcessInfo.processInfo.environment["EP_PR_REPORT"], !out.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_PR_REPORT")
+        }
+        let container = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        let customs = try ctx.fetch(FetchDescriptor<CustomExercise>())
+        let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let snap = SetRecordBuilder.build(sessions: all, customExercises: customs, bodyWeight: profile?.bodyWeight)
+        var lines: [String] = []
+        // OLD: any rep count
+        var old: [String: (e1: Double, load: Double, reps: Int)] = [:]
+        for s in snap.sets where s.isRecordSet && s.e1RM > 0 { if (old[s.exerciseId]?.e1 ?? 0) < s.e1RM { old[s.exerciseId] = (s.e1RM, s.effectiveLoad, s.reps) } }
+        // NEW: the engine (the rule applies there once the definition is switched; before that it equals OLD)
+        let new = PersonalRecords.bests(from: snap.sets)
+        var changed = 0, lost = 0
+        let name: (String) -> String = { id in snap.sets.first { $0.exerciseId == id }?.exerciseName ?? id }
+        for id in old.keys.sorted(by: { name($0) < name($1) }) {
+            let o = old[id]!, n = new[id]
+            let same = n != nil && abs(n!.e1RM - o.e1) < 1e-6
+            if same { continue }
+            if n == nil { lost += 1 } else { changed += 1 }
+            lines.append("\(name(id)): was \(Int(o.load)) x \(o.reps) (e1RM \(Int(o.e1)))  now " + (n.map { "\(Int($0.load)) x \($0.reps) (e1RM \(Int($0.e1RM)))" } ?? "no record (no set of 12 reps or fewer)"))
+        }
+        let oldEvents = Dictionary(grouping: PersonalRecords.events(from: snap.sets).filter { !$0.isBaseline }, by: \.exerciseId).mapValues(\.count)
+        lines.insert("lifts with a record: \(old.count); record changed: \(changed); record lost: \(lost); lifts with PR events now: \(oldEvents.count) (total \(oldEvents.values.reduce(0, +)))", at: 0)
+        try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
     func test_noPreviousBlock_noComparison() {
         let all = sets(110, "bench_press", load: 205, meso: "new")
         XCTAssertNil(compare(all, infos: [info("new", start: 100)]))

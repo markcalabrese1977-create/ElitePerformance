@@ -3,7 +3,8 @@ import SwiftData
 
 /// Handles reading/writing PR data from SwiftData.
 ///
-/// A PR is the best working-set e1RM of a canonical exercise (the single definition in `PersonalRecords`): Epley on the
+/// A PR is the best working-set e1RM of a canonical exercise (the single definition in `PersonalRecords`, sets of 12 reps
+/// or fewer only): Epley on the
 /// effective load, warm-ups / rest-pause / drop / skipped rows excluded, every completed session counted (maintenance and
 /// deload included). A bodyweight lift uses the lifter's body weight; without one it has no PR. `PRIndex` stores the
 /// best set (load = effective load, reps); its e1RM is derived, and `bestSetVolume` is kept as load x reps.
@@ -16,7 +17,7 @@ struct PRService {
         var best: (e1RM: Double, load: Double, reps: Int)?
         for row in WorkingSetFilter.workingRows(of: item, isBodyweight: isBodyweight) {
             let load = E1RMCalculator.effectiveLoad(actualLoad: row.load, exerciseId: item.exerciseId, bodyWeight: bodyWeight)
-            let e1rm = E1RMCalculator.e1RM(load: load, reps: row.reps)
+            let e1rm = BestSetRule.e1RM(load: load, reps: row.reps)      // sets of 12 reps or fewer only
             if e1rm > (best?.e1RM ?? 0) { best = (e1rm, load, row.reps) }
         }
         return best
@@ -45,7 +46,7 @@ struct PRService {
             let existing = try context.fetch(FetchDescriptor<PRIndex>())
                 .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
             if let existing {
-                if best.e1RM > E1RMCalculator.e1RM(load: existing.bestLoad, reps: existing.bestReps) {
+                if best.e1RM > BestSetRule.e1RM(load: existing.bestLoad, reps: existing.bestReps) {
                     existing.exerciseId = canonical
                     existing.bestSetVolume = best.load * Double(best.reps)
                     existing.bestLoad = best.load

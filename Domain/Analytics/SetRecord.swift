@@ -121,6 +121,10 @@ struct SetRecord: Equatable {
     /// Epley e1RM of this row through `E1RMCalculator` on the effective load (0 without load and reps).
     var e1RM: Double { E1RMCalculator.e1RM(load: effectiveLoad, reps: reps) }
 
+    /// The e1RM a RECORD may use: only sets of 12 reps or fewer (`BestSetRule`); 0 for a longer set. PRs, records and PR
+    /// badges share this definition with the Meso Summary rows.
+    var recordE1RM: Double { BestSetRule.e1RM(load: effectiveLoad, reps: reps) }
+
     /// A working set of any completed session, maintenance and deload included: what records and lifetime history read.
     /// (Seeds, fatigue baselines and meso-over-meso comparisons use `isPerformanceSet`, which leaves those sessions out.)
     var isRecordSet: Bool { isWorkingSet && status == .completed }

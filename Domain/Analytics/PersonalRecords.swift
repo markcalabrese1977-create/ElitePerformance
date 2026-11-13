@@ -1,8 +1,8 @@
 // Domain/Analytics/PersonalRecords.swift
 import Foundation
 
-/// The one PR definition: the best working-set e1RM (`E1RMCalculator`, Epley, on the effective load) of a canonical
-/// exercise, over ALL completed sessions. Maintenance blocks and deload weeks are history and count; warm-ups,
+/// The one PR definition: the best working-set e1RM (`E1RMCalculator`, Epley, on the effective load, from sets of 12 reps
+/// or fewer only: `BestSetRule`) of a canonical exercise, over ALL completed sessions. Maintenance blocks and deload weeks are history and count; warm-ups,
 /// rest-pause and drop rows and skipped rows do not. A bodyweight lift uses the lifter's body weight when it is set and
 /// has no record (no e1RM at all) when it is not. Records that look too good to be true are surfaced by `suspects`.
 ///
@@ -30,9 +30,9 @@ enum PersonalRecords {
     /// Best e1RM per canonical id.
     static func bests(from sets: [SetRecord]) -> [String: Best] {
         var out: [String: Best] = [:]
-        for s in sets where s.isRecordSet && s.e1RM > 0 {
-            if let b = out[s.exerciseId], b.e1RM >= s.e1RM { continue }
-            out[s.exerciseId] = Best(exerciseId: s.exerciseId, e1RM: s.e1RM, load: s.effectiveLoad, reps: s.reps,
+        for s in sets where s.isRecordSet && s.recordE1RM > 0 {
+            if let b = out[s.exerciseId], b.e1RM >= s.recordE1RM { continue }
+            out[s.exerciseId] = Best(exerciseId: s.exerciseId, e1RM: s.recordE1RM, load: s.effectiveLoad, reps: s.reps,
                                      date: s.sessionDate, sessionKey: s.sessionKey)
         }
         return out
@@ -42,10 +42,10 @@ enum PersonalRecords {
     static func events(from sets: [SetRecord]) -> [Event] {
         struct K: Hashable { let session: String; let exercise: String }
         var best: [K: (e1RM: Double, date: Date)] = [:]
-        for s in sets where s.isRecordSet && s.e1RM > 0 {
+        for s in sets where s.isRecordSet && s.recordE1RM > 0 {
             let k = K(session: s.sessionKey, exercise: s.exerciseId)
-            if let b = best[k], b.e1RM >= s.e1RM { continue }
-            best[k] = (s.e1RM, s.sessionDate)
+            if let b = best[k], b.e1RM >= s.recordE1RM { continue }
+            best[k] = (s.recordE1RM, s.sessionDate)
         }
         let ordered = best.map { (key: $0.key, e1RM: $0.value.e1RM, date: $0.value.date) }
             .sorted { ($0.date, $0.key.session, $0.key.exercise) < ($1.date, $1.key.session, $1.key.exercise) }
@@ -77,8 +77,8 @@ enum PersonalRecords {
     static func suspects(from sets: [SetRecord], threshold: Double = 1.25) -> [Suspect] {
         let best = bests(from: sets)
         var perSession: [String: [String: Double]] = [:]   // exercise -> session -> best e1RM
-        for s in sets where s.isRecordSet && s.e1RM > 0 {
-            perSession[s.exerciseId, default: [:]][s.sessionKey] = max(perSession[s.exerciseId]?[s.sessionKey] ?? 0, s.e1RM)
+        for s in sets where s.isRecordSet && s.recordE1RM > 0 {
+            perSession[s.exerciseId, default: [:]][s.sessionKey] = max(perSession[s.exerciseId]?[s.sessionKey] ?? 0, s.recordE1RM)
         }
         return best.values.compactMap { b -> Suspect? in
             let others = (perSession[b.exerciseId] ?? [:]).filter { $0.key != b.sessionKey }.values

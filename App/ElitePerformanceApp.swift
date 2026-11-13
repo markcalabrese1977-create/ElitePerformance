@@ -210,6 +210,7 @@ enum StartupBackfills {
         BodyweightPhantomLoadMigration.runIfNeeded(in: context)
         PrescribedSetsBackfill.runIfNeeded(in: context)
         PlannedDateBackfill.runIfNeeded(in: context)
+        PRIndexRuleBackfill.runIfNeeded(in: context)
         LegacyExerciseNotesBackfill.runIfNeeded(in: context)
     }
 }
