@@ -11,16 +11,25 @@ struct StallPolicy: Equatable {
     var loadToleranceIncrements = 1.0
     /// Only chains whose latest exposure is within this many days of `asOf` are "current" (a lift dropped long ago is not stalled, it is gone).
     var currentWithinDays = 56
-    /// false (the specified behaviour): the record is the lift's best on that letter across every block. true: only the
-    /// current block counts, so a lift re-seeded lower by a new block (a deliberate reset) is not "stalled" for failing to
-    /// beat a record from the previous one. Needs at least `exposures + 1` exposures inside the block.
-    var currentBlockOnly = false
+    /// true (default): only the current block counts, so a lift re-seeded lower by a new block (a deliberate reset) is not
+    /// "stalled" for failing to beat a record from the previous one. Needs at least `exposures + 1` exposures inside the
+    /// block. false: the record is the lift's best on that letter across every block; a comparison across blocks belongs
+    /// to meso-over-meso comparison (P5), not to stall flags.
+    var currentBlockOnly = true
     static let `default` = StallPolicy()
 }
 
 /// One stalled lift on one wave letter.
 struct Stall: Equatable {
     enum Metric: String { case e1RM, reps }
+    enum Status: String {
+        /// Still prescribed in the block and not progressing.
+        case stalled
+        /// No planned session left in the active block prescribes this lift on this letter: it is not stalled, it is gone.
+        case noLongerProgrammed
+    }
+
+    var status: Status = .stalled
 
     let exerciseId: String
     let exerciseName: String
@@ -120,7 +129,17 @@ enum StallDetector {
                 evidence = "\(name)\(key.letter.isEmpty ? "" : " " + key.letter.uppercased()): best e1RM \(fmt.whole(best)) on \(day(values[bestIndex].e.date)); "
                     + "\(since.count) exposures since: \(nums)"
             }
+            // Programmed? Only knowable when the snapshot carries sessions; none = unknown = still treated as programmed.
+            var status = Stall.Status.stalled
+            if !snapshot.sessions.isEmpty {
+                let remaining = snapshot.sessions.contains {
+                    $0.mesoKey == last.chain.mesoKey && $0.status != .completed && !$0.isInsertedDeload && !$0.isDeloadWeek
+                        && $0.prescribedLifts.contains { $0.exerciseId == key.id && $0.letter == key.letter }
+                }
+                if !remaining { status = .noLongerProgrammed }
+            }
             out.append(Stall(
+                status: status,
                 exerciseId: key.id, exerciseName: name, letter: key.letter, isTop: key.isTop, metric: metric,
                 bestValue: best, bestDate: values[bestIndex].e.date, sinceBest: since.map { ($0.e.date, $0.value) },
                 load: load, evidence: evidence))

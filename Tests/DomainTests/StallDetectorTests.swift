@@ -28,8 +28,8 @@ final class StallDetectorTests: XCTestCase {
         }
     }
 
-    private func series(_ lift: String = "bench_press", letter: String? = "a", loads: [Double], start: Int = 0, step: Int = 21, top: Bool = false) -> [SetRecord] {
-        loads.enumerated().flatMap { i, l in exposure(start + i * step, lift: lift, letter: letter, load: l, top: top) }
+    private func series(_ lift: String = "bench_press", letter: String? = "a", loads: [Double], start: Int = 0, step: Int = 21, top: Bool = false, meso: String = "m1") -> [SetRecord] {
+        loads.enumerated().flatMap { i, l in exposure(start + i * step, lift: lift, letter: letter, meso: meso, load: l, top: top) }
     }
 
     private func stalls(_ sets: [SetRecord], asOf: Int = 100, policy: StallPolicy = .default,
@@ -126,6 +126,73 @@ final class StallDetectorTests: XCTestCase {
         XCTAssertTrue(stalls(sets, asOf: 84 + 57).isEmpty, "not trained for 57 days: gone, not stalled")
     }
 
+    // MARK: - Current block, programmed status, letter chain
+
+    func test_defaultIsCurrentBlockOnly_aReseededLiftIsNotStalledAgainstLastBlocksRecord() {
+        XCTAssertTrue(StallPolicy.default.currentBlockOnly)
+        // Block 1 reached 260 e1RM; block 2 re-seeded lower and has only three exposures, none above block 1's record.
+        var sets = series(loads: [200, 220, 230], meso: "m1")
+        sets += series(loads: [180, 185, 190], start: 63, step: 7, meso: "m2")
+        XCTAssertTrue(stalls(sets, asOf: 100).isEmpty, "inside block 2 the three exposures are all there is")
+        var across = StallPolicy.default; across.currentBlockOnly = false
+        XCTAssertEqual(stalls(sets, asOf: 100, policy: across).count, 1, "compared across blocks it would be flagged (meso comparison's job)")
+        // Four exposures in the block and no new best over the last three: stalled inside the block.
+        let flat = series(loads: [200, 220, 230], meso: "m1") + series(loads: [180, 190, 190, 190, 190], start: 63, step: 7, meso: "m2")
+        XCTAssertEqual(stalls(flat, asOf: 110).count, 1)
+    }
+
+    func test_liftWithNoRemainingPlannedSession_isNoLongerProgrammed_notStalled() {
+        let sets = series(loads: [200, 205, 203, 204, 205], step: 7)    // stalled; last exposure on day 28
+        func record(_ key: String, _ status: SessionStatus, _ lifts: [PrescribedLift], meso: String = "m1") -> SessionRecord {
+            SessionRecord(key: key, date: day(40), plannedDate: nil, plannedDateIsExact: false, completedAt: nil, status: status,
+                          weekIndex: 6, dayLabel: "Push", mesoKey: meso, mesoName: nil, isMaintenance: false, isInsertedDeload: false,
+                          isDeloadWeek: false, readiness: .normal, readinessStars: 0, hkDuration: 0, prescribedLifts: lifts)
+        }
+        func run(_ sessions: [SessionRecord]) -> [Stall] {
+            StallDetector.stalls(in: AnalyticsSnapshot(sessions: sessions, sets: sets), loadIncrementLb: incr, asOf: day(30))
+        }
+        let bench = PrescribedLift(exerciseId: "bench_press", letter: "a")
+        XCTAssertEqual(run([record("p1", .planned, [bench])]).first?.status, .stalled, "still prescribed on A in a planned session")
+        XCTAssertEqual(run([record("p1", .planned, [PrescribedLift(exerciseId: "bench_press", letter: "b")])]).first?.status,
+                       .noLongerProgrammed, "only on another letter")
+        XCTAssertEqual(run([record("p1", .planned, [PrescribedLift(exerciseId: "t_bar_row", letter: "a")])]).first?.status, .noLongerProgrammed)
+        XCTAssertEqual(run([record("p1", .completed, [bench])]).first?.status, .noLongerProgrammed, "a completed session is not remaining")
+        XCTAssertEqual(run([record("p1", .planned, [bench], meso: "other")]).first?.status, .noLongerProgrammed, "a planned session of another block")
+        XCTAssertEqual(run([]).first?.status, .stalled, "no session data: unknown, treated as programmed")
+    }
+
+    func test_bodyweightItemWithoutWaveLetter_takesTheSessionsLetter_soTheChainIsKept() throws {
+        let container = try BackupTestSupport.makeContainer()
+        let ctx = ModelContext(container)
+        func item(_ id: String, wave: String?) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: id, exerciseNameSnapshot: id, targetReps: 8, targetSets: 2, targetRIR: 2,
+                                suggestedLoad: 0, waveRaw: wave, plannedRepsBySet: [8, 8], plannedLoadsBySet: [0, 0], plannedRIRsBySet: [2, 2])
+            i.actualReps = [8, 8]; i.actualLoads = [100, 100]; i.actualRIRs = [2, 2]; i.isCompleted = true
+            return i
+        }
+        func add(_ d: Int, _ items: [SessionItem]) -> Session {
+            let sess = Session(date: day(d), status: .completed, weekIndex: 1, dayLabel: "Pull", items: items)
+            ctx.insert(sess); return sess
+        }
+        let tagged = add(0, [item("barbell_row", wave: "c"), item("pull_up", wave: nil)])
+        let alsoTagged = add(7, [item("barbell_row", wave: "c"), item("pull_up", wave: "c")])
+        let mixed = add(14, [item("barbell_row", wave: "a"), item("lat_pulldown", wave: "b"), item("pull_up", wave: nil)])
+        let deload = add(21, [item("barbell_row", wave: "deload"), item("pull_up", wave: nil)])
+        let noWave = add(28, [item("barbell_row", wave: nil), item("pull_up", wave: nil)])
+        let snap = SetRecordBuilder.build(sessions: [tagged, alsoTagged, mixed, deload, noWave])
+        func letter(_ d: Int, _ id: String) -> String? { snap.sets.first { $0.exerciseId == id && $0.sessionDate == day(d) }?.waveLetter }
+        XCTAssertEqual(letter(0, "pull_up"), "c", "an untagged bodyweight item takes the session's one letter")
+        XCTAssertEqual(letter(7, "pull_up"), "c")
+        XCTAssertNil(letter(14, "pull_up"), "the session's letters disagree (a, b): nothing to derive")
+        XCTAssertNil(letter(21, "pull_up"), "a deload session's letter is never invented")
+        XCTAssertNil(letter(28, "pull_up"), "a block with no letters keeps none")
+        XCTAssertEqual(letter(0, "barbell_row"), "c")
+        // and the chain is one chain across the tagged and untagged sessions
+        let chains = Set(Exposures.build(from: snap.sets).filter { $0.chain.exerciseId == "pull_up" }.map(\.chain.letter))
+        XCTAssertTrue(chains.contains("c"))
+        XCTAssertEqual(snap.sessions.first { $0.date == day(0) }?.prescribedLifts.first { $0.exerciseId == "pull_up" }?.letter, "c")
+    }
+
     // MARK: - Reps mode
 
     func test_cappedLift_isJudgedOnRepsAtTheCappedLoad() {
@@ -190,9 +257,9 @@ final class StallDetectorTests: XCTestCase {
             in: snapshot, loadIncrementLb: incrementLb, asOf: lastDone, unit: unit,
             maxLoad: { UserProfile.effectiveMaxLoad(for: $0, profile: profile, customExercises: customs) },
             isFixedLoad: { UserProfile.isProgressionExempt(exerciseId: $0, profile: profile) })
-        var blockOnly = StallPolicy.default; blockOnly.currentBlockOnly = true
-        let inBlock = StallDetector.stalls(
-            in: snapshot, policy: blockOnly, loadIncrementLb: incrementLb, asOf: lastDone, unit: unit,
+        var acrossPolicy = StallPolicy.default; acrossPolicy.currentBlockOnly = false
+        let across = StallDetector.stalls(
+            in: snapshot, policy: acrossPolicy, loadIncrementLb: incrementLb, asOf: lastDone, unit: unit,
             maxLoad: { UserProfile.effectiveMaxLoad(for: $0, profile: profile, customExercises: customs) },
             isFixedLoad: { UserProfile.isProgressionExempt(exerciseId: $0, profile: profile) })
         let exposures = Exposures.build(from: snapshot.sets)
@@ -200,18 +267,29 @@ final class StallDetectorTests: XCTestCase {
         let current = Dictionary(grouping: exposures, by: { K(id: $0.chain.exerciseId, l: $0.chain.letter, t: $0.chain.isTop) })
             .filter { ($0.value.map(\.date).max() ?? .distantPast) >= lastDone.addingTimeInterval(-56 * 86_400) }
         log("fixture: \(URL(fileURLWithPath: path).lastPathComponent) · as of \(lastDone.formatted(date: .abbreviated, time: .omitted))")
-        log("current lift x letter chains (trained in the last 8 weeks): \(current.count) · stalled: \(result.count) (e1RM \(result.filter { $0.metric == .e1RM }.count), reps \(result.filter { $0.metric == .reps }.count))")
+        log("current lift x letter chains (trained in the last 8 weeks): \(current.count) · flagged: \(result.count), stalled \(result.filter { $0.status == .stalled }.count), no longer programmed \(result.filter { $0.status == .noLongerProgrammed }.count) (e1RM \(result.filter { $0.metric == .e1RM }.count), reps \(result.filter { $0.metric == .reps }.count))")
         log("")
         for x in result {
+            log("   [\(x.status == .stalled ? "STALLED" : "NO LONGER PROGRAMMED")]")
             let vals = x.sinceBest.map { x.metric == .reps ? String(format: "%.1f", $0.value) : LoadFormatter(unit: unit).whole($0.value) }
             log("   \(x.evidence)")
             log("      since best: " + zip(x.sinceBest, vals).map { "\($0.0.date.formatted(.dateTime.month().day())) \($0.1)" }.joined(separator: " · ") + (x.isTop ? " · top sets" : ""))
         }
         log("")
-        log("== the same with the record limited to the CURRENT BLOCK (a re-seeded lift is not compared with last block's best): \(inBlock.count) stalled")
-        for x in inBlock { log("   \(x.evidence)") }
-        let onlyAcross = result.filter { r in !inBlock.contains { $0.exerciseId == r.exerciseId && $0.letter == r.letter && $0.isTop == r.isTop } }
-        log("   stalls that exist only because the record is from an earlier block: \(onlyAcross.map { "\($0.exerciseName) \($0.letter.uppercased())" })")
+        log("== for reference: the record compared across blocks (not the default): \(across.count) flagged")
+        let onlyAcross = across.filter { r in !result.contains { $0.exerciseId == r.exerciseId && $0.letter == r.letter && $0.isTop == r.isTop } }
+        log("   flags that exist only because the record is from an earlier block: \(onlyAcross.map { "\($0.exerciseName) \($0.letter.uppercased())" })")
+        // Pull-Up: the items behind the reps-mode stall.
+        log("")
+        log("== Pull-Up items (canonical pull_up): date · raw exerciseId · item waveRaw · session day · letters of the session's other items · reps")
+        for sess in all where sess.status == .completed {
+            for item in sess.items where ExerciseCatalog.canonicalExerciseId(for: item.exerciseId) == "pull_up" {
+                let derived = snapshot.sets.first { $0.exerciseId == "pull_up" && $0.sessionDate == sess.date && $0.waveLetter != nil }?.waveLetter ?? "-"
+                log("      letter used by analytics: \(derived)")
+                let others = Set(sess.items.compactMap { $0.waveRaw }).sorted()
+                log("   \(sess.date.formatted(date: .abbreviated, time: .omitted)) · \(item.exerciseId) · \(item.waveRaw ?? "nil") · \(sess.dayLabel ?? "-") · \(others) · reps \(item.actualReps) loads \(item.actualLoads)")
+            }
+        }
         XCTAssertFalse(current.isEmpty)
     }
 }

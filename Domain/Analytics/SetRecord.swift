@@ -4,6 +4,12 @@ import SwiftData
 
 /// A value-type snapshot of one session, for analytics. Built by `SetRecordBuilder`, the only analytics code that
 /// reads `Session`.
+struct PrescribedLift: Hashable {
+    let exerciseId: String
+    /// "a" / "b" / "c", or "" when the item has no letter (and none can be derived).
+    let letter: String
+}
+
 struct SessionRecord: Equatable {
     /// Stable within a run: the session UUID, else its persistent id.
     let key: String
@@ -27,6 +33,9 @@ struct SessionRecord: Equatable {
     let readinessStars: Int
     /// HealthKit workout duration in seconds; 0 when the session has no workout summary.
     let hkDuration: Double
+    /// The lifts this session prescribes (canonical id + wave letter), whatever its status. Used to tell whether a lift is
+    /// still programmed in the rest of a block.
+    var prescribedLifts: [PrescribedLift] = []
 
     /// A session whose numbers describe normal training: not a deload, not maintenance.
     var isRegularTraining: Bool { !isDeloadWeek && !isInsertedDeload && !isMaintenance }
@@ -146,7 +155,23 @@ enum SetRecordBuilder {
         var sessionRecords: [SessionRecord] = []
         var setRecords: [SetRecord] = []
 
+        func letterOf(_ item: SessionItem) -> String? {
+            let raw = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            return WavePrescriptionGuard.isWaveLetter(raw) ? raw : nil
+        }
+
         for session in sessions {
+            // Some items (bodyweight lifts logged before waveRaw was written for them) carry no wave letter although the
+            // session is one wave. Such an item takes the session's letter when its other items agree on one, so a lift's
+            // letter chain is not broken by a missing tag. A "deload" item is never given a letter.
+            var letterCounts: [String: Int] = [:]
+            for item in session.items { if let l = letterOf(item) { letterCounts[l, default: 0] += 1 } }
+            let sessionLetter: String? = {
+                let top = letterCounts.max { $0.value < $1.value }
+                guard let top, letterCounts.values.filter({ $0 == top.value }).count == 1 else { return nil }
+                return top.key
+            }()
+
             let sessionKey = session.id?.uuidString ?? "\(session.persistentModelID)"
             let mesoKey = session.meso.map { $0.id?.uuidString ?? "\($0.persistentModelID)" } ?? "none"
             let isMaintenance = session.meso?.isMaintenance == true
@@ -159,7 +184,12 @@ enum SetRecordBuilder {
                 status: session.status, weekIndex: session.weekIndex, dayLabel: session.dayLabel,
                 mesoKey: mesoKey, mesoName: session.meso?.name,
                 isMaintenance: isMaintenance, isInsertedDeload: isInserted, isDeloadWeek: isDeloadWeek,
-                readiness: session.readiness, readinessStars: session.readinessStars, hkDuration: session.hkDuration
+                readiness: session.readiness, readinessStars: session.readinessStars, hkDuration: session.hkDuration,
+                prescribedLifts: session.items.map {
+                    PrescribedLift(
+                        exerciseId: ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId),
+                        letter: letterOf($0) ?? ($0.waveRaw?.lowercased() == "deload" ? "" : (sessionLetter ?? "")))
+                }
             ))
 
             for item in session.items {
@@ -171,8 +201,8 @@ enum SetRecordBuilder {
                     ?? canonical
 
                 let rawWave = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-                let letter: String? = WavePrescriptionGuard.isWaveLetter(rawWave) ? rawWave : nil
                 let isDeloadWaveItem = rawWave == "deload"
+                let letter: String? = letterOf(item) ?? (isDeloadWaveItem ? nil : sessionLetter)
 
                 let working = Set(WorkingSetFilter.workingRows(of: item, isBodyweight: isBodyweight).map(\.index))
                 let hard = Set(WorkingSetFilter.hardSetRows(of: item, isBodyweight: isBodyweight).map(\.index))
