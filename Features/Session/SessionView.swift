@@ -2615,7 +2615,7 @@ extension SessionScreenViewModel {
 
                 targetSets: item.targetSets,
                 sets: uiSets,
-                coachMessage: item.coachNote ?? "",
+                coachMessage: CoachNoteHygiene.visibleNote(of: item, unit: unit) ?? "",
                 itemID: item.id,
                 topRepMin: item.topRepMin,
                 topRepMax: item.topRepMax

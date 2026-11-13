@@ -1103,11 +1103,11 @@ private struct ProgramExercisePlanRow: View {
                                 Text(displayName)
                                     .font(.headline)
 
-                                if let note = item.coachNote, note.hasPrefix("⚠️") {
+                                if let note = CoachNoteHygiene.visibleNote(of: item, unit: unit), note.hasPrefix("⚠️") {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(.caption)
                                         .foregroundStyle(.red)
-                                } else if let note = item.coachNote, note.hasPrefix("ℹ️") {
+                                } else if let note = CoachNoteHygiene.visibleNote(of: item, unit: unit), note.hasPrefix("ℹ️") {
                                     Image(systemName: "info.circle.fill")
                                         .font(.caption)
                                         .foregroundStyle(.orange)
@@ -1118,7 +1118,7 @@ private struct ProgramExercisePlanRow: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
-                            if let note = item.coachNote, !note.isEmpty {
+                            if let note = CoachNoteHygiene.visibleNote(of: item, unit: unit) {
                                 Text(note)
                                     .font(.caption2)
                                     .foregroundStyle(note.hasPrefix("⚠️") ? Color.red : Color.orange)

@@ -278,6 +278,10 @@ struct PlanMemoryEngine {
                 targetItem.plannedLoadsBySet = Self.propagatedPlan(nil, top: topLoad, for: targetItem)
             }
 
+            // A note left by an earlier pass that cites a load this plan no longer has is dropped here, so the
+            // progression note below can be regenerated for the load just written.
+            CoachNoteHygiene.clearIfStale(targetItem, unit: unit)
+
             // Pain carry-forward
             let sourcePainFlagged = sourceItem.setFeedbackBySet.contains {
                 $0 == SetFeedback.pain.rawValue
