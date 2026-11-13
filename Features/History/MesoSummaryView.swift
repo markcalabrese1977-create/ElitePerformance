@@ -967,7 +967,7 @@ struct MesoComparisonSection: View {
             noteLine("Below range", c.notes.musclesBelowRange.map { "\($0.muscle.displayName) \(String(format: "%.1f", $0.average)) (min \(Int($0.minimum)))" })
             noteLine("Stalled", c.notes.stalledLifts)
             noteLine("Reps up at the same load (candidates for an extra set)", c.notes.earnedSetCandidates.map {
-                "\($0.name)\($0.letter.isEmpty ? "" : " \($0.letter.uppercased())") \(String(format: "%.1f", $0.firstReps))→\(String(format: "%.1f", $0.lastReps)) reps"
+                "\($0.name)\($0.letter.isEmpty ? "" : " \($0.letter.uppercased())") \(String(format: "%.1f", $0.firstReps))→\(String(format: "%.1f", $0.lastReps)) reps\($0.atCap ? " (at your max load)" : "")"
             })
             Text("Facts only. Nothing is changed automatically.").font(.caption2).foregroundStyle(.secondary)
         }

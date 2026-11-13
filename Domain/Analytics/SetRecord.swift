@@ -8,6 +8,8 @@ struct PrescribedLift: Hashable {
     let exerciseId: String
     /// "a" / "b" / "c", or "" when the item has no letter (and none can be derived).
     let letter: String
+    /// Prescribed working sets (`SessionItem.targetSets`; the per-set arrays are padded and not a set count).
+    var sets: Int = 0
 }
 
 struct SessionRecord: Equatable {
@@ -188,7 +190,8 @@ enum SetRecordBuilder {
                 prescribedLifts: session.items.map {
                     PrescribedLift(
                         exerciseId: ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId),
-                        letter: letterOf($0) ?? ($0.waveRaw?.lowercased() == "deload" ? "" : (sessionLetter ?? "")))
+                        letter: letterOf($0) ?? ($0.waveRaw?.lowercased() == "deload" ? "" : (sessionLetter ?? "")),
+                        sets: $0.targetSets)
                 }
             ))
 

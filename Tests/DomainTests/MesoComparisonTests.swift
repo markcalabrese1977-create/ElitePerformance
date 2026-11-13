@@ -174,6 +174,33 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: same).count, 1)
     }
 
+    func test_earnedSets_excludeALiftWhosePrescribedSetCountRoseOnAnyLetter_evenInRemainingSessions() {
+        func session(_ key: String, _ d: Int, _ status: SessionStatus, _ lifts: [PrescribedLift]) -> SessionRecord {
+            SessionRecord(key: key, date: day(d), plannedDate: day(d), plannedDateIsExact: true, completedAt: nil, status: status,
+                          weekIndex: 1, dayLabel: "Push", mesoKey: "new", mesoName: "new", isMaintenance: false, isInsertedDeload: false,
+                          isDeloadWeek: false, readiness: .normal, readinessStars: 0, hkDuration: 0, prescribedLifts: lifts)
+        }
+        // letter-a logged series with the SAME logged set count, but the prescription adds a set on letter c later in the block
+        var all = sets(110, "decline", load: 285, reps: [8, 8, 8], meso: "new", letter: "a") + sets(124, "decline", load: 285, reps: [10, 10, 10], meso: "new", letter: "a")
+        all += sets(111, "curl", load: 50, reps: [8, 8, 8], meso: "new", letter: "a") + sets(125, "curl", load: 50, reps: [10, 10, 10], meso: "new", letter: "a")
+        let raised = [
+            session("s1", 110, .completed, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 3), PrescribedLift(exerciseId: "curl", letter: "a", sets: 3)]),
+            session("s2", 117, .completed, [PrescribedLift(exerciseId: "decline", letter: "c", sets: 3)]),
+            session("s3", 131, .planned, [PrescribedLift(exerciseId: "decline", letter: "c", sets: 4), PrescribedLift(exerciseId: "curl", letter: "a", sets: 3)])]
+        let found = MesoComparer.earnedSetCandidates(sets: all, sessions: raised).map(\.exerciseId)
+        XCTAssertEqual(found, ["curl"], "decline's prescribed sets rose 3 -> 4 (letter c, still planned): excluded on every letter")
+        XCTAssertEqual(Set(MesoComparer.earnedSetCandidates(sets: all).map(\.exerciseId)), ["decline", "curl"], "no prescription data: the logged counts are all there is")
+        // a one-off higher count in a COMPLETED session that is back to the baseline for the remaining ones is not a change
+        let blip = [session("s1", 110, .completed, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 3)]),
+                    session("s2", 117, .completed, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 4)]),
+                    session("s3", 131, .planned, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 3)])]
+        XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: all, sessions: blip).count, 2)
+        // a deload's lower count and a first-session baseline are not an increase
+        let flat = [session("s1", 110, .completed, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 3)]),
+                    session("s2", 124, .completed, [PrescribedLift(exerciseId: "decline", letter: "a", sets: 3)])]
+        XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: all, sessions: flat).count, 2)
+    }
+
     func test_earnedSets_atTheMaxLoad_needTwoConsecutiveRepGains() {
         func series(_ reps: [[Int]]) -> [SetRecord] { reps.enumerated().flatMap { i, r in sets(110 + i * 7, "leg_press", load: 300, reps: r, meso: "new", coarse: .quads) } }
         let cap: (String) -> Double? = { _ in 300 }
@@ -266,6 +293,32 @@ final class MesoComparisonTests: XCTestCase {
         log("  below range: " + c.notes.musclesBelowRange.map { "\($0.muscle.displayName) \(String(format: "%.1f", $0.average)) < \(Int($0.minimum))" }.joined(separator: "; "))
         log("  stalled: " + c.notes.stalledLifts.joined(separator: "; "))
         log("  earned-set candidates: " + c.notes.earnedSetCandidates.map { "\($0.name)\($0.letter.isEmpty ? "" : " " + $0.letter.uppercased()) @\(fmt.compact($0.load)) \(String(format: "%.1f", $0.firstReps)) -> \(String(format: "%.1f", $0.lastReps)) reps" }.joined(separator: "; "))
+        // Earned-set diagnostics: the max-load lookup and the exposures behind each candidate.
+        log("")
+        log("max loads on the profile: \(profile?.maxLoadByExercise ?? [:])")
+        let curSets = engine.snapshot.sets.filter { $0.isPerformanceSet && $0.mesoKey == c.current.key }
+        let exps = Exposures.build(from: curSets)
+        for cand in c.notes.earnedSetCandidates {
+            log("candidate \(cand.name) \(cand.letter) id=\(cand.exerciseId): maxLoad(for:) = \(String(describing: profile?.maxLoad(for: cand.exerciseId))), effective = \(String(describing: UserProfile.effectiveMaxLoad(for: cand.exerciseId, profile: profile, customExercises: customs)))")
+            for e in exps.filter({ $0.chain.exerciseId == cand.exerciseId && $0.chain.letter == cand.letter && !$0.chain.isTop }).sorted(by: { $0.date < $1.date }) {
+                log("     \(e.date.formatted(date: .abbreviated, time: .omitted)) sets \(e.sets.map { "\(fmt.compact($0.load))x\($0.reps)" }.joined(separator: ","))")
+            }
+        }
+        for sess in all.filter({ $0.meso?.name == c.current.name }).sorted(by: { $0.date < $1.date }) {
+            for it in sess.items where ExerciseCatalog.canonicalExerciseId(for: it.exerciseId) == "decline_bench_press" {
+                log("  RAW \(sess.date.formatted(date: .abbreviated, time: .omitted)) \(sess.status.rawValue) wave \(it.waveRaw ?? "-") targetSets \(it.targetSets) setMin \(String(describing: it.setMin)) setMax \(String(describing: it.setMax)) plannedReps \(it.plannedRepsBySet) plannedLoads \(it.plannedLoadsBySet) actualReps \(it.actualReps)")
+            }
+        }
+        for id in ["decline_bench_press", "leg_extension"] {
+            log("prescription of \(id) in the current block:")
+            for r in engine.snapshot.sessions.filter({ $0.mesoKey == c.current.key }).sorted(by: { ($0.plannedDate ?? $0.date) < ($1.plannedDate ?? $1.date) }) {
+                for l in r.prescribedLifts where l.exerciseId == id {
+                    log("     \((r.plannedDate ?? r.date).formatted(date: .abbreviated, time: .omitted)) \(r.status.rawValue) letter \(l.letter) prescribed sets \(l.sets)")
+                }
+            }
+        }
         XCTAssertFalse(c.lifts.isEmpty)
+        // Decline Bench had a set added from Nov 8 (the prescription), so it is not an earned-set candidate on any letter.
+        if c.notes.earnedSetCandidates.contains(where: { $0.exerciseId == "decline_bench_press" }) { XCTFail("Decline Bench: its prescribed set count rose") }
     }
 }

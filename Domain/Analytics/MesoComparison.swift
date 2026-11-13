@@ -93,6 +93,8 @@ struct EarnedSetCandidate: Equatable {
     let load: Double
     let firstReps: Double
     let lastReps: Double
+    /// The latest load is the lifter's max load for this exercise: reps are the only way left to progress.
+    var atCap = false
 }
 
 struct MesoComparison {
@@ -247,7 +249,7 @@ enum MesoComparer {
             .map { ($0.muscle, $0.currentAverage, $0.range.min) }
         notes.stalledLifts = stalledLifts
         notes.earnedSetCandidates = earnedSetCandidates(
-            sets: curSets, maxLoad: { UserProfile.effectiveMaxLoad(for: $0, profile: profile, customExercises: customs) },
+            sets: curSets, sessions: snapshot.sessions.filter { $0.mesoKey == current.key }, maxLoad: { UserProfile.effectiveMaxLoad(for: $0, profile: profile, customExercises: customs) },
             incrementLb: incrementLb)
 
         return MesoComparison(
@@ -265,28 +267,48 @@ enum MesoComparer {
     ///   exposures at the cap (so three exposures, rising twice in a row); one noisy session at the cap is not evidence;
     /// - otherwise reps up by at least one between the first and the latest exposure at that load.
     static func earnedSetCandidates(
-        sets: [SetRecord], loadToleranceLb: Double = 5, maxLoad: (String) -> Double? = { _ in nil }, incrementLb: Double = 5
+        sets: [SetRecord], sessions: [SessionRecord] = [], loadToleranceLb: Double = 5,
+        maxLoad: (String) -> Double? = { _ in nil }, incrementLb: Double = 5
     ) -> [EarnedSetCandidate] {
         let exposures = Exposures.build(from: sets)
+        // The PRESCRIPTION decides whether the set count was changed on purpose: a lift whose prescribed set count, on any
+        // letter, is higher in a REMAINING (not yet completed) session than in its first session of the block is out.
+        // Without session data the logged working-set count is the fallback.
+        var raisedBySession: Set<String> = []
+        let ordered = sessions.filter { !$0.isDeloadWeek && !$0.isInsertedDeload && !$0.isMaintenance }
+            .sorted { ($0.plannedDate ?? $0.date) < ($1.plannedDate ?? $1.date) }
+        var startCount: [String: Int] = [:]          // "id|letter" -> prescribed sets at the first session with that lift/letter
+        for r in ordered {
+            for l in r.prescribedLifts where l.sets > 0 {
+                let k = "\(l.exerciseId)|\(l.letter)"
+                if let s = startCount[k] {
+                    // only the REMAINING sessions matter: what the lifter is about to do, not a past one-off
+                    if r.status != .completed, l.sets > s { raisedBySession.insert(l.exerciseId) }
+                } else { startCount[k] = l.sets }
+            }
+        }
         struct K: Hashable { let id: String; let letter: String; let isTop: Bool }
         var out: [EarnedSetCandidate] = []
         for (k, list) in Dictionary(grouping: exposures, by: { K(id: $0.chain.exerciseId, letter: $0.chain.letter, isTop: $0.chain.isTop) }) {
             if k.isTop { continue }
             let chain = list.sorted { $0.date < $1.date }
             guard let first = chain.first, let last = chain.last, !last.isBodyweight, last.heaviestLoad > 0 else { continue }
-            if chain.contains(where: { $0.sets.count > first.sets.count }) { continue }      // set count went up: deliberate
+            if raisedBySession.contains(k.id) { continue }                                  // prescribed set count went up
+            if sessions.isEmpty, chain.contains(where: { $0.sets.count > first.sets.count }) { continue }
             func mean(_ e: Exposure) -> Double? {
                 let r = e.sets.filter { abs($0.load - last.heaviestLoad) <= loadToleranceLb }.map(\.reps)
                 return r.isEmpty ? nil : Double(r.reduce(0, +)) / Double(r.count)
             }
             let atLoad = chain.compactMap { e in mean(e).map { (e, $0) } }
             guard atLoad.count >= 2, let f = atLoad.first, let l = atLoad.last, l.1 - f.1 >= 1 else { continue }
+            var atCap = false
             if let cap = maxLoad(k.id), last.heaviestLoad >= cap - 0.5 * incrementLb {
+                atCap = true
                 let v = atLoad.map(\.1)
                 guard v.count >= 3, v[v.count - 1] > v[v.count - 2], v[v.count - 2] > v[v.count - 3] else { continue }
             }
             out.append(EarnedSetCandidate(exerciseId: k.id, name: last.exerciseName, letter: k.letter, load: last.heaviestLoad,
-                                          firstReps: f.1, lastReps: l.1))
+                                          firstReps: f.1, lastReps: l.1, atCap: atCap))
         }
         return out.sorted { ($0.name, $0.letter) < ($1.name, $1.letter) }
     }
