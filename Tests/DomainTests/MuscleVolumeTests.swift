@@ -177,6 +177,38 @@ final class MuscleVolumeTests: XCTestCase {
         XCTAssertEqual(MuscleVolume.currentMesoKey(in: s), "m2")
     }
 
+    // MARK: - Screen summary
+
+    func test_summary_averagesFullWeeks_listsUnmapped_andChipText() {
+        func rec(_ key: String, _ d: Int, _ status: SessionStatus = .completed) -> SessionRecord {
+            SessionRecord(key: key, date: day(d), plannedDate: day(d), plannedDateIsExact: true, completedAt: nil, status: status,
+                          weekIndex: 1, dayLabel: nil, mesoKey: "m1", mesoName: "Block", isMaintenance: false, isInsertedDeload: false,
+                          isDeloadWeek: false, readiness: .normal, readinessStars: 0, hkDuration: 0)
+        }
+        // Mon-based weeks: day(4)=13 Oct, day(11)=20 Oct, day(18)=27 Oct. The middle week has 1 of 3 sessions done.
+        let sessions = [rec("a", 4), rec("b", 11), rec("c", 12, .planned), rec("d", 13, .planned), rec("e", 18)]
+        let all = sets(4, "leg_extension", rows: 10) + sets(11, "leg_extension", rows: 2) + sets(18, "leg_extension", rows: 12)
+            + sets(18, "custom_x", coarse: .back, rows: 4)
+        let sum = MuscleVolume.summary(snapshot: AnalyticsSnapshot(sessions: sessions, sets: all), customs: [], profile: nil, asOf: day(30))
+        XCTAssertEqual(sum.weeks.count, 3)
+        XCTAssertEqual(sum.averagedWeeks, 2, "the 1-of-3 week is held out")
+        let quads = sum.rows.first { $0.muscle == .quads }
+        XCTAssertEqual(quads?.average, 11, "(10 + 12) / 2")
+        XCTAssertEqual(quads?.status, .within)
+        XCTAssertEqual(quads?.series, [10, 2, 12])
+        XCTAssertEqual(sum.unmapped.map(\.id), ["custom_x"])
+        XCTAssertEqual(sum.unmapped.first?.sets, 4)
+        XCTAssertEqual(sum.unmapped.first?.isEditable, false, "no saved custom exercise to edit")
+        XCTAssertEqual(sum.blockName, "Block")
+
+        let stalled = Stall(status: .stalled, exerciseId: "x", exerciseName: "X", letter: "b", isTop: false, metric: .e1RM, bestValue: 1,
+                            bestDate: day(0), sinceBest: [(day(1), 1), (day(2), 1), (day(3), 1)], load: 0, evidence: "")
+        XCTAssertEqual(stalled.chipText, "B: Stalled: no new best in 3 exposures")
+        let gone = Stall(status: .noLongerProgrammed, exerciseId: "x", exerciseName: "X", letter: "", isTop: false, metric: .e1RM, bestValue: 1,
+                         bestDate: day(0), sinceBest: [], load: 0, evidence: "")
+        XCTAssertEqual(gone.chipText, "No longer programmed")
+    }
+
     // MARK: - Ranges
 
     func test_defaultRanges_coverEveryMuscle_andAreOrdered() {

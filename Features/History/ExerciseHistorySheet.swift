@@ -34,6 +34,8 @@ struct ExerciseHistorySheet: View {
 
     @State private var entries: [ExerciseHistoryEntry] = []
     @State private var selectedWave: String? = nil // nil = All
+    /// Stall flags for this lift in the current block (one per letter / role), from StallDetector.
+    @State private var stalls: [Stall] = []
 
     // MARK: - Derived
 
@@ -84,6 +86,7 @@ struct ExerciseHistorySheet: View {
                             .foregroundStyle(.secondary)
                             .padding(.top, 30)
                     } else {
+                        stallChips
                         e1rmChart
                         if availableWaves.count > 1 {
                             waveFilter
@@ -109,6 +112,30 @@ struct ExerciseHistorySheet: View {
     }
 
     
+
+    // MARK: - Stall chips
+
+    @ViewBuilder private var stallChips: some View {
+        if !stalls.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(stalls.enumerated()), id: \.offset) { _, stall in
+                    HStack(spacing: 6) {
+                        Image(systemName: stall.status == .stalled ? "pause.circle.fill" : "minus.circle.fill")
+                        Text(stall.chipText)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(stall.status == .stalled ? Color.orange : Color.secondary)
+                    .background(Capsule().fill((stall.status == .stalled ? Color.orange : Color.secondary).opacity(0.15)))
+                    .accessibilityIdentifier("stallChip")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
     // MARK: - e1RM Sparkline Chart
 
@@ -459,6 +486,11 @@ struct ExerciseHistorySheet: View {
             }
 
             entries = built
+
+            let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+            let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+            stalls = AnalyticsEngine(sessions: sessions, customExercises: customs, bodyWeight: profile?.bodyWeight)
+                .stalls(forExerciseId: exerciseId, customs: customs, profile: profile)
 
             // Pre-select current wave filter if provided
             if let current = currentWave, availableWaves.contains(current) {
