@@ -102,3 +102,33 @@ extension Stall {
         }
     }
 }
+
+extension CustomExercise {
+    /// Saves the lifter's fine mapping. The primary is always 1.0 and never also a synergist: a share on the primary is
+    /// dropped, as are shares outside (0, 0.5] and unknown muscles. A nil primary clears the mapping (secondaries too).
+    func setFineMapping(primary: FineMuscle?, secondary: [FineMuscle: Double]) {
+        guard let primary else {
+            fineMuscleRaw = nil
+            fineSecondaryShares = nil
+            return
+        }
+        fineMuscleRaw = primary.rawValue
+        let clean = Dictionary(uniqueKeysWithValues: secondary
+            .filter { $0.key != primary && $0.value > 0 && $0.value <= 0.5 }
+            .map { ($0.key.rawValue, $0.value) })
+        fineSecondaryShares = clean.isEmpty ? nil : clean
+    }
+
+    /// One-time cleanup of mappings saved before the editor dropped a share on the primary (or kept a share with no
+    /// primary): rewrites the stored fields through `setFineMapping`. Returns true when something changed.
+    @discardableResult
+    func sanitizeFineMapping() -> Bool {
+        let before = (fineMuscleRaw, fineSecondaryShares)
+        let primary = fineMuscleRaw.flatMap(FineMuscle.init(rawValue:))
+        var secondary: [FineMuscle: Double] = [:]
+        for (k, v) in fineSecondaryShares ?? [:] { if let m = FineMuscle(rawValue: k) { secondary[m] = v } }
+        if primary == nil && fineMuscleRaw != nil { fineMuscleRaw = nil }       // an unknown primary is no primary
+        setFineMapping(primary: primary, secondary: secondary)
+        return before.0 != fineMuscleRaw || before.1 != fineSecondaryShares
+    }
+}

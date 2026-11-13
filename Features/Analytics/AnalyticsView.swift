@@ -10,6 +10,7 @@ struct AnalyticsView: View {
     @State private var selectedExerciseId: String? = nil
     @State private var volume: MuscleVolumeSummary? = nil
     @State private var showUnmapped = false
+    @State private var showCustomMuscles = false
     @State private var volumeRefresh = UUID()
 
     private var mesoCutoff: Date {
@@ -20,13 +21,16 @@ struct AnalyticsView: View {
         NavigationStack {
             List {
                 summarySection
-                MuscleVolumeSection(summary: volume, showUnmapped: $showUnmapped)
+                MuscleVolumeSection(summary: volume, showUnmapped: $showUnmapped, showCustomMuscles: $showCustomMuscles)
                 activitySection
                 topExercisesSection
                 allExercisesSection
             }
             .navigationTitle("Analytics")
             .task(id: "\(sessions.count)-\(customExercises.count)-\(volumeRefresh)-\(profiles.first?.muscleSetRangesStored?.count ?? 0)") { refreshVolume() }
+            .sheet(isPresented: $showCustomMuscles, onDismiss: { volumeRefresh = UUID() }) {
+                CustomExerciseMusclesSheet()
+            }
             .sheet(isPresented: $showUnmapped, onDismiss: { volumeRefresh = UUID() }) {
                 UnmappedExercisesSheet(items: volume?.unmapped ?? [])
             }
@@ -247,6 +251,7 @@ struct AnalyticsView: View {
 struct MuscleVolumeSection: View {
     let summary: MuscleVolumeSummary?
     @Binding var showUnmapped: Bool
+    @Binding var showCustomMuscles: Bool
 
     var body: some View {
         Section {
@@ -261,6 +266,14 @@ struct MuscleVolumeSection: View {
                     }
                 }
                 .accessibilityIdentifier("unmappedExercisesRow")
+                Button { showCustomMuscles = true } label: {
+                    HStack {
+                        Text("Custom exercise muscles")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                .accessibilityIdentifier("customExerciseMusclesRow")
             } else {
                 Text("No completed training in the current block yet.")
                     .font(.caption).foregroundStyle(.secondary)

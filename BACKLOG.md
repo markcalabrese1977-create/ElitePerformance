@@ -87,8 +87,18 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 Resolved by the custom fine-muscle mapping (CustomExercise.fineMuscleRaw + shares, mapping editor, "Unmapped exercises" row).
 Unmapped customs are now counted in no muscle's total instead of being credited by coarse group.
 
-## Settings repair actions run on a single tap
-Settings "Repair maintenance loads" (and the other Data Repair buttons) write on one tap, with no confirmation. Add a
-confirmation dialog before each writes: what it will scan, what it can change, and that it cannot be undone. Check every
-Settings repair action for the same gap (Repair Exercise Data, Remove Unrecognized Exercises, Sync meso start date,
-Repair maintenance loads). Found when a stray tap ran "Repair maintenance loads" during simulator testing (it found nothing to change).
+## Destructive controls: audit (confirmations added) and what is left
+Fixed on fix/mapping-and-delete-confirm: Program tab item delete (trash button and swipe) now asks "Remove <name> from <day, date>?"
+and offers an 8 second Undo that restores the slot (order, wave letter, prescription, edited loads); all five Settings repair
+actions (Reset mesocycle, Repair exercise data, Remove unrecognized exercises, Sync meso start date, Repair maintenance
+loads) confirm with what they scan/change; deleting a custom exercise (picker swipe) confirms.
+Already confirmed before: Program plan session delete (ProgramPlanView), MesoSummary and SessionView dialogs.
+Still one tap, to decide: Insert/Remove deload "Remove deload" button (InsertDeloadFlow, has its own review screen first),
+exercise note "Clear" (ExerciseNoteSheet), onboarding trash buttons (OnboardingFlowView, pre-data), Settings "Reset all to defaults"
+for muscle ranges (harmless), ExerciseCustomizationSheet "Reset to default".
+Undo only covers the Program tab item delete; the Settings repairs have no undo (confirmation only).
+
+## Re-adding an exercise to a wave-based session creates a blank, letterless item
+After removing and re-adding an exercise on a wave session (A/B/C), the new item has no wave letter or prescription, which
+breaks carry-forward. Offer to restore the slot's prescription from the same-letter template / previous exposure when adding
+an exercise to a wave-based session (Undo covers the accidental-delete case only).

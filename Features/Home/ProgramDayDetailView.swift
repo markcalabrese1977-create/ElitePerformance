@@ -20,6 +20,10 @@ struct ProgramDayDetailView: View {
     @State private var propagateChangesToFutureSessions: Bool = true
     @State private var showDayLabelEditor: Bool = false
     @State private var dayLabelDraft: String = ""
+    /// Items waiting for the lifter to confirm their removal from this session's plan.
+    @State private var pendingDelete: PendingDelete?
+    /// The last removal, restorable for a few seconds.
+    @State private var undoDelete: UndoDelete?
 
     // MARK: - Derived ordered items
 
@@ -64,7 +68,7 @@ struct ProgramDayDetailView: View {
                             item: item,
                             onMoveUp:  { move(item, direction: -1) },
                             onMoveDown:{ move(item, direction: 1) },
-                            onDelete:  { delete(item) },
+                            onDelete:  { requestDelete([item], propagate: true) },
                             onSwapTapped: { swapTarget = SwapTarget(item: item) },
                             onChangePrescriptionTapped: { scope in changeTarget = ChangeTarget(item: item, scope: scope) },
                             onHistoryTapped: { exerciseId, exerciseName in
@@ -83,7 +87,7 @@ struct ProgramDayDetailView: View {
                                                     )
                     }
                     .onMove(perform: moveItems)
-                    .onDelete(perform: deleteItems)
+                    .onDelete { offsets in requestDelete(offsets.map { orderedItems[$0] }, propagate: false) }
                 }
 
                 Button {
@@ -96,6 +100,37 @@ struct ProgramDayDetailView: View {
         }
         .navigationTitle(session.date.formatted(date: .abbreviated, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Remove exercise?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { p in
+            Button("Remove", role: .destructive) { performDelete(p) }
+            Button("Cancel", role: .cancel) { }
+        } message: { p in
+            Text(deleteMessage(p))
+        }
+        .overlay(alignment: .bottom) {
+            if let u = undoDelete {
+                HStack {
+                    Text(u.label).font(.subheadline)
+                    Spacer()
+                    Button("Undo") { restore(u) }.fontWeight(.semibold)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: u.id) {
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    if undoDelete?.id == u.id { undoDelete = nil }
+                }
+            }
+        }
+        .animation(.default, value: undoDelete?.id)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("Auto+") {
@@ -647,27 +682,74 @@ struct ProgramDayDetailView: View {
         }
     }
 
-    private func delete(_ item: SessionItem) {
-        guard let index = session.items.firstIndex(where: { $0.id == item.id }) else { return }
-        let removedOrder = session.items[index].order
+    // MARK: - Removing items (confirmed, with undo)
 
-        session.items.remove(at: index)
+    struct PendingDelete: Identifiable {
+        let id = UUID()
+        let items: [SessionItem]
+        let propagate: Bool
+    }
 
-        // Re-normalize order so it stays contiguous
-        for sessionItem in session.items where sessionItem.order > removedOrder {
-            sessionItem.order -= 1
+    struct UndoDelete: Identifiable {
+        let id = UUID()
+        let entries: [(item: SessionItem, order: Int)]
+        let label: String
+        let propagate: Bool
+    }
+
+    private func itemName(_ item: SessionItem) -> String {
+        ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId))
+    }
+
+    private var sessionTitle: String {
+        let day = session.dayLabel?.trimmingCharacters(in: .whitespaces).nonEmpty
+        let date = session.date.formatted(date: .abbreviated, time: .omitted)
+        return day.map { "\($0), \(date)" } ?? date
+    }
+
+    private func requestDelete(_ items: [SessionItem], propagate: Bool) {
+        guard !items.isEmpty else { return }
+        pendingDelete = PendingDelete(items: items, propagate: propagate)
+    }
+
+    private func deleteMessage(_ p: PendingDelete) -> String {
+        let names = p.items.map(itemName).joined(separator: ", ")
+        var text = "Remove \(names) from \(sessionTitle)? Its plan for this session is lost. Logged history is not affected."
+        if p.propagate && propagatesToFutureSessions { text += " It is also removed from future planned sessions." }
+        return text
+    }
+
+    private func performDelete(_ p: PendingDelete) {
+        var entries: [(item: SessionItem, order: Int)] = []
+        for item in p.items {
+            guard let index = session.items.firstIndex(where: { $0.id == item.id }) else { continue }
+            let removedOrder = session.items[index].order
+            entries.append((item, removedOrder))
+            session.items.remove(at: index)
+            // Re-normalize order so it stays contiguous
+            for sessionItem in session.items where sessionItem.order > removedOrder { sessionItem.order -= 1 }
         }
-
-        // ✅ NEW: propagate program edits forward into future planned sessions
-        if propagatesToFutureSessions {
-                    ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
-                }
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("⚠️ Failed to delete exercise: \(error)")
+        guard !entries.isEmpty else { return }
+        if p.propagate && propagatesToFutureSessions {
+            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
         }
+        do { try modelContext.save() } catch { print("⚠️ Failed to delete exercise: \(error)") }
+        let label = entries.count == 1 ? "Removed \(itemName(entries[0].item))" : "Removed \(entries.count) exercises"
+        undoDelete = UndoDelete(entries: entries, label: label, propagate: p.propagate)
+    }
+
+    /// Puts the removed items back with their slot (order, prescription, wave letter, edited loads: the objects are intact).
+    private func restore(_ u: UndoDelete) {
+        for entry in u.entries.sorted(by: { $0.order < $1.order }) {
+            for other in session.items where other.order >= entry.order { other.order += 1 }
+            entry.item.order = entry.order
+            session.items.append(entry.item)
+        }
+        if u.propagate && propagatesToFutureSessions {
+            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        }
+        do { try modelContext.save() } catch { print("⚠️ Failed to restore exercise: \(error)") }
+        undoDelete = nil
     }
 
     private func move(_ item: SessionItem, direction: Int) {
@@ -710,27 +792,6 @@ struct ProgramDayDetailView: View {
             try modelContext.save()
         } catch {
             print("⚠️ Failed to re-order items: \(error)")
-        }
-    }
-
-    private func deleteItems(at offsets: IndexSet) {
-        let itemsToDelete = offsets.map { orderedItems[$0] }
-        for item in itemsToDelete {
-            if let idx = session.items.firstIndex(where: { $0.id == item.id }) {
-                session.items.remove(at: idx)
-            }
-        }
-
-        // Re-normalize order after deletions
-        let sorted = session.items.sorted { $0.order < $1.order }
-        for (idx, item) in sorted.enumerated() {
-            item.order = idx + 1
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("⚠️ Failed to delete via swipe: \(error)")
         }
     }
 

@@ -10,6 +10,7 @@ struct AddExerciseSheet: View {
     @State private var showingCreateCustom = false
     @State private var refreshToken = UUID()
     @State private var mappingExerciseId: MappingTarget?
+    @State private var pendingCustomDelete: [CatalogExercise] = []
 
     private var builtIn: [CatalogExercise] { ExerciseCatalog.builtIn }
     private var custom: [CatalogExercise] { ExerciseCatalog.customExercises(in: modelContext) }
@@ -60,9 +61,7 @@ struct AddExerciseSheet: View {
                             }
                         }
                         .onDelete { idx in
-                            let ids = idx.map { filteredCustom[$0].id }
-                            ExerciseCatalog.deleteCustomExercises(ids: ids, in: modelContext)
-                            refreshToken = UUID()
+                            pendingCustomDelete = idx.map { filteredCustom[$0] }
                         }
                     }
                 }
@@ -98,6 +97,20 @@ struct AddExerciseSheet: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .exerciseCatalogDidChange)) { _ in
                 refreshToken = UUID()
+            }
+            .confirmationDialog(
+                "Delete custom exercise?",
+                isPresented: Binding(get: { !pendingCustomDelete.isEmpty }, set: { if !$0 { pendingCustomDelete = [] } }),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    ExerciseCatalog.deleteCustomExercises(ids: pendingCustomDelete.map(\.id), in: modelContext)
+                    pendingCustomDelete = []
+                    refreshToken = UUID()
+                }
+                Button("Cancel", role: .cancel) { pendingCustomDelete = [] }
+            } message: {
+                Text("Delete \(pendingCustomDelete.map(\.name).joined(separator: ", "))? It disappears from the exercise picker and its muscle mapping is lost. Sessions that already use it keep their logged history.")
             }
             .sheet(item: $mappingExerciseId) { target in
                 CustomMuscleMappingSheet(exerciseId: target.id)
@@ -215,7 +228,7 @@ struct CustomMuscleMappingSheet: View {
                         Text("Like \(s.basedOn) (\(s.confidence.rawValue)): \(s.primary?.displayName ?? "-")")
                         Button("Use suggestion") {
                             primary = s.primary
-                            secondary = s.shares.filter { $0.value < 1 }
+                            secondary = s.shares.filter { $0.value < 1 && $0.key != s.primary }
                         }
                     }
                 }
@@ -242,22 +255,80 @@ struct CustomMuscleMappingSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if let c = custom {
-                            c.fineMuscleRaw = primary?.rawValue
-                            let extras = Dictionary(uniqueKeysWithValues: secondary.map { ($0.key.rawValue, $0.value) })
-                            c.fineSecondaryShares = primary == nil || extras.isEmpty ? nil : extras
+                            c.setFineMapping(primary: primary, secondary: secondary)
                             try? modelContext.save()
                         }
                         dismiss()
                     }
                 }
             }
+            .onChange(of: primary) { _, newPrimary in
+                // the primary is 1.0: it can never also be an "also trains" share
+                if let newPrimary { secondary[newPrimary] = nil }
+            }
             .onAppear {
                 guard !loaded, let c = custom else { return }
                 loaded = true
+                if c.sanitizeFineMapping() { try? modelContext.save() }
                 primary = c.fineMuscleRaw.flatMap(FineMuscle.init(rawValue:))
                 secondary = Dictionary(uniqueKeysWithValues: (c.fineSecondaryShares ?? [:]).compactMap { k, v in
                     FineMuscle(rawValue: k).map { ($0, v) }
                 })
+            }
+        }
+    }
+}
+
+
+/// Every custom exercise with its muscle mapping (mapped / unmapped); each opens the mapping editor. The way back to the
+/// editor for exercises that have left the "Unmapped exercises" list.
+struct CustomExerciseMusclesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \CustomExercise.name) private var customs: [CustomExercise]
+    @State private var editing: MappingTarget?
+
+    private func summary(_ c: CustomExercise) -> String {
+        guard let shares = c.fineShares, let primary = c.fineMuscleRaw.flatMap(FineMuscle.init(rawValue:)) else { return "Unmapped" }
+        let others = shares.filter { $0.key != primary }.sorted { ($1.value, $0.key.rawValue) < ($0.value, $1.key.rawValue) }
+            .map { "\($0.key.displayName) \($0.value == 0.5 ? "½" : "¼")" }
+        return ([primary.displayName] + others).joined(separator: " · ")
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if customs.isEmpty {
+                    Text("No custom exercises.").foregroundStyle(.secondary)
+                } else {
+                    Section {
+                        ForEach(customs) { c in
+                            Button { editing = MappingTarget(id: c.id) } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(c.name)
+                                        Text(summary(c)).font(.caption)
+                                            .foregroundStyle(c.fineShares == nil ? Color.orange : Color.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    } footer: {
+                        Text("Mapped: \(customs.filter { $0.fineShares != nil }.count) of \(customs.count). Unmapped exercises are counted in no muscle's weekly total.")
+                    }
+                }
+            }
+            .navigationTitle("Custom exercise muscles")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .sheet(item: $editing) { target in CustomMuscleMappingSheet(exerciseId: target.id) }
+            .onAppear {
+                // one-time cleanup of mappings saved with a share on their own primary
+                var changed = false
+                for c in customs { if c.sanitizeFineMapping() { changed = true } }
+                if changed { try? modelContext.save() }
             }
         }
     }

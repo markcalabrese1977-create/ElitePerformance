@@ -177,6 +177,44 @@ final class MuscleVolumeTests: XCTestCase {
         XCTAssertEqual(MuscleVolume.currentMesoKey(in: s), "m2")
     }
 
+    // MARK: - Mapping editor: the primary is never also a secondary
+
+    func test_setFineMapping_dropsAShareOnThePrimary_andOutOfRangeShares() {
+        let c = CustomExercise(id: "custom_a", name: "DB Row [Lat Bias]", primaryMuscleRaw: "back", isCompound: true)
+        c.setFineMapping(primary: .lats, secondary: [.lats: 0.5, .upperBack: 0.5, .biceps: 0.5, .rearDelts: 0.25, .triceps: 0.9, .chest: 0])
+        XCTAssertEqual(c.fineMuscleRaw, "lats")
+        XCTAssertEqual(c.fineSecondaryShares ?? [:], ["upperBack": 0.5, "biceps": 0.5, "rearDelts": 0.25])
+        XCTAssertEqual(c.fineShares, [.lats: 1, .upperBack: 0.5, .biceps: 0.5, .rearDelts: 0.25])
+        c.setFineMapping(primary: .lats, secondary: [.lats: 0.5])
+        XCTAssertNil(c.fineSecondaryShares, "only a share on the primary: nothing left")
+        c.setFineMapping(primary: nil, secondary: [.biceps: 0.5])
+        XCTAssertNil(c.fineMuscleRaw)
+        XCTAssertNil(c.fineSecondaryShares, "no primary, no mapping")
+    }
+
+    func test_sanitize_cleansMappingsSavedWithAHiddenShareOnTheirPrimary() {
+        // as saved by the old editor: "Use suggestion" of Barbell Row (upper back 1, lats .5 ...), then primary changed to lats
+        let c = CustomExercise(id: "custom_a", name: "DB Row [Lat Bias]", primaryMuscleRaw: "back", isCompound: true)
+        c.fineMuscleRaw = "lats"
+        c.fineSecondaryShares = ["lats": 0.5, "upperBack": 0.5, "biceps": 0.5, "rearDelts": 0.25]
+        XCTAssertTrue(c.sanitizeFineMapping())
+        XCTAssertEqual(c.fineSecondaryShares ?? [:], ["upperBack": 0.5, "biceps": 0.5, "rearDelts": 0.25])
+        XCTAssertFalse(c.sanitizeFineMapping(), "idempotent")
+        // an unmapped exercise is left alone
+        let u = CustomExercise(id: "custom_b", name: "X", primaryMuscleRaw: "chest", isCompound: false)
+        XCTAssertFalse(u.sanitizeFineMapping())
+        // shares with no primary are dropped
+        u.fineSecondaryShares = ["biceps": 0.5]
+        XCTAssertTrue(u.sanitizeFineMapping())
+        XCTAssertNil(u.fineSecondaryShares)
+        // an unknown primary is no primary
+        u.fineMuscleRaw = "nonsense"
+        u.fineSecondaryShares = ["biceps": 0.5]
+        XCTAssertTrue(u.sanitizeFineMapping())
+        XCTAssertNil(u.fineMuscleRaw)
+        XCTAssertNil(u.fineSecondaryShares)
+    }
+
     // MARK: - Screen summary
 
     func test_summary_averagesFullWeeks_listsUnmapped_andChipText() {

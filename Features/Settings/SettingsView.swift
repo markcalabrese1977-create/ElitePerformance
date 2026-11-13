@@ -25,6 +25,7 @@ struct SettingsView: View {
     // MARK: - About
     @State private var didCopyBuildInfo = false
     @State private var showMuscleRanges = false
+    @State private var pendingRepair: SettingsRepair?
     
 
     var body: some View {
@@ -178,12 +179,7 @@ struct SettingsView: View {
             // MARK: - Mesocycle
                         Section("Mesocycle") {
                             Button(role: .destructive) {
-                                let today = Calendar.current.startOfDay(for: Date())
-                                MesoLifecycle.confirmStartNewMeso(on: today)
-                                AppStateBridge.setActiveMesoStartDate(today, in: context)
-                                AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
-                                AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
-                                AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
+                                pendingRepair = .resetMeso
                             } label: {
                                 Text("Reset Mesocycle to Week 1")
                             }
@@ -206,29 +202,28 @@ struct SettingsView: View {
             // MARK: - Data Repair
             Section("Data Repair") {
                             Button("Repair Exercise Data") {
-                                fixExerciseIdMismatches()
+                                pendingRepair = .exerciseData
                             }
                             Text("Run this if exercise history is showing incorrect exercises. Safe to run at any time.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
                 Button("Remove Unrecognized Exercises") {
-                                    removeOrphanedExerciseItems()
-                                    removeOrphanedHistoryExercises()
+                                    pendingRepair = .unrecognized
                                 }
                             Text("Removes logged sets from exercises that can no longer be identified. Does not delete sessions.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
                 Button("Sync meso start date") {
-                    syncMesoStartDate()
+                    pendingRepair = .syncMeso
                 }
                 Text("Re-anchors Analytics to the currently active mesocycle block. Use this if Analytics is showing data from a previous block.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 Button("Repair maintenance loads") {
-                    repairMaintenanceLoads()
+                    pendingRepair = .maintenanceLoads
                 }
                 Text("Resets inflated planned loads on upcoming maintenance sessions back to your last completed actuals for that exercise.")
                     .font(.caption)
@@ -388,6 +383,17 @@ struct SettingsView: View {
                 showImportAlert = true
             }
         }
+        .confirmationDialog(
+            pendingRepair?.title ?? "",
+            isPresented: Binding(get: { pendingRepair != nil }, set: { if !$0 { pendingRepair = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingRepair
+        ) { repair in
+            Button(repair.confirmLabel, role: repair.isDestructive ? .destructive : nil) { runRepair(repair) }
+            Button("Cancel", role: .cancel) { }
+        } message: { repair in
+            Text(repair.message)
+        }
         .alert("Mesocycle", isPresented: $showMesoGenerationAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -402,6 +408,24 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private func runRepair(_ repair: SettingsRepair) {
+        switch repair {
+        case .resetMeso:
+            let today = Calendar.current.startOfDay(for: Date())
+            MesoLifecycle.confirmStartNewMeso(on: today)
+            AppStateBridge.setActiveMesoStartDate(today, in: context)
+            AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
+            AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
+            AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
+        case .exerciseData: fixExerciseIdMismatches()
+        case .unrecognized:
+            removeOrphanedExerciseItems()
+            removeOrphanedHistoryExercises()
+        case .syncMeso: syncMesoStartDate()
+        case .maintenanceLoads: repairMaintenanceLoads()
+        }
+    }
 
     private func fixExerciseIdMismatches() {
         let descriptor = FetchDescriptor<SessionItem>()
@@ -660,4 +684,46 @@ struct MuscleRangesEditor: View {
         .navigationTitle("Weekly set ranges")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+
+/// The Settings actions that rewrite stored data. Each is confirmed first, saying what it scans and what it can change.
+enum SettingsRepair: Identifiable {
+    case resetMeso, exerciseData, unrecognized, syncMeso, maintenanceLoads
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .resetMeso: return "Reset mesocycle to Week 1?"
+        case .exerciseData: return "Repair exercise data?"
+        case .unrecognized: return "Remove unrecognized exercises?"
+        case .syncMeso: return "Sync meso start date?"
+        case .maintenanceLoads: return "Repair maintenance loads?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .resetMeso:
+            return "Relabels this block as Week 1, Day 1 starting today and clears the scheduled next-meso date. Your logged history is not deleted, but week and day labels change and cannot be restored automatically."
+        case .exerciseData:
+            return "Scans every session and history entry and re-links exercise ids that no longer match the catalog. It changes only the ids stored on logged exercises, never sets, reps or loads. Cannot be undone."
+        case .unrecognized:
+            return "Scans all sessions and history for exercises that can no longer be identified and permanently deletes their logged sets. Sessions themselves are kept. Export a backup first if unsure."
+        case .syncMeso:
+            return "Moves the analytics start date to the currently active mesocycle block. Only the start date changes; no sessions are edited."
+        case .maintenanceLoads:
+            return "Scans upcoming maintenance sessions and resets planned loads that are above your last completed load for that exercise back to that load. Completed sessions are not changed. Cannot be undone."
+        }
+    }
+
+    var confirmLabel: String {
+        switch self {
+        case .resetMeso: return "Reset to Week 1"
+        case .unrecognized: return "Delete sets"
+        default: return "Run repair"
+        }
+    }
+
+    var isDestructive: Bool { self == .resetMeso || self == .unrecognized }
 }
