@@ -437,7 +437,7 @@ struct MesoSummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                verdictBadge(analysis.overallVerdict, scope: "most lifts, whole block")
+                verdictBadge(analysis.overallVerdict)
             }
 
             Text(analysis.verdictNarrative)
@@ -529,6 +529,12 @@ struct MesoSummaryView: View {
             Text("By exercise")
                 .font(.subheadline.bold())
 
+            Text(Self.trendCaption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("trendCaption")
+
             VStack(spacing: 8) {
                 ForEach(analysis.exerciseSummaries, id: \.exerciseId) { summary in
                     exerciseRow(summary)
@@ -585,7 +591,7 @@ struct MesoSummaryView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
-                                            verdictBadge(summary.verdict, scope: "first → last session")
+                                            verdictBadge(summary.verdict)
 
                                             if let best = summary.bestSet {
                                                 Text("best \(LoadFormatter(unit: unit).compact(best.load)) × \(best.reps)")
@@ -856,8 +862,17 @@ struct MesoSummaryView: View {
         }
     }
 
-    /// The chip names what it measures: the trend between the block's first and last session (±3%), not the latest session.
-    private func verdictBadge(_ verdict: ExerciseVerdict, scope: String) -> some View {
+    /// What every number on a By-exercise row measures, as the code computes it (MesoPerformanceAnalyzer):
+    /// - the chip and the % are the SAME comparison: this lift's e1RM in the block's first session vs its last session
+    ///   (each session's best set of 12 reps or fewer, warm-ups out; deload weeks excluded). Progressing / Declining at
+    ///   +/-3% or more, else Holding. With no set of 12 reps or fewer it is the best load at matched reps instead;
+    ///   a bodyweight lift with no body weight set uses reps per set.
+    /// - "best" is the block's best single set of that lift (highest e1RM among sets of 12 reps or fewer).
+    /// - sets and volume count every logged working row of the block (load x reps).
+    static let trendCaption = "Trend and % = this lift's e1RM, first → last session of the block (±3% = Holding). Best = top set of the block, load × reps. Sets · volume = logged sets of the block."
+
+    /// The chip is one word. What it measures is stated once, in `trendCaption`, under the "By exercise" header.
+    private func verdictBadge(_ verdict: ExerciseVerdict) -> some View {
         let (label, color): (String, Color) = {
             switch verdict {
             case .progressing:  return ("↑ Progressing", .green)
@@ -867,7 +882,7 @@ struct MesoSummaryView: View {
             }
         }()
 
-        return Text(verdict == .insufficient ? label : "\(label) · \(scope)")
+        return Text(label)
             .font(.caption2)
             .fontWeight(.semibold)
             .foregroundColor(color)

@@ -375,6 +375,30 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(a.exerciseSummaries.count, 1)
     }
 
+    func test_verdictChip_isTheFirstToLastE1RMChange_withPlusMinus3PercentBands() throws {
+        func verdict(first: Double, last: Double) throws -> (ExerciseVerdict, Double?) {
+            let ctx = ModelContext(try BackupTestSupport.makeContainer())
+            let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+            ctx.insert(meso)
+            // the MIDDLE session is far higher than both ends: the verdict must ignore it (first -> last, not best or recent)
+            for (i, load) in [first, first * 1.5, last].enumerated() {
+                let s = Session(date: day(i * 7), status: .completed, weekIndex: i + 1, dayLabel: "D", items: [item("bench_press", reps: [5, 5], loads: [load, load])])
+                s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+            }
+            let e = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: [])?.exerciseSummaries.first)
+            return (e.verdict, e.trendChange)
+        }
+        let up = try verdict(first: 200, last: 206.2)
+        XCTAssertEqual(up.0, .progressing, "+3.1% on e1RM")
+        XCTAssertEqual(up.1 ?? 0, 0.031, accuracy: 1e-9)
+        XCTAssertEqual(try verdict(first: 200, last: 205).0, .plateaued, "+2.5%")
+        XCTAssertEqual(try verdict(first: 200, last: 194).0, .declining, "-3%")
+        XCTAssertEqual(try verdict(first: 200, last: 195).0, .plateaued, "-2.5%")
+        // the one caption under the header says exactly this
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("first → last"))
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("±3%"))
+    }
+
     func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {
         // one PARTIAL week (the asOf is mid-week) of a custom exercise: no complete week, so no weekly average
         let cs = sets(4, "custom_x", load: 100, reps: [8, 8, 8], meso: "m1", coarse: .back)
