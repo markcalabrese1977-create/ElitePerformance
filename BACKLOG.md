@@ -83,7 +83,12 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Fixture-dependent tests (CarryForwardAudit, DUPMesoLengthConversion fixture, LastSameLetter fixture, InsertDeloadRealBackup...): 4 fail against the Oct 30 backup because they pin old data. Make them backup-agnostic (assert invariants, not specific dates/loads) or retire them; then run them with the latest backup in the gate.
 - Store the weekday pattern on UserProfile so Change Program prefills it (today it falls back to the default pattern for the day count).
 
-## Muscle volume: custom exercises are credited by their coarse group only
-A custom exercise gets 1.0 to the fine primary of its coarse group (back -> lats, shoulders -> side delts). On the Nov 12
-backup that misfiles e.g. "Chest Supported Barbell Row" (lats, should be upper back), "Landmine Press" and "Prone Y-Raise"
-(side delts). Options when the volume UI lands: let the custom-exercise editor pick a fine primary, or infer it from the name.
+## Muscle volume: custom exercises are credited by their coarse group only (resolved)
+Resolved by the custom fine-muscle mapping (CustomExercise.fineMuscleRaw + shares, mapping editor, "Unmapped exercises" row).
+Unmapped customs are now counted in no muscle's total instead of being credited by coarse group.
+
+## Settings repair actions run on a single tap
+Settings "Repair maintenance loads" (and the other Data Repair buttons) write on one tap, with no confirmation. Add a
+confirmation dialog before each writes: what it will scan, what it can change, and that it cannot be undone. Check every
+Settings repair action for the same gap (Repair Exercise Data, Remove Unrecognized Exercises, Sync meso start date,
+Repair maintenance loads). Found when a stray tap ran "Repair maintenance loads" during simulator testing (it found nothing to change).
