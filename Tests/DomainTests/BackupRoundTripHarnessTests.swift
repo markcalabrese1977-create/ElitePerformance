@@ -626,7 +626,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         // The store as it was before `prescribedSets` existed: no item carries it.
         for s in try ctx.fetch(FetchDescriptor<Session>()) { for i in s.items { i.prescribedSets = nil } }
         // ... and before `plannedDate` existed: no session carries it.
-        for s in try ctx.fetch(FetchDescriptor<Session>()) { s.plannedDate = nil }
+        for s in try ctx.fetch(FetchDescriptor<Session>()) { s.plannedDate = nil; s.plannedDateExact = nil }
         try ctx.save()
         return ctx
     }
@@ -664,6 +664,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
                 XCTAssertEqual(sessions[s]["plannedDate"] as? String, sessions[s]["date"] as? String,
                                "planned session: plannedDate == date")
                 sessions[s].removeValue(forKey: "plannedDate")
+                XCTAssertNil(sessions[s]["plannedDateExact"], "a backfilled date is never marked exact")
                 plannedSessions += 1
             } else {
                 XCTAssertNil(sessions[s]["plannedDate"], "\(status ?? "?") sessions keep no plannedDate (unknown, never guessed)")
@@ -787,6 +788,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             for i in items.indices { items[i].removeValue(forKey: "prescribedSets") }
             sessions[s]["items"] = items
             sessions[s].removeValue(forKey: "plannedDate")
+            XCTAssertNil(sessions[s]["plannedDateExact"], "a backfill never marks a date exact")
         }
         after["sessions"] = sessions
         XCTAssertEqual(try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys]),

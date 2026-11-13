@@ -191,4 +191,79 @@ final class AnalyticsImpactReportTests: XCTestCase {
         log("")
         log("== not affected (snapshots written at completion, or session-level): SessionRecapView, HistoryView set lists and totals (SessionHistory), Analytics session counts.")
     }
+
+    // MARK: - P1b: which rule removes which rows
+
+    private func reason(_ r: SetRecord) -> String {
+        if r.isMaintenance { return "maintenance block" }
+        if r.isInsertedDeload { return "inserted deload week" }
+        if r.isDeloadWaveItem { return "deload-wave item" }
+        if r.isDeloadWeek { return "deload band of a non-wave block (Session.isDeloadWeek)" }
+        if r.isSkipped { return "skipped row" }
+        if !r.isHardSetRow { return "warm-up (< 50% of the item's heaviest logged row)" }
+        return "counted"
+    }
+
+    func test_audit_whyTheTopNumbersMove() throws {
+        let (ctx, all, profile, customs) = try loadFixture()
+        defer { flush() }
+        _ = ctx
+        let snap = SetRecordBuilder.build(sessions: all, customExercises: customs, bodyWeight: profile?.bodyWeight)
+        let mesoNames = Dictionary(uniqueKeysWithValues: snap.sessions.map { ($0.key, $0.mesoName ?? "-") })
+        func d(_ x: Date) -> String { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MM/dd"; return f.string(from: x) }
+        func flags(_ r: SetRecord) -> String {
+            var f: [String] = []
+            if r.isMaintenance { f.append("maintenance") }
+            if r.isInsertedDeload { f.append("insertedDeload") }
+            if r.isDeloadWaveItem { f.append("deloadWave") }
+            if r.isDeloadWeek { f.append("deloadWeek") }
+            if r.isRestPause { f.append("RP") }
+            if r.isDrop { f.append("drop") }
+            if r.isTop { f.append("top") }
+            if !r.isWorkingSet { f.append("notWorkingSet") }
+            return f.isEmpty ? "-" : f.joined(separator: ",")
+        }
+        for name in ["Chest-Supported Incline DB Row", "Smith Machine Hip Thrust", "Leg Press"] {
+            guard let id = snap.sets.first(where: { $0.exerciseName == name })?.exerciseId else { log("\(name): not found"); continue }
+            let rows = snap.sets.filter { $0.exerciseId == id && $0.status == .completed && $0.reps > 0 && $0.load > 0 }
+            log("")
+            log("== \(name) (\(id)): rows counted today (completed, reps>0, load>0): \(rows.count) · hard sets under the new rule: \(rows.filter(\.countsAsHardSet).count)")
+            let byReason = Dictionary(grouping: rows, by: reason)
+            for (why, rs) in byReason.sorted(by: { $0.value.count > $1.value.count }) where why != "counted" {
+                let bySession = Dictionary(grouping: rs, by: \.sessionKey)
+                let dates = bySession.values.compactMap { $0.first }.sorted { $0.sessionDate < $1.sessionDate }
+                    .map { "\(d($0.sessionDate)) w\($0.weekIndex)×\(bySession[$0.sessionKey]!.count) [\(mesoNames[$0.sessionKey] ?? "-")]" }
+                log("   removed by \"\(why)\": \(rs.count) rows in \(bySession.count) sessions")
+                log("      \(dates.prefix(30).joined(separator: ", "))")
+            }
+            // e1RM: today's best (any row) versus the single definition's
+            let todayBest = rows.max { $0.e1RM < $1.e1RM }
+            let newBest = rows.filter(\.isPerformanceSet).max { $0.e1RM < $1.e1RM }
+            func line(_ r: SetRecord?) -> String {
+                guard let r else { return "none" }
+                return "\(d(r.sessionDate)) wk\(r.weekIndex) \(Int(r.load))×\(r.reps) → e1RM \(String(format: "%.1f", r.e1RM)) [\(flags(r))] meso \(mesoNames[r.sessionKey] ?? "-")"
+            }
+            log("   best e1RM today:        \(line(todayBest))")
+            log("   best e1RM new rule:     \(line(newBest))")
+            log("   top 6 rows by e1RM and why each is in or out of a record:")
+            for r in rows.sorted(by: { $0.e1RM > $1.e1RM }).prefix(6) {
+                log("      \(line(r))  → \(r.isPerformanceSet ? "counts" : (r.isWorkingSet ? "excluded: deload/maintenance session" : "excluded: not a working set (RP/drop/warm-up)"))")
+            }
+        }
+
+        // The Hip Thrust PR flip in MesoSummary: the prior peak the old rule saw.
+        if let id = snap.sets.first(where: { $0.exerciseName == "Smith Machine Hip Thrust" })?.exerciseId {
+            log("")
+            log("== Smith Machine Hip Thrust PR badge (12-Week DUP Meso): prior rows that set the old prior peak (every other session, any status of block)")
+            let meso12 = snap.sessions.filter { $0.mesoName == "12-Week DUP Meso" }.map(\.key)
+            let priors = snap.sets.filter { $0.exerciseId == id && !meso12.contains($0.sessionKey) && $0.reps > 0 && $0.load > 0 }
+            for r in priors.sorted(by: { $0.e1RM > $1.e1RM }).prefix(5) {
+                log("      \(d(r.sessionDate)) \(Int(r.load))×\(r.reps) e1RM \(String(format: "%.1f", r.e1RM)) [\(flags(r))] meso \(mesoNames[r.sessionKey] ?? "-") — \(r.isMaintenance ? "maintenance: now excluded" : "still counts")")
+            }
+            let thisMeso = snap.sets.filter { $0.exerciseId == id && meso12.contains($0.sessionKey) && $0.reps > 0 && $0.load > 0 }
+            if let b = thisMeso.filter({ $0.status == .completed && !$0.isDeloadWeek }).max(by: { $0.e1RM < $1.e1RM }) {
+                log("      this block's peak: \(d(b.sessionDate)) \(Int(b.load))×\(b.reps) e1RM \(String(format: "%.1f", b.e1RM))")
+            }
+        }
+    }
 }

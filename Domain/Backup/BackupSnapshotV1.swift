@@ -130,6 +130,7 @@ struct SessionBackupDTO: Codable {
     var insertedDeload: Bool? = nil
     // Added with plannedDate (analytics foundation). Optional so OLD backups decode with nil.
     var plannedDate: Date? = nil
+    var plannedDateExact: Bool? = nil
 
     let hkWorkoutUUID: String?
     let hkWorkoutStart: Date?

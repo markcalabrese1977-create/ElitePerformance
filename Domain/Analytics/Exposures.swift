@@ -14,18 +14,38 @@ struct Exposure: Equatable {
         let mesoKey: String
     }
 
+    struct Prescription: Equatable {
+        let repMin: Int?
+        let repMax: Int?
+        let rirMin: Int?
+        let rirMax: Int?
+    }
+
     struct WorkingSet: Equatable {
         let load: Double
         let reps: Int
+        /// What the plan asked for on this row (stored lb / reps); nil when the item carried no plan for it.
+        let plannedLoad: Double?
+        let plannedReps: Int?
         var e1RM: Double { E1RMCalculator.e1RM(load: load, reps: reps) }
     }
 
     let chain: ChainKey
     let exerciseName: String
+    let isBodyweight: Bool
     let sessionKey: String
     let date: Date
     let weekIndex: Int
     let sets: [WorkingSet]
+    /// What the session asked for. Two exposures are comparable only when this matches.
+    let prescription: Prescription
+    /// The heaviest planned load of the working rows (stored lb); nil when none was planned.
+    let plannedLoad: Double?
+    /// The user edited the plan of this exposure's item by hand.
+    let planEdited: Bool
+    /// Every working set reached the top of the rep range with at least the target reserve: a strong exposure by
+    /// the prescription's own terms, whatever its e1RM says.
+    let reachedTopAtTarget: Bool
     /// Mean of the prescription's reps over the working rows; nil when none carries a planned entry. Lets a
     /// comparison tell "performed worse" from "was asked for something else" (a prescription edit mid-block).
     let meanPlannedReps: Double?
@@ -54,8 +74,15 @@ enum Exposures {
             guard let rows = groups[k], let first = rows.first else { return nil }
             return Exposure(
                 chain: .init(exerciseId: k.exercise, letter: first.waveLetter ?? "", isTop: k.isTop, mesoKey: first.mesoKey),
-                exerciseName: first.exerciseName, sessionKey: k.session, date: first.sessionDate, weekIndex: first.weekIndex,
-                sets: rows.sorted { $0.rowIndex < $1.rowIndex }.map { .init(load: $0.load, reps: $0.reps) },
+                exerciseName: first.exerciseName, isBodyweight: first.isBodyweight, sessionKey: k.session, date: first.sessionDate, weekIndex: first.weekIndex,
+                sets: rows.sorted { $0.rowIndex < $1.rowIndex }.map { .init(load: $0.load, reps: $0.reps, plannedLoad: $0.plannedLoad, plannedReps: $0.plannedReps) },
+                prescription: .init(repMin: first.repMin, repMax: first.repMax, rirMin: first.targetRIRMin, rirMax: first.targetRIRMax),
+                plannedLoad: rows.compactMap(\.plannedLoad).max(),
+                planEdited: first.planEdited,
+                reachedTopAtTarget: rows.allSatisfy { r in
+                    guard let top = r.repMax, r.reps >= top, let rir = r.rir else { return false }
+                    return rir >= (r.targetRIRMin ?? r.targetRIR)
+                },
                 meanPlannedReps: {
                     let p = rows.compactMap(\.plannedReps)
                     return p.isEmpty ? nil : Double(p.reduce(0, +)) / Double(p.count)

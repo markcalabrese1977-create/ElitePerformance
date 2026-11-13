@@ -11,6 +11,8 @@ struct SessionRecord: Equatable {
     let date: Date
     /// `Session.plannedDate`: nil when unknown. Never moved by completion.
     let plannedDate: Date?
+    /// `plannedDate` was recorded at creation (`Session.plannedDateExact`); a backfilled date is not.
+    let plannedDateIsExact: Bool
     let completedAt: Date?
     let status: SessionStatus
     let weekIndex: Int
@@ -56,6 +58,14 @@ struct SetRecord: Equatable {
     let isTop: Bool
     /// The prescription's reps for this row (`plannedRepsBySet`), nil when the item has no planned entry.
     let plannedReps: Int?
+    /// The planned load of this row (`plannedLoadsBySet`, stored lb), nil when absent or 0.
+    let plannedLoad: Double?
+    /// The row's prescription: rep range and RIR target. A top row reads the top set's own values.
+    let repMin: Int?
+    let repMax: Int?
+    let targetRIRMin: Int?
+    let targetRIRMax: Int?
+    let targetRIR: Int
     let reps: Int
     /// The load as logged (stored lb); 0 for bodyweight work.
     let load: Double
@@ -69,6 +79,8 @@ struct SetRecord: Equatable {
     let pump: Int
     /// The item's load-override reason (per exercise, not per set).
     let loadOverride: LoadOverrideReason?
+    /// The user edited this item's plan by hand (`SessionItem.planEdited`): its planned loads are theirs, not the engine's.
+    let planEdited: Bool
     let readiness: SessionReadiness
     let readinessStars: Int
     let hkDuration: Double
@@ -127,7 +139,8 @@ enum SetRecordBuilder {
             let isDeloadWeek = session.isDeloadWeek
 
             sessionRecords.append(SessionRecord(
-                key: sessionKey, date: session.date, plannedDate: session.plannedDate, completedAt: session.completedAt,
+                key: sessionKey, date: session.date, plannedDate: session.plannedDate,
+                plannedDateIsExact: session.plannedDate != nil && session.plannedDateExact == true, completedAt: session.completedAt,
                 status: session.status, weekIndex: session.weekIndex, dayLabel: session.dayLabel,
                 mesoKey: mesoKey, mesoName: session.meso?.name,
                 isMaintenance: isMaintenance, isInsertedDeload: isInserted, isDeloadWeek: isDeloadWeek,
@@ -163,14 +176,21 @@ enum SetRecordBuilder {
                         exerciseId: canonical, exerciseName: name, muscle: catalog?.primaryMuscle, isBodyweight: isBodyweight,
                         waveLetter: letter, isDeloadWaveItem: isDeloadWaveItem,
                         isInsertedDeload: isInserted, isDeloadWeek: isDeloadWeek, isMaintenance: isMaintenance,
-                        rowIndex: i, isTop: item.isTopRow(i), plannedReps: at(item.plannedRepsBySet, i), reps: reps, load: at(item.actualLoads, i) ?? 0,
+                        rowIndex: i, isTop: item.isTopRow(i), plannedReps: at(item.plannedRepsBySet, i),
+                        plannedLoad: at(item.plannedLoadsBySet, i).flatMap { $0 > 0 ? $0 : nil },
+                        repMin: item.isTopRow(i) ? (item.topRepMin ?? item.repMin) : item.repMin,
+                        repMax: item.isTopRow(i) ? (item.topRepMax ?? item.repMax) : item.repMax,
+                        targetRIRMin: item.isTopRow(i) ? (item.topRIR ?? item.targetRIRMin) : item.targetRIRMin,
+                        targetRIRMax: item.isTopRow(i) ? (item.topRIR ?? item.targetRIRMax) : item.targetRIRMax,
+                        targetRIR: item.isTopRow(i) ? (item.topRIR ?? item.targetRIR) : item.targetRIR,
+                        reps: reps, load: at(item.actualLoads, i) ?? 0,
                         rir: at(item.actualRIRs, i),
                         isSkipped: skipped,
                         isRestPause: at(item.usedRestPauseFlags, i) == true || (!pattern.isEmpty && !skipped),
                         isDrop: !(at(item.dropSetPatternsBySet, i) ?? "").isEmpty,
                         feedback: SetFeedback(rawValue: at(item.setFeedbackBySet, i) ?? "") ?? .none,
                         pump: at(item.pumpRatingsBySet, i) ?? 0,
-                        loadOverride: item.loadOverrideReason,
+                        loadOverride: item.loadOverrideReason, planEdited: item.planEdited,
                         readiness: session.readiness, readinessStars: session.readinessStars, hkDuration: session.hkDuration,
                         isWorkingSet: working.contains(i), isHardSetRow: hard.contains(i)
                     ))

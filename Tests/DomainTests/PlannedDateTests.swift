@@ -53,7 +53,9 @@ final class PlannedDateTests: XCTestCase {
 
     func test_creation_setsPlannedDateToDate() {
         let d = date(2026, 11, 2)
-        XCTAssertEqual(Session(date: d).plannedDate, d)
+        let s = Session(date: d)
+        XCTAssertEqual(s.plannedDate, d)
+        XCTAssertEqual(s.plannedDateExact, true, "recorded at creation: the real schedule")
     }
 
     func test_completion_neverMovesPlannedDate() throws {
