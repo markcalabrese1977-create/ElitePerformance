@@ -10,6 +10,8 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 
 ## Open
 
+- PR candidates to verify (analytics): `PersonalRecords.suspects` lists a record more than 1.25x the lifter's next best session for the lift (typos, wrong-unit loads). Nothing shows it yet: surface it (a "verify this record" row on the lift's history, with a fix-or-confirm action) when the screens move to the new definitions. On the Nov 12 backup it flags 4: Smith Machine Hip Thrust 351x10 (x1.27, a maintenance-block set), DB Skull Crushers 10x10 (x2.00), DB Skull Crusher [Rehab] (x1.50), Decline Cable Crunch 50x12 (x1.33).
+- Analytics next: switch the screens (History summary, exercise history sheet, Home history, Analytics tab, meso summary) to the single definitions in Domain/Analytics (records include maintenance; seeds, fatigue baselines and meso comparisons exclude it); FatigueMonitor performance signals are watch-only until tuned on more than one lifter's history (see its header).
 - Install: install current HEAD after the Fri Oct 30 Push A backup checks out; commits after 46039ee are deinit (a5b3b74), baseline (48e6bcb), test-only (c3ca2d0) and docs. 46039ee carries top set + back-off, the prescribed set count and its backfill, and the next-meso clone. Verify the launch log lists the 10 StartupBackfills (the new one last) and that the Push A next-meso preview shows 3 back-offs on B/C weeks.
 - HealthKitAuthorizationCoordinator: add `nonisolated deinit {}` defensively (same shape
   as SessionScreenViewModel; tests pass today). Low priority.
