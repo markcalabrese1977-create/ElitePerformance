@@ -2250,7 +2250,6 @@ final class SessionScreenViewModel: ObservableObject {
             var totalRepsForExercise = 0
             var totalVolume: Double = 0
             var lastRIR: Int? = nil
-            var topE1RM: Double? = nil
 
             for set in exercise.sets where exercise.isPlannedRow(set) {
                 guard set.status == .completed else { continue }
@@ -2272,21 +2271,15 @@ final class SessionScreenViewModel: ObservableObject {
                 if let rir = rir {
                     lastRIR = rir
                 }
-
-                // Epley e1RM estimate for this set
-                if effLoad > 0 && reps > 0 {
-                    let e1 = E1RMCalculator.e1RM(load: effLoad, reps: reps)
-                    if let currentTop = topE1RM {
-                        if e1 > currentTop {
-                            topE1RM = e1
-                        }
-                    } else {
-                        topE1RM = e1
-                    }
-                }
             }
 
             let matchingItem = session.items.first { $0.exerciseId == exercise.exerciseId }
+            // The one e1RM definition (Domain/Analytics): best WORKING-set Epley at the effective load; warm-ups,
+            // rest-pause, drop and skipped rows are not working sets. The items are already persisted with every set change.
+            let topE1RM: Double? = matchingItem.flatMap { item in
+                let best = AnalyticsEngine.ItemStats.of(item, bodyWeight: bodyWeight).bestE1RM
+                return best > 0 ? best : nil
+            }
 
             let summary = SessionRecapExercise(
                 name: exercise.name,

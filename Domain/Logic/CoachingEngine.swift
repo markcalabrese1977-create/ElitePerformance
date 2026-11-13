@@ -6,7 +6,7 @@ import SwiftData
 // Current user-visible authority: SessionScreenViewModel.coachMessage() — LEGACY
 // Status: live in production — recommend()'s message is wired into exercise.coachMessage
 // (SessionView.swift) and rendered in SessionExerciseCardView on every set logged.
-// (SessionRecapView's separate recommend() calls remain dead — zero instantiation sites.)
+// (The old SessionRecapView, whose separate recommend() calls were dead, has been deleted.)
 // Phase 1 scope: wire CoachingEngine.message into exercise.coachMessage only
 // nextSuggestedLoad: NOT wired in Phase 1 — load authority is a separate truth pass
 // Frozen: Progression.swift, coachMessage()
