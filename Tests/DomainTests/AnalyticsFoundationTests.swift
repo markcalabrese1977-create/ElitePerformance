@@ -512,4 +512,52 @@ final class AnalyticsFoundationTests: XCTestCase {
         let beaten = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: current, allPriorSessions: [heavyRegular]))
         XCTAssertFalse(try XCTUnwrap(beaten.exerciseSummaries.first).isPR, "a REGULAR prior still counts")
     }
+
+    // MARK: - AnalyticsEngine (what the screens read)
+
+    func test_itemStats_hardSetsWorkingE1RMAndEffectiveLoadVolume() {
+        // warm-up 45x10 (dropped), RP flag row 225x8 (counts once as a set, never an e1RM), working 225x8, 225x7, top 245x5, skipped row.
+        let it = item("bench_press", reps: [10, 8, 8, 7, 5, 8], loads: [45, 225, 225, 225, 245, 225],
+                      rp: [false, true, false, false, false, false],
+                      patterns: ["", "", "", "", "", "SKIP"], roles: ["", "", "", "", "top", ""])
+        let s = AnalyticsEngine.ItemStats.of(it, bodyWeight: nil)
+        XCTAssertEqual(s.sets, 4, "warm-up and skipped row out; the RP base set counts once")
+        XCTAssertEqual(s.reps, 8 + 8 + 7 + 5)
+        let expectedVolume: Double = 1800 + 1800 + 1575 + 1225
+        XCTAssertEqual(s.volume, expectedVolume)
+        XCTAssertEqual(s.bestE1RM, E1RMCalculator.e1RM(load: 245, reps: 5), accuracy: 1e-9, "245x5 (285.8) beats 225x8 (285); the RP row is no e1RM")
+        XCTAssertEqual(s.bestLoad, 245)
+        XCTAssertEqual(s.bestReps, 5)
+    }
+
+    func test_itemStats_bodyweight() {
+        let it = item("pull_up", reps: [8, 7], loads: [0, 0])
+        let with = AnalyticsEngine.ItemStats.of(it, bodyWeight: 200)
+        XCTAssertEqual(with.sets, 2)
+        XCTAssertEqual(with.volume, 3000.0)
+        XCTAssertEqual(with.bestE1RM, E1RMCalculator.e1RM(load: 200, reps: 8), accuracy: 1e-9)
+        XCTAssertEqual(with.bestLoad, 200)
+        let without = AnalyticsEngine.ItemStats.of(it, bodyWeight: nil)
+        XCTAssertEqual(without.sets, 2)
+        XCTAssertEqual(without.bestE1RM, 0)
+        XCTAssertEqual(without.volume, 0)
+    }
+
+    func test_engine_recordsAndTheRecapPR_andVolume() throws {
+        let ctx = try makeContext()
+        let m = meso(ctx)
+        let s1 = session(ctx, meso: m, day: 1, items: [item("bench_press", reps: [5], loads: [200])])
+        let s2 = session(ctx, meso: m, day: 2, items: [item("bench_press", reps: [5], loads: [190])])
+        let s3 = session(ctx, meso: m, day: 3, items: [item("bench_press", reps: [5], loads: [210]), item("barbell_row", reps: [8], loads: [150])])
+        let planned = session(ctx, meso: m, day: 4, status: .planned, items: [item("bench_press", reps: [5], loads: [500])])
+        _ = planned
+        let engine = AnalyticsEngine(sessions: [s1, s2, s3])
+        XCTAssertEqual(engine.recordExerciseIds(in: s1), [], "a first session is a baseline, not a record")
+        XCTAssertEqual(engine.recordExerciseIds(in: s2), [], "lighter")
+        XCTAssertEqual(engine.recordExerciseIds(in: s3), ["bench_press"], "210x5 beats 200x5; the row is a baseline")
+        XCTAssertEqual(engine.records["bench_press"]?.load, 210)
+        let vol = engine.volumeByExercise()
+        XCTAssertEqual(vol["bench_press"], 3000.0)   // 1000 + 950 + 1050
+        XCTAssertEqual(vol["barbell_row"], 1200.0)
+    }
 }

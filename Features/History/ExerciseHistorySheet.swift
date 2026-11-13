@@ -409,7 +409,6 @@ struct ExerciseHistorySheet: View {
                 var repsTotal = 0
                 var volumeTotal: Double = 0
                 var executedSetCount = 0
-                var bestE1RM: Double? = nil
 
                 for set in uiEx.sets where set.index <= target || (set.actualReps ?? 0) > 0 {
                     let reps = set.actualReps ?? 0
@@ -424,10 +423,6 @@ struct ExerciseHistorySheet: View {
                     executedSetCount += 1
                     repsTotal += reps
                     volumeTotal += effLoad * Double(reps)
-                    if load > 0 {
-                        let e1 = estimate1RM(load: load, reps: reps)
-                        bestE1RM = max(bestE1RM ?? 0, e1)
-                    }
                     executedTokens.append(
                         formatSetToken(
                             load: load, reps: reps, rir: rir,
@@ -439,6 +434,14 @@ struct ExerciseHistorySheet: View {
 
                 guard executedSetCount > 0 else { continue }
 
+                // Best working-set e1RM of the session for this lift: the single e1RM definition (Domain/Analytics).
+                let bestE1RM: Double? = {
+                    let best = session.items
+                        .filter { ExerciseCatalog.resolvedExerciseId(rawId: $0.exerciseId, snapshotName: $0.exerciseNameSnapshot, fallbackName: nil) == targetExerciseId }
+                        .map { AnalyticsEngine.ItemStats.of($0, bodyWeight: bodyWeight).bestE1RM }.max() ?? 0
+                    return best > 0 ? best : nil
+                }()
+
                 built.append(
                     ExerciseHistoryEntry(
                         date: session.date,
@@ -449,7 +452,7 @@ struct ExerciseHistorySheet: View {
                         reps: repsTotal,
                         volume: volumeTotal,
                         detail: executedTokens.joined(separator: ", "),
-                        bestE1RM: (bestE1RM == 0 ? nil : bestE1RM),
+                        bestE1RM: bestE1RM,
                         session: session
                     )
                 )
@@ -468,11 +471,6 @@ struct ExerciseHistorySheet: View {
     }
 
     // MARK: - Helpers
-
-    private func estimate1RM(load: Double, reps: Int) -> Double {
-        let r = max(1, reps)
-        return load * (1.0 + Double(r) / 30.0)
-    }
 
     private func formatVolume(_ v: Double) -> String {
         let iv = Int(unit.fromStoredLb(v).rounded())

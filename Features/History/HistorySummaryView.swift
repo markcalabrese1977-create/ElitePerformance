@@ -506,28 +506,14 @@ enum HistorySummaryBuilder {
                     bucket.primaryMuscle = resolvedMuscle
                 }
 
-                var didRecordAnySet = false
-
-                for idx in 0..<setCount {
-                    let reps = item.actualReps[idx]
-                    let load = item.actualLoads[idx]
-                    let effLoad = E1RMCalculator.effectiveLoad(
-                        actualLoad: load,
-                        exerciseId: exerciseId,
-                        bodyWeight: bodyWeight
-                    )
-
-                    guard reps > 0, effLoad > 0 else { continue }
-
-                    didRecordAnySet = true
-
-                    let volume = Double(reps) * effLoad
-                    let e1rm = estimateE1RM(weight: effLoad, reps: reps)
-
-                    bucket.totalSets += 1
-                    bucket.totalReps += reps
-                    bucket.totalVolume += volume
-                    bucket.bestE1RM = max(bucket.bestE1RM, e1rm)
+                // One definition of a set, an e1RM and volume (Domain/Analytics): hard sets, working-set e1RM, effective load.
+                let stats = AnalyticsEngine.ItemStats.of(item, bodyWeight: bodyWeight)
+                let didRecordAnySet = stats.sets > 0
+                if didRecordAnySet {
+                    bucket.totalSets += stats.sets
+                    bucket.totalReps += stats.reps
+                    bucket.totalVolume += stats.volume
+                    bucket.bestE1RM = max(bucket.bestE1RM, stats.bestE1RM)
                 }
 
                 if didRecordAnySet {
@@ -569,11 +555,6 @@ enum HistorySummaryBuilder {
         }
     }
 
-    static func estimateE1RM(weight: Double, reps: Int) -> Double {
-        guard weight > 0, reps > 0 else { return 0 }
-        return weight * (1.0 + Double(reps) / 30.0)
-    }
-    
 
 
     private static func prescriptionLabel(

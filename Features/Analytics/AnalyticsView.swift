@@ -4,6 +4,7 @@ import SwiftData
 struct AnalyticsView: View {
     @Environment(\.loadUnit) private var unit
     @Query(sort: \Session.date, order: .reverse) private var sessions: [Session]
+    @Query private var profiles: [UserProfile]
 
     @State private var selectedExerciseId: String? = nil
 
@@ -152,11 +153,11 @@ struct AnalyticsView: View {
                 let exId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 let name = map[exId]?.exerciseName ?? ExerciseCatalog.displayName(for: exId)
 
+                // Hard-set volume at the effective load (Domain/Analytics): warm-ups and skipped rows out, bodyweight sets in.
+                let volume = AnalyticsEngine.ItemStats.of(item, bodyWeight: profiles.first?.bodyWeight).volume
+
                 let loads = item.actualLoads
                 let reps = item.actualReps
-                let n = min(loads.count, reps.count)
-                var volume: Double = 0
-                for i in 0..<n { volume += Double(loads[i]) * Double(reps[i]) }
 
                 let logged = (loads.contains(where: { $0 > 0 }) || reps.contains(where: { $0 > 0 })) ? 1 : 0
 

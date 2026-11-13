@@ -13,11 +13,10 @@ struct ExerciseHistoryEntry: Identifiable {
 
 /// Shows history for a single exercise across all logged sessions.
 ///
-/// - Computation:
-///   For each Session that includes this exercise:
-///   • Find the set with the HIGHEST REPS (your “highest-rep” set)
-///   • Use its load + reps to compute an estimated 1RM (Epley: 1RM = w * (1 + reps/30))
-///   • Display that as the entry’s “best e1RM” for that day
+/// - Computation (Domain/Analytics, the same definitions as every other screen):
+///   For each Session that includes this exercise, the entry shows the BEST WORKING SET by estimated 1RM
+///   (Epley via `E1RMCalculator`; warm-ups, rest-pause, drop and skipped rows are not working sets; a bodyweight lift is
+///   measured at the lifter's body weight). That e1RM is the entry's "best e1RM" for the day.
 struct ExerciseHistoryView: View {
     @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var context
@@ -96,25 +95,25 @@ struct ExerciseHistoryView: View {
             descriptor.sortBy = [SortDescriptor(\Session.date, order: .reverse)]
 
             let sessions = try context.fetch(descriptor)
+            let bodyWeight = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first?.bodyWeight
+            let target = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
             var built: [ExerciseHistoryEntry] = []
 
-            for session in sessions {
-                // Find the SessionItem for this exercise
-                let items = session.items.sorted { $0.order < $1.order }
-                guard let item = items.first(where: { $0.exerciseId == exerciseId }) else {
-                    continue
-                }
+            for session in sessions where session.status == .completed {
+                // The session's best working set for this exercise, by e1RM.
+                let best = session.items
+                    .filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == target }
+                    .map { AnalyticsEngine.ItemStats.of($0, bodyWeight: bodyWeight) }
+                    .max { $0.bestE1RM < $1.bestE1RM }
+                guard let best, best.bestE1RM > 0 else { continue }
 
-                guard let best = bestSet(in: item) else { continue }
-
-                let entry = ExerciseHistoryEntry(
+                built.append(ExerciseHistoryEntry(
                     date: session.date,
                     weekIndex: session.weekIndex,
-                    bestLoad: best.load,
-                    bestReps: best.reps,
-                    estimated1RM: best.e1rm
-                )
-                built.append(entry)
+                    bestLoad: best.bestLoad,
+                    bestReps: best.bestReps,
+                    estimated1RM: best.bestE1RM
+                ))
             }
 
             entries = built.sorted { $0.date > $1.date }
@@ -122,57 +121,6 @@ struct ExerciseHistoryView: View {
         } catch {
             print("⚠️ Failed to load exercise history: \(error)")
         }
-    }
-
-    // MARK: - Highest-rep e1RM logic
-
-    /// Find the set with the **highest reps** and compute its e1RM.
-    private func bestSet(in item: SessionItem) -> (load: Double, reps: Int, e1rm: Double?)? {
-        let repsArray = item.actualReps
-        let loadsArray = item.actualLoads
-        let plannedLoads = item.plannedLoadsBySet
-
-        if repsArray.isEmpty && loadsArray.isEmpty && plannedLoads.isEmpty {
-            return nil
-        }
-
-        var bestIndex: Int?
-        var bestReps = 0
-
-        let count = max(repsArray.count, loadsArray.count, plannedLoads.count)
-
-        for idx in 0..<count {
-            let reps = idx < repsArray.count ? repsArray[idx] : 0
-            let loadActual = idx < loadsArray.count ? loadsArray[idx] : 0
-            let loadPlanned = idx < plannedLoads.count ? plannedLoads[idx] : 0
-            let load = loadActual > 0 ? loadActual : loadPlanned
-
-            guard reps > 0, load > 0 else { continue }
-
-            // Highest REP wins (this is your “highest-rep e1RM” rule)
-            if reps > bestReps {
-                bestReps = reps
-                bestIndex = idx
-            }
-        }
-
-        guard let index = bestIndex else { return nil }
-
-        let reps = index < repsArray.count ? repsArray[index] : bestReps
-        let loadActual = index < loadsArray.count ? loadsArray[index] : 0
-        let loadPlanned = index < plannedLoads.count ? plannedLoads[index] : 0
-        let load = loadActual > 0 ? loadActual : loadPlanned
-
-        guard reps > 0, load > 0 else { return nil }
-
-        let e1rm = estimate1RM(load: load, reps: reps)
-        return (load, reps, e1rm)
-    }
-
-    /// Epley: 1RM = weight × (1 + reps/30)
-    private func estimate1RM(load: Double, reps: Int) -> Double {
-        let r = max(1, reps)
-        return load * (1.0 + Double(r) / 30.0)
     }
 
     // MARK: - Formatting

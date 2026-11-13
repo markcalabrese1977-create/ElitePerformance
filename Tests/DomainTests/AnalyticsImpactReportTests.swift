@@ -286,4 +286,81 @@ final class AnalyticsImpactReportTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - P1d: the screens read the engine; the only changes are the ones the P1c report listed
+
+    func test_screens_changeOnlyWhereTheImpactReportSaid() throws {
+        let (_, all, profile, customs) = try loadFixture()
+        defer { flush() }
+        _ = customs
+        let completed = all.filter { $0.status == .completed }
+        let bw = profile?.bodyWeight
+
+        // History summary: the screen's own builder (now on the engine) against the old per-row logic.
+        let screen = HistorySummaryBuilder.build(from: completed, bodyWeight: bw)
+        var oldSets: [String: Int] = [:], oldReps: [String: Int] = [:], oldVol: [String: Double] = [:], oldBest: [String: Double] = [:]
+        for s in completed { for item in s.items {
+            let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            for i in 0..<min(item.actualLoads.count, item.actualReps.count) {
+                let reps = item.actualReps[i]
+                let eff = E1RMCalculator.effectiveLoad(actualLoad: item.actualLoads[i], exerciseId: id, bodyWeight: bw)
+                guard reps > 0, eff > 0 else { continue }
+                oldSets[id, default: 0] += 1; oldReps[id, default: 0] += reps; oldVol[id, default: 0] += Double(reps) * eff
+                oldBest[id] = max(oldBest[id] ?? 0, eff * (1 + Double(reps) / 30))
+            }
+        } }
+        var summaryDiffs: [String] = []
+        for x in screen {
+            let id = ExerciseCatalog.canonicalExerciseId(for: x.id)
+            if x.totalSets != (oldSets[id] ?? 0) || x.totalReps != (oldReps[id] ?? 0)
+                || abs(x.totalVolume - (oldVol[id] ?? 0)) > 0.01 || abs(x.bestE1RM - (oldBest[id] ?? 0)) > 0.01 { summaryDiffs.append(name(id)) }
+        }
+        log("History summary: \(screen.count) exercises, \(summaryDiffs.count) differ from the old logic \(summaryDiffs)")
+
+        // Analytics volume per exercise: old raw load x reps over every row vs the engine's hard-set effective-load volume.
+        var oldRaw: [String: Double] = [:], newVol: [String: Double] = [:]
+        for s in completed { for item in s.items {
+            let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            for i in 0..<min(item.actualLoads.count, item.actualReps.count) { oldRaw[id, default: 0] += item.actualLoads[i] * Double(item.actualReps[i]) }
+            newVol[id, default: 0] += AnalyticsEngine.ItemStats.of(item, bodyWeight: bw).volume
+        } }
+        let volDiffs = Set(oldRaw.keys).union(newVol.keys).filter { abs((oldRaw[$0] ?? 0) - (newVol[$0] ?? 0)) > 0.5 }.map(name).sorted()
+        log("Analytics volume: \(volDiffs.count) exercises differ \(volDiffs)")
+
+        // Exercise history sheet: per-session best e1RM, old (max over logged sets, raw load) vs the item stats.
+        var sheetDiffs = 0, pullUps = 0
+        for s in completed {
+            var seen = Set<String>()
+            for item in s.items {
+                let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                guard seen.insert(id).inserted else { continue }
+                // A session can hold the same lift twice and SwiftData does not order `items`: both sides take the max over ALL of them.
+                var old = 0.0
+                for other in s.items where ExerciseCatalog.canonicalExerciseId(for: other.exerciseId) == id {
+                    for i in 0..<min(other.actualReps.count, other.actualLoads.count) where other.actualReps[i] > 0 && other.actualLoads[i] > 0 {
+                        old = max(old, other.actualLoads[i] * (1 + Double(max(1, other.actualReps[i])) / 30))
+                    }
+                }
+                let new = s.items.filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id }
+                    .map { AnalyticsEngine.ItemStats.of($0, bodyWeight: bw).bestE1RM }.max() ?? 0
+                if old == 0 && new == 0 { continue }
+                if abs(old - new) > max(0.005 * old, 0.01) {
+                    sheetDiffs += 1; if id == "pull_up" { pullUps += 1 }
+                    if id != "pull_up" { log("   sheet diff: \(name(id)) \(s.date.formatted(date: .abbreviated, time: .omitted)) old \(f(old)) new \(f(new)) bw=\(ExerciseCatalog.isBodyweight(exerciseId: id))") }
+                }
+            }
+        }
+        log("Exercise sheet: \(sheetDiffs) session entries differ, of which Pull-Up (body weight now used): \(pullUps)")
+
+        // Records / PR: the engine's index equals the rebuilt PRIndex rows.
+        let engine = AnalyticsEngine(sessions: completed, bodyWeight: bw)
+        let rows = try ModelContext(container).fetch(FetchDescriptor<PRIndex>())
+        log("Records: engine \(engine.records.count) lifts · PRIndex rows \(rows.count)")
+
+        XCTAssertEqual(summaryDiffs, [], "History summary must not change on this backup")
+        XCTAssertEqual(volDiffs, ["Pull-Up"], "Analytics volume changes only for the bodyweight lift")
+        XCTAssertEqual(sheetDiffs, 25, "the P1c report listed 25 changed session entries (16 of them Pull-Up)")
+        XCTAssertEqual(pullUps, 16)
+        XCTAssertEqual(engine.records.count, rows.count)
+    }
 }
