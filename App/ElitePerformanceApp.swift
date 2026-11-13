@@ -158,7 +158,10 @@ struct ElitePerformanceApp: App {
         }
 
         guard let best else {
-            print("⚠️ No preferred SwiftData store found — falling back to DEFAULT store.")
+            // Steady state, not a fault. The three candidates above are LEGACY store files in the app's own Application Support
+            // folder (older builds named their stores). With an App Group entitlement SwiftData keeps the default store in the
+            // group container instead, so none of them exists and the default store (the real one) opens here, every launch.
+            print("ℹ️ No legacy SwiftData store files found (the default store lives in the app group container) — opening the DEFAULT store.")
             do {
                 let (container, _) = try openStore(label: nil)
                 self.sharedModelContainer = container
