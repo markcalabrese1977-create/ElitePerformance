@@ -36,6 +36,15 @@ struct ExerciseHistorySheet: View {
     @State private var selectedWave: String? = nil // nil = All
     /// Stall flags for this lift in the current block (one per letter / role), from StallDetector.
     @State private var stalls: [Stall] = []
+    /// All-time totals for this lift (completed sessions, every block).
+    @State private var lifetime: LifetimeStats?
+
+    private struct LifetimeStats {
+        let sessions: Int
+        let sets: Int
+        let reps: Int
+        let bestSet: BestSet?
+    }
 
     // MARK: - Derived
 
@@ -86,6 +95,7 @@ struct ExerciseHistorySheet: View {
                             .foregroundStyle(.secondary)
                             .padding(.top, 30)
                     } else {
+                        lifetimeCard
                         stallChips
                         e1rmChart
                         if availableWaves.count > 1 {
@@ -112,6 +122,38 @@ struct ExerciseHistorySheet: View {
     }
 
     
+
+    // MARK: - Lifetime stats
+
+    @ViewBuilder private var lifetimeCard: some View {
+        if let l = lifetime {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Lifetime").font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
+                HStack {
+                    lifetimeCell("Sessions", LoadFormatter.grouped(l.sessions))
+                    lifetimeCell("Sets", LoadFormatter.grouped(l.sets))
+                    lifetimeCell("Reps", LoadFormatter.grouped(l.reps))
+                    if let b = l.bestSet {
+                        lifetimeCell("Best set", "\(LoadFormatter(unit: unit).compact(b.load)) × \(b.reps)")
+                    }
+                }
+                Text("Hard sets in completed sessions (warm-ups and skipped sets excluded). Best set: highest e1RM among sets of 12 reps or fewer.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .accessibilityIdentifier("lifetimeCard")
+        }
+    }
+
+    private func lifetimeCell(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.subheadline).fontWeight(.semibold)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
 
     // MARK: - Stall chips
 
@@ -388,6 +430,27 @@ struct ExerciseHistorySheet: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// All-time sessions, hard sets, reps and best set of this lift, on the shared analytics definitions.
+    private func computeLifetime(sessions: [Session], bodyWeight: Double?, customs: [CustomExercise]) -> LifetimeStats? {
+        let target = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        var nSessions = 0, nSets = 0, nReps = 0
+        var rows: [(load: Double, reps: Int)] = []
+        for s in sessions where s.status == .completed {
+            let items = s.items.filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == target }
+            guard !items.isEmpty else { continue }
+            var counted = false
+            for item in items {
+                let st = AnalyticsEngine.ItemStats.of(item, bodyWeight: bodyWeight, customExercises: customs)
+                if st.sets > 0 { counted = true }
+                nSets += st.sets; nReps += st.reps
+                if let b = BestSetRule.best(of: item, bodyWeight: bodyWeight, customExercises: customs) { rows.append((b.load, b.reps)) }
+            }
+            if counted { nSessions += 1 }
+        }
+        guard nSessions > 0 else { return nil }
+        return LifetimeStats(sessions: nSessions, sets: nSets, reps: nReps, bestSet: BestSetRule.best(of: rows))
+    }
+
     private func loadHistory() {
         do {
             var descriptor = FetchDescriptor<Session>()
@@ -489,6 +552,7 @@ struct ExerciseHistorySheet: View {
 
             let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
             let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+            lifetime = computeLifetime(sessions: sessions, bodyWeight: profile?.bodyWeight, customs: customs)
             stalls = AnalyticsEngine(sessions: sessions, customExercises: customs, bodyWeight: profile?.bodyWeight)
                 .stalls(forExerciseId: exerciseId, customs: customs, profile: profile)
 

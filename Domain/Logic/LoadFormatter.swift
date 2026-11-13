@@ -61,6 +61,28 @@ struct LoadFormatter {
     /// lb: `String(Int(v))` of a volume (lb·reps), truncating. kg: the volume converted, truncated.
     func volumeInt(_ storedVolume: Double) -> String { String(Int(unit.fromStoredLb(storedVolume))) }
 
+    // MARK: Large numbers with grouping separators ("1,028", "905,432")
+
+    /// A count or an amount that is already a plain number, grouped by the locale ("10,572").
+    static func grouped(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        f.usesGroupingSeparator = true
+        return f.string(from: NSNumber(value: value.rounded())) ?? String(Int(value.rounded()))
+    }
+
+    static func grouped(_ value: Int) -> String { grouped(Double(value)) }
+
+    /// `volumeInt` (truncating) with grouping separators: the History tab's session volumes.
+    func volumeIntGrouped(_ storedVolume: Double) -> String { Self.grouped(Double(Int(unit.fromStoredLb(storedVolume)))) }
+
+    /// `whole` with grouping separators: e1RMs, peaks.
+    func wholeGrouped(_ storedLb: Double) -> String { Self.grouped(unit.fromStoredLb(storedLb)) }
+
+    /// A volume (lb·reps) in this unit, whole, with grouping separators ("905,432").
+    func volumeGrouped(_ storedVolume: Double) -> String { Self.grouped(unit.fromStoredLb(storedVolume)) }
+
     /// "132 lb", "46.5 kg".
     func text(_ storedLb: Double) -> String { "\(number(storedLb)) \(unitLabel)" }
 

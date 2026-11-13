@@ -58,15 +58,10 @@ final class AnalyticsImpactReportTests: XCTestCase {
         let snap = SetRecordBuilder.build(sessions: all, customExercises: customs, bodyWeight: bodyWeight)
         log("sessions \(all.count) (completed \(completed.count)) · set records \(snap.sets.count) · lb storage, so lb users see these numbers as is")
 
-        // ---- 1. HistorySummaryView (best e1RM / sets / volume per exercise, all-time) -------------------------------
-        let old1 = HistorySummaryBuilder.build(from: completed, bodyWeight: bodyWeight)
         let bests = PersonalRecords.bests(from: snap.sets)
-        table("1. HistorySummaryView: best e1RM per exercise (today: any set incl. warm-ups, rest-pause, drop, deload, maintenance)",
-              old1.map { s in (ExerciseCatalog.canonicalExerciseId(for: s.id), s.bestE1RM, bests[ExerciseCatalog.canonicalExerciseId(for: s.id)]?.e1RM ?? 0) })
         var hard: [String: Int] = [:]
         for r in snap.sets where r.isLifetimeHardSet { hard[r.exerciseId, default: 0] += 1 }
-        table("1b. HistorySummaryView: total sets per exercise (today: reps>0 & load>0 rows) vs lifetime hard sets (maintenance and deload included; warm-ups and skips out; bodyweight sets counted)",
-              old1.map { s in (ExerciseCatalog.canonicalExerciseId(for: s.id), Double(s.totalSets), Double(hard[ExerciseCatalog.canonicalExerciseId(for: s.id)] ?? 0)) })
+        // ---- 1. (HistorySummaryView was retired: the Block recap now opens the Meso Summary) ----------------------------------
 
         // ---- 2. ExerciseHistorySheet (best e1RM per session entry) ---------------------------------------------------
         var entryRows: [(id: String, old: Double, new: Double)] = []
@@ -296,26 +291,8 @@ final class AnalyticsImpactReportTests: XCTestCase {
         let completed = all.filter { $0.status == .completed }
         let bw = profile?.bodyWeight
 
-        // History summary: the screen's own builder (now on the engine) against the old per-row logic.
-        let screen = HistorySummaryBuilder.build(from: completed, bodyWeight: bw)
-        var oldSets: [String: Int] = [:], oldReps: [String: Int] = [:], oldVol: [String: Double] = [:], oldBest: [String: Double] = [:]
-        for s in completed { for item in s.items {
-            let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-            for i in 0..<min(item.actualLoads.count, item.actualReps.count) {
-                let reps = item.actualReps[i]
-                let eff = E1RMCalculator.effectiveLoad(actualLoad: item.actualLoads[i], exerciseId: id, bodyWeight: bw)
-                guard reps > 0, eff > 0 else { continue }
-                oldSets[id, default: 0] += 1; oldReps[id, default: 0] += reps; oldVol[id, default: 0] += Double(reps) * eff
-                oldBest[id] = max(oldBest[id] ?? 0, eff * (1 + Double(reps) / 30))
-            }
-        } }
+        // (The old History summary screen was retired; the Meso Summary reads the engine and is covered by MesoComparisonTests.)
         var summaryDiffs: [String] = []
-        for x in screen {
-            let id = ExerciseCatalog.canonicalExerciseId(for: x.id)
-            if x.totalSets != (oldSets[id] ?? 0) || x.totalReps != (oldReps[id] ?? 0)
-                || abs(x.totalVolume - (oldVol[id] ?? 0)) > 0.01 || abs(x.bestE1RM - (oldBest[id] ?? 0)) > 0.01 { summaryDiffs.append(name(id)) }
-        }
-        log("History summary: \(screen.count) exercises, \(summaryDiffs.count) differ from the old logic \(summaryDiffs)")
 
         // Analytics volume per exercise: old raw load x reps over every row vs the engine's hard-set effective-load volume.
         var oldRaw: [String: Double] = [:], newVol: [String: Double] = [:]

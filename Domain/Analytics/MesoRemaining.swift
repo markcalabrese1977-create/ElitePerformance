@@ -31,3 +31,34 @@ struct MesoRemaining: Equatable {
             defaultStart: final ? tomorrow : calendar.date(byAdding: .day, value: 1, to: last)!)
     }
 }
+
+/// The header of the Meso Summary: where the block stands.
+struct MesoHeader: Equatable {
+    let name: String
+    /// The week the lifter is in: the week of today's or the next unfinished session, else the last week of the block.
+    let currentWeek: Int
+    let totalWeeks: Int
+    /// Sessions completed, and sessions that were due up to and including today.
+    let completed: Int
+    let planned: Int
+
+    var weekText: String { "Week \(currentWeek) of \(totalWeeks)" }
+    var sessionsText: String { "\(completed)/\(planned) sessions" }
+
+    static func compute(
+        name: String, totalWeeks: Int?,
+        sessions: [(date: Date, plannedDate: Date?, status: SessionStatus, weekIndex: Int)],
+        now: Date = Date(), calendar: Calendar = .current
+    ) -> MesoHeader {
+        let today = calendar.startOfDay(for: now)
+        let endOfToday = calendar.date(byAdding: .day, value: 1, to: today)!
+        let maxWeek = sessions.map(\.weekIndex).max() ?? 1
+        let upcoming = sessions.filter { $0.status != .completed && calendar.startOfDay(for: $0.date) >= today }
+            .min { $0.date < $1.date }
+        let week = upcoming?.weekIndex ?? maxWeek
+        let due = sessions.filter { $0.status == .completed || ($0.plannedDate ?? $0.date) < endOfToday }
+        return MesoHeader(
+            name: name, currentWeek: min(week, max(totalWeeks ?? maxWeek, 1)), totalWeeks: max(totalWeeks ?? maxWeek, 1),
+            completed: sessions.filter { $0.status == .completed }.count, planned: due.count)
+    }
+}

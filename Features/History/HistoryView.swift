@@ -6,6 +6,13 @@ import SwiftData
 struct HistoryView: View {
     @Query(sort: \SessionHistory.date, order: .reverse)
     private var sessions: [SessionHistory]
+    @Query private var blocks: [MesoBlock]
+    @State private var showBlockRecap = false
+
+    /// The block the recap opens: the active regular block (a maintenance block is a recap target too when it is the active one).
+    private var activeMeso: MesoBlock? {
+        blocks.filter { $0.status == .active }.max { $0.startDate < $1.startDate }
+    }
 
     /// Group by day for headers like "December 9, 2025"
     private var groupedSessions: [(date: Date, sessions: [SessionHistory])] {
@@ -24,25 +31,26 @@ struct HistoryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
 
-                    NavigationLink {
-                        HistorySummaryView()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Block recap")
-                                .font(.headline)
+                    if let meso = activeMeso {
+                        Button { showBlockRecap = true } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Block recap")
+                                    .font(.headline)
 
-                            Text("See best lifts, total volume, and how often you’ve trained each exercise this block.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                Text("\(meso.name): this block so far, mid-block included. Lifts, weekly sets per muscle, sessions done.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.secondarySystemBackground))
-                        )
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("blockRecapCard")
                     }
-                    .buttonStyle(.plain)
 
                     if sessions.isEmpty {
                         Text("No history yet.")
@@ -75,6 +83,12 @@ struct HistoryView: View {
                 .padding(.bottom, 24)
             }
             .navigationTitle("History")
+            .sheet(isPresented: $showBlockRecap) {
+                if let meso = activeMeso {
+                    // "New program from template" needs the Today tab's onboarding flow, so it is not offered from here.
+                    MesoSummaryView(meso: meso, hostHandlesNewProgram: false) { _ in }
+                }
+            }
         }
     }
 }
@@ -111,7 +125,7 @@ private struct HistoryRow: View {
             HStack(spacing: 16) {
                 Label("\(history.totalExercises) lifts", systemImage: "dumbbell")
                 Label("\(history.totalSets) sets", systemImage: "square.grid.2x2")
-                Label("\(LoadFormatter(unit: unit).volumeInt(history.totalVolume)) \(unit.label)", systemImage: "scalemass")
+                Label("\(LoadFormatter(unit: unit).volumeIntGrouped(history.totalVolume)) \(unit.label)", systemImage: "scalemass")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -473,7 +487,7 @@ private struct HistoryDayDetailView: View {
 
                 VStack(alignment: .leading) {
                     Text("Total volume").font(.caption).foregroundStyle(.secondary)
-                    Text(LoadFormatter(unit: unit).volumeInt(history.totalVolume)).font(.headline)
+                    Text(LoadFormatter(unit: unit).volumeIntGrouped(history.totalVolume)).font(.headline)
                 }
             }
 
@@ -633,7 +647,7 @@ private struct HistoryDayDetailView: View {
                             if let primary = ex.primaryMuscle { Text(primary) }
                             Text("Sets: \(ex.totalSets)")
                             Text("Reps: \(ex.totalReps)")
-                            Text("Vol: \(LoadFormatter(unit: unit).volumeInt(ex.totalVolume))")
+                            Text("Vol: \(LoadFormatter(unit: unit).volumeIntGrouped(ex.totalVolume))")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

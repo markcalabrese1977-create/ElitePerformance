@@ -39,13 +39,18 @@ struct MuscleVolumeSummary {
 extension MuscleVolume {
 
     /// The summary for the lifter's current block as of `asOf`.
-    static func summary(snapshot: AnalyticsSnapshot, customs: [CustomExercise], profile: UserProfile?, asOf: Date) -> MuscleVolumeSummary {
-        guard let meso = currentMesoKey(in: snapshot) else {
+    /// - Parameters:
+    ///   - mesoKey: the block to summarise (nil: the lifter's current block).
+    ///   - wholeBlock: true averages EVERY complete week of the block (the Meso Summary); false the last four (the Analytics tab).
+    static func summary(snapshot: AnalyticsSnapshot, customs: [CustomExercise], profile: UserProfile?, asOf: Date,
+                        mesoKey: String? = nil, wholeBlock: Bool = false) -> MuscleVolumeSummary {
+        guard let meso = mesoKey ?? currentMesoKey(in: snapshot) else {
             return MuscleVolumeSummary(blockName: nil, weeks: [], rows: [], unmapped: [], averagedWeeks: 0)
         }
         let all = weekly(in: snapshot, mesoKey: meso, asOf: asOf, customShares: customShares(from: customs))
-        let elapsed = Array(all.filter(\.isComplete).suffix(MuscleVolumeSummary.sparklineWeeks))
-        let window = Array(elapsed.suffix(4))
+        let completeWeeks = all.filter(\.isComplete)
+        let elapsed = wholeBlock ? completeWeeks : Array(completeWeeks.suffix(MuscleVolumeSummary.sparklineWeeks))
+        let window = wholeBlock ? elapsed : Array(elapsed.suffix(4))
         var counted = window.filter { !$0.isIncomplete && !$0.hasDeload }
         if counted.isEmpty { counted = window }          // nothing clean to average: use what there is
         let ranges = profile?.muscleSetRanges ?? MuscleVolumeRanges.defaults

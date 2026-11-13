@@ -22,6 +22,17 @@ struct WeeklyVolumeSummary {
     let completedSets: Int
 }
 
+/// What an exercise's trend is measured on.
+enum ExerciseTrendBasis: Equatable {
+    /// e1RM of sets of 12 reps or fewer.
+    case e1RM
+    /// No set of 12 reps or fewer: the best load at matched reps (at least this many).
+    case loadAtReps(Int)
+    /// Bodyweight lift with no body weight on the profile: reps per set.
+    case reps
+    case none
+}
+
 /// Per-exercise summary across the full meso.
 struct ExercisePerformanceSummary {
     let exerciseId: String
@@ -31,8 +42,15 @@ struct ExercisePerformanceSummary {
     /// e1RM per session, in chronological order.
     let e1rmBySession: [(weekIndex: Int, date: Date, e1rm: Double)]
 
-    /// Best e1RM achieved this meso.
+    /// Best e1RM achieved this meso (sets of 12 reps or fewer only).
     let peakE1RM: Double?
+
+    /// The block's best set, load x reps (a lift is only ever compared with itself, never ranked against another).
+    let bestSet: BestSet?
+
+    /// What the trend (and the verdict) was measured on, and its change first -> last session within this lift.
+    let trendBasis: ExerciseTrendBasis
+    let trendChange: Double?
 
     /// Load used in the first session this meso.
     let openingLoad: Double?
@@ -231,7 +249,8 @@ enum MesoPerformanceAnalyzer {
                     let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
                     guard load > 0, reps > 0 else { continue }
-                    let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
+                    let e1rm = BestSetRule.e1RM(load: load, reps: reps)      // sets of 12 reps or fewer only
+                    guard e1rm > 0 else { continue }
                     priorPeakE1RM[canonical] = max(priorPeakE1RM[canonical] ?? 0, e1rm)
                 }
             }
@@ -251,37 +270,49 @@ enum MesoPerformanceAnalyzer {
 
             guard sessionsWithExercise.count >= 1 else { continue }
 
-            // e1RM per session — warmups excluded. A set counts as a working
-            // set only if its load is >= 50% of that session's own max load
-            // for this exercise (same threshold CoachingEngine uses to
-            // exclude warmups). Without this, a low-load/high-rep warmup set
-            // can produce a higher raw Epley e1RM than the true working top
-            // set and win sessionPeak outright. Two-pass: find the session's
-            // raw max load first, then only fold sets clearing 50% of it
-            // into the e1RM/peak computation.
-            var e1rmBySession: [(weekIndex: Int, date: Date, e1rm: Double)] = []
+            // Working rows per session. Warm-ups are excluded: a row counts only if its load is >= 50% of that session's own
+            // max load for this exercise (the threshold CoachingEngine uses), else a light high-rep warm-up could win.
+            struct Row { let load: Double; let reps: Int }
+            var rowsBySession: [(weekIndex: Int, date: Date, rows: [Row])] = []
             for (session, item) in sessionsWithExercise {
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 let sessionMaxLoad = (0..<setCount)
                     .map { effective(item.actualLoads[$0], item) }
                     .filter { $0 > 0 }
                     .max() ?? 0
-
-                var sessionPeak: Double = 0
+                var rows: [Row] = []
                 for idx in 0..<setCount {
                     let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
-                    guard load > 0, reps > 0 else { continue }
-                    guard load >= 0.50 * sessionMaxLoad else { continue } // exclude warmups
-                    let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
-                    sessionPeak = max(sessionPeak, e1rm)
+                    guard load > 0, reps > 0, load >= 0.50 * sessionMaxLoad else { continue }
+                    rows.append(Row(load: load, reps: reps))
                 }
-                if sessionPeak > 0 {
-                    e1rmBySession.append((weekIndex: session.weekIndex, date: session.date, e1rm: sessionPeak))
-                }
+                if !rows.isEmpty { rowsBySession.append((session.weekIndex, session.date, rows)) }
             }
 
+            // e1RM only from sets of 12 reps or fewer (BestSetRule): a 20-rep set does not predict a 1RM.
+            var e1rmBySession: [(weekIndex: Int, date: Date, e1rm: Double)] = []
+            for s in rowsBySession {
+                let peak = s.rows.map { BestSetRule.e1RM(load: $0.load, reps: $0.reps) }.max() ?? 0
+                if peak > 0 { e1rmBySession.append((s.weekIndex, s.date, peak)) }
+            }
             let peakE1RM = e1rmBySession.map { $0.e1rm }.max()
+            let allRows = rowsBySession.flatMap { $0.rows }
+            let bestSet = BestSetRule.best(of: allRows.map { (load: $0.load, reps: $0.reps) })
+
+            // The trend, within this one lift: e1RM first -> last; a lift with no set of 12 reps or fewer is compared at matched
+            // reps (the best load lifted for at least the reps of the closing session's heaviest set).
+            var trendBasis: ExerciseTrendBasis = .none
+            var trendChange: Double? = nil
+            if !e1rmBySession.isEmpty {
+                trendBasis = .e1RM
+                if e1rmBySession.count >= 2, let f = e1rmBySession.first?.e1rm, let l = e1rmBySession.last?.e1rm, f > 0 { trendChange = (l - f) / f }
+            } else if let closing = rowsBySession.last?.rows.max(by: { ($0.load, $0.reps) < ($1.load, $1.reps) }) {
+                trendBasis = .loadAtReps(closing.reps)
+                let series = rowsBySession.map { BestSetRule.bestLoad(atLeast: closing.reps, in: $0.rows.map { (load: $0.load, reps: $0.reps) }) }.filter { $0 > 0 }
+                if series.count >= 2, let f = series.first, let l = series.last, f > 0 { trendChange = (l - f) / f }
+            }
+
 
             // Opening and closing loads
             let openingLoad: Double? = {
@@ -297,29 +328,31 @@ enum MesoPerformanceAnalyzer {
             }()
 
             // A bodyweight lift with no body weight set has no load to rate: judge it on mean reps per working set.
-            let repsBased = e1rmBySession.isEmpty && sessionsWithExercise.contains { isBW($0.item) }
+            let repsBased = allRows.isEmpty && sessionsWithExercise.contains { isBW($0.item) }
             func meanReps(_ item: SessionItem) -> Double? {
                 let reps = (0..<min(item.actualLoads.count, item.actualReps.count)).map { item.actualReps[$0] }.filter { $0 > 0 }
                 return reps.isEmpty ? nil : Double(reps.reduce(0, +)) / Double(reps.count)
             }
             let repSeries = repsBased ? sessionsWithExercise.compactMap { meanReps($0.item) } : []
             let openingReps = repSeries.first, closingReps = repSeries.last
+            let repsChange: Double? = {
+                guard repSeries.count >= 2, let f = repSeries.first, let l = repSeries.last, f > 0 else { return nil }
+                return (l - f) / f
+            }()
 
-            // Verdict
+            // Verdict (the trend between the first and the last session of the block, +-3%)
             let verdict: ExerciseVerdict = {
                 if repsBased {
                     guard repSeries.count >= 2, let f = repSeries.first, let l = repSeries.last, f > 0 else { return .insufficient }
                     let d = (l - f) / f
                     return d >= 0.03 ? .progressing : (d <= -0.03 ? .declining : .plateaued)
                 }
-                guard e1rmBySession.count >= 2 else { return .insufficient }
-                let first = e1rmBySession.first!.e1rm
-                let last = e1rmBySession.last!.e1rm
-                let delta = (last - first) / first
+                guard let delta = trendChange else { return .insufficient }
                 if delta >= 0.03 { return .progressing }   // 3%+ gain
                 if delta <= -0.03 { return .declining }     // 3%+ drop
                 return .plateaued
             }()
+
 
             // PR detection
             // A record needs something to beat: a lift with no earlier exposure (prior 0) sets a baseline ("New"), not a PR.
@@ -359,6 +392,9 @@ enum MesoPerformanceAnalyzer {
                             primaryMuscle: primaryMuscle,
                             e1rmBySession: e1rmBySession,
                             peakE1RM: peakE1RM,
+                            bestSet: bestSet,
+                            trendBasis: repsBased ? .reps : trendBasis,
+                            trendChange: repsBased ? repsChange : trendChange,
                             openingLoad: openingLoad,
                             closingLoad: closingLoad,
                             verdict: verdict,

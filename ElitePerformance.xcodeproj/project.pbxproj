@@ -71,7 +71,6 @@
 		D5AA00092F99900900AA0009 /* E1RMFloorCapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */; };
 		D5AA0B022F99900700AA0001 /* CarryForwardWritesHoldsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA0B012F99900700AA0001 /* CarryForwardWritesHoldsTests.swift */; };
 		D5AA0B042F99900700AA0001 /* CarryForwardAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */; };
-		D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */; };
 		D5B8A4FD2ECA189800B2A8E8 /* ProgramPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */; };
 		D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */; };
 		D5BB57D22FA95CBC004083DE /* DropSetEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BB57D12FA95CBA004083DE /* DropSetEntry.swift */; };
@@ -223,7 +222,6 @@
 		D5AA000A2F99900A00AA000A /* E1RMFloorCapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E1RMFloorCapTests.swift; sourceTree = "<group>"; };
 		D5AA0B012F99900700AA0001 /* CarryForwardWritesHoldsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForwardWritesHoldsTests.swift; sourceTree = "<group>"; };
 		D5AA0B032F99900700AA0001 /* CarryForwardAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForwardAuditTests.swift; sourceTree = "<group>"; };
-		D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummaryView.swift; sourceTree = "<group>"; };
 		D5B8A4FC2ECA189600B2A8E8 /* ProgramPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPlanView.swift; sourceTree = "<group>"; };
 		D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStyle.swift; sourceTree = "<group>"; };
 		D5BB57D12FA95CBA004083DE /* DropSetEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DropSetEntry.swift; sourceTree = "<group>"; };
@@ -550,7 +548,6 @@
 				D53213A02FBCFA5500E01E39 /* MesoSummaryView.swift */,
 				D5813F952F48C28500CCE909 /* ExerciseSessionDetailView.swift */,
 				D5C48EFB2F1C0F6D00495C46 /* ExerciseHistorySheet.swift */,
-				D5AC36CE2EECDF3100AE585B /* HistorySummaryView.swift */,
 				D5E293542EC410DD00034D78 /* HistoryView.swift */,
 			);
 			path = History;
@@ -880,7 +877,6 @@
 				D54892902F8EC5C100F2C30A /* WaveAwareComparisonEngine.swift in Sources */,
 				D5B8A4FF2ECA3F8E00B2A8E8 /* ProgramStyle.swift in Sources */,
 				D5F0CB5C2FE7229200416E76 /* MaintenanceProgramPickerView.swift in Sources */,
-				D5AC36CF2EECDF3C00AE585B /* HistorySummaryView.swift in Sources */,
 				D588C08A2FE3670400B019A7 /* MechanicalLoadSharedStore.swift in Sources */,
 				D588C08C2FE3670400B019A8 /* MechanicalLoadProjector.swift in Sources */,
 				D5813FDC2F493E2F00CCE909 /* HistoryView.swift in Sources */,

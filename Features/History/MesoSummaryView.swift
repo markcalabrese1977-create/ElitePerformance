@@ -18,6 +18,8 @@ enum NextBlockChoice {
 struct MesoSummaryView: View {
     @Environment(\.loadUnit) private var unit
     let meso: MesoBlock
+    /// false when the summary is opened from a screen that cannot run the new-program flow (the History tab).
+    var hostHandlesNewProgram: Bool = true
     let onNextBlock: (NextBlockChoice) -> Void
 
     @Environment(\.modelContext) private var context
@@ -31,6 +33,14 @@ struct MesoSummaryView: View {
     @State private var showStartNextMeso: Bool = false
     @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
     @State private var remaining: MesoRemaining? = nil
+
+    /// "Week 8 of 12 · 37/43 sessions" (completed / due to date).
+    private var headerLine: String {
+        let h = MesoHeader.compute(
+            name: meso.name, totalWeeks: meso.totalWeeks,
+            sessions: meso.sessions.map { ($0.date, $0.plannedDate, $0.status, $0.weekIndex) })
+        return "\(h.weekText) · \(h.sessionsText)"
+    }
 
     // Extend maintenance block (mid-block action)
     @State private var showExtendSheet: Bool = false
@@ -61,6 +71,7 @@ struct MesoSummaryView: View {
                                             verdictHeader(analysis)
                                             statsRow(analysis)
                                             volumeRampChart(analysis)
+                                            MesoMuscleSection(meso: meso)
                                             exerciseSection(analysis)
                                             MesoComparisonSection(meso: meso)
                                             if canExtendMaintenance {
@@ -421,7 +432,7 @@ struct MesoSummaryView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(analysis.mesoName)
                         .font(.headline)
-                    Text("\(analysis.totalWeeks) weeks · \(analysis.completedSessions) sessions")
+                    Text(headerLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -446,11 +457,11 @@ struct MesoSummaryView: View {
 
     private func statsRow(_ analysis: MesoAnalysis) -> some View {
         HStack(spacing: 0) {
-            statCell(label: "Volume", value: formatVolume(analysis.totalVolume))
+            statCell(label: "Volume", value: LoadFormatter(unit: unit).volumeGrouped(analysis.totalVolume))
             Divider().frame(height: 40)
-            statCell(label: "Sets", value: "\(analysis.totalSets)")
+            statCell(label: "Sets", value: LoadFormatter.grouped(analysis.totalSets))
             Divider().frame(height: 40)
-            statCell(label: "Reps", value: "\(analysis.totalReps)")
+            statCell(label: "Reps", value: LoadFormatter.grouped(analysis.totalReps))
             Divider().frame(height: 40)
             statCell(label: "PRs", value: "\(analysis.exerciseSummaries.filter { $0.isPR }.count)")
         }
@@ -576,18 +587,24 @@ struct MesoSummaryView: View {
                     VStack(alignment: .trailing, spacing: 3) {
                                             verdictBadge(summary.verdict, scope: "first → last session")
 
-                                            if summary.repsBased, let o = summary.openingReps, let c = summary.closingReps {
-                                                Text("\(String(format: "%.1f", o)) → \(String(format: "%.1f", c)) reps/set")
+                                            if let best = summary.bestSet {
+                                                Text("best \(LoadFormatter(unit: unit).compact(best.load)) × \(best.reps)")
                                                     .font(.caption2)
                                                     .foregroundStyle(.secondary)
-                                            } else if let open = summary.openingLoad, let close = summary.closingLoad, open > 0 {
-                                                Text("\(formatLoad(open)) → \(formatLoad(close))")
+                                            } else if summary.repsBased, let c = summary.closingReps {
+                                                Text("\(String(format: "%.1f", c)) reps/set")
                                                     .font(.caption2)
                                                     .foregroundStyle(.secondary)
                                             }
 
+                                            if let change = summary.trendChange {
+                                                Text("\(String(format: "%+.1f%%", change * 100)) \(trendBasisLabel(summary.trendBasis))")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(change > 0.005 ? Color.green : (change < -0.005 ? Color.orange : Color.secondary))
+                                            }
+
                                             if summary.totalSets > 0 {
-                                                Text("\(summary.totalSets) sets · \(formatVolume(summary.totalVolume))")
+                                                Text("\(LoadFormatter.grouped(summary.totalSets)) sets · \(LoadFormatter(unit: unit).volumeGrouped(summary.totalVolume))")
                                                     .font(.caption2)
                                                     .foregroundStyle(.tertiary)
                                             }
@@ -612,7 +629,7 @@ struct MesoSummaryView: View {
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                                 Spacer()
-                                                Text(LoadFormatter(unit: unit).whole(peak))
+                                                Text(LoadFormatter(unit: unit).wholeGrouped(peak))
                                                     .font(.caption)
                                                     .fontWeight(.semibold)
                                             }
@@ -624,7 +641,7 @@ struct MesoSummaryView: View {
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                                 Spacer()
-                                                Text("\(summary.totalSets) sets · \(summary.totalReps) reps · \(formatVolume(summary.totalVolume))")
+                                                Text("\(LoadFormatter.grouped(summary.totalSets)) sets · \(LoadFormatter.grouped(summary.totalReps)) reps · \(LoadFormatter(unit: unit).volumeGrouped(summary.totalVolume))")
                                                     .font(.caption)
                                                     .fontWeight(.semibold)
                                             }
@@ -712,6 +729,7 @@ struct MesoSummaryView: View {
                     showStartNextMeso = true
                 }
 
+                if hostHandlesNewProgram {
                 nextBlockButton(
                     title: "New program from template",
                     subtitle: "Choose a program and set it up fresh. Loads start from your recent history.",
@@ -720,6 +738,7 @@ struct MesoSummaryView: View {
                 ) {
                     onNextBlock(.newHypertrophyMeso(startDate: mesoStartDate))
                     dismiss()
+                }
                 }
 
                 nextBlockButton(
@@ -827,6 +846,15 @@ struct MesoSummaryView: View {
     }
 
     // MARK: - Helpers
+
+    private func trendBasisLabel(_ basis: ExerciseTrendBasis) -> String {
+        switch basis {
+        case .e1RM: return "e1RM"
+        case .loadAtReps(let r): return "load at \(r)+ reps"
+        case .reps: return "reps/set"
+        case .none: return ""
+        }
+    }
 
     /// The chip names what it measures: the trend between the block's first and last session (±3%), not the latest session.
     private func verdictBadge(_ verdict: ExerciseVerdict, scope: String) -> some View {
@@ -943,11 +971,11 @@ struct MesoComparisonSection: View {
                         HStack {
                             Text(l.name + (l.letter.isEmpty ? "" : " \(l.letter.uppercased())")).font(.caption)
                             Spacer()
-                            Text("\(fmt.whole(l.previousPeak)) → \(fmt.whole(l.currentPeak))").font(.caption)
+                            Text("\(fmt.wholeGrouped(l.previousPeak)) → \(fmt.wholeGrouped(l.currentPeak))").font(.caption)
                             Text(pct(l.peakChange)).font(.caption.bold()).foregroundStyle(color(l.peakChange)).frame(width: 56, alignment: .trailing)
                         }
                         HStack {
-                            Text("top-3 \(fmt.whole(l.previousTop3)) → \(fmt.whole(l.currentTop3)) (\(pct(l.top3Change)))")
+                            Text("top-3 \(fmt.wholeGrouped(l.previousTop3)) → \(fmt.wholeGrouped(l.currentTop3)) (\(pct(l.top3Change)))")
                             Spacer()
                             Text("started at \(Int((l.previousPeak > 0 ? l.currentFirst / l.previousPeak : 0) * 100))% of old peak")
                         }
@@ -1010,5 +1038,72 @@ struct MesoComparisonSection: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(items.isEmpty ? "None" : items.joined(separator: " · ")).font(.caption).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+
+// MARK: - Weekly hard sets by muscle (this block)
+
+/// "Weekly hard sets by muscle": the average over the COMPLETE weeks of this block, as weighted sets against each muscle's
+/// range, plus the sets of custom exercises that have no muscle mapping yet (with a way to map them).
+struct MesoMuscleSection: View {
+    let meso: MesoBlock
+    @Environment(\.modelContext) private var context
+    @State private var summary: MuscleVolumeSummary?
+    @State private var showUnmapped = false
+    @State private var refresh = UUID()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Weekly hard sets by muscle").font(.subheadline.bold())
+            if let s = summary {
+                if s.isEmpty || s.averagedWeeks == 0 {
+                    Text("No complete training week in this block yet, so there is no weekly average.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("mesoMuscleEmpty")
+                } else {
+                    Text("Average of \(s.averagedWeeks) complete week\(s.averagedWeeks == 1 ? "" : "s") (weeks under 70% of planned sessions and deload weeks are left out). A synergist counts 0.25–0.5 of a set.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    ForEach(s.rows) { row in
+                        HStack {
+                            Text(row.muscle.displayName).font(.caption)
+                            Spacer()
+                            Text(String(format: "%.1f", row.average)).font(.caption.bold())
+                            Text("\(Int(row.range.min))–\(Int(row.range.max))").font(.caption2).foregroundStyle(.secondary).frame(width: 48, alignment: .trailing)
+                            Text(row.status.rawValue).font(.caption2).foregroundStyle(color(row.status)).frame(width: 52, alignment: .trailing)
+                        }
+                    }
+                }
+                let n = s.unmapped.reduce(0) { $0 + $1.sets }
+                Button { showUnmapped = true } label: {
+                    HStack {
+                        Text("Unmapped custom sets: \(LoadFormatter.grouped(n))")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                }
+                .accessibilityIdentifier("mesoUnmappedRow")
+            }
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 2, y: 1))
+        .task(id: refresh) { load() }
+        .sheet(isPresented: $showUnmapped, onDismiss: { refresh = UUID() }) {
+            UnmappedExercisesSheet(items: summary?.unmapped ?? [])
+        }
+    }
+
+    private func color(_ s: MuscleVolume.Status) -> Color {
+        switch s { case .below: return .orange; case .within: return .green; case .above: return .red }
+    }
+
+    private func load() {
+        let sessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        let engine = AnalyticsEngine(sessions: sessions, customExercises: customs, bodyWeight: profile?.bodyWeight)
+        let key = meso.id?.uuidString ?? "\(meso.persistentModelID)"
+        summary = MuscleVolume.summary(snapshot: engine.snapshot, customs: customs, profile: profile, asOf: Date(), mesoKey: key, wholeBlock: true)
     }
 }

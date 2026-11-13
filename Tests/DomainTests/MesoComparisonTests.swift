@@ -288,6 +288,125 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertFalse(s.isPR)
     }
 
+    // MARK: - Meso Summary rework: the 12-rep e1RM rule, the header, mid-block, empty muscle data
+
+    func test_e1RM_onlyFromSetsOf12RepsOrFewer_elseHeaviestLoad() {
+        // a 20-rep set has the higher raw Epley (150 x 20 = 250) but is not eligible; the 5 x 200 set (233) is the best set
+        let best = BestSetRule.best(of: [(load: 150, reps: 20), (load: 200, reps: 5)])
+        XCTAssertEqual(best?.load, 200)
+        XCTAssertEqual(best?.reps, 5)
+        XCTAssertNotNil(best?.e1RM)
+        XCTAssertEqual(BestSetRule.e1RM(load: 150, reps: 20), 0)
+        XCTAssertEqual(BestSetRule.e1RM(load: 150, reps: 12), E1RMCalculator.e1RM(load: 150, reps: 12))
+        XCTAssertTrue(BestSetRule.isE1RMEligible(reps: 12))
+        XCTAssertFalse(BestSetRule.isE1RMEligible(reps: 13))
+        // no set of 12 or fewer: the fallback is the heaviest load (more reps on a tie), with no e1RM
+        let fb = BestSetRule.best(of: [(load: 60, reps: 20), (load: 80, reps: 15), (load: 80, reps: 18)])
+        XCTAssertEqual(fb?.load, 80)
+        XCTAssertEqual(fb?.reps, 18)
+        XCTAssertNil(fb?.e1RM)
+        XCTAssertTrue(fb?.isFallback ?? false)
+        XCTAssertNil(BestSetRule.best(of: []))
+        XCTAssertEqual(BestSetRule.bestLoad(atLeast: 15, in: [(load: 60, reps: 20), (load: 80, reps: 15), (load: 100, reps: 8)]), 80)
+    }
+
+    private func item(_ id: String, reps: [Int], loads: [Double]) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, exerciseNameSnapshot: id, targetReps: 10, targetSets: reps.count, targetRIR: 2, suggestedLoad: 0,
+                            waveRaw: "a", plannedRepsBySet: reps, plannedLoadsBySet: loads, plannedRIRsBySet: Array(repeating: 2, count: reps.count))
+        i.actualReps = reps; i.actualLoads = loads; i.actualRIRs = Array(repeating: 2, count: reps.count); i.isCompleted = true
+        return i
+    }
+
+    func test_mesoAnalysis_trendUsesTheSameLiftOnly_and12RepsOrFewer() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        // leg_extension: only high-rep sets (15-20): load-at-matched-reps trend; bench_press: 8 reps then 20-rep back-offs
+        let plan: [(Int, SessionItem, SessionItem)] = [
+            (0, item("leg_extension", reps: [20, 18, 15], loads: [100, 100, 100]), item("bench_press", reps: [8, 20], loads: [200, 100])),
+            (7, item("leg_extension", reps: [20, 18, 15], loads: [110, 110, 110]), item("bench_press", reps: [8, 20], loads: [210, 150])),
+        ]
+        for (d, a, b) in plan {
+            let s = Session(date: day(d), status: .completed, weekIndex: 1 + d / 7, dayLabel: "D", items: [a, b])
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        let a = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
+        let leg = try XCTUnwrap(a.exerciseSummaries.first { $0.exerciseId == "leg_extension" })
+        XCTAssertNil(leg.peakE1RM, "no set of 12 reps or fewer: no e1RM")
+        XCTAssertEqual(leg.trendBasis, .loadAtReps(20), "the closing session's heaviest set was 110 x 20")
+        XCTAssertEqual(leg.trendChange ?? 0, 0.10, accuracy: 1e-9, "100 -> 110 at 20+ reps")
+        XCTAssertEqual(leg.bestSet?.load, 110)
+        XCTAssertTrue(leg.bestSet?.isFallback ?? false)
+        let bench = try XCTUnwrap(a.exerciseSummaries.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual(bench.trendBasis, .e1RM)
+        XCTAssertEqual(bench.peakE1RM ?? 0, E1RMCalculator.e1RM(load: 210, reps: 8), accuracy: 1e-9, "the 20-rep set never counts")
+        XCTAssertEqual(bench.bestSet?.load, 210)
+        XCTAssertEqual(bench.bestSet?.reps, 8)
+        XCTAssertEqual(bench.trendChange ?? 0, E1RMCalculator.e1RM(load: 210, reps: 8) / E1RMCalculator.e1RM(load: 200, reps: 8) - 1, accuracy: 1e-9)
+        // no ranking across lifts: the rows are ordered by muscle then name, never by e1RM
+        let names = a.exerciseSummaries.map { ($0.primaryMuscle ?? "", $0.exerciseName) }
+        XCTAssertEqual(names.map { "\($0.0)|\($0.1)" }, names.map { "\($0.0)|\($0.1)" }.sorted())
+    }
+
+    func test_mesoSummary_midBlock_headerAndAnalysisWithPlannedSessionsRemaining() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        func at(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: now))! }
+        let sessions: [(date: Date, plannedDate: Date?, status: SessionStatus, weekIndex: Int)] = [
+            (at(-9), at(-9), .completed, 1), (at(-2), at(-2), .completed, 2), (at(-1), at(-1), .planned, 2),
+            (at(3), at(3), .planned, 3), (at(10), at(10), .planned, 4)]
+        let h = MesoHeader.compute(name: "12-Week DUP", totalWeeks: 4, sessions: sessions, now: now, calendar: cal)
+        XCTAssertEqual(h.weekText, "Week 3 of 4", "the next unfinished session is in week 3")
+        XCTAssertEqual(h.sessionsText, "2/3 sessions", "2 done of the 3 due to date (the skipped one counts as due)")
+        XCTAssertEqual(h.name, "12-Week DUP")
+        // a finished block reads its last week
+        let done = MesoHeader.compute(name: "X", totalWeeks: 4, sessions: [(at(-30), at(-30), .completed, 4)], now: now, calendar: cal)
+        XCTAssertEqual(done.weekText, "Week 4 of 4")
+        // and the analysis of an ACTIVE block with sessions still planned works from what is completed
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        for (d, st) in [(0, SessionStatus.completed), (7, .completed), (14, .planned), (21, .planned)] {
+            let s = Session(date: day(d), status: st, weekIndex: 1 + d / 7, dayLabel: "D", items: [item("bench_press", reps: [8, 8], loads: [200, 200])])
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        let a = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
+        XCTAssertEqual(a.completedSessions, 2, "planned sessions are not counted")
+        XCTAssertEqual(a.exerciseSummaries.count, 1)
+    }
+
+    func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {
+        // one PARTIAL week (the asOf is mid-week) of a custom exercise: no complete week, so no weekly average
+        let cs = sets(4, "custom_x", load: 100, reps: [8, 8, 8], meso: "m1", coarse: .back)
+        let sum = MuscleVolume.summary(snapshot: AnalyticsSnapshot(sessions: [rec("a", 4, meso: "m1")], sets: cs),
+                                       customs: [], profile: nil, asOf: day(5), mesoKey: "m1", wholeBlock: true)
+        XCTAssertEqual(sum.averagedWeeks, 0)
+        XCTAssertTrue(sum.isEmpty, "no complete week")
+        XCTAssertEqual(sum.rows.allSatisfy { $0.average == 0 }, true)
+        XCTAssertEqual(sum.unmapped.map(\.sets), [3], "the unmapped sets are still reported, with a way to map them")
+        // and with no training at all
+        let none = MuscleVolume.summary(snapshot: AnalyticsSnapshot(sessions: [], sets: []), customs: [], profile: nil, asOf: day(5), mesoKey: "m1", wholeBlock: true)
+        XCTAssertTrue(none.isEmpty)
+        XCTAssertTrue(none.unmapped.isEmpty)
+    }
+
+    func test_mesoMuscleSection_wholeBlockAveragesEveryCompleteWeek() {
+        var all: [SetRecord] = []
+        for w in 0..<6 { all += sets(7 + w * 7, "leg_extension", load: 100, reps: Array(repeating: 10, count: 8), meso: "m1", coarse: .quads) }
+        let sum = MuscleVolume.summary(snapshot: AnalyticsSnapshot(sessions: [], sets: all), customs: [], profile: nil, asOf: day(90), mesoKey: "m1", wholeBlock: true)
+        XCTAssertEqual(sum.averagedWeeks, 6, "all six complete weeks, not the last four")
+        XCTAssertEqual(sum.rows.first { $0.muscle == .quads }?.average, 8)
+        XCTAssertEqual(sum.rows.first { $0.muscle == .quads }?.status, .within)
+    }
+
+    func test_groupedNumbers() {
+        XCTAssertEqual(LoadFormatter.grouped(905432), "905,432")
+        XCTAssertEqual(LoadFormatter.grouped(1028), "1,028")
+        XCTAssertEqual(LoadFormatter.grouped(7), "7")
+        XCTAssertEqual(LoadFormatter(unit: .lb).volumeIntGrouped(10572.9), "10,572")
+        XCTAssertEqual(LoadFormatter(unit: .lb).wholeGrouped(1027.6), "1,028")
+    }
+
     func test_noPreviousBlock_noComparison() {
         let all = sets(110, "bench_press", load: 205, meso: "new")
         XCTAssertNil(compare(all, infos: [info("new", start: 100)]))
