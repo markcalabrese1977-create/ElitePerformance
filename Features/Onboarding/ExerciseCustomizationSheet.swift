@@ -20,6 +20,7 @@ struct ExerciseCustomizationSheet: View {
     // Tracks whether an explicit button (Apply/Cancel/Reset) already handled the close.
     // onDisappear commits only when this is still false — i.e. an interactive swipe-dismiss.
     @State private var didCommitOrCancel = false
+    @State private var confirmReset = false
 
     private struct WaveDraft: Equatable {
         var repMin: Int
@@ -84,12 +85,20 @@ struct ExerciseCustomizationSheet: View {
                 if existingOverride != nil {
                     ToolbarItem(placement: .bottomBar) {
                         Button("Reset to default", role: .destructive) {
-                            didCommitOrCancel = true
-                            onReset()
-                            dismiss()
+                            confirmReset = true
                         }
                     }
                 }
+            }
+            .confirmationDialog("Reset to default?", isPresented: $confirmReset, titleVisibility: .visible) {
+                Button("Reset to default", role: .destructive) {
+                    didCommitOrCancel = true
+                    onReset()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Your custom prescription for this exercise is removed and the program default is used again.")
             }
             .onAppear { loadDrafts() }
             .onDisappear {

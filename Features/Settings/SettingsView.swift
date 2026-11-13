@@ -638,6 +638,7 @@ private struct ExportShareItem: Identifiable {
 /// defaults are stored; Reset returns a muscle (or all of them) to the defaults.
 struct MuscleRangesEditor: View {
     let profile: UserProfile
+    @State private var confirmResetAll = false
 
     private func range(_ m: FineMuscle) -> MuscleSetRange { profile.muscleSetRanges[m] ?? MuscleVolumeRanges.defaults[m]! }
     private func isCustom(_ m: FineMuscle) -> Bool { range(m) != MuscleVolumeRanges.defaults[m] }
@@ -677,8 +678,14 @@ struct MuscleRangesEditor: View {
                 Text("Starting points from common hypertrophy guidance, not a prescription. Counts are weighted hard sets: a synergist counts 0.25 or 0.5 of a set.")
             }
             Section {
-                Button("Reset all to defaults", role: .destructive) { profile.muscleSetRanges = MuscleVolumeRanges.defaults }
+                Button("Reset all to defaults", role: .destructive) { confirmResetAll = true }
                     .disabled(profile.muscleSetRangesStored == nil)
+                    .confirmationDialog("Reset all ranges?", isPresented: $confirmResetAll, titleVisibility: .visible) {
+                        Button("Reset all to defaults", role: .destructive) { profile.muscleSetRanges = MuscleVolumeRanges.defaults }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Every weekly set range you changed goes back to the default.")
+                    }
             }
         }
         .navigationTitle("Weekly set ranges")

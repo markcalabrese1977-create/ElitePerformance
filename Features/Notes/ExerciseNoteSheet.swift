@@ -13,6 +13,7 @@ struct ExerciseNoteSheet: View {
     @Query private var profiles: [UserProfile]
 
     @State private var text: String = ""
+    @State private var confirmClear = false
 
     // Max-load confirmation, shown INLINE in this sheet (a second sheet cannot present from inside a sheet that
     // is being dismissed: "view is not in the window hierarchy").
@@ -76,7 +77,7 @@ struct ExerciseNoteSheet: View {
 
                 ToolbarItemGroup(placement: .confirmationAction) {
                     Button("Clear") {
-                        clearNote()
+                        confirmClear = true
                     }
 
                     Button("Save") {
@@ -87,6 +88,12 @@ struct ExerciseNoteSheet: View {
             }
             .onAppear {
                 loadNote()
+            }
+            .confirmationDialog("Clear this note?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Clear note", role: .destructive) { clearNote() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("The note for \(exerciseName) is deleted. This cannot be undone.")
             }
         }
     }

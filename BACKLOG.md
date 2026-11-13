@@ -93,9 +93,8 @@ and offers an 8 second Undo that restores the slot (order, wave letter, prescrip
 actions (Reset mesocycle, Repair exercise data, Remove unrecognized exercises, Sync meso start date, Repair maintenance
 loads) confirm with what they scan/change; deleting a custom exercise (picker swipe) confirms.
 Already confirmed before: Program plan session delete (ProgramPlanView), MesoSummary and SessionView dialogs.
-Still one tap, to decide: Insert/Remove deload "Remove deload" button (InsertDeloadFlow, has its own review screen first),
-exercise note "Clear" (ExerciseNoteSheet), onboarding trash buttons (OnboardingFlowView, pre-data), Settings "Reset all to defaults"
-for muscle ranges (harmless), ExerciseCustomizationSheet "Reset to default".
+Also confirmed now: clearing an exercise note, "Reset to default" in exercise customization, "Reset all to defaults" for muscle ranges.
+Deliberately left one tap: "Remove deload" (InsertDeloadFlow, has its own review screen first) and the onboarding trash buttons (pre-data).
 Undo only covers the Program tab item delete; the Settings repairs have no undo (confirmation only).
 
 ## Re-adding an exercise to a wave-based session creates a blank, letterless item
