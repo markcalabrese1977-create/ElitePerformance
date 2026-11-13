@@ -69,11 +69,68 @@ final class MuscleVolumeTests: XCTestCase {
         XCTAssertEqual(sug("Leg Press [Gym]", .quads)?.confidence, .exact, "bracketed notes are ignored")
         XCTAssertEqual(sug("Seated Smith Machine Calf Raise", .calves)?.basedOn, "Seated Calf Raise")
         XCTAssertEqual(sug("Smith Machine Romanian Deadlift", .hamstrings)?.basedOn, "Romanian Deadlift")
-        XCTAssertNil(sug("Prone Y-Raise", .shoulders), "only one of its three words matches anything: no suggestion")
+        XCTAssertEqual(sug("Prone Y-Raise", .shoulders)?.confidence, .keyword, "not in the catalog: the keyword table has it")
         XCTAssertNil(sug("Zercher Carry Thing", .core))
         XCTAssertNil(sug("Hip Thrust", .chest), "other muscle groups are not candidates")
         // equally good matches that disagree on the primary muscle are flagged
         XCTAssertEqual(sug("Row", .back)?.confidence, .ambiguous)
+    }
+
+    // MARK: - Suggester rules (generic names)
+
+    func test_suggester_tag_namingAMuscleSetsThePrimary_keepingTheRestOfTheShares() {
+        let row = MuscleSuggester.suggest(name: "Row [Lat Bias]", coarse: .back)
+        XCTAssertEqual(row?.confidence, .tagged)
+        XCTAssertEqual(row?.shares[.lats], 1, "the tagged muscle becomes the primary")
+        XCTAssertEqual(row?.shares[.upperBack], 0.5, "the old primary drops to 0.5")
+        XCTAssertEqual(row?.shares[.biceps], 0.5, "the other shares stay")
+        XCTAssertEqual(row?.shares.values.filter { $0 == 1 }.count, 1)
+        // a muscle the matched shares did not have is added as the primary
+        let fly = MuscleSuggester.suggest(name: "Cable Fly [Rear Delt]", coarse: .chest)
+        XCTAssertEqual(fly?.shares[.rearDelts], 1)
+        XCTAssertEqual(fly?.shares[.chest], 0.5)
+        // a tag naming the matched primary changes nothing but the confidence
+        let ext = MuscleSuggester.suggest(name: "Single-Arm Cable Extension (Long Head)", coarse: .triceps)
+        XCTAssertEqual(ext?.confidence, .tagged)
+        XCTAssertEqual(ext?.primary, .triceps)
+        // tags that name no muscle are ignored for matching and for the primary
+        XCTAssertEqual(MuscleSuggester.suggest(name: "Leg Press [Gym]", coarse: .quads)?.confidence, .exact)
+        XCTAssertEqual(MuscleSuggester.suggest(name: "Single Arm Pulldown (Kneeling)", coarse: .back)?.primary, .lats)
+        XCTAssertNil(MuscleSuggester.tagMuscle("Plain Name"))
+        XCTAssertEqual(MuscleSuggester.tagMuscle("Thing [Rear Delts]"), .rearDelts)
+    }
+
+    func test_suggester_straightArm_prefersPulloverBuiltIns_elseDropsElbowFlexors() {
+        let s = MuscleSuggester.suggest(name: "Straight-Arm Cable Pulldown", coarse: .back)
+        XCTAssertEqual(s?.basedOn, "Cable Pullover")
+        XCTAssertEqual(s?.primary, .lats)
+        XCTAssertNil(s?.shares[.biceps])
+        XCTAssertNotNil(MuscleSuggester.suggest(name: "Straight Arm Pulldown", coarse: .back)?.shares[.lats])
+        let shares: [FineMuscle: Double] = [.lats: 1, .biceps: 0.5, .upperBack: 0.25, .forearms: 0.25]
+        XCTAssertEqual(MuscleSuggester.removingElbowFlexors(from: shares), [.lats: 1, .upperBack: 0.25])
+        XCTAssertEqual(MuscleSuggester.removingElbowFlexors(from: [.biceps: 1, .forearms: 0.25]), [.biceps: 1, .forearms: 0.25], "a curl is all elbow flexion")
+        XCTAssertTrue(MuscleSuggester.isStraightArm("Straight-Arm Thing"))
+        XCTAssertTrue(MuscleSuggester.isStraightArm("straight arm thing"))
+        XCTAssertFalse(MuscleSuggester.isStraightArm("Single Arm Thing"))
+    }
+
+    func test_suggester_tieStaysAmbiguous_butLandsOnTheMostCommonPrimary() {
+        let row = MuscleSuggester.suggest(name: "Row", coarse: .back)
+        XCTAssertEqual(row?.confidence, .ambiguous)
+        XCTAssertEqual(row?.primary, .upperBack, "most rows are upper-back rows")
+        XCTAssertEqual(MuscleSuggester.suggest(name: "One Arm DB Row", coarse: .back)?.primary, .upperBack)
+    }
+
+    func test_suggester_keywordTable_isOneTable_withValidRows() {
+        let y = MuscleSuggester.suggest(name: "Prone Y-Raise", coarse: .shoulders)
+        XCTAssertEqual(y?.confidence, .keyword)
+        XCTAssertEqual(y?.shares, [.rearDelts: 1.0, .upperBack: 0.5, .sideDelts: 0.25])
+        XCTAssertEqual(MuscleSuggester.suggest(name: "Cable Hip Adduction", coarse: .glutes)?.primary, .adductors, "not read as a hip thrust")
+        XCTAssertEqual(MuscleSuggester.suggest(name: "Seated Reverse Fly", coarse: .shoulders)?.primary, .rearDelts)
+        for row in MuscleSuggester.keywordTable {
+            XCTAssertEqual(row.shares.values.filter { $0 == 1 }.count, 1, "\(row.keywords)")
+            XCTAssertTrue(row.shares.values.allSatisfy { $0 > 0 && $0 <= 1 })
+        }
     }
 
     func test_unmappedCustoms_areListedNotGuessedIntoTotals() {
@@ -294,6 +351,26 @@ final class MuscleVolumeTests: XCTestCase {
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: result.url, modelContainer: other)
         let back = try ModelContext(other).fetch(FetchDescriptor<UserProfile>()).first
         XCTAssertEqual(back?.muscleSetRangesStored ?? [:], ["chest.min": 12, "chest.max": 24])
+    }
+
+    // MARK: - Suggestion report (before/after of suggester changes; report only)
+
+    func test_report_suggestionForEveryCustom() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
+              let out = ProcessInfo.processInfo.environment["EP_SUGGEST_REPORT"], !out.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_SUGGEST_REPORT")
+        }
+        let container = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let customs = try ModelContext(container).fetch(FetchDescriptor<CustomExercise>()).sorted { $0.name < $1.name }
+        var lines: [String] = []
+        for c in customs {
+            let coarse = MuscleGroup(rawValue: c.primaryMuscleRaw) ?? .chest
+            let sug = MuscleSuggester.suggest(name: c.name, coarse: coarse)
+            let shares = sug?.shares.sorted { ($1.value, $0.key.rawValue) < ($0.value, $1.key.rawValue) }.map { "\($0.key.displayName) \($0.value)" }.joined(separator: ", ") ?? "-"
+            lines.append("\(c.name) [\(coarse.rawValue)] | \(sug?.confidence.rawValue ?? "none") | based on \(sug?.basedOn ?? "-") | \(shares)")
+        }
+        try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Backtest on a real backup (report only)
