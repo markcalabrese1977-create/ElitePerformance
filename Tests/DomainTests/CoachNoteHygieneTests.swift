@@ -48,6 +48,35 @@ final class CoachNoteHygieneTests: XCTestCase {
         XCTAssertTrue(CoachNoteHygiene.isStale(stale, unit: .kg))
     }
 
+    /// The note is WRITTEN in the lifter's display unit (`LoadFormatter(unit:).oneDecimal`, kg trimmed to at most 2 decimals) and
+    /// the plan is STORED in lb, so the comparison converts the stored loads to the display unit first. A kg lifter on a
+    /// 1.25 kg step must never see a fresh note judged stale (or a stale one kept) by unit-conversion rounding.
+    func test_kgLifter_generatedNotesRoundTripThroughTheRealFormatter_acrossAKgLoadRange() {
+        let kg = LoadFormatter(unit: .kg)
+        var kgLoad = 20.0
+        while kgLoad <= 140 {
+            let stored = LoadUnit.kg.toStoredLb(kgLoad)
+            let text = kg.oneDecimal(stored)                                            // exactly what PlanMemoryEngine writes
+            let note = "ℹ️ One more clean session at \(text) earns the increase."
+            let fresh = item(note: note, loads: [stored, stored], suggested: stored)
+            XCTAssertFalse(CoachNoteHygiene.isStale(fresh, unit: .kg), "fresh note \(text) kg judged stale")
+            XCTAssertEqual(CoachNoteHygiene.citedLoad(in: note) ?? -1, Double(text) ?? -2, accuracy: 1e-9)
+            // the plan moves up one 1.25 kg step: the same note is now stale
+            let moved = item(note: note, loads: [LoadUnit.kg.toStoredLb(kgLoad + 1.25)], suggested: LoadUnit.kg.toStoredLb(kgLoad + 1.25))
+            XCTAssertTrue(CoachNoteHygiene.isStale(moved, unit: .kg), "\(text) kg note kept after the plan moved")
+            kgLoad += 1.25
+        }
+    }
+
+    func test_kgLifter_theSameStoredPlanIsJudgedInTheDisplayUnit_notAsAKgNumberAgainstLb() {
+        // plan 70 lb stored = 31.75 kg; a kg lifter's note cites 31.75, not 70
+        let stored = 70.0
+        let kgNote = item(note: "ℹ️ One more clean session at \(LoadFormatter(unit: .kg).oneDecimal(stored)) earns the increase.", loads: [stored], suggested: stored)
+        XCTAssertFalse(CoachNoteHygiene.isStale(kgNote, unit: .kg))
+        // the very same text read by an lb lifter would cite 31.75 lb against a 70 lb plan: stale
+        XCTAssertTrue(CoachNoteHygiene.isStale(kgNote, unit: .lb))
+    }
+
     func test_sweep_clearsStaleNotesOnPlannedSessionsOnly() throws {
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
         let planned = Session(date: Date(), status: .planned, weekIndex: 1, dayLabel: "Push",
