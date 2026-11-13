@@ -215,6 +215,37 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(MesoComparer.earnedSetCandidates(sets: series([[8, 8, 8], [10, 10, 10]]), maxLoad: { _ in 400 }).count, 1)
     }
 
+    // MARK: - What's next: remaining weeks
+
+    func test_remaining_beforeTheFinalWeek_noVerdict_startsTheDayAfterTheLastPlannedSession() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_760_000_000)           // some day D
+        func at(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: now))! }
+        let sessions: [(date: Date, status: SessionStatus)] = [(at(-3), .completed), (at(2), .planned), (at(20), .planned), (at(-1), .planned)]
+        let r = MesoRemaining.compute(sessions: sessions, now: now, calendar: cal)
+        XCTAssertEqual(r.remainingSessions, 2, "a past planned session and completed ones do not count")
+        XCTAssertEqual(r.lastPlannedDate, at(20))
+        XCTAssertEqual(r.weeksRemaining, 3, "20 days -> 3 weeks")
+        XCTAssertFalse(r.isFinalWeekOrOver)
+        XCTAssertEqual(r.defaultStart, at(21), "the day after the last planned session")
+    }
+
+    func test_remaining_inTheFinalWeekOrAfter_verdictAndTomorrow() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        func at(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: now))! }
+        let finalWeek = MesoRemaining.compute(sessions: [(at(-5), .completed), (at(3), .planned), (at(6), .planned)], now: now, calendar: cal)
+        XCTAssertTrue(finalWeek.isFinalWeekOrOver, "the last planned session is 6 days away")
+        XCTAssertEqual(finalWeek.defaultStart, at(1), "tomorrow")
+        XCTAssertEqual(finalWeek.weeksRemaining, 1)
+        let sevenAway = MesoRemaining.compute(sessions: [(at(7), .planned)], now: now, calendar: cal)
+        XCTAssertFalse(sevenAway.isFinalWeekOrOver, "7 days away is not yet the final week")
+        let over = MesoRemaining.compute(sessions: [(at(-9), .completed), (at(-2), .planned)], now: now, calendar: cal)
+        XCTAssertTrue(over.isFinalWeekOrOver)
+        XCTAssertEqual(over.remainingSessions, 0)
+        XCTAssertEqual(over.defaultStart, at(1))
+    }
+
     func test_noPreviousBlock_noComparison() {
         let all = sets(110, "bench_press", load: 205, meso: "new")
         XCTAssertNil(compare(all, infos: [info("new", start: 100)]))
@@ -318,6 +349,20 @@ final class MesoComparisonTests: XCTestCase {
             }
         }
         XCTAssertFalse(c.lifts.isEmpty)
+        // PRs and first-time baselines per block, as the summary header counts them.
+        log("")
+        for info in [c.previous, c.current] {
+            guard let block = blocks.first(where: { ($0.id?.uuidString ?? "\($0.persistentModelID)") == info.key }) else { continue }
+            let ids = Set(block.sessions.map { $0.persistentModelID })
+            let first = block.sessions.map(\.date).min() ?? block.startDate
+            let prior = all.filter { !ids.contains($0.persistentModelID) && $0.date < first }
+            guard let a = AnalyticsEngine.mesoAnalysis(meso: block, allPriorSessions: prior) else { continue }
+            let prs = a.exerciseSummaries.filter(\.isPR), news = a.exerciseSummaries.filter(\.isNew)
+            log("\(info.name): summary PRs \(prs.count) (\(prs.map(\.exerciseName).sorted().joined(separator: ", ")))")
+            log("\(info.name): New (first-ever baseline) \(news.count) (\(news.map(\.exerciseName).sorted().joined(separator: ", ")))")
+            XCTAssertTrue(a.exerciseSummaries.allSatisfy { !($0.isPR && $0.isNew) })
+        }
+        log("PR events (record-breaking sessions, baselines excluded): previous \(c.prsPrevious), current \(c.prsCurrent)")
         // Decline Bench had a set added from Nov 8 (the prescription), so it is not an earned-set candidate on any letter.
         if c.notes.earnedSetCandidates.contains(where: { $0.exerciseId == "decline_bench_press" }) { XCTFail("Decline Bench: its prescribed set count rose") }
     }

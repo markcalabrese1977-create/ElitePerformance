@@ -30,6 +30,7 @@ struct MesoSummaryView: View {
     @State private var showProgramPicker: Bool = false
     @State private var showStartNextMeso: Bool = false
     @State private var mesoStartDate: Date = MesoLifecycle.defaultMesoStartDate
+    @State private var remaining: MesoRemaining? = nil
 
     // Extend maintenance block (mid-block action)
     @State private var showExtendSheet: Bool = false
@@ -97,6 +98,10 @@ struct MesoSummaryView: View {
             }
             .onAppear {
                             buildAnalysis()
+                            let r = MesoRemaining.compute(sessions: meso.sessions.map { ($0.date, $0.status) })
+                            remaining = r
+                            // an unfinished active meso: the next block starts the day after its last planned session
+                            if meso.status == .active, !r.isFinalWeekOrOver { mesoStartDate = r.defaultStart }
                         }
             .sheet(isPresented: $showProgramPicker) {
                 MaintenanceProgramPickerView(startDate: mesoStartDate) {
@@ -137,7 +142,10 @@ struct MesoSummaryView: View {
             )
             let allSessions = (try? context.fetch(descriptor)) ?? []
             let mesoSessionIDs = Set(meso.sessions.map { $0.persistentModelID })
-            let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
+            // Only what came BEFORE this meso is "prior": a later block's sessions must not make an old block's first
+            // exposure look like a repeat.
+            let firstDate = meso.sessions.map(\.date).min() ?? meso.startDate
+            let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) && $0.date < firstDate }
 
         analysis = AnalyticsEngine.mesoAnalysis(meso: meso, allPriorSessions: priorSessions)
                     analysisComplete = true
@@ -534,7 +542,16 @@ struct MesoSummaryView: View {
                                 .fontWeight(.semibold)
                                 .foregroundColor(.primary)
 
-                            if summary.isPR {
+                            if summary.isNew {
+                                Text("New")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.teal)
+                                    .clipShape(Capsule())
+                            } else if summary.isPR {
                                 Text("PR")
                                     .font(.caption2)
                                     .fontWeight(.bold)
@@ -658,7 +675,7 @@ struct MesoSummaryView: View {
             Text("What's next?")
                 .font(.subheadline.bold())
 
-            Text(nextBlockRecommendationText(analysis))
+            Text(nextBlockHeadline(analysis))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -673,7 +690,7 @@ struct MesoSummaryView: View {
                 DatePicker(
                     "Start date",
                     selection: $mesoStartDate,
-                    in: MesoLifecycle.mesoStartDateRange,
+                    in: MesoLifecycle.mesoStartDateRange.lowerBound...max(MesoLifecycle.mesoStartDateRange.upperBound, mesoStartDate),
                     displayedComponents: .date
                 )
                 .datePickerStyle(.compact)
@@ -780,6 +797,15 @@ struct MesoSummaryView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// While planned sessions remain before the final week there is no verdict yet, only how long is left.
+    private func nextBlockHeadline(_ analysis: MesoAnalysis) -> String {
+        if meso.status == .active, let r = remaining, !r.isFinalWeekOrOver {
+            let last = r.lastPlannedDate?.formatted(date: .abbreviated, time: .omitted) ?? ""
+            return "\(r.weeksRemaining) week\(r.weeksRemaining == 1 ? "" : "s") remaining (\(r.remainingSessions) sessions, last on \(last)). The next block starts the day after the last planned session; pick it when this one is nearly done."
+        }
+        return nextBlockRecommendationText(analysis)
     }
 
     private func nextBlockRecommendationText(_ analysis: MesoAnalysis) -> String {

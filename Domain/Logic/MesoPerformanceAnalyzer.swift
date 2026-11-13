@@ -46,6 +46,9 @@ struct ExercisePerformanceSummary {
     /// Whether this exercise set a new e1RM record (vs all prior mesos).
         let isPR: Bool
 
+        /// The lift's first-ever working exposure is in this meso: a baseline, not a record.
+        let isNew: Bool
+
         /// Total completed sets for this exercise across the meso.
         let totalSets: Int
 
@@ -287,10 +290,12 @@ enum MesoPerformanceAnalyzer {
             }()
 
             // PR detection
+            // A record needs something to beat: a lift with no earlier exposure (prior 0) sets a baseline ("New"), not a PR.
+            let isNew: Bool = peakE1RM != nil && (priorPeakE1RM[exerciseId] ?? 0) <= 0
             let isPR: Bool = {
                 guard let peak = peakE1RM else { return false }
                 let prior = priorPeakE1RM[exerciseId] ?? 0
-                return peak > prior
+                return prior > 0 && peak > prior
             }()
 
             // Display name and muscle
@@ -326,6 +331,7 @@ enum MesoPerformanceAnalyzer {
                             closingLoad: closingLoad,
                             verdict: verdict,
                             isPR: isPR,
+                            isNew: isNew,
                             totalSets: exSets,
                             totalReps: exReps,
                             totalVolume: exVolume
