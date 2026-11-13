@@ -140,6 +140,8 @@ enum BackupSnapshotImporter {
             session.readinessRaw = sessionDTO.readinessRaw ?? "normal"
             // Old backups predate this key → nil (not an inserted deload).
             session.insertedDeload = sessionDTO.insertedDeload
+            // Old backups predate this key → nil (unknown planned day). Overrides the init default (= date).
+            session.plannedDate = sessionDTO.plannedDate
 
             if let mesoBlockId = sessionDTO.mesoBlockId,
                let meso = mesoById[mesoBlockId] {

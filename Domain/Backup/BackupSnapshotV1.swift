@@ -128,6 +128,8 @@ struct SessionBackupDTO: Codable {
     let programIndex: Int?
     // Added with the insert-deload feature. Optional so OLD backups decode with nil.
     var insertedDeload: Bool? = nil
+    // Added with plannedDate (analytics foundation). Optional so OLD backups decode with nil.
+    var plannedDate: Date? = nil
 
     let hkWorkoutUUID: String?
     let hkWorkoutStart: Date?

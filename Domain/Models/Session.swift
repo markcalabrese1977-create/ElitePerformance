@@ -61,6 +61,13 @@ final class Session {
     /// the program generated). Optional for lightweight migration; nil and false both mean "not inserted".
     var insertedDeload: Bool?
 
+    /// The day this session is scheduled for. Set at creation (= `date`), moved only by the services that move
+    /// planned sessions (Rest today, insert / remove deload week), and NEVER by completion: finishing a session
+    /// overwrites `date` with the completion time, so this is what tells a late or missed session from an on-time
+    /// one. nil on sessions from before the field existed (only planned ones are backfilled), meaning "unknown".
+    /// Optional Date: SwiftData lightweight migration, no schema version bump.
+    var plannedDate: Date?
+
     /// Alias used throughout the app.
     var weekIndex: Int {
         get { weekInMeso ?? 1 }
@@ -147,6 +154,7 @@ final class Session {
         self.updatedAt = updatedAt
 
         self.date = date
+        self.plannedDate = date
         self.status = status
         self.completedAt = completedAt
 

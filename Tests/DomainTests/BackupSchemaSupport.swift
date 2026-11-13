@@ -176,6 +176,8 @@ enum PopulatedStoreBuilder {
             hkHeartRateSeriesBPM: [110, 120, 130], hkHeartRateSeriesStepSeconds: 30,
             hkPostWorkoutHeartRateBPM: [140, 120, 100], hkPostWorkoutHeartRateStepSeconds: 15
         )
+        // BA2: a non-default value (Session.init sets plannedDate = date, so move it a day).
+        s.plannedDate = date.addingTimeInterval(-86_400)
         s.meso = meso
         meso.sessions.append(s)
         ctx.insert(s)

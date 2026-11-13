@@ -1241,8 +1241,8 @@ extension SessionItemEditService {
         // Everything this method overwrites on live objects, so a failure can put it back by hand
         // (rollback() drops inserts but does not revert property edits).
         struct SessionRestore {
-            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
-            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+            let session: Session; let date: Date; let plannedDate: Date?; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; plannedDate = s.plannedDate; week = s.weekInMeso; programIndex = s.programIndex }
         }
         let otherSessions = meso.sessions.filter { s in !live.shifted.contains { $0.session === s } }
         let restores = (otherSessions + live.shifted.map(\.session)).map(SessionRestore.init)
@@ -1250,7 +1250,7 @@ extension SessionItemEditService {
         let mesoSessionsBefore = meso.sessions
         var created: [Session] = []
         func abandon() {
-            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            for r in restores { r.session.date = r.date; r.session.plannedDate = r.plannedDate; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
             meso.totalWeeks = totalWeeksBefore
             meso.sessions = mesoSessionsBefore
             for s in created { context.delete(s) }
@@ -1300,6 +1300,7 @@ extension SessionItemEditService {
         // 2. Everything from that week on moves a week later.
         for move in live.shifted {
             move.session.date = move.newDate
+            if move.session.plannedDate != nil { move.session.plannedDate = move.newDate }   // unknown stays unknown
             move.session.weekInMeso = move.newWeek
         }
         if let total = totalWeeksBefore { meso.totalWeeks = total + 1 }
@@ -1567,8 +1568,8 @@ extension SessionItemEditService {
         let insertedBefore = meso.sessions.filter { $0.insertedDeload == true }.count
 
         struct SessionRestore {
-            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
-            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+            let session: Session; let date: Date; let plannedDate: Date?; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; plannedDate = s.plannedDate; week = s.weekInMeso; programIndex = s.programIndex }
         }
         let untouched = meso.sessions.filter { s in
             !removedIDs.contains(s.persistentModelID) && !live.shifted.contains { $0.session === s }
@@ -1577,7 +1578,7 @@ extension SessionItemEditService {
         let totalWeeksBefore = meso.totalWeeks
         let mesoSessionsBefore = meso.sessions
         func abandon() {
-            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            for r in restores { r.session.date = r.date; r.session.plannedDate = r.plannedDate; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
             meso.totalWeeks = totalWeeksBefore
             meso.sessions = mesoSessionsBefore
             context.rollback()
@@ -1594,6 +1595,7 @@ extension SessionItemEditService {
         // 2. Later sessions come back a week.
         for move in live.shifted {
             move.session.date = move.newDate
+            if move.session.plannedDate != nil { move.session.plannedDate = move.newDate }   // unknown stays unknown
             move.session.weekInMeso = move.newWeek
         }
         if let total = totalWeeksBefore { meso.totalWeeks = max(1, total - 1) }
@@ -1802,16 +1804,19 @@ extension SessionItemEditService {
         let chainsBefore = chainTargets()
 
         struct DateRestore {
-            let session: Session; let date: Date; let week: Int?; let programIndex: Int?
-            init(_ s: Session) { session = s; date = s.date; week = s.weekInMeso; programIndex = s.programIndex }
+            let session: Session; let date: Date; let plannedDate: Date?; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; plannedDate = s.plannedDate; week = s.weekInMeso; programIndex = s.programIndex }
         }
         let restores = live.moves.map { DateRestore($0.session) }
         func abandon() {
-            for r in restores { r.session.date = r.date; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            for r in restores { r.session.date = r.date; r.session.plannedDate = r.plannedDate; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
             context.rollback()
         }
 
-        for move in live.moves { move.session.date = move.newDate }
+        for move in live.moves {
+            move.session.date = move.newDate
+            if move.session.plannedDate != nil { move.session.plannedDate = move.newDate }   // unknown stays unknown
+        }
 
         var problems: [String] = []
         for (move, r) in zip(live.moves, restores) {
