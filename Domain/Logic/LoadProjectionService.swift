@@ -655,32 +655,14 @@ enum HistorySeedLoad {
 
     static let maxCreditedRIR = 4
     /// Sets lighter than this share of the session's heaviest set are warm-ups.
-    static let warmupFraction = 0.5
+    static let warmupFraction = WorkingSetFilter.warmupFraction
 
-    private struct LoggedSet { let reps: Int; let load: Double; let rir: Int }
+    /// Which rows of an item a seed reads (defined by `WorkingSetFilter`, which analytics shares).
+    typealias Role = WorkingSetFilter.Role
 
-    /// Which rows of an item a seed reads. `backOff` = every row that is not a top row (all rows of an
-    /// item with no top set). `top` = the top rows; an item with no logged top row contributes all its
-    /// rows (history from before a top set existed is still the best evidence of what the lifter can do).
-    enum Role { case backOff, top }
-
-    /// Logged working sets: reps and load present, not rest-pause, drop or skipped.
-    private static func qualifyingSets(of item: SessionItem, role: Role? = nil) -> [LoggedSet] {
-        func at<T>(_ a: [T], _ i: Int) -> T? { a.indices.contains(i) ? a[i] : nil }
-        let topRowsLogged = item.topRowIndices.contains { at(item.actualReps, $0).map { $0 > 0 } ?? false }
-        return (0..<min(item.actualLoads.count, item.actualReps.count)).compactMap { i in
-            switch role {
-            case .backOff?: if item.isTopRow(i) { return nil }
-            case .top?: if topRowsLogged && !item.isTopRow(i) { return nil }
-            case nil: break
-            }
-            let reps = item.actualReps[i], load = item.actualLoads[i]
-            guard reps > 0, load > 0 else { return nil }
-            if at(item.usedRestPauseFlags, i) == true { return nil }
-            if let p = at(item.restPausePatternsBySet, i), !p.isEmpty { return nil }   // includes "SKIP"
-            if let d = at(item.dropSetPatternsBySet, i), !d.isEmpty { return nil }
-            return LoggedSet(reps: reps, load: load, rir: at(item.actualRIRs, i) ?? 0)
-        }
+    /// Logged working sets: reps and load present, not rest-pause, drop or skipped (`WorkingSetFilter`).
+    private static func qualifyingSets(of item: SessionItem, role: Role? = nil) -> [WorkingSetFilter.Row] {
+        WorkingSetFilter.qualifyingRows(of: item, role: role)
     }
 
     /// - Returns: `0` for bodyweight exercises (they never carry a numeric load),
@@ -710,9 +692,9 @@ enum HistorySeedLoad {
             if match.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" { continue }
 
             let sets = qualifyingSets(of: match, role: role)
-            guard let heaviest = sets.map(\.load).max() else { continue }
+            guard !sets.isEmpty else { continue }
             var best = 0.0
-            for set in sets where set.load >= heaviest * warmupFraction {
+            for set in WorkingSetFilter.droppingWarmups(sets) {
                 let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
                 best = max(best, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
@@ -780,8 +762,8 @@ enum HistorySeedLoad {
             if match.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" { continue }
 
             let sets = qualifyingSets(of: match, role: role)
-            guard let heaviest = sets.map(\.load).max() else { continue }
-            for set in sets where set.load >= heaviest * warmupFraction {
+            guard !sets.isEmpty else { continue }
+            for set in WorkingSetFilter.droppingWarmups(sets) {
                 let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
                 peak = max(peak, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }

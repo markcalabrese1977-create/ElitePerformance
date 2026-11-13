@@ -22,6 +22,7 @@ enum BackupSchemaMap {
         "MesoBlock.status": "statusRaw",
         "UserProfile.exemptExerciseIdsStored": "exemptExerciseIds",
         "UserProfile.maxLoadByExerciseStored": "maxLoadByExercise",
+        "UserProfile.muscleSetRangesStored": "muscleSetRanges",
     ]
 
     /// Non-zero model defaults, "Entity.dtoKey" -> default. Zero, false, "", [] and nil are always defaults.
@@ -114,6 +115,7 @@ enum PopulatedStoreBuilder {
         )
         profile.exemptExerciseIds = ["bench_press"]
         profile.maxLoadByExercise = ["back_squat": 405.0, "cable_tricep_rope_pushdown": 130.0]
+        profile.muscleSetRangesStored = ["chest.min": 12.0, "chest.max": 24.0, "calves.max": 14.0]
         profile.birthDateOverride = day(-9_000)
         profile.loadUnit = .kg
         profile.savedIncrementLb = 5.0
@@ -160,8 +162,11 @@ enum PopulatedStoreBuilder {
         ctx.insert(history)
 
         ctx.insert(ExerciseNote(id: UUID(), createdAt: day(-4), updatedAt: day(-3), exerciseId: "bench_press", note: "probe note"))
-        ctx.insert(CustomExercise(id: "probe_custom_one", name: "Probe Custom Lift", primaryMuscleRaw: "back",
-                                  isCompound: true, createdAt: day(-15), isBodyweight: true))
+        let probeCustom = CustomExercise(id: "probe_custom_one", name: "Probe Custom Lift", primaryMuscleRaw: "back",
+                                         isCompound: true, createdAt: day(-15), isBodyweight: true)
+        probeCustom.fineMuscleRaw = "upperBack"
+        probeCustom.fineSecondaryShares = ["lats": 0.5, "rearDelts": 0.25]
+        ctx.insert(probeCustom)
         try ctx.save()
     }
 
@@ -176,6 +181,9 @@ enum PopulatedStoreBuilder {
             hkHeartRateSeriesBPM: [110, 120, 130], hkHeartRateSeriesStepSeconds: 30,
             hkPostWorkoutHeartRateBPM: [140, 120, 100], hkPostWorkoutHeartRateStepSeconds: 15
         )
+        // BA2: a non-default value (Session.init sets plannedDate = date, so move it a day).
+        s.plannedDate = date.addingTimeInterval(-86_400)
+        s.plannedDateExact = true
         s.meso = meso
         meso.sessions.append(s)
         ctx.insert(s)

@@ -46,6 +46,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         "week6UpperBCleanupMigration.v1.completed",
         "mesoBlockIsMaintenanceBackfill.v1.completed",
         "prescribedSetsBackfill.v1.completed",
+        "plannedDateBackfill.v1.completed",
         "customExerciseIdRepairMigration.v1.completed",
         "sessionHistoryBlockBackfill.v1.completed",
         "exerciseNameSnapshotRepair.v6.completed",
@@ -75,7 +76,8 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("CustomExerciseUserDefaultsSyncRepair", { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
         ("MesoBlockIsMaintenanceBackfill", { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
         ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
-        ("PrescribedSetsBackfill", { PrescribedSetsBackfill.runIfNeeded(in: $0) })
+        ("PrescribedSetsBackfill", { PrescribedSetsBackfill.runIfNeeded(in: $0) }),
+        ("PlannedDateBackfill", { PlannedDateBackfill.runIfNeeded(in: $0) })
     ]
 
 
@@ -90,6 +92,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("MesoBlockIsMaintenanceBackfill", "mesoBlockIsMaintenanceBackfill.v1.completed"),
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
         ("PrescribedSetsBackfill", "prescribedSetsBackfill.v1.completed"),
+        ("PlannedDateBackfill", "plannedDateBackfill.v1.completed"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
@@ -522,7 +525,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         "sessionDayLabelBackfill.v1.completed", "customExerciseStoreMigration.v1.completed",
         "customExerciseUserDefaultsSync.v1.completed", "mesoBlockIsMaintenanceBackfill.v1.completed",
         "bodyweightPhantomLoadMigration.v1.completed", "prescriptionNotesClear.v1.completed",
-        "prescribedSetsBackfill.v1.completed",
+        "prescribedSetsBackfill.v1.completed", "plannedDateBackfill.v1.completed",
         "week6UpperBCleanupMigration.v1.completed", "custom_exercises_v2",
     ]
     private var savedDefaults: [String: Any] = [:]
@@ -622,6 +625,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
 
         // The store as it was before `prescribedSets` existed: no item carries it.
         for s in try ctx.fetch(FetchDescriptor<Session>()) { for i in s.items { i.prescribedSets = nil } }
+        // ... and before `plannedDate` existed: no session carries it.
+        for s in try ctx.fetch(FetchDescriptor<Session>()) { s.plannedDate = nil; s.plannedDateExact = nil }
         try ctx.save()
         return ctx
     }
@@ -635,13 +640,15 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
-    /// Every registered backfill but PrescribedSetsBackfill leaves the store byte-identical; that one adds
-    /// `prescribedSets` (= targetSets) to PLANNED items and changes nothing else. The comparison removes
-    /// exactly that one key from planned items and requires everything else to be unchanged.
-    func test_registeredStartupBackfills_leaveAnotherUsersStoreUnchanged_exceptPrescribedSetsOnPlannedItems() throws {
+    /// Every registered backfill but PrescribedSetsBackfill and PlannedDateBackfill leaves the store byte-identical;
+    /// those two add `prescribedSets` (= targetSets) to PLANNED items and `plannedDate` (= date) to PLANNED sessions
+    /// and change nothing else. The comparison removes exactly those keys from planned rows (and requires them to be
+    /// absent everywhere else) and requires everything else to be unchanged.
+    func test_registeredStartupBackfills_leaveAnotherUsersStoreUnchanged_exceptPlannedRowKeys() throws {
         let ctx = try makeStore()
         let before = try snapshot(ctx)
         XCTAssertFalse(String(decoding: before, as: UTF8.self).contains("prescribedSets"), "precondition: a pre-key store")
+        XCTAssertFalse(String(decoding: before, as: UTF8.self).contains("plannedDate"), "precondition: a pre-plannedDate store")
 
         clearKeys()
         StartupBackfills.run(using: container)
@@ -650,9 +657,19 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         let afterData = try snapshot(ModelContext(container))
         var after = try XCTUnwrap(JSONSerialization.jsonObject(with: afterData) as? [String: Any])
         var sessions = try XCTUnwrap(after["sessions"] as? [[String: Any]])
-        var plannedItems = 0, otherItems = 0
+        var plannedItems = 0, otherItems = 0, plannedSessions = 0, otherSessions = 0
         for s in sessions.indices {
             let status = sessions[s]["statusRaw"] as? String
+            if status == "planned" {
+                XCTAssertEqual(sessions[s]["plannedDate"] as? String, sessions[s]["date"] as? String,
+                               "planned session: plannedDate == date")
+                sessions[s].removeValue(forKey: "plannedDate")
+                XCTAssertNil(sessions[s]["plannedDateExact"], "a backfilled date is never marked exact")
+                plannedSessions += 1
+            } else {
+                XCTAssertNil(sessions[s]["plannedDate"], "\(status ?? "?") sessions keep no plannedDate (unknown, never guessed)")
+                otherSessions += 1
+            }
             var items = try XCTUnwrap(sessions[s]["items"] as? [[String: Any]])
             for i in items.indices {
                 if status == "planned" {
@@ -670,6 +687,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         after["sessions"] = sessions
         XCTAssertGreaterThan(plannedItems, 0)
         XCTAssertGreaterThan(otherItems, 0, "the store has completed and in-progress items too")
+        XCTAssertGreaterThan(plannedSessions, 0)
+        XCTAssertGreaterThan(otherSessions, 0)
         let scoped = try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys])
         XCTAssertEqual(scoped, before, "every other byte is unchanged")
     }
@@ -710,6 +729,39 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         XCTAssertEqual(keep.prescribedSets, 2)
     }
 
+    func test_plannedDateBackfill_isIdempotent_waitsForSessions_andNeverOverwrites() throws {
+        let schema = Schema([
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+            MesoBlock.self, UserProfile.self, CustomExercise.self
+        ])
+        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = empty
+        clearKeys()
+        PlannedDateBackfill.runIfNeeded(in: ModelContext(empty))
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "plannedDateBackfill.v1.completed"), "empty store: not marked done")
+
+        let ctx = try makeStore()
+        clearKeys()
+        PlannedDateBackfill.runIfNeeded(in: ctx)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: "plannedDateBackfill.v1.completed"))
+        let once = try snapshot(ctx)
+        PlannedDateBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(try snapshot(ctx), once, "a second run changes nothing")
+        for s in try ctx.fetch(FetchDescriptor<Session>()) {
+            if s.status == .planned { XCTAssertEqual(s.plannedDate, s.date) }
+            else { XCTAssertNil(s.plannedDate, "\(s.status) sessions are untouched") }
+        }
+        // A planned session that already carries a plannedDate (moved by Rest today) is never overwritten.
+        let planned = try XCTUnwrap(try ctx.fetch(FetchDescriptor<Session>()).first { $0.status == .planned })
+        let moved = planned.date.addingTimeInterval(-86_400 * 3)
+        planned.plannedDate = moved
+        try ctx.save()
+        UserDefaults.standard.removeObject(forKey: "plannedDateBackfill.v1.completed")
+        PlannedDateBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(planned.plannedDate, moved)
+    }
+
     /// Legacy exerciseNotes.v1.* keys are moved into ExerciseNote rows by the startup backfills, and that is the
     /// ONLY change to the store (prescribedSets on planned items is the other backfill's separate, known change).
     func test_legacyNotesBackfill_addsOnlyExerciseNoteRows() throws {
@@ -728,13 +780,15 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         let added = try XCTUnwrap(after["exerciseNotes"] as? [[String: Any]])
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: added.map { ($0["exerciseId"] as! String, $0["note"] as! String) }), legacy)
 
-        // Scope the comparison: drop the notes and the other backfill's prescribedSets, require the rest identical.
+        // Scope the comparison: drop the notes and the other backfills' prescribedSets / plannedDate, require the rest identical.
         after["exerciseNotes"] = before["exerciseNotes"]
         var sessions = try XCTUnwrap(after["sessions"] as? [[String: Any]])
         for s in sessions.indices {
             var items = try XCTUnwrap(sessions[s]["items"] as? [[String: Any]])
             for i in items.indices { items[i].removeValue(forKey: "prescribedSets") }
             sessions[s]["items"] = items
+            sessions[s].removeValue(forKey: "plannedDate")
+            XCTAssertNil(sessions[s]["plannedDateExact"], "a backfill never marks a date exact")
         }
         after["sessions"] = sessions
         XCTAssertEqual(try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys]),

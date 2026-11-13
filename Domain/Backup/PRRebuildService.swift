@@ -6,8 +6,9 @@ import SwiftData
 /// empty one would make the first lift after a restore a false PR.
 enum PRRebuildService {
 
-    /// Replays completed sessions oldest first with the same metric as `PRService.updatePR` (best single-set volume,
-    /// a strictly greater set replaces the best). `bestDate` is the date of the session that set the best.
+    /// Rebuilds the index with the single PR definition (`PersonalRecords`): the best working-set e1RM per canonical
+    /// exercise over every completed session, maintenance and deload included, with a bodyweight lift measured at the
+    /// lifter's body weight (no body weight, no PR for it). `bestDate` is the date of the session that set the best.
     static func rebuild(in context: ModelContext) throws {
         for existing in try context.fetch(FetchDescriptor<PRIndex>()) {
             context.delete(existing)
@@ -16,36 +17,22 @@ enum PRRebuildService {
         let sessions = try context.fetch(
             FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)])
         )
+        let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let bodyWeight = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first?.bodyWeight
+        let records = SetRecordBuilder.build(sessions: sessions, customExercises: customs, bodyWeight: bodyWeight)
 
-        var bestByExercise: [String: PRIndex] = [:]
-        for session in sessions where session.status == .completed {
-            for item in session.items.sorted(by: { $0.order < $1.order }) {
-                guard let best = PRService.bestSet(in: item) else { continue }
-
-                if let current = bestByExercise[item.exerciseId] {
-                    guard best.volume > current.bestSetVolume else { continue }
-                    current.bestSetVolume = best.volume
-                    current.bestLoad = best.load
-                    current.bestReps = best.reps
-                    current.bestDate = session.date
-                } else {
-                    let name = ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })?.name
-                        ?? item.exerciseNameSnapshot
-                        ?? "Unknown"
-                    let pr = PRIndex(
-                        exerciseId: item.exerciseId,
-                        exerciseName: name,
-                        bestSetVolume: best.volume,
-                        bestLoad: best.load,
-                        bestReps: best.reps,
-                        bestDate: session.date
-                    )
-                    context.insert(pr)
-                    bestByExercise[item.exerciseId] = pr
-                }
-            }
+        var names: [String: String] = [:]
+        for session in sessions { for item in session.items {
+            let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            if names[id] == nil, let n = item.exerciseNameSnapshot, !n.isEmpty { names[id] = n }
+        } }
+        for best in PersonalRecords.bests(from: records.sets).values.sorted(by: { $0.exerciseId < $1.exerciseId }) {
+            let name = ExerciseCatalog.all.first(where: { $0.id == best.exerciseId })?.name ?? names[best.exerciseId] ?? "Unknown"
+            context.insert(PRIndex(
+                exerciseId: best.exerciseId, exerciseName: name, bestSetVolume: best.load * Double(best.reps),
+                bestLoad: best.load, bestReps: best.reps, bestDate: best.date
+            ))
         }
-
         try context.save()
     }
 }

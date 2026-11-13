@@ -24,6 +24,7 @@ struct SettingsView: View {
 
     // MARK: - About
     @State private var didCopyBuildInfo = false
+    @State private var showMuscleRanges = false
     
 
     var body: some View {
@@ -193,7 +194,15 @@ struct SettingsView: View {
                         }
 
 
-            
+            // MARK: - Analytics
+            if let profile = profiles.first {
+                Section("Analytics") {
+                    Button(profile.muscleSetRangesStored == nil ? "Weekly set ranges" : "Weekly set ranges (customized)") {
+                        showMuscleRanges = true
+                    }
+                }
+            }
+
             // MARK: - Data Repair
             Section("Data Repair") {
                             Button("Repair Exercise Data") {
@@ -322,6 +331,14 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .sheet(isPresented: $showMuscleRanges) {
+            if let profile = profiles.first {
+                NavigationStack {
+                    MuscleRangesEditor(profile: profile)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showMuscleRanges = false } } }
+                }
+            }
+        }
         .onAppear(perform: ensureProfileExists)
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
@@ -588,4 +605,59 @@ struct SettingsView: View {
 private struct ExportShareItem: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+
+// MARK: - Weekly set ranges
+
+/// Edits the weekly hard-set range per muscle used by "Weekly sets per muscle". Only numbers that differ from the
+/// defaults are stored; Reset returns a muscle (or all of them) to the defaults.
+struct MuscleRangesEditor: View {
+    let profile: UserProfile
+
+    private func range(_ m: FineMuscle) -> MuscleSetRange { profile.muscleSetRanges[m] ?? MuscleVolumeRanges.defaults[m]! }
+    private func isCustom(_ m: FineMuscle) -> Bool { range(m) != MuscleVolumeRanges.defaults[m] }
+
+    private func set(_ m: FineMuscle, _ r: MuscleSetRange) {
+        var all = profile.muscleSetRanges
+        all[m] = r
+        profile.muscleSetRanges = all
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(FineMuscle.allCases, id: \.self) { m in
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text(m.displayName).font(.subheadline).fontWeight(.semibold)
+                            Spacer()
+                            if isCustom(m) {
+                                Button("Reset") { set(m, MuscleVolumeRanges.defaults[m]!) }
+                                    .font(.caption)
+                                    .buttonStyle(.borderless)
+                            }
+                        }
+                        Stepper(value: Binding(get: { range(m).min }, set: { set(m, MuscleSetRange(min: $0, max: range(m).max)) }),
+                                in: 0...range(m).max, step: 1) {
+                            Text("Minimum: \(Int(range(m).min)) sets / week")
+                        }
+                        Stepper(value: Binding(get: { range(m).max }, set: { set(m, MuscleSetRange(min: range(m).min, max: $0)) }),
+                                in: range(m).min...40, step: 1) {
+                            Text("Maximum: \(Int(range(m).max)) sets / week")
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } footer: {
+                Text("Starting points from common hypertrophy guidance, not a prescription. Counts are weighted hard sets: a synergist counts 0.25 or 0.5 of a set.")
+            }
+            Section {
+                Button("Reset all to defaults", role: .destructive) { profile.muscleSetRanges = MuscleVolumeRanges.defaults }
+                    .disabled(profile.muscleSetRangesStored == nil)
+            }
+        }
+        .navigationTitle("Weekly set ranges")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }

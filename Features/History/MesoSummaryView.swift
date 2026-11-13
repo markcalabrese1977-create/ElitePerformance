@@ -138,7 +138,7 @@ struct MesoSummaryView: View {
             let mesoSessionIDs = Set(meso.sessions.map { $0.persistentModelID })
             let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) }
 
-        analysis = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priorSessions)
+        analysis = AnalyticsEngine.mesoAnalysis(meso: meso, allPriorSessions: priorSessions)
                     analysisComplete = true
         }
     

@@ -102,6 +102,17 @@ struct MesoAnalysis {
 
 enum MesoPerformanceAnalyzer {
 
+    /// The load an item is represented by in an opening / closing comparison: its first logged BACK-OFF row. A top
+    /// set sits at the tail and is heavier by design, so reading it as "the load" would compare a top set in one
+    /// session with a back-off in another. Only an item with no logged back-off row falls back to its first logged
+    /// row (a top row); nil when nothing was logged. For an item with no top set this is the first logged load, as
+    /// it always was.
+    static func representativeLoad(of item: SessionItem) -> Double? {
+        let logged = item.actualLoads.indices.filter { item.actualLoads[$0] > 0 }
+        if let back = logged.first(where: { !item.isTopRow($0) }) { return item.actualLoads[back] }
+        return logged.first.map { item.actualLoads[$0] }
+    }
+
     /// Analyze a completed or near-complete meso block.
     ///
     /// - Parameters:
@@ -191,8 +202,9 @@ enum MesoPerformanceAnalyzer {
         }
 
         // Build prior e1RM peaks for PR detection
+        // Maintenance blocks are held at deliberately reduced work: they never set or raise a prior peak.
         var priorPeakE1RM: [String: Double] = [:]
-        for session in allPriorSessions {
+        for session in allPriorSessions where session.meso?.isMaintenance != true {
             for item in session.items {
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
@@ -255,14 +267,12 @@ enum MesoPerformanceAnalyzer {
             // Opening and closing loads
             let openingLoad: Double? = {
                 let first = sessionsWithExercise.first?.item
-                let actuals = first?.actualLoads.filter { $0 > 0 } ?? []
-                return actuals.first ?? (first?.suggestedLoad ?? 0 > 0 ? first?.suggestedLoad : nil)
+                return first.flatMap { representativeLoad(of: $0) } ?? (first?.suggestedLoad ?? 0 > 0 ? first?.suggestedLoad : nil)
             }()
 
             let closingLoad: Double? = {
                 let last = sessionsWithExercise.last?.item
-                let actuals = last?.actualLoads.filter { $0 > 0 } ?? []
-                return actuals.first ?? (last?.suggestedLoad ?? 0 > 0 ? last?.suggestedLoad : nil)
+                return last.flatMap { representativeLoad(of: $0) } ?? (last?.suggestedLoad ?? 0 > 0 ? last?.suggestedLoad : nil)
             }()
 
             // Verdict

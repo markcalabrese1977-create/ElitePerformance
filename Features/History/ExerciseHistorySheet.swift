@@ -34,6 +34,8 @@ struct ExerciseHistorySheet: View {
 
     @State private var entries: [ExerciseHistoryEntry] = []
     @State private var selectedWave: String? = nil // nil = All
+    /// Stall flags for this lift in the current block (one per letter / role), from StallDetector.
+    @State private var stalls: [Stall] = []
 
     // MARK: - Derived
 
@@ -84,6 +86,7 @@ struct ExerciseHistorySheet: View {
                             .foregroundStyle(.secondary)
                             .padding(.top, 30)
                     } else {
+                        stallChips
                         e1rmChart
                         if availableWaves.count > 1 {
                             waveFilter
@@ -109,6 +112,30 @@ struct ExerciseHistorySheet: View {
     }
 
     
+
+    // MARK: - Stall chips
+
+    @ViewBuilder private var stallChips: some View {
+        if !stalls.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(stalls.enumerated()), id: \.offset) { _, stall in
+                    HStack(spacing: 6) {
+                        Image(systemName: stall.status == .stalled ? "pause.circle.fill" : "minus.circle.fill")
+                        Text(stall.chipText)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(stall.status == .stalled ? Color.orange : Color.secondary)
+                    .background(Capsule().fill((stall.status == .stalled ? Color.orange : Color.secondary).opacity(0.15)))
+                    .accessibilityIdentifier("stallChip")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
     // MARK: - e1RM Sparkline Chart
 
@@ -409,7 +436,6 @@ struct ExerciseHistorySheet: View {
                 var repsTotal = 0
                 var volumeTotal: Double = 0
                 var executedSetCount = 0
-                var bestE1RM: Double? = nil
 
                 for set in uiEx.sets where set.index <= target || (set.actualReps ?? 0) > 0 {
                     let reps = set.actualReps ?? 0
@@ -424,10 +450,6 @@ struct ExerciseHistorySheet: View {
                     executedSetCount += 1
                     repsTotal += reps
                     volumeTotal += effLoad * Double(reps)
-                    if load > 0 {
-                        let e1 = estimate1RM(load: load, reps: reps)
-                        bestE1RM = max(bestE1RM ?? 0, e1)
-                    }
                     executedTokens.append(
                         formatSetToken(
                             load: load, reps: reps, rir: rir,
@@ -439,6 +461,14 @@ struct ExerciseHistorySheet: View {
 
                 guard executedSetCount > 0 else { continue }
 
+                // Best working-set e1RM of the session for this lift: the single e1RM definition (Domain/Analytics).
+                let bestE1RM: Double? = {
+                    let best = session.items
+                        .filter { ExerciseCatalog.resolvedExerciseId(rawId: $0.exerciseId, snapshotName: $0.exerciseNameSnapshot, fallbackName: nil) == targetExerciseId }
+                        .map { AnalyticsEngine.ItemStats.of($0, bodyWeight: bodyWeight).bestE1RM }.max() ?? 0
+                    return best > 0 ? best : nil
+                }()
+
                 built.append(
                     ExerciseHistoryEntry(
                         date: session.date,
@@ -449,13 +479,18 @@ struct ExerciseHistorySheet: View {
                         reps: repsTotal,
                         volume: volumeTotal,
                         detail: executedTokens.joined(separator: ", "),
-                        bestE1RM: (bestE1RM == 0 ? nil : bestE1RM),
+                        bestE1RM: bestE1RM,
                         session: session
                     )
                 )
             }
 
             entries = built
+
+            let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+            let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+            stalls = AnalyticsEngine(sessions: sessions, customExercises: customs, bodyWeight: profile?.bodyWeight)
+                .stalls(forExerciseId: exerciseId, customs: customs, profile: profile)
 
             // Pre-select current wave filter if provided
             if let current = currentWave, availableWaves.contains(current) {
@@ -468,11 +503,6 @@ struct ExerciseHistorySheet: View {
     }
 
     // MARK: - Helpers
-
-    private func estimate1RM(load: Double, reps: Int) -> Double {
-        let r = max(1, reps)
-        return load * (1.0 + Double(r) / 30.0)
-    }
 
     private func formatVolume(_ v: Double) -> String {
         let iv = Int(unit.fromStoredLb(v).rounded())

@@ -206,6 +206,7 @@ enum StartupBackfills {
         MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
         BodyweightPhantomLoadMigration.runIfNeeded(in: context)
         PrescribedSetsBackfill.runIfNeeded(in: context)
+        PlannedDateBackfill.runIfNeeded(in: context)
         LegacyExerciseNotesBackfill.runIfNeeded(in: context)
     }
 }

@@ -44,6 +44,7 @@ enum BackupSnapshotImporter {
             profile.exemptExerciseIds = dto.exemptExerciseIds ?? UserProfile.defaultExemptExerciseIds
             // Per-exercise max loads. nil (an old backup, or no caps ever set) stays nil.
             profile.maxLoadByExerciseStored = dto.maxLoadByExercise
+            profile.muscleSetRangesStored = dto.muscleSetRanges
             profile.birthDateOverride = dto.birthDateOverride
             profile.equipmentPresetRaw = dto.equipmentPresetRaw
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
@@ -140,6 +141,9 @@ enum BackupSnapshotImporter {
             session.readinessRaw = sessionDTO.readinessRaw ?? "normal"
             // Old backups predate this key → nil (not an inserted deload).
             session.insertedDeload = sessionDTO.insertedDeload
+            // Old backups predate this key → nil (unknown planned day). Overrides the init default (= date).
+            session.plannedDate = sessionDTO.plannedDate
+            session.plannedDateExact = sessionDTO.plannedDateExact
 
             if let mesoBlockId = sessionDTO.mesoBlockId,
                let meso = mesoById[mesoBlockId] {
@@ -279,6 +283,8 @@ enum BackupSnapshotImporter {
                 createdAt: dto.createdAt,
                 isBodyweight: dto.isBodyweight ?? false
             )
+            custom.fineMuscleRaw = dto.fineMuscleRaw
+            custom.fineSecondaryShares = dto.fineSecondaryShares
             modelContext.insert(custom)
         }
 

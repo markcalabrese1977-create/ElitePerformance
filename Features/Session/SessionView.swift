@@ -2275,7 +2275,7 @@ final class SessionScreenViewModel: ObservableObject {
 
                 // Epley e1RM estimate for this set
                 if effLoad > 0 && reps > 0 {
-                    let e1 = effLoad * (1.0 + Double(reps) / 30.0)
+                    let e1 = E1RMCalculator.e1RM(load: effLoad, reps: reps)
                     if let currentTop = topE1RM {
                         if e1 > currentTop {
                             topE1RM = e1

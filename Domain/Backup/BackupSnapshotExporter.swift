@@ -73,6 +73,7 @@ enum BackupSnapshotExporter {
                     bodyWeight: $0.bodyWeight,
                     exemptExerciseIds: $0.exemptExerciseIds,
                     maxLoadByExercise: $0.maxLoadByExerciseStored,
+                    muscleSetRanges: $0.muscleSetRangesStored,
                     birthDateOverride: $0.birthDateOverride,
                     equipmentPresetRaw: $0.equipmentPresetRaw,
                     equipmentChecklistRaws: $0.equipmentChecklistRaws,
@@ -110,6 +111,8 @@ enum BackupSnapshotExporter {
                     weekInMeso: session.weekInMeso,
                     dayLabel: session.dayLabel, programIndex: session.programIndex,
                     insertedDeload: session.insertedDeload,
+                    plannedDate: session.plannedDate,
+                    plannedDateExact: session.plannedDateExact,
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
                     hkWorkoutEnd: session.hkWorkoutEnd,
@@ -233,7 +236,9 @@ enum BackupSnapshotExporter {
                     primaryMuscleRaw: ex.primaryMuscleRaw,
                     isCompound: ex.isCompound,
                     createdAt: ex.createdAt,
-                    isBodyweight: ex.isBodyweight
+                    isBodyweight: ex.isBodyweight,
+                    fineMuscleRaw: ex.fineMuscleRaw,
+                    fineSecondaryShares: ex.fineSecondaryShares
                 )
             },
             user: user.map {

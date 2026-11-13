@@ -4,8 +4,13 @@ import SwiftData
 struct AnalyticsView: View {
     @Environment(\.loadUnit) private var unit
     @Query(sort: \Session.date, order: .reverse) private var sessions: [Session]
+    @Query private var profiles: [UserProfile]
+    @Query private var customExercises: [CustomExercise]
 
     @State private var selectedExerciseId: String? = nil
+    @State private var volume: MuscleVolumeSummary? = nil
+    @State private var showUnmapped = false
+    @State private var volumeRefresh = UUID()
 
     private var mesoCutoff: Date {
         Calendar.current.startOfDay(for: MesoLifecycle.activeStartDate)
@@ -15,11 +20,16 @@ struct AnalyticsView: View {
         NavigationStack {
             List {
                 summarySection
+                MuscleVolumeSection(summary: volume, showUnmapped: $showUnmapped)
                 activitySection
                 topExercisesSection
                 allExercisesSection
             }
             .navigationTitle("Analytics")
+            .task(id: "\(sessions.count)-\(customExercises.count)-\(volumeRefresh)-\(profiles.first?.muscleSetRangesStored?.count ?? 0)") { refreshVolume() }
+            .sheet(isPresented: $showUnmapped, onDismiss: { volumeRefresh = UUID() }) {
+                UnmappedExercisesSheet(items: volume?.unmapped ?? [])
+            }
             .sheet(item: sheetItemBinding) { item in
                 ExerciseHistorySheet(
                                     exerciseId: item.exerciseId,
@@ -31,6 +41,12 @@ struct AnalyticsView: View {
                                 .presentationDragIndicator(.hidden)
             }
         }
+    }
+
+    private func refreshVolume() {
+        let profile = profiles.first
+        let engine = AnalyticsEngine(sessions: sessions, customExercises: customExercises, bodyWeight: profile?.bodyWeight)
+        volume = engine.muscleVolume(customs: customExercises, profile: profile)
     }
 
     // MARK: - Sections
@@ -152,11 +168,11 @@ struct AnalyticsView: View {
                 let exId = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 let name = map[exId]?.exerciseName ?? ExerciseCatalog.displayName(for: exId)
 
+                // Hard-set volume at the effective load (Domain/Analytics): warm-ups and skipped rows out, bodyweight sets in.
+                let volume = AnalyticsEngine.ItemStats.of(item, bodyWeight: profiles.first?.bodyWeight).volume
+
                 let loads = item.actualLoads
                 let reps = item.actualReps
-                let n = min(loads.count, reps.count)
-                var volume: Double = 0
-                for i in 0..<n { volume += Double(loads[i]) * Double(reps[i]) }
 
                 let logged = (loads.contains(where: { $0 > 0 }) || reps.contains(where: { $0 > 0 })) ? 1 : 0
 
@@ -220,5 +236,167 @@ struct AnalyticsView: View {
         var id: String { exerciseId }
         let exerciseId: String
         let exerciseName: String
+    }
+}
+
+
+// MARK: - Weekly sets per muscle
+
+/// "Weekly sets per muscle" (current block): the 4-week average vs the lifter's range, a per-week sparkline, adherence
+/// markers per week and the exercises that have no muscle mapping yet.
+struct MuscleVolumeSection: View {
+    let summary: MuscleVolumeSummary?
+    @Binding var showUnmapped: Bool
+
+    var body: some View {
+        Section {
+            if let s = summary, !s.isEmpty {
+                adherenceHeader(s)
+                ForEach(s.rows) { row in MuscleVolumeRow(row: row, weeks: s.weeks) }
+                Button { showUnmapped = true } label: {
+                    HStack {
+                        Text("Unmapped exercises: \(s.unmapped.count)")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                .accessibilityIdentifier("unmappedExercisesRow")
+            } else {
+                Text("No completed training in the current block yet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Weekly sets per muscle")
+        } footer: {
+            if let s = summary, !s.isEmpty {
+                Text("Hard sets, current block\(s.blockName.map { " (\($0))" } ?? ""). Average of the last \(s.averagedWeeks) full week\(s.averagedWeeks == 1 ? "" : "s"); synergists count 0.25–0.5 of a set. Weeks with under 70% of planned sessions done (hollow points) and deload weeks are left out of the average. Ranges are adjustable in Settings.")
+            }
+        }
+    }
+
+    private func adherenceHeader(_ s: MuscleVolumeSummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Last 4 weeks (sessions done / planned)")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(Array(s.windowWeeks.enumerated()), id: \.offset) { _, w in
+                    VStack(spacing: 2) {
+                        Text(w.weekStart, format: .dateTime.month(.abbreviated).day()).font(.caption2)
+                        Text("\(w.completedSessions)/\(w.plannedSessions)\(w.hasDeload ? " D" : "")")
+                            .font(.caption2).fontWeight(.semibold)
+                            .foregroundStyle(w.isIncomplete ? Color.orange : (w.hasDeload ? Color.blue : Color.green))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct MuscleVolumeRow: View {
+    let row: MuscleVolumeSummary.Row
+    let weeks: [MuscleWeek]
+
+    private var color: Color {
+        switch row.status {
+        case .below: return .orange
+        case .within: return .green
+        case .above: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.muscle.displayName).font(.subheadline)
+                Text("range \(Int(row.range.min))–\(Int(row.range.max))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Sparkline(values: row.series, weeks: weeks, color: color)
+                .frame(width: 72, height: 24)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "%.1f", row.average)).font(.subheadline).fontWeight(.semibold)
+                Text(row.status.rawValue).font(.caption2).foregroundStyle(color)
+            }
+            .frame(width: 52, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A tiny line per week; a week with under 70% of its sessions done (or a deload week) is a hollow point.
+private struct Sparkline: View {
+    let values: [Double]
+    let weeks: [MuscleWeek]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let top = max(values.max() ?? 0, 1)
+            let n = max(values.count - 1, 1)
+            let pts: [CGPoint] = values.enumerated().map { i, v in
+                CGPoint(x: geo.size.width * CGFloat(i) / CGFloat(n), y: geo.size.height * (1 - CGFloat(v / top)) * 0.9 + 2)
+            }
+            ZStack {
+                Path { p in
+                    for (i, pt) in pts.enumerated() { i == 0 ? p.move(to: pt) : p.addLine(to: pt) }
+                }
+                .stroke(color.opacity(0.7), lineWidth: 1.5)
+                ForEach(Array(pts.enumerated()), id: \.offset) { i, pt in
+                    let held = i < weeks.count && (weeks[i].isIncomplete || weeks[i].hasDeload)
+                    Circle()
+                        .strokeBorder(color, lineWidth: 1.2)
+                        .background(Circle().fill(held ? Color(.systemBackground) : color))
+                        .frame(width: 5, height: 5)
+                        .position(pt)
+                }
+            }
+        }
+    }
+}
+
+/// The exercises with hard sets in the block that are in no muscle's total; tap one to map it.
+struct UnmappedExercisesSheet: View {
+    let items: [MuscleVolumeSummary.Unmapped]
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: MappingTarget?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if items.isEmpty {
+                    Text("Every exercise in this block is mapped.").foregroundStyle(.secondary)
+                } else {
+                    Section {
+                        ForEach(items) { item in
+                            Button {
+                                if item.isEditable { editing = MappingTarget(id: item.id) }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name)
+                                        Text("\(item.sets) hard sets in this block, in no muscle's total")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if item.isEditable { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
+                                }
+                            }
+                            .disabled(!item.isEditable)
+                        }
+                    } footer: {
+                        Text("Pick the muscle each custom exercise trains. You can also swipe a custom exercise right in the exercise picker.")
+                    }
+                }
+            }
+            .navigationTitle("Unmapped exercises")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .sheet(item: $editing) { target in CustomMuscleMappingSheet(exerciseId: target.id) }
+        }
     }
 }

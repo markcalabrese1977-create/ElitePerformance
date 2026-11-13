@@ -9,6 +9,7 @@ struct AddExerciseSheet: View {
     @State private var searchText: String = ""
     @State private var showingCreateCustom = false
     @State private var refreshToken = UUID()
+    @State private var mappingExerciseId: MappingTarget?
 
     private var builtIn: [CatalogExercise] { ExerciseCatalog.builtIn }
     private var custom: [CatalogExercise] { ExerciseCatalog.customExercises(in: modelContext) }
@@ -48,6 +49,14 @@ struct AddExerciseSheet: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button {
+                                    mappingExerciseId = MappingTarget(id: ex.id)
+                                } label: {
+                                    Label("Muscles", systemImage: "figure.strengthtraining.traditional")
+                                }
+                                .tint(.indigo)
                             }
                         }
                         .onDelete { idx in
@@ -89,6 +98,9 @@ struct AddExerciseSheet: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .exerciseCatalogDidChange)) { _ in
                 refreshToken = UUID()
+            }
+            .sheet(item: $mappingExerciseId) { target in
+                CustomMuscleMappingSheet(exerciseId: target.id)
             }
             .sheet(isPresented: $showingCreateCustom) {
                 CreateCustomExerciseSheet(
@@ -161,6 +173,91 @@ struct CreateCustomExerciseSheet: View {
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+        }
+    }
+}
+
+
+struct MappingTarget: Identifiable { let id: String }
+
+/// Minimal editor for the analytics muscles of a custom exercise: the fine primary muscle and what else a set trains.
+/// Unmapped customs are listed as "unmapped" in volume reports and counted in no muscle's total.
+struct CustomMuscleMappingSheet: View {
+    let exerciseId: String
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @State private var primary: FineMuscle?
+    @State private var secondary: [FineMuscle: Double] = [:]
+    @State private var loaded = false
+
+    private var custom: CustomExercise? {
+        (try? modelContext.fetch(FetchDescriptor<CustomExercise>()))?.first { $0.id == exerciseId }
+    }
+
+    private var suggestion: MuscleSuggestion? {
+        guard let c = custom else { return nil }
+        return MuscleSuggester.suggest(name: c.name, coarse: MuscleGroup(rawValue: c.primaryMuscleRaw) ?? .chest)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Primary muscle") {
+                    Picker("Primary", selection: $primary) {
+                        Text("Not mapped").tag(FineMuscle?.none)
+                        ForEach(FineMuscle.allCases, id: \.self) { m in Text(m.displayName).tag(FineMuscle?.some(m)) }
+                    }
+                }
+                if let s = suggestion {
+                    Section("Suggestion") {
+                        Text("Like \(s.basedOn) (\(s.confidence.rawValue)): \(s.primary?.displayName ?? "-")")
+                        Button("Use suggestion") {
+                            primary = s.primary
+                            secondary = s.shares.filter { $0.value < 1 }
+                        }
+                    }
+                }
+                if let primary {
+                    Section("Also trains") {
+                        ForEach(FineMuscle.allCases.filter { $0 != primary }, id: \.self) { m in
+                            Picker(m.displayName, selection: Binding(get: { secondary[m] ?? 0 }, set: { secondary[m] = $0 == 0 ? nil : $0 })) {
+                                Text("No").tag(0.0)
+                                Text("A little").tag(0.25)
+                                Text("Half a set").tag(0.5)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Text("Used only for weekly volume per muscle. Saved to this device and included in your backup.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(custom?.name ?? "Muscles")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if let c = custom {
+                            c.fineMuscleRaw = primary?.rawValue
+                            let extras = Dictionary(uniqueKeysWithValues: secondary.map { ($0.key.rawValue, $0.value) })
+                            c.fineSecondaryShares = primary == nil || extras.isEmpty ? nil : extras
+                            try? modelContext.save()
+                        }
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                guard !loaded, let c = custom else { return }
+                loaded = true
+                primary = c.fineMuscleRaw.flatMap(FineMuscle.init(rawValue:))
+                secondary = Dictionary(uniqueKeysWithValues: (c.fineSecondaryShares ?? [:]).compactMap { k, v in
+                    FineMuscle(rawValue: k).map { ($0, v) }
+                })
             }
         }
     }

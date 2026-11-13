@@ -51,6 +51,8 @@ struct UserProfileBackupDTO: Codable {
     var exemptExerciseIds: [String]? = nil
     /// Per-exercise max load (canonical id -> load). nil in old backups: no caps.
     var maxLoadByExercise: [String: Double]? = nil
+    /// Weekly set-range overrides per muscle ("<muscle>.min"/".max"). nil in old backups: all defaults.
+    var muscleSetRanges: [String: Double]? = nil
     // Added (optional birthdate for age-based heart-rate zones). Absent in older backups.
     var birthDateOverride: Date? = nil
     // Added (equipment preset + checklist). Optional so OLD backups decode with nil: preset derives from
@@ -128,6 +130,9 @@ struct SessionBackupDTO: Codable {
     let programIndex: Int?
     // Added with the insert-deload feature. Optional so OLD backups decode with nil.
     var insertedDeload: Bool? = nil
+    // Added with plannedDate (analytics foundation). Optional so OLD backups decode with nil.
+    var plannedDate: Date? = nil
+    var plannedDateExact: Bool? = nil
 
     let hkWorkoutUUID: String?
     let hkWorkoutStart: Date?
@@ -285,4 +290,7 @@ struct CustomExerciseBackupDTO: Codable {
     let isCompound: Bool
     let createdAt: Date
     let isBodyweight: Bool?
+    /// Analytics fine-muscle mapping. Absent in old backups: not mapped.
+    var fineMuscleRaw: String? = nil
+    var fineSecondaryShares: [String: Double]? = nil
 }

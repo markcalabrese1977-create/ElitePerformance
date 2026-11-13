@@ -7,10 +7,20 @@ struct SessionRecapView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.loadUnit) private var unit
     @Query private var profiles: [UserProfile]
+    @Query(sort: \Session.date) private var allSessions: [Session]
     @Bindable var session: Session
 
+    /// Lifts that set a new record in this session (Domain/Analytics: best working-set e1RM above every earlier session).
+    private var recordExerciseIds: Set<String> {
+        AnalyticsEngine(
+            sessions: allSessions.filter { $0.status == .completed },
+            bodyWeight: profiles.first?.bodyWeight
+        ).recordExerciseIds(in: session)
+    }
+
     var body: some View {
-        List {
+        let recordIds = recordExerciseIds
+        return List {
             Section {
                 header
             }
@@ -27,7 +37,7 @@ struct SessionRecapView: View {
 
             Section(header: Text("Exercises")) {
                 ForEach(sortedItems) { item in
-                    ExerciseRecapRow(item: item)
+                    ExerciseRecapRow(item: item, isPR: recordIds.contains(ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)))
                 }
             }
 
@@ -449,6 +459,8 @@ struct ExerciseRecapRow: View {
     @Environment(\.loadUnit) private var unit
     @Query private var profiles: [UserProfile]
     let item: SessionItem
+    /// Whether this lift set a new record in the session (from `AnalyticsEngine`, not the stored flag).
+    let isPR: Bool
 
     private var exercise: CatalogExercise? {
         ExerciseCatalog.all.first(where: { $0.id == item.exerciseId })
@@ -502,7 +514,7 @@ struct ExerciseRecapRow: View {
 
                 Spacer()
 
-                if item.isPR {
+                if isPR {
                     Text("PR")
                         .font(.caption2)
                         .padding(.horizontal, 6)
