@@ -180,6 +180,11 @@ final class UserProfile {
     /// "no caps". Use `maxLoadByExercise` / `maxLoad(for:)`, never this raw column.
     var maxLoadByExerciseStored: [String: Double]? = nil
 
+    /// Weekly hard-set range overrides per fine muscle for analytics ("<muscle>.min" / "<muscle>.max" -> weighted sets
+    /// per week). Only numbers that differ from `MuscleVolumeRanges.defaults` are stored; nil = all defaults. Stored
+    /// OPTIONAL for the additive migration. Use `muscleSetRanges`, never this raw column.
+    var muscleSetRangesStored: [String: Double]? = nil
+
     var maxLoadByExercise: [String: Double] {
         get { maxLoadByExerciseStored ?? [:] }
         set { maxLoadByExerciseStored = newValue }

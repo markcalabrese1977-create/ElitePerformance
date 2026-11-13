@@ -82,3 +82,8 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Replaced, kept for history: "Coach-message honesty: non-exempt reduce text says \"next session\"; \"N sets in. Finish the session.\" appears on completed sessions with incomplete evidence; blocked-write wording." (see Open)
 - Fixture-dependent tests (CarryForwardAudit, DUPMesoLengthConversion fixture, LastSameLetter fixture, InsertDeloadRealBackup...): 4 fail against the Oct 30 backup because they pin old data. Make them backup-agnostic (assert invariants, not specific dates/loads) or retire them; then run them with the latest backup in the gate.
 - Store the weekday pattern on UserProfile so Change Program prefills it (today it falls back to the default pattern for the day count).
+
+## Muscle volume: custom exercises are credited by their coarse group only
+A custom exercise gets 1.0 to the fine primary of its coarse group (back -> lats, shoulders -> side delts). On the Nov 12
+backup that misfiles e.g. "Chest Supported Barbell Row" (lats, should be upper back), "Landmine Press" and "Prone Y-Raise"
+(side delts). Options when the volume UI lands: let the custom-exercise editor pick a fine primary, or infer it from the name.

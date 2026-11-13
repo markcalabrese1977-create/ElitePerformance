@@ -22,6 +22,7 @@ enum BackupSchemaMap {
         "MesoBlock.status": "statusRaw",
         "UserProfile.exemptExerciseIdsStored": "exemptExerciseIds",
         "UserProfile.maxLoadByExerciseStored": "maxLoadByExercise",
+        "UserProfile.muscleSetRangesStored": "muscleSetRanges",
     ]
 
     /// Non-zero model defaults, "Entity.dtoKey" -> default. Zero, false, "", [] and nil are always defaults.
@@ -114,6 +115,7 @@ enum PopulatedStoreBuilder {
         )
         profile.exemptExerciseIds = ["bench_press"]
         profile.maxLoadByExercise = ["back_squat": 405.0, "cable_tricep_rope_pushdown": 130.0]
+        profile.muscleSetRangesStored = ["chest.min": 12.0, "chest.max": 24.0, "calves.max": 14.0]
         profile.birthDateOverride = day(-9_000)
         profile.loadUnit = .kg
         profile.savedIncrementLb = 5.0

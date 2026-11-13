@@ -44,6 +44,7 @@ enum BackupSnapshotImporter {
             profile.exemptExerciseIds = dto.exemptExerciseIds ?? UserProfile.defaultExemptExerciseIds
             // Per-exercise max loads. nil (an old backup, or no caps ever set) stays nil.
             profile.maxLoadByExerciseStored = dto.maxLoadByExercise
+            profile.muscleSetRangesStored = dto.muscleSetRanges
             profile.birthDateOverride = dto.birthDateOverride
             profile.equipmentPresetRaw = dto.equipmentPresetRaw
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
