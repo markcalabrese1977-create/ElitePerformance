@@ -43,6 +43,13 @@ struct ExercisePerformanceSummary {
     /// Performance verdict across the meso.
     let verdict: ExerciseVerdict
 
+    /// A bodyweight lift with no body weight on the profile has no load to rate: it is judged on reps instead.
+    let repsBased: Bool
+
+    /// Mean reps per working set in the first / last session this meso (reps-based lifts).
+    let openingReps: Double?
+    let closingReps: Double?
+
     /// Whether this exercise set a new e1RM record (vs all prior mesos).
         let isPR: Bool
 
@@ -124,8 +131,17 @@ enum MesoPerformanceAnalyzer {
     /// - Returns: A `MesoAnalysis` if there are enough completed sessions, nil otherwise.
     static func analyze(
         meso: MesoBlock,
-        allPriorSessions: [Session]
+        allPriorSessions: [Session],
+        bodyWeight: Double? = nil
     ) -> MesoAnalysis? {
+        // A bodyweight lift is rated at the lifter's body weight (the same rule as every other screen: the P1 definition);
+        // 0 means "no load to rate": the lift is counted by reps only.
+        func effective(_ load: Double, _ item: SessionItem) -> Double {
+            if load > 0 { return load }
+            if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId), let bw = bodyWeight, bw > 0 { return bw }
+            return 0
+        }
+        func isBW(_ item: SessionItem) -> Bool { ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId) }
         let completedSessions = meso.sessions
             .filter { $0.status == .completed }
             .sorted { $0.date < $1.date }
@@ -142,9 +158,9 @@ enum MesoPerformanceAnalyzer {
             for item in session.items {
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 for idx in 0..<setCount {
-                    let load = item.actualLoads[idx]
+                    let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
-                    guard load > 0, reps > 0 else { continue }
+                    guard reps > 0, load > 0 || isBW(item) else { continue }
                     totalVolume += load * Double(reps)
                     totalSets += 1
                     totalReps += reps
@@ -162,9 +178,9 @@ enum MesoPerformanceAnalyzer {
             for item in session.items {
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 for idx in 0..<setCount {
-                    let load = item.actualLoads[idx]
+                    let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
-                    guard load > 0, reps > 0 else { continue }
+                    guard reps > 0, load > 0 || isBW(item) else { continue }
                     weekVolume += load * Double(reps)
                     weekSets += 1
                 }
@@ -212,7 +228,7 @@ enum MesoPerformanceAnalyzer {
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 for idx in 0..<setCount {
-                    let load = item.actualLoads[idx]
+                    let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
                     guard load > 0, reps > 0 else { continue }
                     let e1rm = E1RMCalculator.e1RM(load: load, reps: reps)
@@ -247,13 +263,13 @@ enum MesoPerformanceAnalyzer {
             for (session, item) in sessionsWithExercise {
                 let setCount = min(item.actualLoads.count, item.actualReps.count)
                 let sessionMaxLoad = (0..<setCount)
-                    .map { item.actualLoads[$0] }
+                    .map { effective(item.actualLoads[$0], item) }
                     .filter { $0 > 0 }
                     .max() ?? 0
 
                 var sessionPeak: Double = 0
                 for idx in 0..<setCount {
-                    let load = item.actualLoads[idx]
+                    let load = effective(item.actualLoads[idx], item)
                     let reps = item.actualReps[idx]
                     guard load > 0, reps > 0 else { continue }
                     guard load >= 0.50 * sessionMaxLoad else { continue } // exclude warmups
@@ -271,15 +287,31 @@ enum MesoPerformanceAnalyzer {
             let openingLoad: Double? = {
                 let first = sessionsWithExercise.first?.item
                 return first.flatMap { representativeLoad(of: $0) } ?? (first?.suggestedLoad ?? 0 > 0 ? first?.suggestedLoad : nil)
+                    ?? (first.map { effective(0, $0) }.flatMap { $0 > 0 ? $0 : nil })
             }()
 
             let closingLoad: Double? = {
                 let last = sessionsWithExercise.last?.item
                 return last.flatMap { representativeLoad(of: $0) } ?? (last?.suggestedLoad ?? 0 > 0 ? last?.suggestedLoad : nil)
+                    ?? (last.map { effective(0, $0) }.flatMap { $0 > 0 ? $0 : nil })
             }()
+
+            // A bodyweight lift with no body weight set has no load to rate: judge it on mean reps per working set.
+            let repsBased = e1rmBySession.isEmpty && sessionsWithExercise.contains { isBW($0.item) }
+            func meanReps(_ item: SessionItem) -> Double? {
+                let reps = (0..<min(item.actualLoads.count, item.actualReps.count)).map { item.actualReps[$0] }.filter { $0 > 0 }
+                return reps.isEmpty ? nil : Double(reps.reduce(0, +)) / Double(reps.count)
+            }
+            let repSeries = repsBased ? sessionsWithExercise.compactMap { meanReps($0.item) } : []
+            let openingReps = repSeries.first, closingReps = repSeries.last
 
             // Verdict
             let verdict: ExerciseVerdict = {
+                if repsBased {
+                    guard repSeries.count >= 2, let f = repSeries.first, let l = repSeries.last, f > 0 else { return .insufficient }
+                    let d = (l - f) / f
+                    return d >= 0.03 ? .progressing : (d <= -0.03 ? .declining : .plateaued)
+                }
                 guard e1rmBySession.count >= 2 else { return .insufficient }
                 let first = e1rmBySession.first!.e1rm
                 let last = e1rmBySession.last!.e1rm
@@ -312,9 +344,9 @@ enum MesoPerformanceAnalyzer {
                         for (_, item) in sessionsWithExercise {
                             let setCount = min(item.actualLoads.count, item.actualReps.count)
                             for idx in 0..<setCount {
-                                let load = item.actualLoads[idx]
+                                let load = effective(item.actualLoads[idx], item)
                                 let reps = item.actualReps[idx]
-                                guard load > 0, reps > 0 else { continue }
+                                guard reps > 0, load > 0 || isBW(item) else { continue }
                                 exSets += 1
                                 exReps += reps
                                 exVolume += load * Double(reps)
@@ -330,6 +362,9 @@ enum MesoPerformanceAnalyzer {
                             openingLoad: openingLoad,
                             closingLoad: closingLoad,
                             verdict: verdict,
+                            repsBased: repsBased,
+                            openingReps: openingReps,
+                            closingReps: closingReps,
                             isPR: isPR,
                             isNew: isNew,
                             totalSets: exSets,

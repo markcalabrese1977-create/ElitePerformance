@@ -246,6 +246,48 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(over.defaultStart, at(1))
     }
 
+    // MARK: - Meso analysis: bodyweight lifts
+
+    private func bwItem(reps: [Int], wave: String = "a") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "pull_up", exerciseNameSnapshot: "Pull-Up", targetReps: 8, targetSets: reps.count, targetRIR: 2,
+                            suggestedLoad: 0, waveRaw: wave, plannedRepsBySet: reps, plannedLoadsBySet: Array(repeating: 0, count: reps.count), plannedRIRsBySet: Array(repeating: 2, count: reps.count))
+        i.actualReps = reps; i.actualLoads = Array(repeating: 0, count: reps.count); i.actualRIRs = Array(repeating: 2, count: reps.count); i.isCompleted = true
+        return i
+    }
+
+    private func analyze(bodyWeight: Double?) throws -> ExercisePerformanceSummary {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        for (i, reps) in [[6, 6, 5], [7, 7, 6], [8, 8, 7]].enumerated() {
+            let s = Session(date: day(i * 7), status: .completed, weekIndex: i + 1, dayLabel: "Pull", items: [bwItem(reps: reps)])
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        return try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: [], bodyWeight: bodyWeight)?.exerciseSummaries.first)
+    }
+
+    func test_mesoAnalysis_bodyweightLift_isRatedAtBodyWeight_likeEveryOtherScreen() throws {
+        let s = try analyze(bodyWeight: 200)
+        XCTAssertFalse(s.repsBased)
+        XCTAssertEqual(s.e1rmBySession.count, 3)
+        XCTAssertEqual(s.peakE1RM ?? 0, E1RMCalculator.e1RM(load: 200, reps: 8), accuracy: 1e-9, "the same Epley on the body weight")
+        XCTAssertEqual(s.openingLoad, 200)
+        XCTAssertEqual(s.verdict, .progressing)
+        XCTAssertGreaterThan(s.totalSets, 0)
+        XCTAssertGreaterThan(s.totalVolume, 0)
+    }
+
+    func test_mesoAnalysis_bodyweightLiftWithoutBodyWeight_showsARepsTrend_notNothing() throws {
+        let s = try analyze(bodyWeight: nil)
+        XCTAssertTrue(s.repsBased)
+        XCTAssertEqual(s.verdict, .progressing, "reps/set went 5.7 -> 7.7")
+        XCTAssertEqual(s.openingReps ?? 0, 17.0 / 3, accuracy: 1e-9)
+        XCTAssertEqual(s.closingReps ?? 0, 23.0 / 3, accuracy: 1e-9)
+        XCTAssertEqual(s.totalSets, 9, "the sets still count")
+        XCTAssertNil(s.peakE1RM)
+        XCTAssertFalse(s.isPR)
+    }
+
     func test_noPreviousBlock_noComparison() {
         let all = sets(110, "bench_press", load: 205, meso: "new")
         XCTAssertNil(compare(all, infos: [info("new", start: 100)]))

@@ -147,7 +147,8 @@ struct MesoSummaryView: View {
             let firstDate = meso.sessions.map(\.date).min() ?? meso.startDate
             let priorSessions = allSessions.filter { !mesoSessionIDs.contains($0.persistentModelID) && $0.date < firstDate }
 
-        analysis = AnalyticsEngine.mesoAnalysis(meso: meso, allPriorSessions: priorSessions)
+        let bodyWeight = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first?.bodyWeight
+        analysis = AnalyticsEngine.mesoAnalysis(meso: meso, allPriorSessions: priorSessions, bodyWeight: bodyWeight)
                     analysisComplete = true
         }
     
@@ -575,7 +576,11 @@ struct MesoSummaryView: View {
                     VStack(alignment: .trailing, spacing: 3) {
                                             verdictBadge(summary.verdict)
 
-                                            if let open = summary.openingLoad, let close = summary.closingLoad, open > 0 {
+                                            if summary.repsBased, let o = summary.openingReps, let c = summary.closingReps {
+                                                Text("\(String(format: "%.1f", o)) → \(String(format: "%.1f", c)) reps/set")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            } else if let open = summary.openingLoad, let close = summary.closingLoad, open > 0 {
                                                 Text("\(formatLoad(open)) → \(formatLoad(close))")
                                                     .font(.caption2)
                                                     .foregroundStyle(.secondary)
