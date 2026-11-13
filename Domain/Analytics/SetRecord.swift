@@ -69,6 +69,9 @@ struct SetRecord: Equatable {
     let reps: Int
     /// The load as logged (stored lb); 0 for bodyweight work.
     let load: Double
+    /// The load used for e1RM and records: the logged load, or for a bodyweight lift with no logged load the lifter's
+    /// body weight (`E1RMCalculator.effectiveLoad`). 0 when there is neither: such a row is reps-only (no e1RM, no PR).
+    var effectiveLoad: Double = 0
     /// nil when the RIR array has no entry for the row. A stored 0 cannot be told from "not recorded".
     let rir: Int?
     let isSkipped: Bool
@@ -104,8 +107,15 @@ struct SetRecord: Equatable {
     /// A working set of regular completed training: the sets e1RM, PRs and chains are built from.
     var isPerformanceSet: Bool { isWorkingSet && isRegularCompleted }
 
-    /// Epley e1RM of this row through `E1RMCalculator` (0 without load and reps).
-    var e1RM: Double { E1RMCalculator.e1RM(load: load, reps: reps) }
+    /// Epley e1RM of this row through `E1RMCalculator` on the effective load (0 without load and reps).
+    var e1RM: Double { E1RMCalculator.e1RM(load: effectiveLoad, reps: reps) }
+
+    /// A working set of any completed session, maintenance and deload included: what records and lifetime history read.
+    /// (Seeds, fatigue baselines and meso-over-meso comparisons use `isPerformanceSet`, which leaves those sessions out.)
+    var isRecordSet: Bool { isWorkingSet && status == .completed }
+
+    /// A hard set of any completed session (lifetime history). `countsAsHardSet` is the regular-training version.
+    var isLifetimeHardSet: Bool { isHardSetRow && status == .completed }
 
     /// A set the lifter flagged with fatigue, pain or disruption (soreness is informational and not counted).
     var hasFatigueFlag: Bool { feedback == .fatigue || feedback == .pain || feedback == .disruption }
@@ -128,6 +138,11 @@ enum SetRecordBuilder {
         var customById: [String: CatalogExercise] = [:]
         for c in customExercises { customById[c.id] = c.asCatalogExercise }
 
+        func effective(_ load: Double, isBodyweight: Bool) -> Double {
+            if load > 0 { return load }
+            if isBodyweight, let bw = bodyWeight, bw > 0 { return bw }
+            return 0
+        }
         var sessionRecords: [SessionRecord] = []
         var setRecords: [SetRecord] = []
 
@@ -184,6 +199,7 @@ enum SetRecordBuilder {
                         targetRIRMax: item.isTopRow(i) ? (item.topRIR ?? item.targetRIRMax) : item.targetRIRMax,
                         targetRIR: item.isTopRow(i) ? (item.topRIR ?? item.targetRIR) : item.targetRIR,
                         reps: reps, load: at(item.actualLoads, i) ?? 0,
+                        effectiveLoad: effective(at(item.actualLoads, i) ?? 0, isBodyweight: isBodyweight),
                         rir: at(item.actualRIRs, i),
                         isSkipped: skipped,
                         isRestPause: at(item.usedRestPauseFlags, i) == true || (!pattern.isEmpty && !skipped),

@@ -142,7 +142,7 @@ final class FatigueBacktestTests: XCTestCase {
             waveLetter: r.waveLetter, isDeloadWaveItem: r.isDeloadWaveItem, isInsertedDeload: r.isInsertedDeload, isDeloadWeek: r.isDeloadWeek,
             isMaintenance: r.isMaintenance, rowIndex: r.rowIndex, isTop: r.isTop, plannedReps: r.plannedReps,
             plannedLoad: plannedLoad ?? r.plannedLoad, repMin: r.repMin, repMax: r.repMax, targetRIRMin: r.targetRIRMin,
-            targetRIRMax: r.targetRIRMax, targetRIR: r.targetRIR, reps: reps ?? r.reps, load: load ?? r.load, rir: r.rir, isSkipped: r.isSkipped,
+            targetRIRMax: r.targetRIRMax, targetRIR: r.targetRIR, reps: reps ?? r.reps, load: load ?? r.load, effectiveLoad: load.map { r.effectiveLoad > 0 ? $0 : 0 } ?? r.effectiveLoad, rir: r.rir, isSkipped: r.isSkipped,
             isRestPause: r.isRestPause, isDrop: r.isDrop, feedback: r.feedback, pump: r.pump, loadOverride: r.loadOverride,
             planEdited: r.planEdited, readiness: r.readiness, readinessStars: r.readinessStars, hkDuration: r.hkDuration,
             isWorkingSet: r.isWorkingSet, isHardSetRow: r.isHardSetRow)

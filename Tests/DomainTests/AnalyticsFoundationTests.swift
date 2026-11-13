@@ -292,7 +292,7 @@ final class AnalyticsFoundationTests: XCTestCase {
 
     // MARK: - One PR definition
 
-    func test_personalRecords_bestWorkingSetE1RM_excludesWarmupRestPauseDropDeloadMaintenanceSkip() throws {
+    func test_personalRecords_bestWorkingSetE1RM_excludesWarmupRestPauseDropSkip_butCountsMaintenanceAndDeload() throws {
         let ctx = try makeContext()
         let m = meso(ctx, weeks: 10)
         let maint = meso(ctx, weeks: 2, maintenance: true, name: "Mt")
@@ -301,20 +301,140 @@ final class AnalyticsFoundationTests: XCTestCase {
         // Session 2: only an RP set and a drop set heavier on paper; neither may set a record.
         let s2 = session(ctx, meso: m, day: 2, items: [item(reps: [12, 12], loads: [230, 230], rp: [true, false],
                                                               patterns: ["", ""], drops: ["", "-20%"])])
-        // Session 3: maintenance block heavier; deload week heavier.
+        // Session 3: a maintenance block set (history counts): 260x10 = 346.7.
         let s3 = session(ctx, meso: maint, day: 3, items: [item(reps: [10], loads: [260])])
+        // Session 4: a deload week set equal to it: not a strict improvement.
         let s4 = session(ctx, meso: m, day: 4, week: 9, items: [item(reps: [10], loads: [260], wave: "deload")])
-        // Session 5: a real improvement.
+        // Session 5: lighter than the maintenance record.
         let s5 = session(ctx, meso: m, day: 5, items: [item(reps: [6], loads: [205])])
         let snap = SetRecordBuilder.build(sessions: [s1, s2, s3, s4, s5])
 
         let best = try XCTUnwrap(PersonalRecords.bests(from: snap.sets)["bench_press"])
-        XCTAssertEqual(best.e1RM, E1RMCalculator.e1RM(load: 205, reps: 6), accuracy: 1e-9)
-        XCTAssertEqual(best.sessionKey, s5.id?.uuidString)
+        XCTAssertEqual(best.e1RM, E1RMCalculator.e1RM(load: 260, reps: 10), accuracy: 1e-9)
+        XCTAssertEqual(best.sessionKey, s3.id?.uuidString, "the maintenance session holds the record")
 
         let events = PersonalRecords.events(from: snap.sets)
-        XCTAssertEqual(events.map(\.sessionKey), [s1.id!.uuidString, s5.id!.uuidString], "s2 (RP/drop), s3 (maintenance), s4 (deload) set nothing")
+        XCTAssertEqual(events.map(\.sessionKey), [s1.id!.uuidString, s3.id!.uuidString], "s2 (RP/drop) sets nothing; s4 ties; s5 is lighter")
         XCTAssertEqual(events.map(\.isBaseline), [true, false])
+        // Seeds and comparisons still leave maintenance and deload out.
+        XCTAssertEqual(snap.sets.filter(\.isPerformanceSet).filter { $0.sessionKey == s3.id?.uuidString }.count, 0)
+        XCTAssertEqual(snap.sets.filter(\.isRecordSet).filter { $0.sessionKey == s3.id?.uuidString }.count, 1)
+    }
+
+    func test_lifetimeHardSets_includeMaintenanceAndDeload_whileRegularTrainingDoesNot() throws {
+        let ctx = try makeContext()
+        let m = meso(ctx, weeks: 10)
+        let maint = meso(ctx, weeks: 2, maintenance: true, name: "Mt")
+        let a = session(ctx, meso: m, day: 1, items: [item(reps: [8, 8], loads: [200, 200])])
+        let b = session(ctx, meso: maint, day: 2, items: [item(reps: [8, 8, 8], loads: [150, 150, 150])])
+        let c = session(ctx, meso: m, day: 3, week: 9, items: [item(reps: [8], loads: [120], wave: "deload")])
+        let snap = SetRecordBuilder.build(sessions: [a, b, c])
+        XCTAssertEqual(snap.sets.filter(\.isLifetimeHardSet).count, 6)
+        XCTAssertEqual(snap.sets.filter(\.countsAsHardSet).count, 2)
+    }
+
+    // MARK: - Bodyweight lifts
+
+    func test_bodyweightLift_usesBodyWeightWhenSet_elseIsRepsOnly() throws {
+        let ctx = try makeContext()
+        let m = meso(ctx)
+        let s = session(ctx, meso: m, day: 1, items: [item("pull_up", reps: [8, 7, 6], loads: [0, 0, 0])])
+        let withBW = SetRecordBuilder.build(sessions: [s], bodyWeight: 180)
+        XCTAssertEqual(withBW.sets.map(\.effectiveLoad), [180, 180, 180])
+        XCTAssertEqual(withBW.sets[0].e1RM, E1RMCalculator.e1RM(load: 180, reps: 8))
+        XCTAssertEqual(PersonalRecords.bests(from: withBW.sets)["pull_up"]?.load, 180)
+        XCTAssertEqual(PersonalRecords.bests(from: withBW.sets)["pull_up"]?.reps, 8)
+
+        let without = SetRecordBuilder.build(sessions: [s], bodyWeight: nil)
+        XCTAssertEqual(without.sets.map(\.effectiveLoad), [0, 0, 0])
+        XCTAssertEqual(without.sets.map(\.e1RM), [0, 0, 0], "no body weight: no e1RM")
+        XCTAssertNil(PersonalRecords.bests(from: without.sets)["pull_up"], "and no PR")
+        XCTAssertEqual(without.sets.filter(\.isLifetimeHardSet).count, 3, "the sets still count as sets")
+        // A logged added load wins over body weight.
+        let weighted = session(ctx, meso: m, day: 2, items: [item("pull_up", reps: [5], loads: [25])])
+        XCTAssertEqual(SetRecordBuilder.build(sessions: [weighted], bodyWeight: 180).sets[0].effectiveLoad, 25)
+    }
+
+    // MARK: - Suspect records
+
+    func test_suspects_flagARecordOver125xTheNextBestSession() throws {
+        let ctx = try makeContext()
+        let m = meso(ctx)
+        // bench: 300x5 amid 200x5 sessions -> 1.5x the next best: suspect. row: 210x5 vs 200x5 -> 1.05x: fine. squat: one session only.
+        let sessions = [
+            session(ctx, meso: m, day: 1, items: [item("bench_press", reps: [5], loads: [200])]),
+            session(ctx, meso: m, day: 2, items: [item("bench_press", reps: [5], loads: [195])]),
+            session(ctx, meso: m, day: 3, items: [item("bench_press", reps: [5], loads: [300])]),
+            session(ctx, meso: m, day: 4, items: [item("barbell_row", reps: [5], loads: [200])]),
+            session(ctx, meso: m, day: 5, items: [item("barbell_row", reps: [5], loads: [210])]),
+            session(ctx, meso: m, day: 6, items: [item("barbell_back_squat", reps: [5], loads: [500])]),
+        ]
+        let found = PersonalRecords.suspects(from: SetRecordBuilder.build(sessions: sessions).sets)
+        XCTAssertEqual(found.map(\.best.exerciseId), ["bench_press"])
+        XCTAssertEqual(found[0].ratio, 300.0 / 200.0, accuracy: 1e-9)
+        XCTAssertTrue(PersonalRecords.suspects(from: SetRecordBuilder.build(sessions: sessions).sets, threshold: 2.0).isEmpty)
+    }
+
+    // MARK: - PRService and the PRIndex rebuild (the e1RM definition)
+
+    func test_prService_isTheE1RMDefinition_notVolume() throws {
+        let ctx = try makeContext()
+        ctx.insert(PRIndex(exerciseId: "bench_press", exerciseName: "Bench Press", bestSetVolume: 1000, bestLoad: 200, bestReps: 5, bestDate: day(0)))
+        // 100x15 has MORE volume (1500) than 200x5 (1000) but a lower e1RM (150 vs 233): not a PR.
+        let high = item("bench_press", reps: [15], loads: [100])
+        PRService.updatePR(for: high, in: ctx)
+        XCTAssertFalse(high.isPR)
+        // 215x5: e1RM 251 > 233: a PR, and the index holds the set.
+        let real = item("bench_press", reps: [5], loads: [215])
+        PRService.updatePR(for: real, in: ctx)
+        XCTAssertTrue(real.isPR)
+        let row = try XCTUnwrap(PRService.currentPR(for: "bench_press", in: ctx))
+        XCTAssertEqual(row.bestLoad, 215)
+        XCTAssertEqual(row.bestReps, 5)
+        XCTAssertEqual(row.bestSetVolume, 1075)
+        // A warm-up or an RP row never sets one.
+        let rp = item("bench_press", reps: [12], loads: [300], rp: [true])
+        PRService.updatePR(for: rp, in: ctx)
+        XCTAssertFalse(rp.isPR)
+    }
+
+    func test_prService_bodyweightUsesProfileBodyWeight_andCanonicalIds() throws {
+        let ctx = try makeContext()
+        let profile = UserProfile(); profile.bodyWeight = 180
+        ctx.insert(profile)
+        let legacy = "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58"   // alias of seated_cable_press
+        let first = item(legacy, reps: [8], loads: [100])
+        PRService.updatePR(for: first, in: ctx)
+        XCTAssertTrue(first.isPR)
+        XCTAssertEqual(PRService.currentPR(for: "seated_cable_press", in: ctx)?.exerciseId, "seated_cable_press", "keyed by the canonical id")
+        let pull = item("pull_up", reps: [8], loads: [0])
+        PRService.updatePR(for: pull, in: ctx)
+        XCTAssertTrue(pull.isPR)
+        XCTAssertEqual(PRService.currentPR(for: "pull_up", in: ctx)?.bestLoad, 180)
+        profile.bodyWeight = nil
+        let pull2 = item("chin_up", reps: [8], loads: [0])
+        PRService.updatePR(for: pull2, in: ctx)
+        XCTAssertFalse(pull2.isPR, "no body weight: no PR for a bodyweight lift")
+    }
+
+    func test_prRebuild_countsMaintenanceAndDeload_bodyweight_andIgnoresPlannedAndInProgress() throws {
+        let ctx = try makeContext()
+        let profile = UserProfile(); profile.bodyWeight = 190
+        ctx.insert(profile)
+        let m = meso(ctx)
+        let maint = meso(ctx, weeks: 2, maintenance: true, name: "Mt")
+        session(ctx, meso: m, day: 1, items: [item("bench_press", reps: [5], loads: [200]), item("pull_up", reps: [8], loads: [0])])
+        session(ctx, meso: maint, day: 2, items: [item("bench_press", reps: [5], loads: [230])])
+        session(ctx, meso: m, day: 3, status: .planned, items: [item("bench_press", reps: [5], loads: [999])])
+        session(ctx, meso: m, day: 4, status: .inProgress, items: [item("bench_press", reps: [5], loads: [888])])
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx)
+        let rows = Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<PRIndex>()).map { ($0.exerciseId, $0) })
+        XCTAssertEqual(rows["bench_press"]?.bestLoad, 230, "the maintenance set is the record")
+        XCTAssertEqual(rows["bench_press"]?.bestDate, day(2))
+        XCTAssertEqual(rows["pull_up"]?.bestLoad, 190)
+        try PRRebuildService.rebuild(in: ctx)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PRIndex>()).count, 2, "a second rebuild replaces, never duplicates")
     }
 
     func test_personalRecords_equalIsNotARecord_andCanonicalIdsMerge() throws {

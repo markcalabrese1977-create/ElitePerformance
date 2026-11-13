@@ -64,8 +64,8 @@ final class AnalyticsImpactReportTests: XCTestCase {
         table("1. HistorySummaryView: best e1RM per exercise (today: any set incl. warm-ups, rest-pause, drop, deload, maintenance)",
               old1.map { s in (ExerciseCatalog.canonicalExerciseId(for: s.id), s.bestE1RM, bests[ExerciseCatalog.canonicalExerciseId(for: s.id)]?.e1RM ?? 0) })
         var hard: [String: Int] = [:]
-        for r in snap.sets where r.countsAsHardSet { hard[r.exerciseId, default: 0] += 1 }
-        table("1b. HistorySummaryView: total sets per exercise (today: reps>0 & load>0 rows) vs hard sets",
+        for r in snap.sets where r.isLifetimeHardSet { hard[r.exerciseId, default: 0] += 1 }
+        table("1b. HistorySummaryView: total sets per exercise (today: reps>0 & load>0 rows) vs lifetime hard sets (maintenance and deload included; warm-ups and skips out; bodyweight sets counted)",
               old1.map { s in (ExerciseCatalog.canonicalExerciseId(for: s.id), Double(s.totalSets), Double(hard[ExerciseCatalog.canonicalExerciseId(for: s.id)] ?? 0)) })
 
         // ---- 2. ExerciseHistorySheet (best e1RM per session entry) ---------------------------------------------------
@@ -154,27 +154,47 @@ final class AnalyticsImpactReportTests: XCTestCase {
         mesoLines.forEach { log($0) }
         log("   not changed here: peak e1RM, verdicts, totals, weekly volume (they still count warm-ups, rest-pause and drop rows).")
 
-        // ---- 5. PRService / PRIndex versus the single PR definition --------------------------------------------------
-        let prIndex = try ctx.fetch(FetchDescriptor<PRIndex>())
+        // ---- 5. The PR index: the old definition (best single-set VOLUME, raw ids) versus the e1RM definition ------------------
+        var oldPRSets: [String: (volume: Double, load: Double, reps: Int)] = [:]
+        for session in completed { for item in session.items {
+            guard let b = PRService.legacyBestVolumeSet(in: item) else { continue }
+            let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            if b.volume > (oldPRSets[id]?.volume ?? 0) { oldPRSets[id] = b }
+        } }
         var prRows: [(id: String, old: Double, new: Double)] = []
         var differentSet = 0
         var prLines: [String] = []
-        for p in prIndex {
-            let id = ExerciseCatalog.canonicalExerciseId(for: p.exerciseId)
+        for (id, o) in oldPRSets {
             guard let b = bests[id] else { continue }
-            let oldE1 = E1RMCalculator.e1RM(load: p.bestLoad, reps: p.bestReps)
+            let oldE1 = E1RMCalculator.e1RM(load: o.load, reps: o.reps)
             prRows.append((id, oldE1, b.e1RM))
-            if abs(p.bestLoad - b.load) > 0.01 || p.bestReps != b.reps {
+            if abs(o.load - b.load) > 0.01 || o.reps != b.reps {
                 differentSet += 1
-                prLines.append("   \(name(id)): PRIndex \(f(p.bestLoad))×\(p.bestReps) (e1RM \(f(oldE1))) → \(f(b.load))×\(b.reps) (e1RM \(f(b.e1RM)))")
+                prLines.append("   \(name(id)): old record \(f(o.load))×\(o.reps) (e1RM \(f(oldE1))) → \(f(b.load))×\(b.reps) (e1RM \(f(b.e1RM)))")
             }
         }
-        table("5. PRIndex best set expressed as e1RM versus the single PR definition", prRows)
-        log("   PRIndex rows \(prIndex.count) · exercises whose record SET differs \(differentSet)")
-        prLines.prefix(40).forEach { log($0) }
-        let flagged = completed.flatMap(\.items).filter(\.isPR).count
+        table("5. PR index: best-volume set expressed as e1RM versus the e1RM definition", prRows)
+        log("   exercises with a record: old \(oldPRSets.count) · new \(bests.count) · record SET differs \(differentSet)")
+        prLines.sorted().prefix(40).forEach { log($0) }
+        let rebuilt = try ctx.fetch(FetchDescriptor<PRIndex>())
+        log("   PRIndex rows after the import's rebuild (new definition): \(rebuilt.count)")
         let events = PersonalRecords.events(from: snap.sets)
-        log("   items flagged isPR in history: \(flagged) · session PR events under the single definition: \(events.count) (baselines \(events.filter(\.isBaseline).count))")
+        log("   session PR events under the single definition: \(events.count) (baselines \(events.filter(\.isBaseline).count))")
+
+        // ---- 5b. records that look too good ----------------------------------------------------------------------------------
+        let suspects = PersonalRecords.suspects(from: snap.sets)
+        log("")
+        log("== 5b. PR candidates more than 1.25x the next best session (for the lifter to verify): \(suspects.count)")
+        for x in suspects { log("   \(name(x.exerciseId)): \(f(x.best.load))×\(x.best.reps) on \(x.best.date.formatted(date: .abbreviated, time: .omitted)) e1RM \(f(x.best.e1RM)) vs next best session \(f(x.nextBestE1RM)) (×\(String(format: "%.2f", x.ratio)))") }
+
+        // ---- 5c. bodyweight lifts ---------------------------------------------------------------------------------------------
+        let bwIds = Set(snap.sets.filter(\.isBodyweight).map(\.exerciseId))
+        log("")
+        log("== 5c. bodyweight lifts (body weight \(profile?.bodyWeight.map { f($0) } ?? "not set")): \(bwIds.count) lifts")
+        for id in bwIds.sorted() {
+            let b = bests[id]
+            log("   \(name(id)): record \(b.map { "\(f($0.load))×\($0.reps) e1RM \(f($0.e1RM))" } ?? "none (reps-only)") · lifetime hard sets \(hard[id] ?? 0)")
+        }
 
         // ---- 6. AnalyticsView volume per exercise --------------------------------------------------------------------
         var oldVol: [String: Double] = [:], newVol: [String: Double] = [:]
@@ -182,8 +202,8 @@ final class AnalyticsImpactReportTests: XCTestCase {
             let id = ExerciseCatalog.canonicalExerciseId(for: it.exerciseId)
             for i in 0..<min(it.actualLoads.count, it.actualReps.count) { oldVol[id, default: 0] += it.actualLoads[i] * Double(it.actualReps[i]) }
         } }
-        for r in snap.sets where r.countsAsHardSet { newVol[r.exerciseId, default: 0] += r.load * Double(r.reps) }
-        table("6. AnalyticsView volume per exercise (today: load×reps over every row of completed sessions) vs hard-set volume",
+        for r in snap.sets where r.isLifetimeHardSet { newVol[r.exerciseId, default: 0] += r.effectiveLoad * Double(r.reps) }
+        table("6. AnalyticsView volume per exercise (today: load×reps over every row of completed sessions) vs lifetime hard-set volume (effective load)",
               oldVol.map { ($0.key, $0.value, newVol[$0.key] ?? 0) })
         let totOld = oldVol.values.reduce(0, +), totNew = newVol.values.reduce(0, +)
         log("   total volume \(Int(totOld)) → \(Int(totNew)) (\(f(pct(totOld, totNew)))%)")
