@@ -61,6 +61,7 @@ struct MesoSummaryView: View {
                                             statsRow(analysis)
                                             volumeRampChart(analysis)
                                             exerciseSection(analysis)
+                                            MesoComparisonSection(meso: meso)
                                             if canExtendMaintenance {
                                                 extendBlockSection
                                             }
@@ -833,5 +834,149 @@ struct MesoSummaryView: View {
             return String(format: "%.0fK", volume / 1_000)
         }
         return "\(Int(volume))"
+    }
+}
+
+
+// MARK: - vs previous block
+
+/// "vs previous block": how this block's lifts, volume and adherence compare with the block it followed, plus factual
+/// notes for planning the next block. Nothing here edits a plan.
+struct MesoComparisonSection: View {
+    let meso: MesoBlock
+    @Environment(\.modelContext) private var context
+    @Environment(\.loadUnit) private var unit
+    @State private var comparison: MesoComparison?
+    @State private var loaded = false
+
+    private var fmt: LoadFormatter { LoadFormatter(unit: unit) }
+
+    var body: some View {
+        // A ZStack, not a Group: an empty Group has no view for `.task` to attach to, so the load would never run.
+        ZStack {
+            if let c = comparison {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("vs previous block").font(.subheadline.bold())
+                    Text("\(c.current.name) vs \(c.previous.name)").font(.caption).foregroundStyle(.secondary)
+                    summaryRows(c)
+                    liftsGroup(c)
+                    changesGroup(c)
+                    musclesGroup(c)
+                    notesGroup(c)
+                    Text("A new block's starting loads are 95% of the previous peak, so values early in the block below the old peak are not regressions. Comparisons use regular working sets only (no deload or maintenance weeks).")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+                .accessibilityIdentifier("mesoComparisonSection")
+            } else if loaded {
+                EmptyView()
+            }
+        }
+        .task { load() }
+    }
+
+    private func load() {
+        let sessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let blocks = (try? context.fetch(FetchDescriptor<MesoBlock>())) ?? []
+        let customs = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        let engine = AnalyticsEngine(sessions: sessions, customExercises: customs, bodyWeight: profile?.bodyWeight)
+        let key = meso.id?.uuidString ?? "\(meso.persistentModelID)"
+        comparison = engine.mesoComparison(blocks: blocks, customs: customs, profile: profile, currentKey: key)
+        loaded = true
+    }
+
+    private func pct(_ v: Double) -> String { String(format: "%+.1f%%", v * 100) }
+    private func color(_ v: Double) -> Color { v > 0.005 ? .green : (v < -0.005 ? .orange : .secondary) }
+
+    private func summaryRows(_ c: MesoComparison) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row("Sessions done", "\(c.adherencePrevious.completed)/\(c.adherencePrevious.planned) → \(c.adherenceCurrent.completed)/\(c.adherenceCurrent.planned)")
+            row("PRs set", "\(c.prsPrevious) → \(c.prsCurrent)")
+            let up = c.lifts.filter { $0.peakChange > 0.005 }.count, down = c.lifts.filter { $0.peakChange < -0.005 }.count
+            row("Lift peaks (\(c.lifts.count) lift×letter)", "\(up) up · \(down) down")
+        }
+    }
+
+    private func row(_ title: String, _ value: String) -> some View {
+        HStack { Text(title).font(.caption); Spacer(); Text(value).font(.caption.bold()) }
+    }
+
+    private func liftsGroup(_ c: MesoComparison) -> some View {
+        DisclosureGroup("Lifts: peak and top-3 e1RM (\(c.lifts.count))") {
+            VStack(spacing: 6) {
+                ForEach(Array(c.lifts.enumerated()), id: \.offset) { _, l in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack {
+                            Text(l.name + (l.letter.isEmpty ? "" : " \(l.letter.uppercased())")).font(.caption)
+                            Spacer()
+                            Text("\(fmt.whole(l.previousPeak)) → \(fmt.whole(l.currentPeak))").font(.caption)
+                            Text(pct(l.peakChange)).font(.caption.bold()).foregroundStyle(color(l.peakChange)).frame(width: 56, alignment: .trailing)
+                        }
+                        HStack {
+                            Text("top-3 \(fmt.whole(l.previousTop3)) → \(fmt.whole(l.currentTop3)) (\(pct(l.top3Change)))")
+                            Spacer()
+                            Text("started at \(Int((l.previousPeak > 0 ? l.currentFirst / l.previousPeak : 0) * 100))% of old peak")
+                        }
+                        .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.caption)
+    }
+
+    @ViewBuilder private func changesGroup(_ c: MesoComparison) -> some View {
+        if !(c.replaced.isEmpty && c.newLifts.isEmpty && c.droppedLifts.isEmpty) {
+            DisclosureGroup("Exercise changes") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(c.replaced.enumerated()), id: \.offset) { _, r in Text("Replaced: \(r.old.name) → \(r.new.name)").font(.caption) }
+                    ForEach(c.newLifts, id: \.id) { Text("New: \($0.name)").font(.caption) }
+                    ForEach(c.droppedLifts, id: \.id) { Text("Dropped: \($0.name)").font(.caption) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func musclesGroup(_ c: MesoComparison) -> some View {
+        DisclosureGroup("Weekly sets per muscle (last \(c.previousWeeksAveraged) / \(c.currentWeeksAveraged) full weeks)") {
+            VStack(spacing: 4) {
+                ForEach(c.muscles, id: \.muscle) { m in
+                    HStack {
+                        Text(m.muscle.displayName).font(.caption)
+                        Spacer()
+                        Text(String(format: "%.1f → %.1f", m.previousAverage, m.currentAverage)).font(.caption)
+                        Text("\(Int(m.range.min))–\(Int(m.range.max))").font(.caption2).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+                    }
+                    .foregroundStyle(m.currentAverage < m.range.min ? Color.orange : Color.primary)
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.caption)
+    }
+
+    private func notesGroup(_ c: MesoComparison) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Next block notes").font(.caption.bold())
+            noteLine("Below range", c.notes.musclesBelowRange.map { "\($0.muscle.displayName) \(String(format: "%.1f", $0.average)) (min \(Int($0.minimum)))" })
+            noteLine("Stalled", c.notes.stalledLifts)
+            noteLine("Reps up at the same load (candidates for an extra set)", c.notes.earnedSetCandidates.map {
+                "\($0.name)\($0.letter.isEmpty ? "" : " \($0.letter.uppercased())") \(String(format: "%.1f", $0.firstReps))→\(String(format: "%.1f", $0.lastReps)) reps"
+            })
+            Text("Facts only. Nothing is changed automatically.").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func noteLine(_ title: String, _ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(items.isEmpty ? "None" : items.joined(separator: " · ")).font(.caption).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

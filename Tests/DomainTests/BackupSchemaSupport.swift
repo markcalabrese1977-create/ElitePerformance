@@ -132,6 +132,7 @@ enum PopulatedStoreBuilder {
                                startDate: day(1), status: .active, notes: "second block", totalWeeks: 10)
         let maintenance = MesoBlock(id: UUID(), createdAt: day(-6), updatedAt: day(-5), name: "Maintenance Block",
                                     startDate: day(-3), status: .archived, notes: nil, totalWeeks: 2, isMaintenance: true)
+        active.previousMesoId = archived.id
         [archived, active, maintenance].forEach(ctx.insert)
 
         let completed = session(ctx, date: day(-50), status: .completed, week: 3, label: "Probe Push", meso: archived, items: [

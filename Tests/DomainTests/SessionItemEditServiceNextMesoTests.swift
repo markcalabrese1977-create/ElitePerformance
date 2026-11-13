@@ -545,6 +545,7 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
             try ctx.save()
 
             let result = try Service.startNextMeso(nextPlan(block, ctx, now: now), in: ctx)
+            XCTAssertEqual(result.meso.previousMesoId, block.id, "the new block remembers the block it was started from")
             for s in result.meso.sessions where s.dayLabel == p.day && s.items.contains(where: { $0.exerciseId == p.y }) {
                 let i = try XCTUnwrap(s.items.first { $0.exerciseId == p.y })
                 if s.weekIndex == 12 { XCTAssertEqual(i.executionNoteText, "tempo 3-1-1") }

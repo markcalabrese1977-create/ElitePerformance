@@ -33,6 +33,10 @@ final class MesoBlock {
     /// explicitly marked maintenance are correctly treated as non-maintenance.
     var isMaintenance: Bool = false
 
+    /// The block this one was started from ("Start next meso"). nil for a first block and for blocks created before this
+    /// field existed; comparison then falls back to the previous non-maintenance block by `startDate`.
+    var previousMesoId: UUID? = nil
+
     /// Sessions that belong to this meso
     @Relationship(deleteRule: .cascade) var sessions: [Session] = []
 

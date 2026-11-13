@@ -105,6 +105,8 @@ struct MesoBlockBackupDTO: Codable {
     // Added (backup-completeness fix). Optional so OLD backups decode with nil.
     let totalWeeks: Int?
     let isMaintenance: Bool?
+    /// Added (meso comparison). nil in old backups.
+    var previousMesoId: UUID? = nil
 }
 
 // MARK: - Session

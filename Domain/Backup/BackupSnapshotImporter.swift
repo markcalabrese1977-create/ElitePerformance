@@ -92,6 +92,7 @@ enum BackupSnapshotImporter {
                 totalWeeks: dto.totalWeeks,
                 isMaintenance: dto.isMaintenance ?? false
             )
+            block.previousMesoId = dto.previousMesoId
 
             modelContext.insert(block)
 

@@ -532,6 +532,7 @@ extension SessionItemEditService {
             notes: "Next meso from \(old.name) on \(isoDay(live.startDate))",
             totalWeeks: live.weeks, isMaintenance: old.isMaintenance
         )
+        block.previousMesoId = old.id
         context.insert(block)
         newMeso = block
         for sp in live.sessions {

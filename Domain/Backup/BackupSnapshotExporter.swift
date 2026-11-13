@@ -93,7 +93,8 @@ enum BackupSnapshotExporter {
                     statusRaw: block.status.rawValue,
                     notes: block.notes,
                     totalWeeks: block.totalWeeks,
-                    isMaintenance: block.isMaintenance
+                    isMaintenance: block.isMaintenance,
+                    previousMesoId: block.previousMesoId
                 )
             },
             sessions: sessions.map { session in
