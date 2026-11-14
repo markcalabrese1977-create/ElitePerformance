@@ -1364,7 +1364,7 @@ final class RIREntryTests: XCTestCase {
         let onTarget = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 2])
         let rec = try XCTUnwrap(CoachingEngine.recommend(for: onTarget))
         XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100)
-        XCTAssertTrue(rec.message.contains("target difficulty"), "a recorded RIR may be cited")
+        XCTAssertTrue(rec.message.hasPrefix("24/24 reps — increase earned"), rec.message)
     }
 
     func test_isolation_ignoresRIRCompletely_repsAgainstTargetOnly() throws {
@@ -1402,5 +1402,57 @@ final class RIREntryTests: XCTestCase {
         let after = try ModelContext(fresh).fetch(FetchDescriptor<SessionItem>()).map { ($0.id, $0.actualRIRs) }
         XCTAssertEqual(Set(after.map { "\($0.0 as Any)|\($0.1)" }), Set(before.map { "\($0.0 as Any)|\($0.1)" }),
                        "unset stays unset, 0 stays 0, every old value is exactly as recorded")
+    }
+}
+
+// MARK: - WW: total-rep progression for compounds
+
+final class TotalRepProgressionTests: XCTestCase {
+
+    private func bench(_ reps: [Int], rirs: [Int]? = nil, id: String = "bench_press") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: 185)
+        i.actualReps = reps
+        i.actualLoads = Array(repeating: 185, count: reps.count)
+        i.actualRIRs = rirs ?? RIREntry.unsetArray(count: reps.count)
+        i.plannedRepsBySet = Array(repeating: 8, count: reps.count)
+        i.repMin = 6; i.repMax = 8
+        return i
+    }
+
+    func test_benchPattern_8_7_6_is21of24_hold() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 7, 6], rirs: [2, 2, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(rec.nextSuggestedLoad, 185)
+        XCTAssertTrue(rec.message.hasPrefix("21/24 — hold, climb reps"), rec.message)
+    }
+
+    func test_benchPattern_8_8_7_is23of24_increase_byTheLoadStep() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], rirs: [2, 2, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(rec.nextSuggestedLoad, 187.5, "the configured 2.5 step")
+        XCTAssertTrue(rec.message.hasPrefix("23/24 reps — increase earned"), rec.message)
+    }
+
+    func test_theLastSetsRecordedRIR_belowPlanMinusOne_blocksTheIncrease_andUnsetDoesNot() throws {
+        let hard = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], rirs: [2, 2, 0]), minLoadIncrement: 2.5))
+        XCTAssertEqual(hard.nextSuggestedLoad, 185, "last set at RIR 0 (< plan-1): hold")
+        let unset = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7]), minLoadIncrement: 2.5))
+        XCTAssertEqual(unset.nextSuggestedLoad, 187.5, "unset RIR: reps decide")
+    }
+
+    func test_aFourSetCompound_sumsThePrimaryThreeSets_aFourthRowIsNotEvidence() throws {
+        let four = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7, 4], rirs: [2, 2, 1, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(four.nextSuggestedLoad, 187.5)
+        XCTAssertTrue(four.message.hasPrefix("23/24 reps — increase earned"), four.message)
+    }
+
+    func test_isolationKeepsTheEverySetAtTheTopRule() throws {
+        let fly = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], id: "seated_cable_fly"), minLoadIncrement: 2.5))
+        XCTAssertEqual(fly.nextSuggestedLoad, 185, "8,8,7 on an isolation lift is not every set at the top")
+        let all = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 8], id: "seated_cable_fly"), minLoadIncrement: 2.5))
+        XCTAssertEqual(all.nextSuggestedLoad, 187.5)
+    }
+
+    func test_theReduceRuleIsUnchanged_twoBadlyMissedSetsBackTheLoadOff() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([5, 4, 4], rirs: [2, 1, 1]), minLoadIncrement: 2.5))
+        XCTAssertLessThan(rec.nextSuggestedLoad ?? 999, 185)
     }
 }
