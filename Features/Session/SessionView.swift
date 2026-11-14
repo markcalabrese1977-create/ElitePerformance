@@ -2319,13 +2319,14 @@ final class SessionScreenViewModel: ObservableObject {
         session.status = .completed
 
         // Build the exercises payload for history
-        let historyExercises = recap.exercises.map {
+        let historyExercises = recap.exercises.enumerated().map { index, ex in
             SessionHistoryExercise(
-                name: $0.name,
-                primaryMuscle: $0.primaryMuscle,
-                sets: $0.sets,
-                reps: $0.reps,
-                volume: $0.volume
+                name: ex.name,
+                primaryMuscle: ex.primaryMuscle,
+                sets: ex.sets,
+                reps: ex.reps,
+                volume: ex.volume,
+                order: index
             )
         }
 

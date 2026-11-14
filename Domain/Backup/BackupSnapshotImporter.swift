@@ -231,13 +231,15 @@ enum BackupSnapshotImporter {
 
         // MARK: - SessionHistory
         for historyDTO in snapshot.sessionHistory {
-            let exercises: [SessionHistoryExercise] = historyDTO.exercises.map { exDTO in
+            // `order` from the file; a backup that predates it has none, and its array index is the best available order.
+            let exercises: [SessionHistoryExercise] = historyDTO.exercises.enumerated().map { index, exDTO in
                 let ex = SessionHistoryExercise(
                     name: exDTO.name,
                     primaryMuscle: exDTO.primaryMuscle,
                     sets: exDTO.sets,
                     reps: exDTO.reps,
-                    volume: exDTO.volume
+                    volume: exDTO.volume,
+                    order: exDTO.order ?? index
                 )
                 modelContext.insert(ex)
                 return ex

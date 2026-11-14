@@ -25,6 +25,14 @@ final class SessionHistory {
     @Relationship(deleteRule: .cascade)
     var exercises: [SessionHistoryExercise]
 
+    /// The exercises in the order they were done. The relationship itself is unordered (SwiftData does not keep array
+    /// order), so every reader and the exporter go through this, sorted by `SessionHistoryExercise.order`.
+    var orderedExercises: [SessionHistoryExercise] {
+        exercises.enumerated().sorted { a, b in
+            a.element.order != b.element.order ? a.element.order < b.element.order : a.offset < b.offset
+        }.map(\.element)
+    }
+
     init(
         date: Date,
         weekIndex: Int,
@@ -63,14 +71,18 @@ final class SessionHistoryExercise {
     var sets: Int
     var reps: Int
     var volume: Double
+    /// Position within the session (0-based). Persisted because the relationship does not keep order.
+    var order: Int = 0
 
     init(
         name: String,
         primaryMuscle: String?,
         sets: Int,
         reps: Int,
-        volume: Double
+        volume: Double,
+        order: Int = 0
     ) {
+        self.order = order
         self.name = name
         self.primaryMuscle = primaryMuscle
         self.sets = sets

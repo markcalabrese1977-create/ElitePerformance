@@ -270,6 +270,8 @@ struct SessionHistoryExerciseBackupDTO: Codable {
     let sets: Int
     let reps: Int
     let volume: Double
+    /// Position within the session. nil in a backup written before it existed: the array index is the best available order.
+    var order: Int? = nil
 }
 
 // MARK: - ExerciseNote

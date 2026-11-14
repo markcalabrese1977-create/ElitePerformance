@@ -550,4 +550,92 @@ final class ImportSafetyTests: XCTestCase {
         older.lastCompletedDate = current.lastCompletedDate!.addingTimeInterval(-1.5)
         XCTAssertTrue(ImportStalenessGuard.assess(incoming: older, current: current).requiresTypedWord)
     }
+
+    // MARK: - History exercise order
+
+    private func historyWithSixExercises(_ ctx: ModelContext) throws {
+        let names = ["Squat", "Bench", "Row", "Curl", "Lateral Raise", "Calf Raise"]
+        let ex = names.enumerated().map { i, n in
+            SessionHistoryExercise(name: n, primaryMuscle: nil, sets: 3, reps: 24, volume: Double(100 * (i + 1)), order: i)
+        }
+        ex.forEach(ctx.insert)
+        let h = SessionHistory(date: Date(timeIntervalSince1970: 1_790_000_000), weekIndex: 2, title: "Six", subtitle: "w", totalExercises: 6,
+                               totalSets: 18, totalVolume: 2100, exercises: ex)
+        ctx.insert(h); try ctx.save()
+    }
+
+    /// The raw file, no normalisation: arrays keep the order they were written in.
+    private func rawExport(_ ctx: ModelContext) throws -> [String: Any] {
+        let url = try BackupTestSupport.exportFile(ctx); defer { try? FileManager.default.removeItem(at: url) }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+    private func historyExerciseNames(_ json: [String: Any]) -> [String: [String]] {
+        var out: [String: [String]] = [:]
+        for h in (json["sessionHistory"] as? [[String: Any]]) ?? [] {
+            out[(h["title"] as? String) ?? "?"] = ((h["exercises"] as? [[String: Any]]) ?? []).map { ($0["name"] as? String) ?? "?" }
+        }
+        return out
+    }
+
+    func test_historyExerciseOrder_survivesExportImportExport_inIdenticalOrder() throws {
+        let (_, ctx) = try populated()
+        try historyWithSixExercises(ctx)
+        let first = try rawExport(ctx)
+        XCTAssertEqual(historyExerciseNames(first)["Six"], ["Squat", "Bench", "Row", "Curl", "Lateral Raise", "Calf Raise"])
+        let target = try BackupTestSupport.makeContainer()
+        let file = try fileOf(ctx); defer { try? FileManager.default.removeItem(at: file) }
+        try BackupSnapshotImporter.importFullBackupJSON(from: file, modelContainer: target)
+        let second = try rawExport(ModelContext(target))
+        XCTAssertEqual(historyExerciseNames(second), historyExerciseNames(first), "identical arrays, identical order, every entry")
+        // and a second hop
+        let file2 = try fileOf(ModelContext(target)); defer { try? FileManager.default.removeItem(at: file2) }
+        let target2 = try BackupTestSupport.makeContainer()
+        try BackupSnapshotImporter.importFullBackupJSON(from: file2, modelContainer: target2)
+        XCTAssertEqual(historyExerciseNames(try rawExport(ModelContext(target2))), historyExerciseNames(first))
+        // the order field is in the file
+        let sixExercises = try XCTUnwrap(((first["sessionHistory"] as? [[String: Any]])?.first { ($0["title"] as? String) == "Six" })?["exercises"] as? [[String: Any]])
+        XCTAssertEqual(sixExercises.compactMap { $0["order"] as? Int }, [0, 1, 2, 3, 4, 5])
+    }
+
+    func test_oldBackupWithoutOrder_importsInArrayOrder_andLogsExportInSetOrder() throws {
+        let (_, ctx) = try populated()
+        try historyWithSixExercises(ctx)
+        var json = try rawExport(ctx)
+        var hs = try XCTUnwrap(json["sessionHistory"] as? [[String: Any]])
+        for i in hs.indices {
+            hs[i]["exercises"] = ((hs[i]["exercises"] as? [[String: Any]]) ?? []).map { var e = $0; e.removeValue(forKey: "order"); return e }
+        }
+        json["sessionHistory"] = hs
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("old_\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: url); defer { try? FileManager.default.removeItem(at: url) }
+        let target = try BackupTestSupport.makeContainer()
+        try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: target)
+        XCTAssertEqual(historyExerciseNames(try rawExport(ModelContext(target)))["Six"], ["Squat", "Bench", "Row", "Curl", "Lateral Raise", "Calf Raise"])
+        // set logs are written in set-number order whatever the relationship returns
+        for s in (try rawExport(ModelContext(target))["sessions"] as? [[String: Any]]) ?? [] {
+            for it in (s["items"] as? [[String: Any]]) ?? [] {
+                let nums = ((it["logs"] as? [[String: Any]]) ?? []).compactMap { $0["setNumber"] as? Int }
+                XCTAssertEqual(nums, nums.sorted())
+            }
+        }
+    }
+
+    func test_orderBackfill_assignsTheCurrentRelationshipOrder_onlyToEntriesStillAllZero_once() throws {
+        UserDefaults.standard.removeObject(forKey: "sessionHistoryExerciseOrder.v1.completed")
+        defer { UserDefaults.standard.removeObject(forKey: "sessionHistoryExerciseOrder.v1.completed") }
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let legacy = (0..<4).map { SessionHistoryExercise(name: "L\($0)", primaryMuscle: nil, sets: 1, reps: 1, volume: 1) }   // all order 0
+        let assigned = (0..<3).map { SessionHistoryExercise(name: "A\($0)", primaryMuscle: nil, sets: 1, reps: 1, volume: 1, order: 2 - $0) }
+        (legacy + assigned).forEach(ctx.insert)
+        ctx.insert(SessionHistory(date: Date(), weekIndex: 1, title: "legacy", subtitle: "", totalExercises: 4, totalSets: 4, totalVolume: 4, exercises: legacy))
+        ctx.insert(SessionHistory(date: Date(), weekIndex: 1, title: "assigned", subtitle: "", totalExercises: 3, totalSets: 3, totalVolume: 3, exercises: assigned))
+        try ctx.save()
+        SessionHistoryExerciseOrderBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(legacy.map(\.order).sorted(), [0, 1, 2, 3], "legacy entry: distinct positions from the relationship order")
+        XCTAssertEqual(assigned.map(\.order), [2, 1, 0], "an entry with orders already assigned is left alone")
+        var lines: [String] = []; BackfillLog.collector = []
+        SessionHistoryExerciseOrderBackfill.runIfNeeded(in: ctx)
+        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines), "not needed")
+    }
 }

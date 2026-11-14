@@ -395,7 +395,7 @@ private struct HistoryDayDetailView: View {
         }
 
         // Fallback: use the persisted summary only (no per-set loads exist in SessionHistoryExercise).
-        return history.exercises.map { ex in
+        return history.orderedExercises.map { ex in
             HistoryExerciseDetail(
                 name: ex.name,
                 primaryMuscle: ex.primaryMuscle,

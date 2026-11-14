@@ -155,8 +155,8 @@ enum PopulatedStoreBuilder {
             totalVolume: 4200.5, sessionId: completed.id, dayLabelSnapshot: "Probe Push", mechanicalLoad: 1234.5,
             mesoBlockId: archived.id, mesoBlockNameSnapshot: archived.name,
             exercises: [
-                SessionHistoryExercise(name: "Probe Press", primaryMuscle: "chest", sets: 3, reps: 24, volume: 2400.5),
-                SessionHistoryExercise(name: "Probe Row", primaryMuscle: "back", sets: 3, reps: 24, volume: 1800),
+                SessionHistoryExercise(name: "Probe Press", primaryMuscle: "chest", sets: 3, reps: 24, volume: 2400.5, order: 1),
+                SessionHistoryExercise(name: "Probe Row", primaryMuscle: "back", sets: 3, reps: 24, volume: 1800, order: 2),
             ]
         )
         history.exercises.forEach(ctx.insert)

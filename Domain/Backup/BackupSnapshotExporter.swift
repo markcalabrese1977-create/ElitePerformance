@@ -173,7 +173,7 @@ enum BackupSnapshotExporter {
                                 loadOverrideReasonRaw: item.loadOverrideReasonRaw,
                                 nextSuggestedLoad: item.nextSuggestedLoad,
                                 planEdited: item.planEdited,
-                                logs: item.logs.map { log in
+                                logs: item.logs.sorted { $0.setNumber < $1.setNumber }.map { log in
                                     SetLogBackupDTO(
                                         id: log.id,
                                         createdAt: log.createdAt,
@@ -205,13 +205,14 @@ enum BackupSnapshotExporter {
                     totalExercises: history.totalExercises,
                     totalSets: history.totalSets,
                     totalVolume: history.totalVolume,
-                    exercises: history.exercises.map { exercise in
+                    exercises: history.orderedExercises.map { exercise in
                         SessionHistoryExerciseBackupDTO(
                             name: exercise.name,
                             primaryMuscle: exercise.primaryMuscle,
                             sets: exercise.sets,
                             reps: exercise.reps,
-                            volume: exercise.volume
+                            volume: exercise.volume,
+                            order: exercise.order
                         )
                     },
                     mechanicalLoad: history.mechanicalLoad,
