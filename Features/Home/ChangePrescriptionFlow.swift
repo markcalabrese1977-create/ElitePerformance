@@ -3,9 +3,10 @@ import SwiftData
 
 // MARK: - Plan steppers
 
-/// What the Program tab's plan editors write. Only editing a LOAD freezes carry-forward's earned-load
-/// write into the item (`planEdited`); sets, reps and RIR edits do not, because carry-forward only ever
-/// writes loads.
+/// What the Program tab's plan editors write. ANY lifter edit to a planned LOAD, REPS or RIR marks the item
+/// `planEdited`, which freezes carry-forward's earned-load write into it (carry-forward itself only ever writes
+/// loads, never reps or RIR, but a hand-set target of any kind is the lifter's, not the engine's). Only the set
+/// COUNT stepper leaves the flag alone.
 enum PlanStepperEdits {
 
     /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
@@ -19,11 +20,12 @@ enum PlanStepperEdits {
         widenSetBand(item, toInclude: value)
     }
 
-    /// RIR stepper: the lifter picked one number, so the displayed range collapses to it as well.
+    /// RIR stepper: the lifter picked one number, so the displayed range collapses to it as well. A hand-set RIR.
     static func setRIR(_ item: SessionItem, to value: Int) {
         item.targetRIR = value
         item.targetRIRMin = value
         item.targetRIRMax = value
+        item.planEdited = true
     }
 
     /// `setMin = min(setMin, sets)`, `setMax = max(setMax, sets)`; untouched when the item has no band.
@@ -32,7 +34,7 @@ enum PlanStepperEdits {
         if let hi = item.setMax { item.setMax = max(hi, sets) }
     }
 
-    /// Per-set load field: the one edit that marks the plan as hand-set.
+    /// Per-set load field: marks the plan as hand-set.
     static func setPlannedLoad(_ item: SessionItem, at index: Int, to value: Double) {
         if index >= item.plannedLoadsBySet.count {
             item.plannedLoadsBySet.append(contentsOf: repeatElement(0.0, count: index + 1 - item.plannedLoadsBySet.count))
@@ -41,20 +43,22 @@ enum PlanStepperEdits {
         item.planEdited = true
     }
 
-    /// Per-set reps field: does not touch `planEdited`.
+    /// Per-set reps field: marks the plan as hand-set.
     static func setPlannedReps(_ item: SessionItem, at index: Int, to value: Int) {
         if index >= item.plannedRepsBySet.count {
             item.plannedRepsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRepsBySet.count))
         }
         item.plannedRepsBySet[index] = value
+        item.planEdited = true
     }
 
-    /// Per-set RIR field: does not touch `planEdited`.
+    /// Per-set RIR field: marks the plan as hand-set.
     static func setPlannedRIR(_ item: SessionItem, at index: Int, to value: Int) {
         if index >= item.plannedRIRsBySet.count {
             item.plannedRIRsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRIRsBySet.count))
         }
         item.plannedRIRsBySet[index] = value
+        item.planEdited = true
     }
 }
 

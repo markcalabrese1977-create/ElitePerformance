@@ -117,6 +117,42 @@ final class LoadWriteTests: XCTestCase {
         XCTAssertEqual(edited.plannedLoadsBySet, [50])
     }
 
+    // A rep-only edit marks the plan edited, and carry-forward then leaves that target's reps AND loads alone. (An unedited
+    // target, as a control, takes the earned load but its reps and RIR are never written by carry-forward.)
+    func test_B2b_aRepOnlyEditFreezesTheTarget_carryForwardLeavesRepsAndLoadsAlone() throws {
+        let context = try makeContext()
+        let yesterday = cal.date(byAdding: .day, value: -1, to: Date())!
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date())!
+        let dayAfter = cal.date(byAdding: .day, value: 2, to: Date())!
+
+        func target(order: Int) -> SessionItem {
+            let t = item(reps: [0], loads: [0], rirs: [0], suggestedLoad: 50)
+            t.plannedLoadsBySet = [50]; t.plannedRepsBySet = [10]; t.plannedRIRsBySet = [2]
+            return t
+        }
+        let edited = target(order: 1), control = target(order: 1)
+        PlanStepperEdits.setPlannedReps(edited, at: 0, to: 12)            // the lifter changes reps only
+        XCTAssertTrue(edited.planEdited, "a rep-only edit sets the flag")
+        XCTAssertFalse(control.planEdited)
+
+        let sourceItem = item(reps: [10], loads: [999], rirs: [2], suggestedLoad: 999)
+        sourceItem.plannedLoadsBySet = [999]
+        let sourceSession = Session(date: yesterday, status: .completed, weekIndex: 1, items: [sourceItem])
+        let editedSession = Session(date: tomorrow, status: .planned, weekIndex: 2, items: [edited])
+        let controlSession = Session(date: dayAfter, status: .planned, weekIndex: 2, items: [control])
+        [sourceSession, editedSession, controlSession].forEach(context.insert)
+        try context.save()
+
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+
+        XCTAssertEqual(edited.plannedRepsBySet, [12]); XCTAssertEqual(edited.plannedRIRsBySet, [2])
+        XCTAssertEqual(edited.plannedLoadsBySet, [50], "the edited target's loads are not written")
+        XCTAssertEqual(edited.suggestedLoad, 50)
+        XCTAssertTrue(edited.planEdited)
+        // control: carry-forward writes the earned LOAD into an unedited plan, never its reps or RIR
+        XCTAssertEqual(control.plannedRepsBySet, [10]); XCTAssertEqual(control.plannedRIRsBySet, [2])
+    }
+
     // T-B.3: hasMeaningfulPlan gate — a source item with no plan at all is
     // never propagated (nothing to carry forward).
     func test_B3_sourceItemWithNoPlanIsNeverPropagated() throws {
