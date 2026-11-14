@@ -107,9 +107,7 @@ final class NextMesoRealBackupTests: XCTestCase {
     }
 
     func testNextMesoOnARealBackup() throws {
-        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
-            throw XCTSkip("EP_BACKUP_FIXTURE not set")
-        }
+        let path = try PinnedFixture.path(requiring: "2026-10-07")
         let defaults = UserDefaults.standard
         let saved = lifecycleKeys.map { ($0, defaults.object(forKey: $0)) }
         defer { for (k, v) in saved { if let v { defaults.set(v, forKey: k) } else { defaults.removeObject(forKey: k) } } }

@@ -285,6 +285,7 @@ final class AnalyticsImpactReportTests: XCTestCase {
     // MARK: - P1d: the screens read the engine; the only changes are the ones the P1c report listed
 
     func test_screens_changeOnlyWhereTheImpactReportSaid() throws {
+        _ = try PinnedFixture.path(requiring: "2026-11-12")      // asserts the Nov 12 backup's numbers
         let (_, all, profile, customs) = try loadFixture()
         defer { flush() }
         _ = customs

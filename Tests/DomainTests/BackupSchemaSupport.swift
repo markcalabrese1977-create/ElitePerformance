@@ -222,3 +222,21 @@ enum PopulatedStoreBuilder {
         return item
     }
 }
+
+
+/// Tests that assert specifics of ONE real backup (dates, loads, session counts) run only when that backup is the active
+/// fixture (TEST_RUNNER_EP_BACKUP_FIXTURE). Any other fixture (or none) skips them instead of failing: they are not
+/// invariants, they are a pinned snapshot. They also live in the "RealBackup" test plan, which runs on request:
+///   xcodebuild test -scheme ElitePerformance -testPlan RealBackup ... with TEST_RUNNER_EP_BACKUP_FIXTURE=<the pinned file>
+/// (one run per pinned backup: 2026-10-07 for the conversion / per-letter / next-meso tests, 2026-11-12 for the impact report).
+enum PinnedFixture {
+    static func path(requiring stamp: String, file: StaticString = #filePath) throws -> String {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to the \(stamp) backup to run")
+        }
+        guard URL(fileURLWithPath: path).lastPathComponent.contains(stamp) else {
+            throw XCTSkip("pinned to the \(stamp) backup; the active fixture is \(URL(fileURLWithPath: path).lastPathComponent)")
+        }
+        return path
+    }
+}

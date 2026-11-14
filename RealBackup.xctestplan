@@ -1,0 +1,32 @@
+{
+  "configurations": [
+    {
+      "id": "C0FFEE00-0000-4000-8000-000000000002",
+      "name": "RealBackup",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": false,
+    "testTimeoutsEnabled": false
+  },
+  "testTargets": [
+    {
+      "selectedTests": [
+        "DUPMesoLengthConversionTests/test_fixture_convertsWithTheSwappedOct7PullBSession_andListsDeadEndsAsInfo",
+        "DUPMesoLengthConversionTests/test_fixture_isTheDescribedBlock",
+        "LastSameLetterPerformanceTests/test_fixture_afterTheConversion_weekTenResolvesToACompletedWeekSeven",
+        "LastSameLetterPerformanceTests/test_fixture_expectedCaptions_andSourceSessions",
+        "LastSameLetterPerformanceTests/test_fixture_nilCases",
+        "NextMesoRealBackupTests/testNextMesoOnARealBackup",
+        "AnalyticsImpactReportTests/test_screens_changeOnlyWhereTheImpactReportSaid"
+      ],
+      "target": {
+        "containerPath": "container:ElitePerformance.xcodeproj",
+        "identifier": "D5E2932B2EC4102900034D78",
+        "name": "ElitePerformanceTests"
+      }
+    }
+  ],
+  "version": 1
+}

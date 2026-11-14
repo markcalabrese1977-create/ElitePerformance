@@ -502,9 +502,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     /// no week-5 counterpart. The conversion verifies only the links it creates (7/8/9 -> 10/11/12), so it must
     /// convert this store as it is and name the legacy dead ends as [INFO], never as failures.
     func test_fixture_convertsWithTheSwappedOct7PullBSession_andListsDeadEndsAsInfo() throws {
-        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
-            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
-        }
+        let path = try PinnedFixture.path(requiring: "2026-10-07")
         print("CONVERSION FIXTURE|\(URL(fileURLWithPath: path).lastPathComponent)")
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
@@ -1270,9 +1268,7 @@ final class LastSameLetterPerformanceTests: XCTestCase {
     // MARK: Fixture (EP_BACKUP_FIXTURE; the newest ElitePerformance_Backup_*.json in ~/Downloads)
 
     private func fixtureURL() throws -> URL {
-        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
-            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
-        }
+        let path = try PinnedFixture.path(requiring: "2026-10-07")
         print("LASTLETTER| fixture: \(URL(fileURLWithPath: path).lastPathComponent)")
         return URL(fileURLWithPath: path)
     }
