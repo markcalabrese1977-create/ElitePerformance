@@ -140,7 +140,7 @@ struct ExerciseHistorySheet: View {
                         lifetimeCell("Best set", "\(LoadFormatter(unit: unit).compact(b.load)) × \(b.reps)")
                     }
                 }
-                Text("Hard sets in completed sessions (warm-ups and skipped sets excluded). Best set: highest e1RM among sets of 12 reps or fewer.")
+                Text("Hard sets in completed sessions (warm-ups and skipped sets excluded). Best set: highest e1RM among sets of 12 reps or fewer; the heaviest load when there is none.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
