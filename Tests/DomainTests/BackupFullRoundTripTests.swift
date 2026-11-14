@@ -308,4 +308,51 @@ final class ImportSafetyTests: XCTestCase {
         XCTAssertNotNil(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(29 * 86_400)))
         XCTAssertNil(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(31 * 86_400)))
     }
+
+    // MARK: - Staleness guard
+
+    private func summary(completed: Int, last: Double?) -> BackupContentSummary {
+        BackupContentSummary(exportedAt: nil, sessions: completed, completedSessions: completed,
+                             lastCompletedDate: last.map { Date(timeIntervalSince1970: $0) },
+                             sessionHistory: 0, customExercises: 0, mesoBlocks: 0)
+    }
+
+    func test_guard_requiresTypedREPLACE_forFewerCompletedSessions_anEarlierLastSession_orBoth_otherwiseNormal() throws {
+        let current = summary(completed: 40, last: 1_800_000_000)
+        // fewer completed sessions, same last date
+        XCTAssertTrue(ImportStalenessGuard.assess(incoming: summary(completed: 30, last: 1_800_000_000), current: current).requiresTypedWord)
+        // same count, earlier last completed session
+        XCTAssertTrue(ImportStalenessGuard.assess(incoming: summary(completed: 40, last: 1_790_000_000), current: current).requiresTypedWord)
+        // both
+        if case .requireTypedReplace(let r) = ImportStalenessGuard.assess(incoming: summary(completed: 10, last: 1_700_000_000), current: current) {
+            XCTAssertEqual(r.count, 2)
+        } else { XCTFail("both conditions should require the typed word") }
+        // a file with no completed session at all, against a device that has some
+        XCTAssertTrue(ImportStalenessGuard.assess(incoming: summary(completed: 0, last: nil), current: current).requiresTypedWord)
+        // equal or newer: a normal confirm
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: summary(completed: 40, last: 1_800_000_000), current: current), .normalConfirm)
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: summary(completed: 55, last: 1_810_000_000), current: current), .normalConfirm)
+        // an empty device (a fresh install restoring): normal
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: summary(completed: 3, last: 1_700_000_000), current: summary(completed: 0, last: nil)), .normalConfirm)
+    }
+
+    func test_guard_acceptsOnlyTheWordREPLACE() {
+        for ok in ["REPLACE", " REPLACE "] { XCTAssertTrue(ImportStalenessGuard.accepts(typed: ok), ok) }
+        for bad in ["", "replace", "Replace", "REPLAC", "REPLACE IT", "yes"] { XCTAssertFalse(ImportStalenessGuard.accepts(typed: bad), bad) }
+    }
+
+    func test_guard_triggersOnAnOlderFile_readFromRealExports() throws {
+        // an older export (fewer completed sessions) against a newer live store
+        let (_, olderCtx) = try populated()
+        let olderURL = try fileOf(olderCtx); defer { try? FileManager.default.removeItem(at: olderURL) }
+        let (_, newerCtx) = try populated()
+        try extraSession(newerCtx, day: 4_000_000_000)          // a later completed session
+        let verdict = ImportStalenessGuard.assess(incoming: try BackupContentSummary.of(file: olderURL),
+                                                  current: try BackupContentSummary.of(store: newerCtx))
+        XCTAssertTrue(verdict.requiresTypedWord)
+        // and the reverse direction is a normal confirm
+        let newerURL = try fileOf(newerCtx); defer { try? FileManager.default.removeItem(at: newerURL) }
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: try BackupContentSummary.of(file: newerURL),
+                                                   current: try BackupContentSummary.of(store: olderCtx)), .normalConfirm)
+    }
 }

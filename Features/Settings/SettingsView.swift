@@ -377,16 +377,11 @@ struct SettingsView: View {
                 showImportAlert = true
             }
         }
-        .confirmationDialog(
-            "Replace all data on this device with this backup?",
-            isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { cancelPendingRestore() } }),
-            titleVisibility: .visible,
-            presenting: pendingRestore
-        ) { pending in
-            Button("Replace", role: .destructive) { runRestore(pending) }
-            Button("Cancel", role: .cancel) { cancelPendingRestore() }
-        } message: { _ in
-            Text("A copy of your current data is saved first, and Restore pre-import state can bring it back.")
+        .sheet(item: $pendingRestore, onDismiss: { }) { pending in
+            RestoreConfirmSheet(
+                url: pending.url,
+                onConfirm: { runRestore(pending) },
+                onCancel: { cancelPendingRestore() })
         }
         .confirmationDialog(
             pendingRepair?.title ?? "",
@@ -770,4 +765,73 @@ enum SettingsRepair: Identifiable {
     }
 
     var isDestructive: Bool { self == .resetMeso || self == .unrecognized }
+}
+
+
+/// Shown before any import: the incoming file next to what is on this device. A file that would move the store backwards
+/// (fewer completed sessions, or an earlier last completed session) needs the word REPLACE typed to continue.
+struct RestoreConfirmSheet: View {
+    let url: URL
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.modelContext) private var context
+    @State private var incoming: BackupContentSummary?
+    @State private var current: BackupContentSummary?
+    @State private var loadError: String?
+    @State private var typed = ""
+
+    private func row(_ title: String, _ s: BackupContentSummary, showExported: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.headline)
+            if showExported {
+                Text("Exported: \(s.exportedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "unknown")")
+            }
+            Text("Completed sessions: \(s.completedSessions)")
+            Text("Last completed session: \(s.lastCompletedDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "none")")
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let loadError {
+                    Section { Text("This file can't be read as a backup: \(loadError)").foregroundStyle(.red) }
+                } else if let incoming, let current {
+                    let verdict = ImportStalenessGuard.assess(incoming: incoming, current: current)
+                    Section { row("Backup file", incoming, showExported: true) }
+                    Section { row("On this device now", current, showExported: false) }
+                    if case .requireTypedReplace(let reasons) = verdict {
+                        Section {
+                            ForEach(reasons, id: \.self) { Text($0).foregroundStyle(.red) }
+                            Text("Type \(ImportStalenessGuard.confirmationWord) to replace your data anyway.")
+                            TextField(ImportStalenessGuard.confirmationWord, text: $typed)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                        } header: { Text("This file is older than your data") }
+                    }
+                    Section {
+                        Button("Replace my data with this backup", role: .destructive, action: onConfirm)
+                            .disabled(verdict.requiresTypedWord && !ImportStalenessGuard.accepts(typed: typed))
+                    } footer: {
+                        Text("A copy of your current data is saved first; Settings → Restore pre-import state can bring it back.")
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .navigationTitle("Restore backup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) } }
+        }
+        .interactiveDismissDisabled()
+        .task {
+            do {
+                incoming = try BackupContentSummary.of(file: url)
+                current = try BackupContentSummary.of(store: context)
+            } catch { loadError = error.localizedDescription }
+        }
+    }
 }
