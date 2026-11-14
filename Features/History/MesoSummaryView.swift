@@ -35,6 +35,18 @@ struct MesoSummaryView: View {
     @State private var remaining: MesoRemaining? = nil
 
     /// "Week 8 of 12 · 37/43 sessions" (completed / due to date).
+    /// A meso in progress (active, with sessions still to do) gets the "Week N of M, K weeks left" narrative; a completed one
+    /// keeps the end-of-block wording.
+    private func narrative(_ analysis: MesoAnalysis) -> String {
+        if meso.status == .active, let r = remaining, r.remainingSessions > 0 {
+            let h = MesoHeader.compute(
+                name: meso.name, totalWeeks: meso.totalWeeks,
+                sessions: meso.sessions.map { ($0.date, $0.plannedDate, $0.status, $0.weekIndex) })
+            return analysis.inProgressNarrative(week: h.currentWeek, totalWeeks: h.totalWeeks)
+        }
+        return analysis.verdictNarrative
+    }
+
     private var headerLine: String {
         let h = MesoHeader.compute(
             name: meso.name, totalWeeks: meso.totalWeeks,
@@ -440,7 +452,7 @@ struct MesoSummaryView: View {
                 verdictBadge(analysis.overallVerdict)
             }
 
-            Text(analysis.verdictNarrative)
+            Text(narrative(analysis))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

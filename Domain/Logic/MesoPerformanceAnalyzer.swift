@@ -117,7 +117,20 @@ struct MesoAnalysis {
         return .plateaued
     }
 
-    /// Coach-written narrative for the overall verdict.
+    /// The narrative for a meso still in progress: where the block stands, then what the numbers say SO FAR (no end-of-block
+    /// phrasing). `verdictNarrative` stays for a completed meso.
+    func inProgressNarrative(week: Int, totalWeeks: Int) -> String {
+        let left = max(totalWeeks - week, 0)
+        let head = left == 0 ? "Week \(week) of \(totalWeeks), last week." : "Week \(week) of \(totalWeeks), \(left) week\(left == 1 ? "" : "s") left."
+        switch overallVerdict {
+        case .progressing: return head + " So far load is moving on most exercises and your e1RM trend is positive."
+        case .plateaued: return head + " So far performance is holding steady across the block."
+        case .declining: return head + " So far performance is dropping on several exercises; keep an eye on recovery."
+        case .insufficient: return head + " Not enough completed sessions yet to assess this meso."
+        }
+    }
+
+    /// Coach-written narrative for the overall verdict (a COMPLETED meso).
     var verdictNarrative: String {
         switch overallVerdict {
         case .progressing:

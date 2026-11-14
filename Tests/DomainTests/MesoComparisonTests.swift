@@ -768,6 +768,30 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertFalse(m.isNew)
     }
 
+    func test_narrative_inProgressSaysWeekNofM_andWeeksLeft_completedKeepsTheEndOfBlockWording() throws {
+        let a = try mesoAnalysisWith(prior: [[(-50, [5], [200])]], current: [(0, [5], [215]), (7, [5], [225])])
+        XCTAssertEqual(a.overallVerdict, .progressing)
+        let mid = a.inProgressNarrative(week: 8, totalWeeks: 12)
+        XCTAssertTrue(mid.hasPrefix("Week 8 of 12, 4 weeks left."), mid)
+        XCTAssertTrue(mid.contains("So far"), mid)
+        for endOfBlock in ["Strong meso", "carry that into the next block", "next block"] { XCTAssertFalse(mid.contains(endOfBlock), mid) }
+        XCTAssertTrue(a.inProgressNarrative(week: 11, totalWeeks: 12).hasPrefix("Week 11 of 12, 1 week left."))
+        XCTAssertTrue(a.inProgressNarrative(week: 12, totalWeeks: 12).hasPrefix("Week 12 of 12, last week."))
+        // a completed meso keeps the current wording
+        XCTAssertTrue(a.verdictNarrative.hasPrefix("Strong meso."))
+        XCTAssertTrue(a.verdictNarrative.contains("carry that into the next block"))
+        // every verdict has an in-progress sentence
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        let s = Session(date: day(0), status: .completed, weekIndex: 1, dayLabel: "D", items: [item("bench_press", reps: [5], loads: [200])])
+        s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        let one = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
+        XCTAssertEqual(one.overallVerdict, .insufficient)
+        XCTAssertTrue(one.inProgressNarrative(week: 2, totalWeeks: 4).hasSuffix("Not enough completed sessions yet to assess this meso."))
+        XCTAssertEqual(one.verdictNarrative, "Not enough completed sessions to assess this meso.")
+    }
+
     func test_statsTile_countsRecordSettingSessions_notLiftsWithAPRChip() throws {
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
         let old = MesoBlock(id: UUID(), name: "Old", startDate: day(-100), status: .archived, totalWeeks: 4)
