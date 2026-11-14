@@ -22,6 +22,9 @@ struct ExerciseHistorySheet: View {
         let volume: Double
         let detail: String
         let bestE1RM: Double?
+        /// When the session has no set of 12 reps or fewer there is no e1RM: its top working set by load (the Meso Summary's
+        /// fallback, `BestSetRule`), shown as a LOAD, never as an e1RM.
+        let topLoadSet: BestSet?
         let session: Session
     }
 
@@ -183,35 +186,56 @@ struct ExerciseHistorySheet: View {
 
     private var e1rmChart: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Estimated 1RM trend")
+            // Chronological points: an e1RM where the session has a set of 12 reps or fewer, else the top set's LOAD.
+            let points = Array(entries.filter { $0.bestE1RM != nil || $0.topLoadSet != nil }.reversed().enumerated())
+            let hasLoadPoints = points.contains { $0.element.bestE1RM == nil }
+            let hasE1RMPoints = points.contains { $0.element.bestE1RM != nil }
+
+            Text(hasLoadPoints ? (hasE1RMPoints ? "Estimated 1RM and top-set load" : "Top-set load") : "Estimated 1RM trend")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
 
-            let chartEntries = entries
-                .filter { $0.bestE1RM != nil }
-                .reversed()
-
-            if chartEntries.isEmpty {
+            if points.isEmpty {
                 Text("No e1RM data yet.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
                 Chart {
-                    ForEach(Array(chartEntries.enumerated()), id: \.element.id) { idx, entry in
-                        LineMark(
-                            x: .value("Session", idx),
-                            y: .value("e1RM", unit.fromStoredLb(entry.bestE1RM ?? 0))
-                        )
-                        .foregroundStyle(waveColor(entry.waveLabel))
-                        .interpolationMethod(.catmullRom)
+                    ForEach(points, id: \.element.id) { idx, entry in
+                        if let e1 = entry.bestE1RM {
+                            LineMark(
+                                x: .value("Session", idx),
+                                y: .value("e1RM", unit.fromStoredLb(e1)),
+                                series: .value("Kind", "e1RM")
+                            )
+                            .foregroundStyle(waveColor(entry.waveLabel))
+                            .interpolationMethod(.catmullRom)
 
-                        PointMark(
-                            x: .value("Session", idx),
-                            y: .value("e1RM", unit.fromStoredLb(entry.bestE1RM ?? 0))
-                        )
-                        .foregroundStyle(waveColor(entry.waveLabel))
-                        .symbolSize(30)
+                            PointMark(
+                                x: .value("Session", idx),
+                                y: .value("e1RM", unit.fromStoredLb(e1))
+                            )
+                            .foregroundStyle(waveColor(entry.waveLabel))
+                            .symbol(.circle)
+                            .symbolSize(30)
+                        } else if let top = entry.topLoadSet {
+                            // a LOAD, not an e1RM: a hollow diamond on a dashed line of its own
+                            LineMark(
+                                x: .value("Session", idx),
+                                y: .value("Load", unit.fromStoredLb(top.load)),
+                                series: .value("Kind", "load")
+                            )
+                            .foregroundStyle(waveColor(entry.waveLabel).opacity(0.6))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+
+                            PointMark(
+                                x: .value("Session", idx),
+                                y: .value("Load", unit.fromStoredLb(top.load))
+                            )
+                            .foregroundStyle(waveColor(entry.waveLabel))
+                            .symbol { Image(systemName: "diamond").font(.system(size: 9, weight: .bold)).foregroundStyle(waveColor(entry.waveLabel)) }
+                        }
                     }
                 }
                 .frame(height: 100)
@@ -228,8 +252,19 @@ struct ExerciseHistorySheet: View {
                     }
                 }
 
+                if hasLoadPoints {
+                    HStack(spacing: 14) {
+                        if hasE1RMPoints {
+                            Label("e1RM", systemImage: "circle.fill").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Label("top-set load (no set of 12 reps or fewer, so no e1RM)", systemImage: "diamond")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("loadMarkerLegend")
+                }
+
                 // Wave legend — only show waves that appear in chart
-                let chartWaves = Array(Set(chartEntries.compactMap { $0.waveLabel })).sorted()
+                let chartWaves = Array(Set(points.compactMap { $0.element.waveLabel })).sorted()
                 if chartWaves.count > 1 {
                     HStack(spacing: 12) {
                         ForEach(chartWaves, id: \.self) { wave in
@@ -366,6 +401,17 @@ struct ExerciseHistorySheet: View {
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.green)
                         }
+                    }
+                    .padding(.top, 2)
+                } else if let top = entry.topLoadSet {
+                    HStack(spacing: 6) {
+                        Image(systemName: "diamond").font(.caption2)
+                        Text("Top set: \(LoadFormatter(unit: unit).compact(top.load)) × \(top.reps)")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                        Text("(load; no set of 12 reps or fewer)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.top, 2)
                 }
@@ -531,6 +577,14 @@ struct ExerciseHistorySheet: View {
                         .map { AnalyticsEngine.ItemStats.of($0, bodyWeight: bodyWeight).bestE1RM }.max() ?? 0
                     return best > 0 ? best : nil
                 }()
+                let topLoadSet: BestSet? = {
+                    guard bestE1RM == nil else { return nil }
+                    let customsForSet = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+                    return session.items
+                        .filter { ExerciseCatalog.resolvedExerciseId(rawId: $0.exerciseId, snapshotName: $0.exerciseNameSnapshot, fallbackName: nil) == targetExerciseId }
+                        .compactMap { BestSetRule.best(of: $0, bodyWeight: bodyWeight, customExercises: customsForSet) }
+                        .max { ($0.load, $0.reps) < ($1.load, $1.reps) }
+                }()
 
                 built.append(
                     ExerciseHistoryEntry(
@@ -543,6 +597,7 @@ struct ExerciseHistorySheet: View {
                         volume: volumeTotal,
                         detail: executedTokens.joined(separator: ", "),
                         bestE1RM: bestE1RM,
+                        topLoadSet: topLoadSet,
                         session: session
                     )
                 )

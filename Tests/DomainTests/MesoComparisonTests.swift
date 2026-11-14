@@ -582,8 +582,8 @@ final class MesoComparisonTests: XCTestCase {
         let ctx = ModelContext(container)
         let all = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }
         let bw = try ctx.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
-        var entries = 0, changed = 0, lost = 0
-        var perLift: [String: (changed: Int, lost: Int, entries: Int, oldMax: Double, newMax: Double)] = [:]
+        var entries = 0, changed = 0, lost = 0, shownAsLoad = 0
+        var perLift: [String: (changed: Int, lost: Int, entries: Int, oldMax: Double, newMax: Double, shownAsLoad: Int)] = [:]
         var recapChanged = 0
         for s in all {
             for it in s.items {
@@ -597,14 +597,18 @@ final class MesoComparisonTests: XCTestCase {
                 let new = AnalyticsEngine.ItemStats.of(it, bodyWeight: bw).bestE1RM
                 guard old > 0 else { continue }
                 entries += 1
-                var e = perLift[id] ?? (0, 0, 0, 0, 0)
+                var e = perLift[id] ?? (0, 0, 0, 0, 0, 0)
                 e.entries += 1; e.oldMax = max(e.oldMax, old); e.newMax = max(e.newMax, new)
-                if new == 0 { lost += 1; e.lost += 1 } else if abs(new - old) > 1e-6 { changed += 1; e.changed += 1 }
+                if new == 0 {
+                    lost += 1; e.lost += 1
+                    // the history sheet now shows this entry's top-set LOAD instead (BestSetRule fallback)
+                    if BestSetRule.best(of: it, bodyWeight: bw)?.load ?? 0 > 0 { shownAsLoad += 1; e.shownAsLoad += 1 }
+                } else if abs(new - old) > 1e-6 { changed += 1; e.changed += 1 }
                 if abs(new - old) > 1e-6 { recapChanged += 1 }
                 perLift[id] = e
             }
         }
-        var lines = ["session x lift entries with an e1RM: \(entries); value changes: \(changed); e1RM disappears (long sets only): \(lost)",
+        var lines = ["session x lift entries with an e1RM: \(entries); value changes: \(changed); e1RM disappears (long sets only): \(lost); of those, shown as a top-set load: \(shownAsLoad)",
                      "(exercise history sheet: per-entry e1RM, chart and the top e1RM; live recap: top e1RM; the Analytics tab shows no e1RM)"]
         let nm: (String) -> String = { ExerciseCatalog.displayName(for: $0) }
         for (id, e) in perLift.sorted(by: { nm($0.key) < nm($1.key) }) where e.changed + e.lost > 0 {
