@@ -1456,3 +1456,119 @@ final class TotalRepProgressionTests: XCTestCase {
         XCTAssertLessThan(rec.nextSuggestedLoad ?? 999, 185)
     }
 }
+
+// MARK: - XX: missed-source seeding
+
+final class MissedSourceSeedingTests: XCTestCase {
+
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    private func item(_ wave: String, reps: [Int] = [], loads: [Double] = [], rirs: [Int] = [], planned: Bool) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "barbell_row", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0, waveRaw: wave)
+        i.plannedRepsBySet = [10, 10, 10]; i.plannedRIRsBySet = [2, 2, 2]
+        i.plannedLoadsBySet = [0, 0, 0]
+        if !planned { i.actualReps = reps; i.actualLoads = loads; i.actualRIRs = rirs; i.suggestedLoad = loads.first ?? 0; i.plannedLoadsBySet = loads }
+        return i
+    }
+
+    /// Pull A (wk4, done) -> Pull B (wk5, MISSED) -> Pull C (wk6, done) -> Pull B again wk8 target at 0 load.
+    private func block(_ ctx: ModelContext, otherMeso: Bool = false) -> (target: SessionItem, targetSession: Session) {
+        let meso = MesoBlock(name: "M", startDate: day(-40), totalWeeks: 8)
+        ctx.insert(meso)
+        let a = Session(date: day(-20), status: .completed, weekIndex: 4, dayLabel: "Pull", items: [item("a", reps: [10, 10, 9], loads: [100, 100, 100], rirs: [2, 2, 2], planned: false)])
+        let missed = Session(date: day(-13), status: .planned, weekIndex: 5, dayLabel: "Pull", items: [item("b", planned: true)])
+        let c = Session(date: day(-6), status: .completed, weekIndex: 6, dayLabel: "Pull", items: [item("c", reps: [10, 10, 10], loads: [110, 110, 110], rirs: [2, 2, 2], planned: false)])
+        let tItem = item("b", planned: true)
+        let target = Session(date: day(8), status: .planned, weekIndex: 8, dayLabel: "Pull", items: [tItem])
+        for s in [a, missed, c, target] { s.meso = meso; ctx.insert(s); meso.sessions.append(s) }
+        return (tItem, target)
+    }
+
+    func test_aZeroLoadTarget_isSeededFromTheLatestCompletedSameDaySession_converted_minus2_5Percent_andNoted() throws {
+        let ctx = try context()
+        let (t, _) = block(ctx)
+        let seeds = MissedSourceSeeding.run(in: ctx)
+        XCTAssertEqual(seeds.count, 1)
+        // e1RM of 110 x (10 + 2 credited RIR) = 110 * (1 + 12/30) = 154; at 10 reps RIR 2: 154/(1+10/30)*0.95 = 109.725; x 0.975 = 106.98 -> down to 2.5
+        XCTAssertEqual(t.plannedLoadsBySet, [105, 105, 105])
+        XCTAssertEqual(t.suggestedLoad, 105)
+        XCTAssertTrue(t.prescriptionNotes?.contains("Seeded from") == true && t.prescriptionNotes?.contains("was missed") == true, t.prescriptionNotes ?? "nil")
+        XCTAssertFalse(t.planEdited)
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
+    }
+
+    func test_anEditedTarget_aTargetWithALoad_aBodyweightLift_andPastTargets_areLeftAlone() throws {
+        let ctx = try context()
+        let (t, session) = block(ctx)
+        t.planEdited = true
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty)
+        XCTAssertEqual(t.plannedLoadsBySet, [0, 0, 0])
+        t.planEdited = false
+        session.date = day(-1)
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a session already in the past is not seeded")
+        session.date = day(8)
+        t.plannedLoadsBySet = [95, 95, 95]; t.suggestedLoad = 95
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a target with a load is never overwritten")
+    }
+
+    func test_neverSeedsZero_whenAnyHistoryExists_evenFromAnotherBlock_andNothingWithoutHistory() throws {
+        let ctx = try context()
+        let old = MesoBlock(name: "Old", startDate: day(-200), totalWeeks: 8)
+        let cur = MesoBlock(name: "Cur", startDate: day(-3), totalWeeks: 8)
+        ctx.insert(old); ctx.insert(cur)
+        let done = Session(date: day(-100), status: .completed, weekIndex: 3, dayLabel: "Pull", items: [item("a", reps: [10, 10, 10], loads: [90, 90, 90], rirs: [2, 2, 2], planned: false)])
+        done.meso = old
+        let tItem = item("a", planned: true)
+        let target = Session(date: day(4), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [tItem]); target.meso = cur
+        for s in [done, target] { ctx.insert(s) }
+        old.sessions.append(done); cur.sessions.append(target)
+        XCTAssertEqual(MissedSourceSeeding.run(in: ctx).count, 1)
+        XCTAssertGreaterThan(tItem.suggestedLoad, 0, "history from an older block still seeds")
+        XCTAssertTrue(tItem.prescriptionNotes?.contains("was missed") != true)
+
+        let empty = try context()
+        let m = MesoBlock(name: "E", startDate: day(-3), totalWeeks: 8); empty.insert(m)
+        let lone = item("a", planned: true)
+        let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [lone]); s.meso = m; empty.insert(s); m.sessions.append(s)
+        XCTAssertTrue(MissedSourceSeeding.run(in: empty).isEmpty)
+        XCTAssertEqual(lone.suggestedLoad, 0, "no history anywhere: nothing to seed from")
+    }
+
+    // LOCAL ONLY, READ-ONLY: what the seeding would write on a real backup.
+    func test_audit_whatTheSeedingWouldWriteOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(
+            for: AppSchema.makeSchema(),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        let profile = try? ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let custom = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let seeds = MissedSourceSeeding.plan(in: ctx, ctx: .init(profile: profile, customExercises: custom))
+        let fmt = DateFormatter(); fmt.dateFormat = "EEE MMM d"
+        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        var lines = ["MISSED-SOURCE SEEDING DRY RUN — \(seeds.count) planned exercises would be written (nothing was saved)"]
+        for s in seeds.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
+            lines.append("\(fmt.string(from: s.session.date)) wk\(s.session.weekIndex) \(s.session.dayLabel ?? "-") · \(s.item.exerciseId) (\(s.item.waveRaw ?? "-")): 0 -> \(s.loads.map(n).joined(separator: "/")) · \(s.note)")
+        }
+        let zeroLeft = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .planned && $0.date >= Calendar.current.startOfDay(for: Date()) }
+            .flatMap { s in s.items.filter { $0.suggestedLoad <= 0 && $0.plannedLoadsBySet.allSatisfy { $0 <= 0 } }.map { (s, $0) } }
+        let seededIds = Set(seeds.map { ObjectIdentifier($0.item) })
+        let staying = zeroLeft.filter { !seededIds.contains(ObjectIdentifier($0.1)) }
+        lines.append("planned future exercises at 0 load that would STAY at 0: \(staying.count) (bodyweight, deload, edited, exempt or no history)")
+        for (sess, it) in staying { lines.append("  stays 0: \(fmt.string(from: sess.date)) wk\(sess.weekIndex) \(sess.dayLabel ?? "-") · \(it.exerciseId) (\(it.waveRaw ?? "-")) edited=\(it.planEdited)") }
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
