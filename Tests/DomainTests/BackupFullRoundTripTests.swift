@@ -1720,8 +1720,8 @@ final class CustomCompoundTests: XCTestCase {
         let ctx = try context()
         XCTAssertTrue(custom(ctx, "Smith Incline Bench Press", muscle: "chest", compound: nil).resolvedIsCompound)
         XCTAssertTrue(custom(ctx, "Smith Split Squat", muscle: "quads", compound: nil).resolvedIsCompound, "a close match to a compound")
-        XCTAssertFalse(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: nil).resolvedIsCompound, "an ambiguous match (several rows disagree on the muscle) is not assumed compound")
-        XCTAssertTrue(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: true).resolvedIsCompound, "...until the lifter says so")
+        XCTAssertTrue(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: nil).resolvedIsCompound, "ambiguous muscle, but every tied row is compound")
+        XCTAssertFalse(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: false).resolvedIsCompound, "the lifter's false still wins")
         XCTAssertFalse(custom(ctx, "Straight-Arm Cable Pulldown", muscle: "back", compound: nil).resolvedIsCompound)
         XCTAssertFalse(custom(ctx, "Cable EZ-Bar Curl", muscle: "biceps", compound: nil).resolvedIsCompound)
         XCTAssertFalse(custom(ctx, "Incline DB Lateral Raise", muscle: "shoulders", compound: nil).resolvedIsCompound)
@@ -1732,21 +1732,36 @@ final class CustomCompoundTests: XCTestCase {
         XCTAssertTrue(custom(ctx, "Hammer Curl [Hotel]", muscle: "biceps", compound: true).resolvedIsCompound, "the lifter's true wins")
     }
 
-    func test_anAmbiguousMatch_defaultsToFalse() throws {
-        // Any name whose suggestion is ambiguous / keyword-only can never read as compound.
-        let names = ["Press", "Row", "Pulldown", "Extension", "Raise", "Fly", "Press Machine Fly", "Y Raise", "Reverse Fly"]
-        var sawWeak = false
+    func test_anAmbiguousMatch_takesTheValueAllTiedCandidatesShare_aDisagreementIsFalse() throws {
+        // Rows: several built-in rows tie and disagree on the muscle, but every one is compound.
+        for (name, muscle) in [("DB Row [Lat Bias]", MuscleGroup.back), ("Lever Row", .back), ("One Arm DB Row [Hotel]", .back)] {
+            let s = try XCTUnwrap(MuscleSuggester.suggest(name: name, coarse: muscle))
+            XCTAssertEqual(s.confidence == .tagged ? s.baseConfidence : s.confidence, .ambiguous, name)
+            let tied = s.tiedBuiltIns.compactMap { n in ExerciseCatalog.builtIn.first { $0.name == n }?.isCompound }
+            XCTAssertGreaterThan(tied.count, 1, "\(name): a real tie")
+            XCTAssertTrue(tied.allSatisfy { $0 }, name)
+            XCTAssertTrue(MuscleSuggester.suggestedCompound(name: name, coarse: muscle), "\(name): all tied candidates compound")
+        }
+        // Mixed: scan for an ambiguous suggestion whose tied candidates disagree on compound; it must be false.
+        let names = ["Press", "Row", "Pulldown", "Extension", "Raise", "Fly", "Curl", "Pushdown", "Squat", "Pull", "Cable Press", "Row Pulldown", "Press Fly", "Extension Curl"]
+        var allSame = 0, mixed = 0
         for name in names {
-            for muscle in [MuscleGroup.chest, .back, .shoulders, .quads, .triceps] {
+            for muscle in MuscleGroup.allCases {
                 guard let s = MuscleSuggester.suggest(name: name, coarse: muscle) else { continue }
-                let effective = s.confidence == .tagged ? s.baseConfidence : s.confidence
-                if effective != .exact && effective != .close {
-                    sawWeak = true
-                    XCTAssertFalse(MuscleSuggester.suggestedCompound(name: name, coarse: muscle), "\(name) / \(muscle): \(s.confidence)")
-                }
+                guard (s.confidence == .tagged ? s.baseConfidence : s.confidence) == .ambiguous else { continue }
+                let values = Set(s.tiedBuiltIns.compactMap { n in ExerciseCatalog.builtIn.first { $0.name == n }?.isCompound })
+                let result = MuscleSuggester.suggestedCompound(name: name, coarse: muscle)
+                if values.count > 1 { mixed += 1; XCTAssertFalse(result, "\(name) / \(muscle): the candidates disagree") }
+                else { allSame += 1; XCTAssertEqual(result, values.first ?? false, "\(name) / \(muscle)") }
             }
         }
-        XCTAssertTrue(sawWeak, "the sweep must include at least one weak (ambiguous or keyword) match")
+        XCTAssertGreaterThan(allSame + mixed, 0, "the sweep must reach ambiguous matches")
+        // The tie rule itself: all compound -> true; mixed (a compound and an isolation) -> false; empty or unknown -> false.
+        XCTAssertTrue(MuscleSuggester.tieIsCompound(["Bench Press", "Barbell Row"]))
+        XCTAssertFalse(MuscleSuggester.tieIsCompound(["Bench Press", "EZ Bar Curl"]), "mixed")
+        XCTAssertFalse(MuscleSuggester.tieIsCompound(["EZ Bar Curl", "Hammer Curl"]), "all isolation")
+        XCTAssertFalse(MuscleSuggester.tieIsCompound([]))
+        XCTAssertFalse(MuscleSuggester.tieIsCompound(["No Such Lift"]))
     }
 
     func test_RIREntry_readsACustomsResolvedCompoundStatus_andRIRUnsetBackfillFollowsEachLaunch() throws {

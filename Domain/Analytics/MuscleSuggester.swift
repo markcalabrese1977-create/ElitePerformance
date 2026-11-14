@@ -24,6 +24,8 @@ struct MuscleSuggestion: Equatable {
     let score: Double
     /// For a `.tagged` suggestion: how well the name itself matched a built-in before the tag set the primary muscle.
     var baseConfidence: Confidence? = nil
+    /// The built-in names that tied for the best match (empty unless the name-matching step produced the suggestion).
+    var tiedBuiltIns: [String] = []
 
     var primary: FineMuscle? { shares.first { $0.value == 1 }?.key }
 }
@@ -142,18 +144,31 @@ enum MuscleSuggester {
         let base = baseSuggestion(name: name, coarse: coarse)
         guard let tagged else { return base }
         if let base {
-            return MuscleSuggestion(shares: applyingTag(tagged, to: base.shares), basedOn: base.basedOn, confidence: .tagged, score: base.score, baseConfidence: base.confidence)
+            return MuscleSuggestion(shares: applyingTag(tagged, to: base.shares), basedOn: base.basedOn, confidence: .tagged, score: base.score, baseConfidence: base.confidence, tiedBuiltIns: base.tiedBuiltIns)
         }
         return MuscleSuggestion(shares: [tagged: 1.0], basedOn: "its tag", confidence: .tagged, score: 1)
     }
 
-    /// Whether the closest built-in is a compound lift, when the match is exact or close (a tag does not change the movement).
-    /// Ambiguous, keyword-only and unmatched names are false: nothing is assumed compound on a weak match.
+    /// True only when every named built-in is compound; any disagreement, an empty list or an unknown name is false.
+    static func tieIsCompound(_ names: [String]) -> Bool {
+        let values = names.map { n in ExerciseCatalog.builtIn.first { $0.name == n }?.isCompound }
+        return !values.isEmpty && values.allSatisfy { $0 == true }
+    }
+
+    /// Whether the closest built-in is a compound lift: on an exact or close match its value (a tag does not change the
+    /// movement); on an ambiguous match the value the tied built-ins all share; a disagreement, a keyword-only match or no
+    /// match is false.
     static func suggestedCompound(name: String, coarse: MuscleGroup) -> Bool {
         guard let s = suggest(name: name, coarse: coarse) else { return false }
         let confidence = s.confidence == .tagged ? s.baseConfidence : s.confidence
-        guard confidence == .exact || confidence == .close else { return false }
-        return ExerciseCatalog.builtIn.first { $0.name == s.basedOn }?.isCompound ?? false
+        func compound(_ name: String) -> Bool? { ExerciseCatalog.builtIn.first { $0.name == name }?.isCompound }
+        if confidence == .exact || confidence == .close { return compound(s.basedOn) ?? false }
+        // Ambiguous: the tied built-ins disagree on the muscle, but if they all agree on compound-or-not, that is the answer.
+        // Only a disagreement among them (or no usable tie) is false.
+        if confidence == .ambiguous {
+            return tieIsCompound(s.tiedBuiltIns)
+        }
+        return false
     }
 
     private static func baseSuggestion(name: String, coarse: MuscleGroup) -> MuscleSuggestion? {
@@ -205,6 +220,6 @@ enum MuscleSuggester {
         if straight { shares = removingElbowFlexors(from: shares) }
         let confidence: MuscleSuggestion.Confidence =
             primaries.count > 1 ? .ambiguous : (best.score == 1 && best.jaccard == 1 ? .exact : .close)
-        return MuscleSuggestion(shares: shares, basedOn: best.name, confidence: confidence, score: best.score)
+        return MuscleSuggestion(shares: shares, basedOn: best.name, confidence: confidence, score: best.score, tiedBuiltIns: tied.map(\.name))
     }
 }
