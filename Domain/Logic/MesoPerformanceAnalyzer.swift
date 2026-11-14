@@ -168,43 +168,23 @@ enum MesoPerformanceAnalyzer {
 
         // MARK: - Totals
 
+        // Working sets only (WorkingSetFilter via ItemStats: no warm-ups, skipped rows or rest-pause / drop add-ons) at the
+        // effective load: the same sets the By-exercise rows count. The header covers every completed session of the block
+        // (deload weeks included); the rows leave deload weeks out of their trends but count the same kind of set.
         var totalVolume: Double = 0
         var totalSets = 0
         var totalReps = 0
-
-        for session in completedSessions {
-            for item in session.items {
-                let setCount = min(item.actualLoads.count, item.actualReps.count)
-                for idx in 0..<setCount {
-                    let load = effective(item.actualLoads[idx], item)
-                    let reps = item.actualReps[idx]
-                    guard reps > 0, load > 0 || isBW(item) else { continue }
-                    totalVolume += load * Double(reps)
-                    totalSets += 1
-                    totalReps += reps
-                }
-            }
-        }
-
-        // MARK: - Weekly volume
-
         var volumeByWeek: [Int: (volume: Double, sets: Int)] = [:]
         for session in completedSessions {
-            let week = session.weekIndex
             var weekVolume: Double = 0
             var weekSets = 0
             for item in session.items {
-                let setCount = min(item.actualLoads.count, item.actualReps.count)
-                for idx in 0..<setCount {
-                    let load = effective(item.actualLoads[idx], item)
-                    let reps = item.actualReps[idx]
-                    guard reps > 0, load > 0 || isBW(item) else { continue }
-                    weekVolume += load * Double(reps)
-                    weekSets += 1
-                }
+                let st = AnalyticsEngine.ItemStats.of(item, bodyWeight: bodyWeight)
+                totalVolume += st.volume; totalSets += st.sets; totalReps += st.reps
+                weekVolume += st.volume; weekSets += st.sets
             }
-            let existing = volumeByWeek[week] ?? (0, 0)
-            volumeByWeek[week] = (existing.volume + weekVolume, existing.sets + weekSets)
+            let existing = volumeByWeek[session.weekIndex] ?? (0, 0)
+            volumeByWeek[session.weekIndex] = (existing.volume + weekVolume, existing.sets + weekSets)
         }
 
         let weeklyVolume = volumeByWeek.keys.sorted().map { week in

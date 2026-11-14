@@ -390,6 +390,25 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertTrue(MesoSummaryView.trendCaption.contains("working sets"))
     }
 
+    func test_mesoHeaderTotals_countWorkingSetsOnly_andEqualTheSumOfTheRows() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        for d in [0, 7] {
+            let s = Session(date: day(d), status: .completed, weekIndex: 1 + d / 7, dayLabel: "D", items: [
+                item("bench_press", reps: [10, 5, 5], loads: [40, 200, 200]),            // a warm-up, then 2 working sets
+                item("barbell_row", reps: [8, 8], loads: [150, 150])])
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        let a = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
+        XCTAssertEqual(a.totalSets, 8, "(2 + 2) per session x 2 sessions; the 40 lb warm-ups are out")
+        XCTAssertEqual(a.totalReps, 2 * (10 + 16))
+        XCTAssertEqual(a.totalVolume, 2 * (2000 + 2400), accuracy: 1e-9)
+        XCTAssertEqual(a.totalSets, a.exerciseSummaries.reduce(0) { $0 + $1.totalSets }, "header = sum of the rows")
+        XCTAssertEqual(a.totalVolume, a.exerciseSummaries.reduce(0) { $0 + $1.totalVolume }, accuracy: 1e-9)
+        XCTAssertEqual(a.weeklyVolume.map(\.completedSets), [4, 4])
+    }
+
     func test_verdictChip_isTheFirstToLastE1RMChange_withPlusMinus3PercentBands() throws {
         func verdict(first: Double, last: Double) throws -> (ExerciseVerdict, Double?) {
             let ctx = ModelContext(try BackupTestSupport.makeContainer())
