@@ -17,6 +17,15 @@ struct SettingsView: View {
     @State private var showImportBackupPicker = false
     @State private var importMessage: String = ""
     @State private var showImportAlert = false
+    /// A file chosen for restore (from the picker, or a pre-import snapshot), waiting for the user's confirmation.
+    @State private var pendingRestore: PendingRestore? = nil
+
+    struct PendingRestore: Identifiable {
+        let id = UUID()
+        let url: URL
+        /// A temp copy of a picked file, deleted when the restore is cancelled or done. A snapshot is never deleted.
+        let isTemporaryCopy: Bool
+    }
 
     // MARK: - Meso generation feedback
     @State private var mesoGenerationMessage: String = ""
@@ -237,6 +246,16 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.red)
 
+                if let snapshot = PreImportSnapshots.undoCandidate() {
+                    Button("Restore pre-import state (\(snapshot.date.formatted(date: .abbreviated, time: .shortened)))") {
+                        pendingRestore = PendingRestore(url: snapshot.url, isTemporaryCopy: false)
+                    }
+                    .foregroundStyle(.red)
+                    Text("Your data as it was just before the last import. Available for 30 days.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Button("Export Full Backup (JSON)") {
                     exportError = nil
                     do {
@@ -347,39 +366,27 @@ struct SettingsView: View {
             do {
                 let urls = try result.get()
                 guard let url = urls.first else { return }
-
+                // Copy the picked file out of its security scope now, so confirming later does not depend on it.
                 let didAccess = url.startAccessingSecurityScopedResource()
-
-                // Post notification first — tears down live SwiftData views before deletion
-                NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
-
-                Task { @MainActor in
-                    defer {
-                        if didAccess {
-                            url.stopAccessingSecurityScopedResource()
-                        }
-                    }
-                    try? await Task.sleep(for: .milliseconds(150))
-                    do {
-                        // Snapshots the current store first (verified); an import never starts without one.
-                        let restore = try BackupRestoreCoordinator.restore(from: url, container: context.container)
-                        importMessage = """
-                        Restored backup successfully.
-
-                        Meso blocks: \(restore.mesoBlockCount)
-                        Sessions: \(restore.sessionCount)
-                        Session history: \(restore.sessionHistoryCount)
-                        Exercise notes: \(restore.exerciseNoteCount)
-                        """
-                    } catch {
-                        importMessage = "Backup import failed: \(error.localizedDescription)"
-                    }
-                    showImportAlert = true
-                }
+                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                let copy = FileManager.default.temporaryDirectory.appendingPathComponent("restore_\(UUID().uuidString).json")
+                try FileManager.default.copyItem(at: url, to: copy)
+                pendingRestore = PendingRestore(url: copy, isTemporaryCopy: true)
             } catch {
                 importMessage = "Backup import failed: \(error.localizedDescription)"
                 showImportAlert = true
             }
+        }
+        .confirmationDialog(
+            "Replace all data on this device with this backup?",
+            isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { cancelPendingRestore() } }),
+            titleVisibility: .visible,
+            presenting: pendingRestore
+        ) { pending in
+            Button("Replace", role: .destructive) { runRestore(pending) }
+            Button("Cancel", role: .cancel) { cancelPendingRestore() }
+        } message: { _ in
+            Text("A copy of your current data is saved first, and Restore pre-import state can bring it back.")
         }
         .confirmationDialog(
             pendingRepair?.title ?? "",
@@ -403,6 +410,38 @@ struct SettingsView: View {
             Text(importMessage)
         }
         
+    }
+
+    // MARK: - Restore
+
+    private func cancelPendingRestore() {
+        if let p = pendingRestore, p.isTemporaryCopy { try? FileManager.default.removeItem(at: p.url) }
+        pendingRestore = nil
+    }
+
+    /// The one restore path for the picker AND "Restore pre-import state": `BackupRestoreCoordinator` snapshots first.
+    private func runRestore(_ pending: PendingRestore) {
+        pendingRestore = nil
+        // Post notification first — tears down live SwiftData views before deletion
+        NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
+        Task { @MainActor in
+            defer { if pending.isTemporaryCopy { try? FileManager.default.removeItem(at: pending.url) } }
+            try? await Task.sleep(for: .milliseconds(150))
+            do {
+                let restore = try BackupRestoreCoordinator.restore(from: pending.url, container: context.container)
+                importMessage = """
+                Restored backup successfully.
+
+                Meso blocks: \(restore.mesoBlockCount)
+                Sessions: \(restore.sessionCount)
+                Session history: \(restore.sessionHistoryCount)
+                Exercise notes: \(restore.exerciseNoteCount)
+                """
+            } catch {
+                importMessage = "Backup import failed: \(error.localizedDescription)"
+            }
+            showImportAlert = true
+        }
     }
 
     // MARK: - Helpers

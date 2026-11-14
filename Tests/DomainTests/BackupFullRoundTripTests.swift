@@ -280,4 +280,32 @@ final class ImportSafetyTests: XCTestCase {
         XCTAssertEqual(kept.count, 5)
         XCTAssertEqual(kept.first?.date, Date(timeIntervalSince1970: 1_800_000_000 + 6 * 60), "newest first; the 2 oldest were pruned")
     }
+
+    func test_undo_returnsTheStoreToItsExactPreImportCounts_andSnapshotsFirstItself() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000); try extraSession(srcCtx, day: 1_800_100_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, targetCtx) = try populated()
+        let before = try BackupContentSummary.of(store: targetCtx)
+        let t0 = Date()
+
+        try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: dir, now: t0)
+        XCTAssertNotEqual(try counts(ModelContext(targetC)), before.verifiedCounts, "the import changed the store")
+
+        let undo = try XCTUnwrap(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(3600)))
+        try BackupRestoreCoordinator.restore(from: undo.url, container: targetC, snapshotDirectory: dir, now: t0.addingTimeInterval(3600))
+        let after = try BackupContentSummary.of(store: ModelContext(targetC))
+        XCTAssertEqual(after.verifiedCounts, before.verifiedCounts, "exact pre-import counts")
+        XCTAssertEqual(after.completedSessions, before.completedSessions)
+        XCTAssertEqual(PreImportSnapshots.list(in: dir).count, 2, "the undo snapshotted the imported state first, so it can itself be undone")
+    }
+
+    func test_undoIsOfferedOnlyWhileTheNewestSnapshotIsUnder30DaysOld() throws {
+        let (_, ctx) = try populated()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertNil(PreImportSnapshots.undoCandidate(in: dir, now: t0), "no snapshot, no undo")
+        try PreImportSnapshots.take(from: ctx, in: dir, now: t0)
+        XCTAssertNotNil(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(29 * 86_400)))
+        XCTAssertNil(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(31 * 86_400)))
+    }
 }
