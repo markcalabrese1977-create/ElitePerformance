@@ -32,6 +32,25 @@ struct MesoRemaining: Equatable {
     }
 }
 
+extension MesoRemaining {
+    /// THE one statement of how much of the block is left, used by the Meso Summary's header narrative AND its "What's next?"
+    /// card so they can never disagree: "Week 8 of 12 · 9 sessions left (last Jan 30, 2027)". Nil when nothing remains.
+    func statusLine(week: Int, totalWeeks: Int) -> String? {
+        guard remainingSessions > 0 else { return nil }
+        let last = lastPlannedDate.map { " (last \($0.formatted(date: .abbreviated, time: .omitted)))" } ?? ""
+        return "Week \(week) of \(totalWeeks) · \(remainingSessions) session\(remainingSessions == 1 ? "" : "s") left\(last)"
+    }
+
+    /// The "What's next?" headline while sessions remain: the status line, then the next-block guidance.
+    func cardHeadline(week: Int, totalWeeks: Int, finalWeekGuidance: String) -> String? {
+        guard let line = statusLine(week: week, totalWeeks: totalWeeks) else { return nil }
+        let guidance = isFinalWeekOrOver
+            ? finalWeekGuidance
+            : "The next block starts the day after the last planned session; pick it when this one is nearly done."
+        return "\(line). \(guidance)"
+    }
+}
+
 /// The header of the Meso Summary: where the block stands.
 struct MesoHeader: Equatable {
     let name: String

@@ -797,12 +797,9 @@ final class MesoComparisonTests: XCTestCase {
     func test_narrative_inProgressSaysWeekNofM_andWeeksLeft_completedKeepsTheEndOfBlockWording() throws {
         let a = try mesoAnalysisWith(prior: [[(-50, [5], [200])]], current: [(0, [5], [215]), (7, [5], [225])])
         XCTAssertEqual(a.overallVerdict, .progressing)
-        let mid = a.inProgressNarrative(week: 8, totalWeeks: 12)
-        XCTAssertTrue(mid.hasPrefix("Week 8 of 12, 4 weeks left."), mid)
-        XCTAssertTrue(mid.contains("So far"), mid)
+        let mid = a.inProgressNarrative(status: "Week 8 of 12 · 9 sessions left (last Jan 30, 2027)")
+        XCTAssertTrue(mid.hasPrefix("Week 8 of 12 · 9 sessions left (last Jan 30, 2027). So far"), mid)
         for endOfBlock in ["Strong meso", "carry that into the next block", "next block"] { XCTAssertFalse(mid.contains(endOfBlock), mid) }
-        XCTAssertTrue(a.inProgressNarrative(week: 11, totalWeeks: 12).hasPrefix("Week 11 of 12, 1 week left."))
-        XCTAssertTrue(a.inProgressNarrative(week: 12, totalWeeks: 12).hasPrefix("Week 12 of 12, last week."))
         // a completed meso keeps the current wording
         XCTAssertTrue(a.verdictNarrative.hasPrefix("Strong meso."))
         XCTAssertTrue(a.verdictNarrative.contains("carry that into the next block"))
@@ -814,8 +811,34 @@ final class MesoComparisonTests: XCTestCase {
         s.meso = meso; meso.sessions.append(s); ctx.insert(s)
         let one = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: []))
         XCTAssertEqual(one.overallVerdict, .insufficient)
-        XCTAssertTrue(one.inProgressNarrative(week: 2, totalWeeks: 4).hasSuffix("Not enough completed sessions yet to assess this meso."))
+        XCTAssertTrue(one.inProgressNarrative(status: "Week 2 of 4 · 5 sessions left").hasSuffix("Not enough completed sessions yet to assess this meso."))
         XCTAssertEqual(one.verdictNarrative, "Not enough completed sessions to assess this meso.")
+    }
+
+    func test_headerNarrativeAndWhatsNextCard_readTheSameWeeksRemainingSource() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = day(0)
+        // 3 weeks of sessions still to do (sessions on day 2, 9, 16), one already completed
+        let sessions: [(date: Date, status: SessionStatus)] = [(day(-3), .completed), (day(2), .planned), (day(9), .planned), (day(16), .planned)]
+        let r = MesoRemaining.compute(sessions: sessions, now: now, calendar: cal)
+        let line = try XCTUnwrap(r.statusLine(week: 2, totalWeeks: 4))
+        XCTAssertEqual(r.remainingSessions, 3)
+        let last = r.lastPlannedDate!.formatted(date: .abbreviated, time: .omitted)
+        XCTAssertEqual(line, "Week 2 of 4 · 3 sessions left (last \(last))")
+        // the header narrative and the card both lead with exactly that line
+        let a = try mesoAnalysisWith(prior: [[(-50, [5], [200])]], current: [(0, [5], [215]), (7, [5], [225])])
+        XCTAssertTrue(a.inProgressNarrative(status: line).hasPrefix(line + "."))
+        let card = try XCTUnwrap(r.cardHeadline(week: 2, totalWeeks: 4, finalWeekGuidance: "FINAL"))
+        XCTAssertTrue(card.hasPrefix(line + "."), card)
+        XCTAssertFalse(card.contains("FINAL"), "more than a week left: the start-the-day-after guidance")
+        // final week with sessions left: same line, and the card still shows it
+        let rFinal = MesoRemaining.compute(sessions: [(day(1), .planned)], now: now, calendar: cal)
+        XCTAssertEqual(rFinal.statusLine(week: 4, totalWeeks: 4).map { $0.contains("1 session left") }, true)
+        XCTAssertTrue(try XCTUnwrap(rFinal.cardHeadline(week: 4, totalWeeks: 4, finalWeekGuidance: "FINAL")).hasSuffix("FINAL"))
+        // nothing left: no line, the card falls back to the recommendation
+        let done = MesoRemaining.compute(sessions: [(day(-3), .completed)], now: now, calendar: cal)
+        XCTAssertNil(done.statusLine(week: 4, totalWeeks: 4))
+        XCTAssertNil(done.cardHeadline(week: 4, totalWeeks: 4, finalWeekGuidance: "FINAL"))
     }
 
     func test_statsTile_countsRecordSettingSessions_notLiftsWithAPRChip() throws {

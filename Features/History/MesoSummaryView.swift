@@ -38,13 +38,18 @@ struct MesoSummaryView: View {
     /// A meso in progress (active, with sessions still to do) gets the "Week N of M, K weeks left" narrative; a completed one
     /// keeps the end-of-block wording.
     private func narrative(_ analysis: MesoAnalysis) -> String {
-        if meso.status == .active, let r = remaining, r.remainingSessions > 0 {
-            let h = MesoHeader.compute(
-                name: meso.name, totalWeeks: meso.totalWeeks,
-                sessions: meso.sessions.map { ($0.date, $0.plannedDate, $0.status, $0.weekIndex) })
-            return analysis.inProgressNarrative(week: h.currentWeek, totalWeeks: h.totalWeeks)
+        if meso.status == .active, let r = remaining, let status = statusLine(r) {
+            return analysis.inProgressNarrative(status: status)
         }
         return analysis.verdictNarrative
+    }
+
+    /// The one "Week N of M · K sessions left (last <date>)" line, shared by the narrative and the What's next? card.
+    private func statusLine(_ r: MesoRemaining) -> String? {
+        let h = MesoHeader.compute(
+            name: meso.name, totalWeeks: meso.totalWeeks,
+            sessions: meso.sessions.map { ($0.date, $0.plannedDate, $0.status, $0.weekIndex) })
+        return r.statusLine(week: h.currentWeek, totalWeeks: h.totalWeeks)
     }
 
     private var headerLine: String {
@@ -843,9 +848,13 @@ struct MesoSummaryView: View {
 
     /// While planned sessions remain before the final week there is no verdict yet, only how long is left.
     private func nextBlockHeadline(_ analysis: MesoAnalysis) -> String {
-        if meso.status == .active, let r = remaining, !r.isFinalWeekOrOver {
-            let last = r.lastPlannedDate?.formatted(date: .abbreviated, time: .omitted) ?? ""
-            return "\(r.weeksRemaining) week\(r.weeksRemaining == 1 ? "" : "s") remaining (\(r.remainingSessions) sessions, last on \(last)). The next block starts the day after the last planned session; pick it when this one is nearly done."
+        if meso.status == .active, let r = remaining {
+            let h = MesoHeader.compute(
+                name: meso.name, totalWeeks: meso.totalWeeks,
+                sessions: meso.sessions.map { ($0.date, $0.plannedDate, $0.status, $0.weekIndex) })
+            if let text = r.cardHeadline(week: h.currentWeek, totalWeeks: h.totalWeeks, finalWeekGuidance: nextBlockRecommendationText(analysis)) {
+                return text
+            }
         }
         return nextBlockRecommendationText(analysis)
     }

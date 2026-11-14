@@ -119,9 +119,9 @@ struct MesoAnalysis {
 
     /// The narrative for a meso still in progress: where the block stands, then what the numbers say SO FAR (no end-of-block
     /// phrasing). `verdictNarrative` stays for a completed meso.
-    func inProgressNarrative(week: Int, totalWeeks: Int) -> String {
-        let left = max(totalWeeks - week, 0)
-        let head = left == 0 ? "Week \(week) of \(totalWeeks), last week." : "Week \(week) of \(totalWeeks), \(left) week\(left == 1 ? "" : "s") left."
+    /// `status` is `MesoRemaining.statusLine` (the same text the "What's next?" card leads with).
+    func inProgressNarrative(status: String) -> String {
+        let head = status + "."
         switch overallVerdict {
         case .progressing: return head + " So far load is moving on most exercises and your e1RM trend is positive."
         case .plateaued: return head + " So far performance is holding steady across the block."
