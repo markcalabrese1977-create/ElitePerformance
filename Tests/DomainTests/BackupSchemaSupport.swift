@@ -168,6 +168,8 @@ enum PopulatedStoreBuilder {
         probeCustom.fineMuscleRaw = "upperBack"
         probeCustom.fineSecondaryShares = ["lats": 0.5, "rearDelts": 0.25]
         ctx.insert(probeCustom)
+        ctx.insert(CustomExercise(id: "probe_custom_undecided", name: "Probe Undecided Lift", primaryMuscleRaw: "chest",
+                                      isCompound: nil, createdAt: day(-14)))   // not decided: nil must survive a round trip
         try ctx.save()
     }
 

@@ -22,6 +22,8 @@ struct MuscleSuggestion: Equatable {
     let confidence: Confidence
     /// Fraction of the custom's movement words found in `basedOn`'s name (0...1).
     let score: Double
+    /// For a `.tagged` suggestion: how well the name itself matched a built-in before the tag set the primary muscle.
+    var baseConfidence: Confidence? = nil
 
     var primary: FineMuscle? { shares.first { $0.value == 1 }?.key }
 }
@@ -140,9 +142,18 @@ enum MuscleSuggester {
         let base = baseSuggestion(name: name, coarse: coarse)
         guard let tagged else { return base }
         if let base {
-            return MuscleSuggestion(shares: applyingTag(tagged, to: base.shares), basedOn: base.basedOn, confidence: .tagged, score: base.score)
+            return MuscleSuggestion(shares: applyingTag(tagged, to: base.shares), basedOn: base.basedOn, confidence: .tagged, score: base.score, baseConfidence: base.confidence)
         }
         return MuscleSuggestion(shares: [tagged: 1.0], basedOn: "its tag", confidence: .tagged, score: 1)
+    }
+
+    /// Whether the closest built-in is a compound lift, when the match is exact or close (a tag does not change the movement).
+    /// Ambiguous, keyword-only and unmatched names are false: nothing is assumed compound on a weak match.
+    static func suggestedCompound(name: String, coarse: MuscleGroup) -> Bool {
+        guard let s = suggest(name: name, coarse: coarse) else { return false }
+        let confidence = s.confidence == .tagged ? s.baseConfidence : s.confidence
+        guard confidence == .exact || confidence == .close else { return false }
+        return ExerciseCatalog.builtIn.first { $0.name == s.basedOn }?.isCompound ?? false
     }
 
     private static func baseSuggestion(name: String, coarse: MuscleGroup) -> MuscleSuggestion? {

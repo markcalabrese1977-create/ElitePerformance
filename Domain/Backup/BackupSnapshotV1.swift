@@ -291,7 +291,8 @@ struct CustomExerciseBackupDTO: Codable {
     let id: String
     let name: String
     let primaryMuscleRaw: String
-    let isCompound: Bool
+    /// nil = not decided (old backups always carry a value).
+    let isCompound: Bool?
     let createdAt: Date
     let isBodyweight: Bool?
     /// Analytics fine-muscle mapping. Absent in old backups: not mapped.
