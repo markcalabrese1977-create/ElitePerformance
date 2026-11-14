@@ -112,3 +112,6 @@ PRIndex is stored and rebuilt (import, PRIndexRuleBackfill) but nothing live rea
 
 ## full_gate.sh should take a lock
 scripts/full_gate.sh should refuse to start while another gate holds a lock (two runs share one output dir and clobber each other).
+
+## PersonalRecords.suspects needs a user "confirmed real" flag
+PersonalRecords.suspects needs a user "confirmed real" flag before it's ever displayed (e.g. Smith Machine Hip Thrust 351×10 is genuine).
