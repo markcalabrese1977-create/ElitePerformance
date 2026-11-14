@@ -203,6 +203,7 @@ struct CustomMuscleMappingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var primary: FineMuscle?
     @State private var secondary: [FineMuscle: Double] = [:]
+    @State private var compound = false
     @State private var loaded = false
 
     private var custom: CustomExercise? {
@@ -214,6 +215,12 @@ struct CustomMuscleMappingSheet: View {
         return MuscleSuggester.suggest(name: c.name, coarse: MuscleGroup(rawValue: c.primaryMuscleRaw) ?? .chest)
     }
 
+    private var compoundFootnote: String {
+        let suggested = custom.map { MuscleSuggester.suggestedCompound(name: $0.name, coarse: MuscleGroup(rawValue: $0.primaryMuscleRaw) ?? .chest) } ?? false
+        let state = custom?.isCompound == nil ? "not decided yet" : "your choice"
+        return "Suggested: \(suggested ? "compound" : "not compound") (\(state)). Compound lifts record RIR with one tap and are judged on total reps."
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -222,6 +229,11 @@ struct CustomMuscleMappingSheet: View {
                         Text("Not mapped").tag(FineMuscle?.none)
                         ForEach(FineMuscle.allCases, id: \.self) { m in Text(m.displayName).tag(FineMuscle?.some(m)) }
                     }
+                }
+                Section {
+                    Toggle("Compound lift", isOn: $compound)
+                } footer: {
+                    Text(compoundFootnote)
                 }
                 if let s = suggestion {
                     Section("Suggestion") {
@@ -256,7 +268,9 @@ struct CustomMuscleMappingSheet: View {
                     Button("Save") {
                         if let c = custom {
                             c.setFineMapping(primary: primary, secondary: secondary)
+                            c.isCompound = compound
                             try? modelContext.save()
+                            ExerciseCatalog.rebuildCustomMirror(from: modelContext)   // context-free lookups read the mirror
                         }
                         dismiss()
                     }
@@ -269,6 +283,7 @@ struct CustomMuscleMappingSheet: View {
             .onAppear {
                 guard !loaded, let c = custom else { return }
                 loaded = true
+                compound = c.resolvedIsCompound   // the lifter's choice, else what the closest built-in suggests
                 if c.sanitizeFineMapping() { try? modelContext.save() }
                 primary = c.fineMuscleRaw.flatMap(FineMuscle.init(rawValue:))
                 secondary = Dictionary(uniqueKeysWithValues: (c.fineSecondaryShares ?? [:]).compactMap { k, v in

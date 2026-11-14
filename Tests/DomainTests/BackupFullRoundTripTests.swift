@@ -1697,3 +1697,160 @@ final class RIRAccessScanTests: XCTestCase {
         XCTAssertNil(RIREntry.recorded(bench(RIREntry.unset), at: 0))
     }
 }
+
+// MARK: - CCC: custom exercises can be compound
+
+final class CustomCompoundTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    private func context() throws -> ModelContext {
+        ModelContext(try BackupTestSupport.makeContainer())
+    }
+
+    private func custom(_ ctx: ModelContext, _ name: String, muscle: String, compound: Bool?) -> CustomExercise {
+        let c = CustomExercise(id: "custom_\(UUID().uuidString.lowercased())", name: name, primaryMuscleRaw: muscle, isCompound: compound)
+        ctx.insert(c)
+        return c
+    }
+
+    func test_anUndecidedCustom_inheritsFromItsMatch_anExplicitValueWins_aWeakMatchIsFalse() throws {
+        let ctx = try context()
+        XCTAssertTrue(custom(ctx, "Smith Incline Bench Press", muscle: "chest", compound: nil).resolvedIsCompound)
+        XCTAssertTrue(custom(ctx, "Smith Split Squat", muscle: "quads", compound: nil).resolvedIsCompound, "a close match to a compound")
+        XCTAssertFalse(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: nil).resolvedIsCompound, "an ambiguous match (several rows disagree on the muscle) is not assumed compound")
+        XCTAssertTrue(custom(ctx, "DB Row [Lat Bias]", muscle: "back", compound: true).resolvedIsCompound, "...until the lifter says so")
+        XCTAssertFalse(custom(ctx, "Straight-Arm Cable Pulldown", muscle: "back", compound: nil).resolvedIsCompound)
+        XCTAssertFalse(custom(ctx, "Cable EZ-Bar Curl", muscle: "biceps", compound: nil).resolvedIsCompound)
+        XCTAssertFalse(custom(ctx, "Incline DB Lateral Raise", muscle: "shoulders", compound: nil).resolvedIsCompound)
+        XCTAssertFalse(custom(ctx, "Band Pushdown [Rehab]", muscle: "triceps", compound: nil).resolvedIsCompound)
+        XCTAssertFalse(custom(ctx, "Totally Unknown Movement", muscle: "chest", compound: nil).resolvedIsCompound, "no match: false")
+
+        XCTAssertFalse(custom(ctx, "Smith Incline Bench Press", muscle: "chest", compound: false).resolvedIsCompound, "the lifter's false wins")
+        XCTAssertTrue(custom(ctx, "Hammer Curl [Hotel]", muscle: "biceps", compound: true).resolvedIsCompound, "the lifter's true wins")
+    }
+
+    func test_anAmbiguousMatch_defaultsToFalse() throws {
+        // Any name whose suggestion is ambiguous / keyword-only can never read as compound.
+        let names = ["Press", "Row", "Pulldown", "Extension", "Raise", "Fly", "Press Machine Fly", "Y Raise", "Reverse Fly"]
+        var sawWeak = false
+        for name in names {
+            for muscle in [MuscleGroup.chest, .back, .shoulders, .quads, .triceps] {
+                guard let s = MuscleSuggester.suggest(name: name, coarse: muscle) else { continue }
+                let effective = s.confidence == .tagged ? s.baseConfidence : s.confidence
+                if effective != .exact && effective != .close {
+                    sawWeak = true
+                    XCTAssertFalse(MuscleSuggester.suggestedCompound(name: name, coarse: muscle), "\(name) / \(muscle): \(s.confidence)")
+                }
+            }
+        }
+        XCTAssertTrue(sawWeak, "the sweep must include at least one weak (ambiguous or keyword) match")
+    }
+
+    func test_RIREntry_readsACustomsResolvedCompoundStatus_andRIRUnsetBackfillFollowsEachLaunch() throws {
+        let ctx = try context()
+        let row = custom(ctx, "Lever Row", muscle: "back", compound: false)       // decided: not compound
+        let item = SessionItem(order: 1, exerciseId: row.id, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        item.actualReps = [0, 0, 0]; item.actualRIRs = [0, 0, 0]
+        ctx.insert(Session(date: Date(), status: .planned, weekIndex: 1, items: [item]))
+        try ctx.save()
+        ExerciseCatalog.rebuildCustomMirror(from: ctx)
+        XCTAssertFalse(RIREntry.isCompound(row.id))
+        RIRUnsetBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(item.actualRIRs, [0, 0, 0], "an isolation custom is untouched")
+
+        row.isCompound = true                                                         // the lifter flips the toggle later
+        try ctx.save()
+        ExerciseCatalog.rebuildCustomMirror(from: ctx)
+        XCTAssertTrue(RIREntry.isCompound(row.id))
+        RIRUnsetBackfill.runIfNeeded(in: ctx)                                         // the next launch re-evaluates
+        XCTAssertEqual(item.actualRIRs, [-1, -1, -1], "newly-compound custom: padded zeros become unset")
+    }
+
+    func test_theBackfill_decidesOnlyUndecidedCustoms_logsTheNames_andRebuildsTheMirror() throws {
+        let ctx = try context()
+        let undecidedPress = custom(ctx, "Smith Incline Bench Press", muscle: "chest", compound: nil)
+        let undecidedCurl = custom(ctx, "Cable EZ-Bar Curl", muscle: "biceps", compound: nil)
+        let decided = custom(ctx, "Landmine Press", muscle: "shoulders", compound: false)
+        try ctx.save()
+        BackfillLog.collector = []
+        CustomExerciseCompoundBackfill.runIfNeeded(in: ctx)
+        let notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(undecidedPress.isCompound, true)
+        XCTAssertEqual(undecidedCurl.isCompound, false)
+        XCTAssertEqual(decided.isCompound, false, "a decided value is never overridden")
+        XCTAssertTrue(BackfillLog.result(from: notes).contains("Smith Incline Bench Press"), notes.joined())
+        XCTAssertFalse(BackfillLog.result(from: notes).contains("Landmine"), "decided customs are not in the list")
+        XCTAssertTrue(RIREntry.isCompound(undecidedPress.id), "the catalog mirror was rebuilt")
+        BackfillLog.collector = []
+        CustomExerciseCompoundBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed", "idempotent")
+        BackfillLog.collector = nil
+    }
+
+    /// The column was a non-optional Bool; an existing store must open with every value intact.
+    enum OldSchema: VersionedSchema {
+        static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
+        static var models: [any PersistentModel.Type] { [CustomExercise.self] }
+
+        @Model
+        final class CustomExercise {
+            var id: String
+            var name: String
+            var primaryMuscleRaw: String
+            var isCompound: Bool
+            var createdAt: Date
+            var isBodyweight: Bool = false
+            var fineMuscleRaw: String? = nil
+            var fineSecondaryShares: [String: Double]? = nil
+            init(id: String, name: String, primaryMuscleRaw: String, isCompound: Bool, createdAt: Date) {
+                self.id = id; self.name = name; self.primaryMuscleRaw = primaryMuscleRaw; self.isCompound = isCompound; self.createdAt = createdAt
+            }
+        }
+    }
+
+    func test_aStoreWrittenWithTheNonOptionalColumn_opensAndKeepsEveryValue() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("compound-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.store")
+        do {
+            let oldSchema = Schema(versionedSchema: OldSchema.self)
+            let old = try ModelContainer(for: oldSchema, configurations: ModelConfiguration(schema: oldSchema, url: url, cloudKitDatabase: .none))
+            let ctx = ModelContext(old)
+            ctx.insert(OldSchema.CustomExercise(id: "custom_a", name: "A", primaryMuscleRaw: "back", isCompound: true, createdAt: Date()))
+            ctx.insert(OldSchema.CustomExercise(id: "custom_b", name: "B", primaryMuscleRaw: "biceps", isCompound: false, createdAt: Date()))
+            try ctx.save()
+        }
+        let schema = AppSchema.makeSchema()
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none))
+        let rows = try ModelContext(container).fetch(FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.id)]))
+        XCTAssertEqual(rows.map(\.id), ["custom_a", "custom_b"])
+        XCTAssertEqual(rows.map(\.isCompound), [true, false], "the lifter's existing values carry over as decisions")
+    }
+
+    // LOCAL ONLY, READ-ONLY: the list the backfill would produce, and how the suggestion compares with what is stored.
+    func test_audit_compoundBackfillOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let customs = try ctx.fetch(FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.name)]))
+        var lines = ["COMPOUND BACKFILL AUDIT — \(customs.count) custom exercises; undecided (nil) in the file: \(customs.filter { $0.isCompound == nil }.count)"]
+        for c in customs {
+            let s = MuscleSuggester.suggest(name: c.name, coarse: MuscleGroup(rawValue: c.primaryMuscleRaw) ?? .chest)
+            let suggested = MuscleSuggester.suggestedCompound(name: c.name, coarse: MuscleGroup(rawValue: c.primaryMuscleRaw) ?? .chest)
+            let mark = (c.isCompound == nil ? "nil" : String(c.isCompound!)) + " | suggested " + String(suggested)
+            let why = s.map { "\($0.confidence.rawValue)\($0.baseConfidence.map { "/" + $0.rawValue } ?? "") like \($0.basedOn)" } ?? "no match"
+            lines.append("\(c.name): stored \(mark) · \(why)\(c.isCompound != nil && c.isCompound! != suggested ? "   <-- stored differs from suggestion" : "")")
+        }
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}

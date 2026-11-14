@@ -6,7 +6,9 @@ final class CustomExercise {
     var id: String
     var name: String
     var primaryMuscleRaw: String
-    var isCompound: Bool
+    /// The lifter's decision: a compound lift (RIR is recorded per set and drives progression) or not. nil = not decided yet:
+    /// `resolvedIsCompound` then follows the closest built-in (see `MuscleSuggester.suggestedCompound`).
+    var isCompound: Bool?
     var createdAt: Date
     var isBodyweight: Bool = false
     /// Analytics only: the fine muscle this exercise primarily trains (`FineMuscle.rawValue`), set by the lifter. nil =
@@ -19,7 +21,7 @@ final class CustomExercise {
         id: String,
         name: String,
         primaryMuscleRaw: String,
-        isCompound: Bool,
+        isCompound: Bool?,
         createdAt: Date = Date(),
         isBodyweight: Bool = false
     ) {
@@ -41,12 +43,18 @@ final class CustomExercise {
         return out
     }
 
+    /// What the app treats this exercise as: the lifter's value when set, else the suggestion from its closest built-in,
+    /// else false (an ambiguous or unknown match is never assumed compound).
+    var resolvedIsCompound: Bool {
+        isCompound ?? MuscleSuggester.suggestedCompound(name: name, coarse: MuscleGroup(rawValue: primaryMuscleRaw) ?? .chest)
+    }
+
     var asCatalogExercise: CatalogExercise {
         CatalogExercise(
             id: id,
             name: name,
             primaryMuscle: MuscleGroup(rawValue: primaryMuscleRaw) ?? .chest,
-            isCompound: isCompound,
+            isCompound: resolvedIsCompound,
             isBodyweight: isBodyweight
         )
     }

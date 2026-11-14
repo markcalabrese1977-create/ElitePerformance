@@ -20,6 +20,11 @@ enum RIREntry {
     /// catalog marks as a compound movement (the pushdowns and extensions that share a cluster with the presses are not).
     static func isCompound(_ exerciseId: String) -> Bool {
         let id = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        // A custom exercise has no cluster: it is compound when the lifter said so, or when its closest built-in is
+        // (`CustomExercise.resolvedIsCompound`, carried by the catalog mirror that context-free lookups read).
+        if !ExerciseCatalog.builtIn.contains(where: { $0.id == id }) {
+            return ExerciseCatalog.all.first(where: { $0.id == id })?.isCompound ?? false
+        }
         guard let cluster = ExerciseCatalog.cluster(for: id) else { return false }
         switch cluster {
         case .primaryChestPress, .secondaryPressOrArms, .primaryLeg: break

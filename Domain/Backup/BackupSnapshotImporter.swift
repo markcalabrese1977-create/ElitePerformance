@@ -285,7 +285,7 @@ enum BackupSnapshotImporter {
                 id: dto.id,
                 name: dto.name,
                 primaryMuscleRaw: dto.primaryMuscleRaw,
-                isCompound: dto.isCompound,
+                isCompound: dto.isCompound,   // nil stays nil: not decided
                 createdAt: dto.createdAt,
                 isBodyweight: dto.isBodyweight ?? false
             )
