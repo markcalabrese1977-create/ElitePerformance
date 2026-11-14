@@ -1953,6 +1953,67 @@ final class ProgramPlanPropagationTests: XCTestCase {
         XCTAssertTrue(targetSession.items.contains { $0.exerciseId == "machine_row" }, "new in source — must be appended to target")
         XCTAssertEqual(targetSession.items.count, 3, "old(deleted) leaves A + B + C(appended) = 3")
     }
+
+    // PP: scope = same weekday AND same dayLabel AND same wave letter AND same meso; edited targets are skipped and counted.
+    private func plannedSession(_ context: ModelContext, daysAhead: Int, label: String?, meso: MesoBlock?, wave: String? = nil, load: Double = 100, edited: Bool = false) -> (Session, SessionItem) {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: load)
+        item.waveRaw = wave
+        item.planEdited = edited
+        let date = Calendar.current.date(byAdding: .day, value: daysAhead, to: Date())!
+        let s = Session(date: date, status: .planned, weekIndex: 1, items: [item])
+        s.dayLabel = label
+        s.meso = meso
+        context.insert(s)
+        return (s, item)
+    }
+
+    func test_PP_aCrossLetterOrCrossDayOrCrossMesoTargetIsUntouched() throws {
+        let context = try makeContext()
+        let mesoA = MesoBlock(name: "A", startDate: Date(), totalWeeks: 8)
+        let mesoB = MesoBlock(name: "B", startDate: Date(), totalWeeks: 8)
+        context.insert(mesoA); context.insert(mesoB)
+        let (source, sourceItem) = plannedSession(context, daysAhead: 0, label: "Push", meso: mesoA, load: 200)
+        let (_, sameOK) = plannedSession(context, daysAhead: 7, label: "push ", meso: mesoA)
+        let (_, otherDay) = plannedSession(context, daysAhead: 14, label: "Pull", meso: mesoA)
+        let (_, otherMeso) = plannedSession(context, daysAhead: 21, label: "Push", meso: mesoB)
+        try context.save()
+        sourceItem.suggestedLoad = 200
+        let result = ProgramPlanPropagationService.applyPlanEditsForward(from: source, in: context)
+        XCTAssertEqual(result.sessionsToChange, 1)
+        XCTAssertEqual(sameOK.suggestedLoad, 200)
+        XCTAssertEqual(otherDay.suggestedLoad, 100, "a different dayLabel is not a target")
+        XCTAssertEqual(otherMeso.suggestedLoad, 100, "another meso is not a target")
+
+        // A target carrying a wave letter the source does not carry is not a target either.
+        let (src2, srcItem2) = plannedSession(context, daysAhead: 1, label: "Legs", meso: nil, load: 300)
+        let (_, waved) = plannedSession(context, daysAhead: 8, label: "Legs", meso: nil, wave: "B")
+        srcItem2.suggestedLoad = 300
+        ProgramPlanPropagationService.applyPlanEditsForward(from: src2, in: context)
+        XCTAssertEqual(waved.suggestedLoad, 100, "a different wave letter is not a target")
+    }
+
+    func test_PP_anEditedTargetItemIsSkippedAndCounted_andTheConfirmCountIsRight() throws {
+        let context = try makeContext()
+        let meso = MesoBlock(name: "M", startDate: Date(), totalWeeks: 8)
+        context.insert(meso)
+        let (source, _) = plannedSession(context, daysAhead: 0, label: "Push", meso: meso, load: 250)
+        let (_, plain1) = plannedSession(context, daysAhead: 7, label: "Push", meso: meso)
+        let (_, plain2) = plannedSession(context, daysAhead: 14, label: "Push", meso: meso)
+        let (_, edited) = plannedSession(context, daysAhead: 21, label: "Push", meso: meso, load: 111, edited: true)
+        try context.save()
+
+        let preview = ProgramPlanPropagationService.preview(from: source, in: context)
+        XCTAssertEqual(preview, .init(sessionsToChange: 3, editedItemsSkipped: 1, sessionsWithSkippedItems: 1))
+        let message = ProgramDayDetailView.propagationMessage(preview)
+        XCTAssertTrue(message.hasPrefix("3 future planned sessions"), message)
+        XCTAssertTrue(message.contains("1 exercise you edited by hand on 1 of them"), message)
+
+        let applied = ProgramPlanPropagationService.applyPlanEditsForward(from: source, in: context)
+        XCTAssertEqual(applied, preview)
+        XCTAssertEqual(plain1.suggestedLoad, 250)
+        XCTAssertEqual(plain2.suggestedLoad, 250)
+        XCTAssertEqual(edited.suggestedLoad, 111, "the lifter's edited target keeps its plan")
+    }
 }
 
 final class ReorderTests: XCTestCase {

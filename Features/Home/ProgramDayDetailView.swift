@@ -22,6 +22,7 @@ struct ProgramDayDetailView: View {
     @State private var dayLabelDraft: String = ""
     /// Items waiting for the lifter to confirm their removal from this session's plan.
     @State private var pendingDelete: PendingDelete?
+    @State private var pendingPropagation: ProgramPlanPropagationService.Preview?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
 
@@ -146,6 +147,12 @@ struct ProgramDayDetailView: View {
         }
         
         
+        .alert("Apply to future sessions?", isPresented: Binding(get: { pendingPropagation != nil }, set: { if !$0 { pendingPropagation = nil } })) {
+            Button("Apply") { confirmPropagation() }
+            Button("Not now", role: .cancel) { pendingPropagation = nil }
+        } message: {
+            Text(Self.propagationMessage(pendingPropagation))
+        }
         .alert("Plan Update", isPresented: $showFeedbackAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -672,7 +679,7 @@ struct ProgramDayDetailView: View {
         session.items.append(newItem)
 
         if propagatesToFutureSessions {
-                    ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+                    requestPropagation()
                 }
 
         do {
@@ -680,6 +687,30 @@ struct ProgramDayDetailView: View {
         } catch {
             print("⚠️ Failed to add exercise: \(error)")
         }
+    }
+
+    // MARK: - Propagation (always confirmed)
+
+    static func propagationMessage(_ p: ProgramPlanPropagationService.Preview?) -> String {
+        guard let p else { return "" }
+        var text = "\(p.sessionsToChange) future planned session\(p.sessionsToChange == 1 ? "" : "s") of this day type in this block will change."
+        if p.editedItemsSkipped > 0 {
+            text += " \(p.editedItemsSkipped) exercise\(p.editedItemsSkipped == 1 ? "" : "s") you edited by hand on \(p.sessionsWithSkippedItems) of them will be left as they are."
+        }
+        return text
+    }
+
+    /// Asks before copying this session's plan forward; does nothing when no session would change.
+    private func requestPropagation() {
+        let preview = ProgramPlanPropagationService.preview(from: session, in: modelContext)
+        guard preview.sessionsToChange > 0 else { return }
+        pendingPropagation = preview
+    }
+
+    private func confirmPropagation() {
+        pendingPropagation = nil
+        ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+        do { try modelContext.save() } catch { print("⚠️ Failed to apply plan to future sessions: \(error)") }
     }
 
     // MARK: - Removing items (confirmed, with undo)
@@ -731,7 +762,7 @@ struct ProgramDayDetailView: View {
         }
         guard !entries.isEmpty else { return }
         if p.propagate && propagatesToFutureSessions {
-            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+            requestPropagation()
         }
         do { try modelContext.save() } catch { print("⚠️ Failed to delete exercise: \(error)") }
         let label = entries.count == 1 ? "Removed \(itemName(entries[0].item))" : "Removed \(entries.count) exercises"
@@ -746,7 +777,7 @@ struct ProgramDayDetailView: View {
             session.items.append(entry.item)
         }
         if u.propagate && propagatesToFutureSessions {
-            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+            requestPropagation()
         }
         do { try modelContext.save() } catch { print("⚠️ Failed to restore exercise: \(error)") }
         undoDelete = nil
@@ -767,7 +798,7 @@ struct ProgramDayDetailView: View {
         }
 
         if propagatesToFutureSessions {
-            ProgramPlanPropagationService.applyPlanEditsForward(from: session, in: modelContext)
+            requestPropagation()
         }
 
         do {
