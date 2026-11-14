@@ -45,7 +45,7 @@ wait "$bpid"; brc=$?
 if [ $brc -ne 0 ] || ! grep -q "TEST BUILD SUCCEEDED" "$BLOG"; then
   tail -20 "$BLOG"; echo "VERDICT: BUILD_FAILED"; exit 3
 fi
-echo "[build] ok in $((SECONDS - start))s"
+BUILD_SECS=$((SECONDS - start)); echo "[build] ok in ${BUILD_SECS}s"
 
 # ---- 2. boot ----
 xcrun simctl boot "$SIM_ID" 2>/dev/null
@@ -78,6 +78,7 @@ while kill -0 "$tpid" 2>/dev/null; do
   fi
 done
 wait "$tpid" 2>/dev/null; trc=$?
+TEST_SECS=$((SECONDS - start))
 
 if [ -z "$verdict" ]; then
   # also catch a crash report that landed just as the run ended
@@ -87,6 +88,17 @@ if [ -z "$verdict" ]; then
   elif [ $trc -eq 0 ]; then verdict=PASS
   else verdict=FAIL; fi
 fi
+# A FULL run (no extra test selection) is judged against Tests/known_failures.txt: PASS only when there are no NEW FAILURES
+# and no KNOWN WITHOUT RESULT (a known test that did not run). A partial run (extra flags) keeps the raw xcodebuild verdict,
+# since a subset cannot give every known test a result.
+if [ ${#EXTRA[@]} -eq 0 ] && { [ "$verdict" = PASS ] || [ "$verdict" = FAIL ]; }; then
+  CMP="$("$(dirname "$0")/../Tests/compare_failures.sh" "$TLOG" 2>&1 || true)"
+  echo "$CMP" | head -40
+  NEWN="$(echo "$CMP" | sed -n 's/^== NEW FAILURES (\([0-9]*\)).*/\1/p')"
+  NORN="$(echo "$CMP" | sed -n 's/^== KNOWN WITHOUT RESULT (\([0-9]*\)).*/\1/p')"
+  if [ "${NEWN:-1}" = "0" ] && [ "${NORN:-1}" = "0" ]; then verdict=PASS; else verdict=FAIL; fi
+fi
+echo "[phase] debug build ${BUILD_SECS}s · test run ${TEST_SECS}s"
 echo "logs: $BLOG $TLOG   elapsed ${SECONDS}s"
 echo "VERDICT: $verdict"
 case $verdict in PASS) exit 0;; FAIL) exit 1;; *) exit 2;; esac
