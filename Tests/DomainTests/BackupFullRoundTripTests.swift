@@ -1572,3 +1572,64 @@ final class MissedSourceSeedingTests: XCTestCase {
         if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
     }
 }
+
+// MARK: - YY: RIRUnsetBackfill
+
+final class RIRUnsetBackfillTests: XCTestCase {
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    private func item(_ id: String, reps: [Int], rirs: [Int]) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100)
+        i.actualReps = reps; i.actualRIRs = rirs
+        return i
+    }
+
+    func test_paddedFutureCompoundSets_becomeUnset_loggedZeroStays_isolationAndCompletedUntouched_idempotent() throws {
+        let ctx = try context()
+        let padded = item("bench_press", reps: [0, 0, 0], rirs: [0, 0, 0])
+        let midSession = item("bench_press", reps: [8, 0, 0], rirs: [0, 0, 0])          // set 1 logged at a real RIR 0
+        let isolation = item("seated_cable_fly", reps: [0, 0], rirs: [0, 0])
+        let done = item("bench_press", reps: [0, 0], rirs: [0, 0])                       // completed: never touched
+        let planned = Session(date: Date(), status: .planned, weekIndex: 1, items: [padded, isolation])
+        let running = Session(date: Date(), status: .inProgress, weekIndex: 1, items: [midSession])
+        let complete = Session(date: Date(), status: .completed, weekIndex: 1, items: [done])
+        for s in [planned, running, complete] { ctx.insert(s) }
+        try ctx.save()
+
+        RIRUnsetBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(padded.actualRIRs, [-1, -1, -1])
+        XCTAssertEqual(midSession.actualRIRs, [0, -1, -1], "the logged set keeps its recorded 0")
+        XCTAssertEqual(isolation.actualRIRs, [0, 0])
+        XCTAssertEqual(done.actualRIRs, [0, 0])
+
+        let lines = LineSink()
+        BackfillLog.collector = []
+        RIRUnsetBackfill.runIfNeeded(in: ctx)
+        lines.notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines.notes), "not needed", "idempotent")
+        XCTAssertEqual(padded.actualRIRs, [-1, -1, -1])
+    }
+
+    private final class LineSink { var notes: [String] = [] }
+
+    // LOCAL ONLY, READ-ONLY.
+    func test_audit_whatTheBackfillWouldChangeOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let todo = RIRUnsetBackfill.candidates(in: ctx)
+        let items = Set(todo.map { ObjectIdentifier($0.item) }).count
+        let text = "RIR UNSET BACKFILL DRY RUN — \(todo.count) sets on \(items) compound items would become unset (nothing was saved)"
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}

@@ -660,8 +660,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
             "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
             "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
-            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "MissedSourceSeedBackfill"], "the registered list, in order")
-        XCTAssertEqual(registered.count, 15)
+            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "RIRUnsetBackfill", "MissedSourceSeedBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 16)
         for launch in [firstLaunch, secondLaunch] {
             XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
             for (line, name) in zip(launch, registered) {
