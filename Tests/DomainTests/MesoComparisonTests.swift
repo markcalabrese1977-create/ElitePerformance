@@ -375,6 +375,21 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(a.exerciseSummaries.count, 1)
     }
 
+    func test_byExerciseSetsAndVolume_countWorkingSetsOnly_noWarmups() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(meso)
+        // a 40 lb warm-up (under half of the 200 lb top weight) then two working sets
+        let it = item("bench_press", reps: [10, 5, 5], loads: [40, 200, 200])
+        let s = Session(date: day(0), status: .completed, weekIndex: 1, dayLabel: "D", items: [it])
+        s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        let e = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: [])?.exerciseSummaries.first)
+        XCTAssertEqual(e.totalSets, 2, "the warm-up is not a working set")
+        XCTAssertEqual(e.totalReps, 10)
+        XCTAssertEqual(e.totalVolume, 2000, accuracy: 1e-9)
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("working sets"))
+    }
+
     func test_verdictChip_isTheFirstToLastE1RMChange_withPlusMinus3PercentBands() throws {
         func verdict(first: Double, last: Double) throws -> (ExerciseVerdict, Double?) {
             let ctx = ModelContext(try BackupTestSupport.makeContainer())

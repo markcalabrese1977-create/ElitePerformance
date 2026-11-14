@@ -370,21 +370,17 @@ enum MesoPerformanceAnalyzer {
                         let displayName = catalog?.name ?? snapshotName ?? exerciseId
             let primaryMuscle = catalog?.primaryMuscle.rawValue.capitalized
 
-            // Per-exercise totals
-                        var exSets = 0
-                        var exReps = 0
-                        var exVolume: Double = 0
-                        for (_, item) in sessionsWithExercise {
-                            let setCount = min(item.actualLoads.count, item.actualReps.count)
-                            for idx in 0..<setCount {
-                                let load = effective(item.actualLoads[idx], item)
-                                let reps = item.actualReps[idx]
-                                guard reps > 0, load > 0 || isBW(item) else { continue }
-                                exSets += 1
-                                exReps += reps
-                                exVolume += load * Double(reps)
-                            }
-                        }
+            // Per-exercise totals: working sets only (WorkingSetFilter via ItemStats): no warm-ups, skipped rows or rest-pause /
+            // drop add-ons, at the effective load. The same sets the weekly-sets-by-muscle section counts.
+            var exSets = 0
+            var exReps = 0
+            var exVolume: Double = 0
+            for (_, item) in sessionsWithExercise {
+                let st = AnalyticsEngine.ItemStats.of(item, bodyWeight: bodyWeight)
+                exSets += st.sets
+                exReps += st.reps
+                exVolume += st.volume
+            }
 
                         exerciseSummaries.append(ExercisePerformanceSummary(
                             exerciseId: exerciseId,

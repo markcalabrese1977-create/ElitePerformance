@@ -868,8 +868,8 @@ struct MesoSummaryView: View {
     ///   +/-3% or more, else Holding. With no set of 12 reps or fewer it is the best load at matched reps instead;
     ///   a bodyweight lift with no body weight set uses reps per set.
     /// - "best" is the block's best single set of that lift (highest e1RM among sets of 12 reps or fewer).
-    /// - sets and volume count every logged working row of the block (load x reps).
-    static let trendCaption = "Trend and % = this lift's e1RM, first → last session of the block (±3% = Holding). Best = top set of the block, load × reps. Sets · volume = logged sets of the block."
+    /// - sets and volume count the block's working sets (WorkingSetFilter: no warm-ups), load x reps.
+    static let trendCaption = "Trend and % = this lift's e1RM, first → last session of the block (±3% = Holding). Best = top set of the block, load × reps. Sets · volume = working sets of the block (no warm-ups)."
 
     /// The chip is one word. What it measures is stated once, in `trendCaption`, under the "By exercise" header.
     private func verdictBadge(_ verdict: ExerciseVerdict) -> some View {
