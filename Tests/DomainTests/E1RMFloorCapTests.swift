@@ -442,7 +442,7 @@ final class FixedLoadExemptTests: XCTestCase {
             ("under-target reduce", item(pushdown, load: 50, reps: [6, 6, 6])),
             ("in range, not top", item(pushdown, load: 50, reps: [11, 11, 11])),
             ("off-target RIR", {
-                let i = item(pushdown, load: 50, reps: [12, 12, 12])   // target RIR 3
+                let i = item("bench_press", load: 50, reps: [12, 12, 12])   // a compound: RIR only gates compounds. Target RIR 3
                 i.actualRIRs = [0, 0, 0]                               // lifted at RIR 0
                 return i
             }()),
@@ -674,7 +674,7 @@ final class FixedLoadExemptTests: XCTestCase {
         out.append(("soreness+disruption", { let i = base()
             i.setFeedbackBySet = [SetFeedback.soreness.rawValue, SetFeedback.disruption.rawValue, ""]; return i }()))
 
-        out.append(("failure + rep crash", { let i = base([12, 10, 8]); i.actualRIRs = [0, 0, 0]; return i }()))
+        out.append(("failure + rep crash", { let i = item("bench_press", load: 50, reps: [12, 10, 8]); i.actualRIRs = [0, 0, 0]; return i }()))   // RIR gates compounds only
         out.append(("intra-session load drop", { let i = base(); i.actualLoads = [50, 50, 40]; return i }()))
 
         out.append(("incomplete: set 1 hard", { let i = base([12]); i.targetSets = 3; i.actualRIRs = [0]; return i }()))
@@ -686,7 +686,7 @@ final class FixedLoadExemptTests: XCTestCase {
         out.append(("flagged override at top", { let i = base()
             i.loadOverrideReasonRaw = LoadOverrideReason.generalFatigue.rawValue; return i }()))
         out.append(("in range, not top", base([11, 11, 11])))
-        out.append(("off-target RIR", { let i = base(); i.actualRIRs = [0, 0, 0]; return i }()))
+        out.append(("off-target RIR", { let i = item("bench_press", load: 50, reps: [12, 12, 12]); i.actualRIRs = [0, 0, 0]; return i }()))   // RIR gates compounds only
         out.append(("top of range (4c)", base()))
         out.append(("over-performed (4c)", base([14, 14, 14])))
         return out

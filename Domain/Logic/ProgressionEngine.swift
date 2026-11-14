@@ -425,7 +425,7 @@ extension SessionItem {
             guard idx < repCount, idx < loadCount else { continue }
             let reps = actualReps[idx]
             let load = actualLoads[idx]
-            let rirInt = idx < rirCount ? actualRIRs[idx] : 0
+            let rirInt: Int? = idx < rirCount ? RIREntry.decisionRIR(self, at: idx) : nil
 
             // Treat as a working set only if we have real data.
             if reps > 0 && load > 0 {
@@ -433,7 +433,7 @@ extension SessionItem {
                     SetSnapshot(
                         load: load,
                         reps: reps,
-                        rir: Double(rirInt)
+                        rir: rirInt.map(Double.init)
                     )
                 )
             }

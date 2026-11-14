@@ -102,7 +102,7 @@ enum SetsV1CSVExporter {
 
                     let actualReps = item.actualReps.safeInt(at: idx0).map(String.init) ?? ""
                     let actualLoad = item.actualLoads.safeDouble(at: idx0).map { formatDouble(unit.fromStoredLb($0)) } ?? ""
-                    let actualRIR  = item.actualRIRs.safeInt(at: idx0).map(String.init) ?? ""
+                    let actualRIR  = item.actualRIRs.safeInt(at: idx0).flatMap { RIREntry.value($0) }.map(String.init) ?? ""
 
                     let usedRP = item.usedRestPauseFlags.safeBool(at: idx0).map { $0 ? "true" : "false" } ?? ""
                     let rpPattern = item.restPausePatternsBySet.safeString(at: idx0) ?? ""

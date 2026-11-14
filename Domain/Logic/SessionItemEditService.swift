@@ -274,7 +274,7 @@ enum SessionItemEditService {
 
             item.actualLoads = Array(repeating: 0.0, count: rows)
             item.actualReps = Array(repeating: 0, count: rows)
-            item.actualRIRs = Array(repeating: 0, count: rows)
+            item.actualRIRs = RIREntry.unsetArray(count: rows)
             item.usedRestPauseFlags = Array(repeating: false, count: rows)
             item.restPausePatternsBySet = Array(repeating: "", count: rows)
             item.dropSetPatternsBySet = Array(repeating: "", count: rows)
@@ -1276,7 +1276,7 @@ extension SessionItemEditService {
                     plannedRIRsBySet: Array(repeating: deloadRIRRange.upperBound, count: n),
                     actualReps: Array(repeating: 0, count: n),
                     actualLoads: Array(repeating: 0.0, count: n),
-                    actualRIRs: Array(repeating: 0, count: n),
+                    actualRIRs: RIREntry.unsetArray(count: n),
                     usedRestPauseFlags: Array(repeating: false, count: n),
                     restPausePatternsBySet: Array(repeating: "", count: n),
                     dropSetPatternsBySet: Array(repeating: "", count: n),

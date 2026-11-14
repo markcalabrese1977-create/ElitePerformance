@@ -238,7 +238,7 @@ enum SetRecordBuilder {
                         targetRIR: item.isTopRow(i) ? (item.topRIR ?? item.targetRIR) : item.targetRIR,
                         reps: reps, load: at(item.actualLoads, i) ?? 0,
                         effectiveLoad: effective(at(item.actualLoads, i) ?? 0, isBodyweight: isBodyweight),
-                        rir: at(item.actualRIRs, i),
+                        rir: at(item.actualRIRs, i).flatMap { RIREntry.value($0) },
                         isSkipped: skipped,
                         isRestPause: at(item.usedRestPauseFlags, i) == true || (!pattern.isEmpty && !skipped),
                         isDrop: !(at(item.dropSetPatternsBySet, i) ?? "").isEmpty,

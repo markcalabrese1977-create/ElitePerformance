@@ -280,7 +280,7 @@ struct CoachingEngine {
         let lo = item.topRepMin ?? item.repMin ?? item.targetReps
         let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
         let targetRIR = item.topRIR ?? item.targetRIR
-        let rirs = rows.compactMap { $0 < item.actualRIRs.count ? item.actualRIRs[$0] : nil }
+        let rirs = rows.compactMap { RIREntry.decisionRIR(item, at: $0) }   // recorded, compound lifts only
         let avgRIR: Double? = rirs.isEmpty ? nil : Double(rirs.reduce(0, +)) / Double(rirs.count)
         let what = "Top set: \(compactLoad(load, unit: unit)) x \(reps.map(String.init).joined(separator: ", "))"
         let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
@@ -438,12 +438,11 @@ struct CoachingEngine {
         let repDrop = firstReps - lastReps
         let bestReps = primaryReps.max() ?? 0
 
-        let actualRIRs = item.actualRIRs
+        // RIR is evidence only when the lifter recorded it on a compound lift. An unset RIR, or any isolation set, leaves
+        // these empty: the set is judged on reps against the target alone and is never assumed "on target".
         var primaryRIRs: [Int] = []
-        if !actualRIRs.isEmpty {
-            for idx in primaryIndices where idx < actualRIRs.count {
-                primaryRIRs.append(actualRIRs[idx])
-            }
+        for idx in primaryIndices {
+            if let rir = RIREntry.decisionRIR(item, at: idx) { primaryRIRs.append(rir) }
         }
 
         var avgRIR: Double? = nil
@@ -598,10 +597,12 @@ struct CoachingEngine {
         // From here: safe + complete. Compute the policy signals.
         let repMax = plannedTopReps
         let repMin = plannedBottomReps
-        // RIR on target (existing definition; nil avgRIR treated as on-target).
+        // RIR gate. Nothing recorded (unset, or an isolation lift): the gate does not apply and the call rests on reps alone.
+        // Recorded on a compound: a set logged harder than plan-1 blocks an increase.
+        let rirRecorded = minRIR != nil
         let rirOnTarget: Bool = {
-            guard let avgRIR = avgRIR else { return true }
-            return abs(avgRIR - Double(targetRIR)) <= 0.5
+            guard let minRIR else { return true }
+            return minRIR >= targetRIR - 1
         }()
         // Double-progression trigger (decision B): EVERY primary working set at/above
         // the top of the range — not the best set. Uses the warmup-culled primary sets.
@@ -745,7 +746,9 @@ struct CoachingEngine {
             if let cap = loadCap, target > cap.max {
                 return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
-            let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
+            let lead = rirRecorded
+                ? "Every working set hit the top of your range at the target difficulty — increase earned."
+                : "Every working set hit the top of your range — increase earned."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):

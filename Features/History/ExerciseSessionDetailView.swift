@@ -81,8 +81,8 @@ struct ExerciseSessionDetailView: View {
         let load = actualLoad > 0 ? actualLoad : plannedLoad
 
         let rir: String = {
-            if idx < item.actualRIRs.count, item.actualRIRs[idx] > 0 {
-                return "\(item.actualRIRs[idx])"
+            if let recorded = RIREntry.recorded(item, at: idx), (idx < item.actualReps.count && item.actualReps[idx] > 0) {
+                return "\(recorded)"
             }
             return "\(item.targetRIR)"
         }()

@@ -1307,3 +1307,100 @@ final class MissingDataSentinelTests: XCTestCase {
         XCTAssertNil(g.newestBackup, "restoring a backup with no completed sessions would not bring the data back")
     }
 }
+
+// MARK: - VV: RIR entry (unset is distinct from 0)
+
+final class RIREntryTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    /// A completed 3-set item at repMax 8, target RIR 2, 100 lb.
+    private func item(_ id: String, reps: [Int], rirs: [Int], load: Double = 100) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: load)
+        i.actualReps = reps
+        i.actualLoads = Array(repeating: load, count: reps.count)
+        i.actualRIRs = rirs
+        i.plannedRepsBySet = Array(repeating: 8, count: reps.count)
+        i.repMin = 6; i.repMax = 8
+        return i
+    }
+
+    func test_unsetIsDistinctFromZero_andOnlyCompoundsFeedDecisions() {
+        let bench = item("bench_press", reps: [8, 8], rirs: [RIREntry.unset, 0])
+        XCTAssertNil(RIREntry.recorded(bench, at: 0), "unset")
+        XCTAssertEqual(RIREntry.recorded(bench, at: 1), 0, "a recorded zero is a value")
+        XCTAssertNil(RIREntry.recorded(bench, at: 5), "no entry")
+        XCTAssertEqual(RIREntry.decisionRIR(bench, at: 1), 0)
+
+        XCTAssertTrue(RIREntry.isCompound("bench_press"))
+        XCTAssertTrue(RIREntry.isCompound("barbell_row"))
+        XCTAssertTrue(RIREntry.isCompound("hack_squat"))
+        XCTAssertFalse(RIREntry.isCompound("cable_tricep_pushdown_straight_bar"), "a pushdown shares a cluster with the presses but is isolation")
+        XCTAssertFalse(RIREntry.isCompound("seated_cable_fly"))
+        XCTAssertFalse(RIREntry.isCompound("some_custom_exercise"), "no cluster, no RIR decisions")
+        let fly = item("seated_cable_fly", reps: [8], rirs: [1])
+        XCTAssertEqual(RIREntry.recorded(fly, at: 0), 1)
+        XCTAssertNil(RIREntry.decisionRIR(fly, at: 0), "an isolation set never feeds a decision")
+    }
+
+    func test_compound_unsetRIR_isJudgedOnRepsAlone_andNeverClaimsTheTargetDifficulty() throws {
+        let unset = item("bench_press", reps: [8, 8, 8], rirs: Array(repeating: RIREntry.unset, count: 3))
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: unset))
+        XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100, "every set at the top: reps alone earn the increase")
+        XCTAssertFalse(rec.message.contains("target difficulty"), rec.message)
+
+        let short = item("bench_press", reps: [7, 6, 6], rirs: Array(repeating: RIREntry.unset, count: 3))
+        let hold = try XCTUnwrap(CoachingEngine.recommend(for: short))
+        XCTAssertEqual(hold.nextSuggestedLoad, 100, "an unset RIR is not assumed on target; reps under the top hold")
+    }
+
+    func test_compound_aRecordedRIRBelowPlanMinusOne_blocksAnIncrease() throws {
+        let hard = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 0])      // plan 2: 0 < 1
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: hard)).nextSuggestedLoad, 100, "an RIR 0 set blocks the bump")
+        let ok = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 1])        // 1 = plan-1 is allowed
+        XCTAssertGreaterThan(try XCTUnwrap(CoachingEngine.recommend(for: ok)).nextSuggestedLoad ?? 0, 100)
+        let onTarget = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 2])
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: onTarget))
+        XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100)
+        XCTAssertTrue(rec.message.contains("target difficulty"), "a recorded RIR may be cited")
+    }
+
+    func test_isolation_ignoresRIRCompletely_repsAgainstTargetOnly() throws {
+        for rirs in [[0, 0, 0], [RIREntry.unset, RIREntry.unset, RIREntry.unset], [4, 4, 4]] {
+            let fly = item("seated_cable_fly", reps: [8, 8, 8], rirs: rirs)
+            let rec = try XCTUnwrap(CoachingEngine.recommend(for: fly))
+            XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100, "RIR \(rirs) on an isolation lift never blocks nor earns")
+            XCTAssertFalse(rec.message.contains("target difficulty"), rec.message)
+        }
+        let under = item("seated_cable_fly", reps: [6, 6, 6], rirs: [2, 2, 2])
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: under)).nextSuggestedLoad, 100, "reps under the top hold, whatever the RIR says")
+    }
+
+    func test_progressionSnapshots_carryNoRIR_forUnsetOrIsolation() {
+        let bench = item("bench_press", reps: [8, 8], rirs: [RIREntry.unset, 1])
+        XCTAssertEqual(bench.toSetSnapshots().map(\.rir), [nil, 1.0])
+        let fly = item("seated_cable_fly", reps: [8], rirs: [1])
+        XCTAssertEqual(fly.toSetSnapshots().map(\.rir), [nil])
+    }
+
+    func test_unsetAndZeroAndOldValues_roundTripThroughABackupAsRecorded() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: source)
+        // A new-style item (unset + a real 0 + a value) next to the old-style values the builder wrote.
+        let session = try XCTUnwrap(try source.fetch(FetchDescriptor<Session>()).first { !$0.items.isEmpty })
+        let fresh3 = SessionItem(order: 9, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        fresh3.actualReps = [8, 8, 8]; fresh3.actualLoads = [100, 100, 100]; fresh3.actualRIRs = [RIREntry.unset, 0, 3]
+        source.insert(fresh3); session.items.append(fresh3)
+        try source.save()
+        let before = try source.fetch(FetchDescriptor<SessionItem>()).map { ($0.id, $0.actualRIRs) }
+        XCTAssertTrue(before.contains { $0.1 == [-1, 0, 3] })
+
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: fresh)
+        let after = try ModelContext(fresh).fetch(FetchDescriptor<SessionItem>()).map { ($0.id, $0.actualRIRs) }
+        XCTAssertEqual(Set(after.map { "\($0.0 as Any)|\($0.1)" }), Set(before.map { "\($0.0 as Any)|\($0.1)" }),
+                       "unset stays unset, 0 stays 0, every old value is exactly as recorded")
+    }
+}

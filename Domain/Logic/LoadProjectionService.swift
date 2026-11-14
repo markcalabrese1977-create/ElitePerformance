@@ -92,7 +92,8 @@ enum LoadProjectionService {
 
         let validRIRs = item.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
             guard !item.isTopRow(idx), idx < item.actualLoads.count, item.actualLoads[idx] > 0 else { return nil }
-            return rir
+            guard RIREntry.isCompound(item.exerciseId) else { return nil }   // only compounds feed this judgement
+            return RIREntry.value(rir)
         }
         if !validRIRs.isEmpty {
             let avgRIR = Double(validRIRs.reduce(0, +)) / Double(validRIRs.count)
@@ -222,7 +223,7 @@ enum LoadProjectionService {
                         bodyWeight: bodyWeight
                     )
                     guard load > 0, reps > 0 else { return nil }
-                    let rir = idx < item.actualRIRs.count ? item.actualRIRs[idx] : item.targetRIR
+                    let rir = (idx < item.actualRIRs.count ? RIREntry.value(item.actualRIRs[idx]) : nil) ?? item.targetRIR
                     return (load: load, reps: reps, actualRIR: rir)
                 }
 
@@ -360,7 +361,8 @@ enum LoadProjectionService {
         // to increase than hitting target exactly. One clean session is sufficient.
         let lastValidRIRs = lastItem.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
             guard idx < lastItem.actualLoads.count, lastItem.actualLoads[idx] > 0 else { return nil }
-            return rir
+            guard RIREntry.isCompound(lastItem.exerciseId) else { return nil }
+            return RIREntry.value(rir)
         }
         let lastAvgRIR = lastValidRIRs.isEmpty ? Double(lastItem.targetRIR) :
             Double(lastValidRIRs.reduce(0, +)) / Double(lastValidRIRs.count)
