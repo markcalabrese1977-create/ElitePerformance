@@ -528,4 +528,26 @@ final class ImportSafetyTests: XCTestCase {
         XCTAssertFalse(gate3.showsMissingSnapshotNotice, "the marker is gone, so the next launch does not repeat it")
         XCTAssertEqual(runs, 3)
     }
+
+    func test_guard_aBackupExportedMomentsAgoFromTheSameDevice_isNotStale_evenWithFractionalSessionDates() throws {
+        let (_, ctx) = try populated()
+        // the store keeps sub-second dates; the exported file does not
+        let last = Session(date: Date(timeIntervalSince1970: 1_800_000_000.734), status: .completed, weekIndex: 1, dayLabel: "Z", items: [])
+        last.id = UUID()
+        ctx.insert(last); try ctx.save()
+        let file = try fileOf(ctx); defer { try? FileManager.default.removeItem(at: file) }
+        let incoming = try BackupContentSummary.of(file: file)
+        let current = try BackupContentSummary.of(store: ctx)
+        XCTAssertLessThan(try XCTUnwrap(incoming.lastCompletedDate), try XCTUnwrap(current.lastCompletedDate),
+                          "reproduces the false positive: the decoded file date is a fraction earlier")
+        XCTAssertEqual(incoming.completedSessions, current.completedSessions)
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: incoming, current: current), .normalConfirm, "no REPLACE for your own fresh export")
+        // same without ids (an old file): whole-second precision alone is enough
+        var noIds = incoming; noIds.completedSessionIds = []
+        XCTAssertEqual(ImportStalenessGuard.assess(incoming: noIds, current: current), .normalConfirm)
+        // a genuinely older file is still caught, even one second earlier
+        var older = incoming; older.completedSessionIds = []
+        older.lastCompletedDate = current.lastCompletedDate!.addingTimeInterval(-1.5)
+        XCTAssertTrue(ImportStalenessGuard.assess(incoming: older, current: current).requiresTypedWord)
+    }
 }

@@ -11,6 +11,10 @@ struct BackupContentSummary: Equatable {
     var sessionHistory: Int
     var customExercises: Int
     var mesoBlocks: Int
+    /// The id of the latest completed session (file: among those it holds; store: the latest on this device). nil when it has none or no id.
+    var lastCompletedSessionId: UUID? = nil
+    /// Ids of every completed session (a file's only; used to see whether the file contains this device's latest session).
+    var completedSessionIds: Set<UUID> = []
 
     var isEmpty: Bool { sessions == 0 && sessionHistory == 0 && customExercises == 0 && mesoBlocks == 0 }
 
@@ -25,7 +29,9 @@ struct BackupContentSummary: Equatable {
         return BackupContentSummary(
             exportedAt: snap.exportedAt, sessions: snap.sessions.count, completedSessions: completed.count,
             lastCompletedDate: completed.map(\.date).max(), sessionHistory: snap.sessionHistory.count,
-            customExercises: snap.customExercises.count, mesoBlocks: snap.mesoBlocks.count)
+            customExercises: snap.customExercises.count, mesoBlocks: snap.mesoBlocks.count,
+            lastCompletedSessionId: completed.max(by: { $0.date < $1.date })?.id,
+            completedSessionIds: Set(completed.compactMap(\.id)))
     }
 
     static func of(store context: ModelContext) throws -> BackupContentSummary {
@@ -36,7 +42,8 @@ struct BackupContentSummary: Equatable {
             lastCompletedDate: completed.map(\.date).max(),
             sessionHistory: try context.fetchCount(FetchDescriptor<SessionHistory>()),
             customExercises: try context.fetchCount(FetchDescriptor<CustomExercise>()),
-            mesoBlocks: try context.fetchCount(FetchDescriptor<MesoBlock>()))
+            mesoBlocks: try context.fetchCount(FetchDescriptor<MesoBlock>()),
+            lastCompletedSessionId: completed.max(by: { $0.date < $1.date })?.id)
     }
 }
 
