@@ -34,14 +34,17 @@ final class ChangePrescriptionFlowTests: XCTestCase {
 
     // MARK: Steppers
 
-    func test_setsAndRIRSteppers_doNotSetPlanEdited() {
+    func test_theSetCountStepper_setsPlanEdited_likeTheRIRStepper() {
         let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
         XCTAssertFalse(i.planEdited)
         PlanStepperEdits.setSets(i, to: 4)
-        PlanStepperEdits.setRIR(i, to: 1)
         XCTAssertEqual(i.targetSets, 4)
+        XCTAssertTrue(i.planEdited, "a lifter-chosen set count is a hand-set target")
+        i.planEdited = false
+        PlanStepperEdits.setRIR(i, to: 1)
         XCTAssertEqual(i.targetRIR, 1)
-        XCTAssertFalse(i.planEdited, "a sets/RIR stepper tap must not freeze carry-forward")
+        XCTAssertTrue(i.planEdited, "a hand-set RIR is the lifter's")
+        i.planEdited = false
 
         i.planEdited = true            // set by editing a load
         PlanStepperEdits.setSets(i, to: 3)
@@ -159,21 +162,28 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         i.targetRIRMin = 2; i.targetRIRMax = 3; i.targetRIR = 3
         PlanStepperEdits.setRIR(i, to: 1)
         XCTAssertEqual(i.targetRIR, 1); XCTAssertEqual(i.targetRIRMin, 1); XCTAssertEqual(i.targetRIRMax, 1)
-        XCTAssertFalse(i.planEdited)
+        XCTAssertTrue(i.planEdited)
     }
 
-    func test_onlyALoadEditSetsPlanEdited_perSetRepsAndRIRDoNot() {
-        let i = bandItem(sets: 3, setMin: nil, setMax: nil)
-        i.plannedRepsBySet = [8, 8, 8]; i.plannedRIRsBySet = [2, 2, 2]
-        PlanStepperEdits.setPlannedReps(i, at: 1, to: 10)
-        PlanStepperEdits.setPlannedRIR(i, at: 2, to: 1)
-        PlanStepperEdits.setPlannedReps(i, at: 4, to: 6)      // grows the array like the field does
-        XCTAssertEqual(i.plannedRepsBySet, [8, 10, 8, 0, 6]); XCTAssertEqual(i.plannedRIRsBySet, [2, 2, 1])
-        XCTAssertFalse(i.planEdited, "per-set reps and RIR edits leave carry-forward free to write loads")
-
-        PlanStepperEdits.setPlannedLoad(i, at: 1, to: 105)
-        XCTAssertEqual(i.plannedLoadsBySet, [100, 105, 100])
-        XCTAssertTrue(i.planEdited, "a hand-set load is protected")
+    func test_anyLifterEditToPlannedLoadsRepsOrRIR_setsPlanEdited() {
+        func fresh() -> SessionItem {
+            let i = bandItem(sets: 3, setMin: nil, setMax: nil)
+            i.plannedRepsBySet = [8, 8, 8]; i.plannedRIRsBySet = [2, 2, 2]
+            XCTAssertFalse(i.planEdited)
+            return i
+        }
+        let reps = fresh()
+        PlanStepperEdits.setPlannedReps(reps, at: 1, to: 10)
+        XCTAssertEqual(reps.plannedRepsBySet, [8, 10, 8]); XCTAssertTrue(reps.planEdited, "a rep-only edit sets the flag")
+        let rir = fresh()
+        PlanStepperEdits.setPlannedRIR(rir, at: 2, to: 1)
+        XCTAssertEqual(rir.plannedRIRsBySet, [2, 2, 1]); XCTAssertTrue(rir.planEdited, "an RIR-only edit sets the flag")
+        let grown = fresh()
+        PlanStepperEdits.setPlannedReps(grown, at: 4, to: 6)      // grows the array like the field does
+        XCTAssertEqual(grown.plannedRepsBySet, [8, 8, 8, 0, 6]); XCTAssertTrue(grown.planEdited)
+        let load = fresh()
+        PlanStepperEdits.setPlannedLoad(load, at: 1, to: 105)
+        XCTAssertEqual(load.plannedLoadsBySet, [100, 105, 100]); XCTAssertTrue(load.planEdited, "a hand-set load is protected")
     }
     // MARK: B5. Top set for remaining sessions
 

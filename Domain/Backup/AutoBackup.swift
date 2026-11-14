@@ -261,12 +261,15 @@ final class AutoBackupService: ObservableObject {
     private let now: () -> Date
     private let currentCommit: () -> String
     private let calendar: Calendar
+    private let log: (String) -> Void
 
     init(status: AutoBackupStatusStore = AutoBackupStatusStore(),
          resolveDestination: @escaping @Sendable () -> AutoBackupDestination = { AutoBackupDestination.resolve() },
          now: @escaping () -> Date = { Date() },
          currentCommit: @escaping () -> String = { BuildInfo.commit },
-         calendar: Calendar = .current) {
+         calendar: Calendar = .current,
+         log: @escaping (String) -> Void = { print($0) }) {
+        self.log = log
         self.status = status
         self.resolveDestination = resolveDestination
         self.now = now
@@ -278,7 +281,7 @@ final class AutoBackupService: ObservableObject {
 
     /// (1) A session was marked completed.
     func sessionCompleted(container: ModelContainer) {
-        guard let pending = try? export(container: container) else { return }
+        guard let pending = exportLoggingSkip(container: container, reason: .sessionCompleted) else { return }
         finish(pending, reason: .sessionCompleted, container: container)
     }
 
@@ -288,8 +291,11 @@ final class AutoBackupService: ObservableObject {
     @discardableResult
     func launchBackupIfBuildChanged(container: ModelContainer) -> Bool {
         let commit = currentCommit()
-        guard status.lastLaunchCommit != commit else { return false }
-        guard let pending = try? export(container: container) else { return false }
+        guard status.lastLaunchCommit != commit else {
+            log("ℹ️ AutoBackup [buildChanged] not needed: this build (\(commit)) is the one of the last launch")
+            return false
+        }
+        guard let pending = exportLoggingSkip(container: container, reason: .buildChanged) else { return false }
         finish(pending, reason: .buildChanged, container: container, launchCommit: commit)
         return true
     }
@@ -301,7 +307,7 @@ final class AutoBackupService: ObservableObject {
         guard status.lastForegroundDay != today else { return false }
         status.lastForegroundDay = today
         if let last = status.lastSuccess, now().timeIntervalSince(last) <= 24 * 3600 { return false }
-        guard let pending = try? export(container: container) else { return false }
+        guard let pending = exportLoggingSkip(container: container, reason: .daily) else { return false }
         finish(pending, reason: .daily, container: container)
         return true
     }
@@ -327,6 +333,11 @@ final class AutoBackupService: ObservableObject {
         return Pending(temp: result.url, live: live)
     }
 
+    private func exportLoggingSkip(container: ModelContainer, reason: Reason) -> Pending? {
+        do { return try export(container: container) }
+        catch { log("ℹ️ AutoBackup [\(reason.rawValue)] skipped: \(error.localizedDescription)"); return nil }
+    }
+
     private func finish(_ pending: Pending, reason: Reason, container: ModelContainer, launchCommit: String? = nil) {
         Task { @MainActor in
             do { _ = try await place(pending, reason: reason, launchCommit: launchCommit) }
@@ -334,24 +345,38 @@ final class AutoBackupService: ObservableObject {
         }
     }
 
-    /// The asynchronous half: look up the destination off the main thread, verify, place, prune, record.
+    /// The asynchronous half: look up the destination off the main thread, verify, place, prune, record. Logs exactly one line
+    /// per attempt: trigger, destination (iCloud / local), verified or FAILED, and the counts.
     func place(_ pending: Pending, reason: Reason, launchCommit: String?) async throws -> AutoBackupFile {
         isRunning = true
         defer { isRunning = false; try? FileManager.default.removeItem(at: pending.temp) }
         let resolver = resolveDestination
         let stamp = now()
-        let (file, destination) = try await Task.detached(priority: .utility) { () -> (AutoBackupFile, AutoBackupDestination) in
+        let outcome = await Task.detached(priority: .utility) { () -> (AutoBackupDestination, Result<AutoBackupFile, Error>) in
             let destination = resolver()
-            let file = try AutoBackupEngine.place(temp: pending.temp, live: pending.live, into: destination.directory, now: stamp,
-                                                  coordinated: destination.isOffDevice)
-            AutoBackupEngine.prune(in: destination.directory)
-            return (file, destination)
+            do {
+                let file = try AutoBackupEngine.place(temp: pending.temp, live: pending.live, into: destination.directory, now: stamp,
+                                                      coordinated: destination.isOffDevice)
+                AutoBackupEngine.prune(in: destination.directory)
+                return (destination, .success(file))
+            } catch { return (destination, .failure(error)) }
         }.value
-        status.recordSuccess(at: stamp, offDevice: destination.isOffDevice)
-        if let launchCommit { status.lastLaunchCommit = launchCommit }
-        lastError = nil
-        statusRevision += 1
-        return file
+        let (destination, result) = outcome
+        let c = pending.live.verifiedCounts
+        let counts = "sessions=\(c[0]) history=\(c[1]) custom=\(c[2]) blocks=\(c[3])"
+        let where_ = destination.isOffDevice ? "iCloud" : "local"
+        switch result {
+        case .success(let file):
+            log("ℹ️ AutoBackup [\(reason.rawValue)] \(where_) verified · \(counts) · \(file.url.lastPathComponent)")
+            status.recordSuccess(at: stamp, offDevice: destination.isOffDevice)
+            if let launchCommit { status.lastLaunchCommit = launchCommit }
+            lastError = nil
+            statusRevision += 1
+            return file
+        case .failure(let error):
+            log("🛑 AutoBackup [\(reason.rawValue)] \(where_) FAILED (\(error.localizedDescription)) · \(counts)")
+            throw error
+        }
     }
 
     // Listing for Settings -----------------------------------------------------

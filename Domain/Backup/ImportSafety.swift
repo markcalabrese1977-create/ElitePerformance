@@ -264,6 +264,7 @@ final class StartupGate: ObservableObject {
     private let beforeBackfills: @MainActor (ModelContainer) -> Void
     private let sentinel: DataSentinelStore
     private let findBackups: @Sendable () -> [AutoBackupFile]
+    private let log: (String) -> Void
 
     /// `beforeBackfills` runs after the interrupted-import check has been answered and BEFORE any backfill: the automatic
     /// backup for a new build is taken here, of the data as it was before the backfills touch it.
@@ -271,7 +272,9 @@ final class StartupGate: ObservableObject {
          sentinel: DataSentinelStore = DataSentinelStore(),
          beforeBackfills: @escaping @MainActor (ModelContainer) -> Void = { AutoBackupService.shared.launchBackupIfBuildChanged(container: $0) },
          runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) },
-         findBackups: @escaping @Sendable () -> [AutoBackupFile] = StartupGate.defaultFindBackups) {
+         findBackups: @escaping @Sendable () -> [AutoBackupFile] = StartupGate.defaultFindBackups,
+         log: @escaping (String) -> Void = { print($0) }) {
+        self.log = log
         self.sentinel = sentinel
         self.findBackups = findBackups
         self.directory = directory
@@ -297,14 +300,20 @@ final class StartupGate: ObservableObject {
     /// had some is treated as missing data: NO backfills and NO automatic backup run until the user answers.
     private func proceed(_ container: ModelContainer) {
         let completed = (try? BackupContentSummary.of(store: ModelContext(container)).completedSessions) ?? -1
-        if completed == 0, sentinel.completedSessions > 0 {
-            missingData = MissingData(expectedSessions: sentinel.completedSessions)
+        let stored = sentinel.completedSessions
+        log("ℹ️ Data sentinel: read stored=\(stored) (\(sentinel.describeSource)), store holds \(completed) completed sessions")
+        if completed == 0, stored > 0 {
+            log("🛑 Data sentinel: BLOCKING (store has 0 completed sessions, last launch had \(stored)); no backfills, no automatic backup")
+            missingData = MissingData(expectedSessions: stored)
             backupLookupDone = false
             Task { await loadNewestBackup() }
             return
         }
         runBackfills(container)
-        if completed >= 0 { sentinel.record(completed) }     // after a successful launch
+        if completed >= 0 {
+            sentinel.record(completed)                        // after a successful launch
+            log("ℹ️ Data sentinel: wrote \(completed), reads back \(sentinel.completedSessions)")
+        }
     }
 
     /// The newest backup that decodes and holds completed sessions.

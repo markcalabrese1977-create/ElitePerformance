@@ -20,4 +20,7 @@ struct DataSentinelStore {
     }
 
     func record(_ completedSessions: Int) { self.completedSessions = completedSessions }
+
+    /// Which defaults the value lives in, for the launch log.
+    var describeSource: String { defaults === UserDefaults.standard ? "standard defaults" : "app-group defaults \(Self.appGroupSuite)" }
 }
