@@ -90,10 +90,9 @@ enum LoadProjectionService {
             .map(\.element).max() ?? 0
         guard bestReps >= prescribedMin else { return false }
 
-        let validRIRs = item.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
+        let validRIRs = (0..<item.actualRIRs.count).compactMap { idx -> Int? in
             guard !item.isTopRow(idx), idx < item.actualLoads.count, item.actualLoads[idx] > 0 else { return nil }
-            guard RIREntry.isCompound(item.exerciseId) else { return nil }   // only compounds feed this judgement
-            return RIREntry.value(rir)
+            return RIREntry.decisionRIR(item, at: idx)   // recorded, compound lifts only
         }
         if !validRIRs.isEmpty {
             let avgRIR = Double(validRIRs.reduce(0, +)) / Double(validRIRs.count)
@@ -223,7 +222,7 @@ enum LoadProjectionService {
                         bodyWeight: bodyWeight
                     )
                     guard load > 0, reps > 0 else { return nil }
-                    let rir = (idx < item.actualRIRs.count ? RIREntry.value(item.actualRIRs[idx]) : nil) ?? item.targetRIR
+                    let rir = RIREntry.recorded(item, at: idx) ?? item.targetRIR
                     return (load: load, reps: reps, actualRIR: rir)
                 }
 
@@ -359,10 +358,9 @@ enum LoadProjectionService {
         // Detect if the last session was performed with more in the tank than planned.
         // avgRIR > targetRIR means the lifter had extra reserve — a stronger signal
         // to increase than hitting target exactly. One clean session is sufficient.
-        let lastValidRIRs = lastItem.actualRIRs.enumerated().compactMap { idx, rir -> Int? in
+        let lastValidRIRs = (0..<lastItem.actualRIRs.count).compactMap { idx -> Int? in
             guard idx < lastItem.actualLoads.count, lastItem.actualLoads[idx] > 0 else { return nil }
-            guard RIREntry.isCompound(lastItem.exerciseId) else { return nil }
-            return RIREntry.value(rir)
+            return RIREntry.decisionRIR(lastItem, at: idx)
         }
         let lastAvgRIR = lastValidRIRs.isEmpty ? Double(lastItem.targetRIR) :
             Double(lastValidRIRs.reduce(0, +)) / Double(lastValidRIRs.count)

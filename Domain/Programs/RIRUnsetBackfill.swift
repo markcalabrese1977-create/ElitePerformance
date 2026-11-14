@@ -13,10 +13,7 @@ enum RIRUnsetBackfill {
         var out: [(SessionItem, Int)] = []
         for s in sessions where s.status == .planned || s.status == .inProgress {
             for item in s.items where RIREntry.isCompound(item.exerciseId) {
-                for row in item.actualRIRs.indices where item.actualRIRs[row] == 0 {
-                    let reps = item.actualReps.indices.contains(row) ? item.actualReps[row] : 0
-                    if reps == 0 { out.append((item, row)) }
-                }
+                for row in RIREntry.paddedZeroRows(item) { out.append((item, row)) }
             }
         }
         return out
@@ -28,7 +25,7 @@ enum RIRUnsetBackfill {
             BackfillLog.note("ℹ️ RIR unset backfill not needed.")
             return
         }
-        for (item, row) in todo { item.actualRIRs[row] = RIREntry.unset }
+        for (item, row) in todo { RIREntry.setRecorded(item, at: row, to: RIREntry.unset) }
         do {
             try context.save()
             BackfillLog.note("✅ RIR unset backfill completed. Cleared \(todo.count) padded sets.")

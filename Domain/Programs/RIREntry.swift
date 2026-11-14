@@ -39,6 +39,29 @@ enum RIREntry {
         isCompound(item.exerciseId) ? recorded(item, at: idx) : nil
     }
 
+    /// Rows holding a 0 with no reps behind them: padding from before RIR could be unset, not a recorded value.
+    static func paddedZeroRows(_ item: SessionItem) -> [Int] {
+        (0..<item.actualRIRs.count).filter { row in
+            item.actualRIRs[row] == 0 && (item.actualReps.indices.contains(row) ? item.actualReps[row] : 0) == 0
+        }
+    }
+
+    /// Writes the RIR of row `idx`, padding any rows before it as unset. The only element write.
+    static func setRecorded(_ item: SessionItem, at idx: Int, to value: Int) {
+        guard idx >= 0 else { return }
+        if item.actualRIRs.count <= idx { item.actualRIRs.append(contentsOf: unsetArray(count: idx + 1 - item.actualRIRs.count)) }
+        item.actualRIRs[idx] = value
+    }
+
+    /// Grows (with unset) or trims the array to `count` rows.
+    static func resize(_ item: SessionItem, to count: Int) {
+        if item.actualRIRs.count < count {
+            item.actualRIRs.append(contentsOf: unsetArray(count: count - item.actualRIRs.count))
+        } else if item.actualRIRs.count > count {
+            item.actualRIRs = Array(item.actualRIRs.prefix(count))
+        }
+    }
+
     /// Reads a raw array value: nil for unset.
     static func value(_ raw: Int) -> Int? { raw >= 0 ? raw : nil }
 }

@@ -1633,3 +1633,56 @@ final class RIRUnsetBackfillTests: XCTestCase {
         if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
     }
 }
+
+// MARK: - ZZ: no raw RIR reads
+
+final class RIRAccessScanTests: XCTestCase {
+
+    private func sourceRoot(file: StaticString = #filePath) throws -> URL {
+        var dir = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while dir.path != "/" {
+            let ok = ["App", "Domain", "Features"].allSatisfy { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) }
+            if ok { return dir }
+            dir.deleteLastPathComponent()
+        }
+        throw XCTSkip("production source root not found")
+    }
+
+    /// Element access to `actualRIRs` (subscript, enumeration, or any sequence read) belongs to `RIREntry`; the backup
+    /// DTO, exporter and importer carry the array whole. Whole-array copies and `.count` are fine.
+    func test_noProductionCodeReadsOrWritesActualRIRsElementsOutsideRIREntry() throws {
+        let root = try sourceRoot()
+        let pattern = try NSRegularExpression(pattern:
+            #"actualRIRs\s*\[|actualRIRs\.(enumerated|safe\w*|first|last|map|compactMap|flatMap|reduce|filter|min|max|prefix|suffix|append|insert|remove\w*|contains|indices|sorted)|at\(\s*[\w.]*actualRIRs"#)
+        var offenders: [String] = []
+        for folder in ["App", "Domain", "Features", "Shared", "Utilities"] {
+            guard let walker = FileManager.default.enumerator(at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                let rel = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                if rel.hasSuffix("Programs/RIREntry.swift") || rel.hasPrefix("Domain/Backup/") { continue }
+                let text = try String(contentsOf: url, encoding: .utf8)
+                for (n, raw) in text.components(separatedBy: "\n").enumerated() {
+                    let line = raw.range(of: "//").map { String(raw[..<$0.lowerBound]) } ?? raw
+                    if pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { offenders.append("\(rel):\(n + 1): \(raw.trimmingCharacters(in: .whitespaces))") }
+                }
+            }
+        }
+        XCTAssertTrue(offenders.isEmpty, "read and write RIR through RIREntry so -1 never reaches arithmetic:\n" + offenders.joined(separator: "\n"))
+    }
+
+    func test_anUnsetRIR_givesTheRepsOnlyE1RM_andTheCSVCellIsEmpty() throws {
+        func bench(_ rir: Int) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 200)
+            i.actualReps = [8]; i.actualLoads = [200]; i.actualRIRs = [rir]; i.plannedRepsBySet = [8]
+            return i
+        }
+        func best(_ i: SessionItem) -> Double {
+            WorkingSetFilter.workingRows(of: i).map { E1RMCalculator.e1RM(load: $0.load, reps: $0.reps + min(max($0.rir, 0), HistorySeedLoad.maxCreditedRIR)) }.max() ?? 0
+        }
+        let repsOnly = E1RMCalculator.e1RM(load: 200, reps: 8)
+        XCTAssertEqual(best(bench(RIREntry.unset)), repsOnly, accuracy: 0.0001, "unset credits nothing")
+        XCTAssertEqual(best(bench(0)), repsOnly, accuracy: 0.0001, "a recorded 0 credits nothing either")
+        XCTAssertGreaterThan(best(bench(2)), repsOnly, "a recorded RIR 2 is credited")
+        XCTAssertNil(RIREntry.recorded(bench(RIREntry.unset), at: 0))
+    }
+}

@@ -1394,9 +1394,7 @@ final class SessionScreenViewModel: ObservableObject {
                     while matchingItem.actualLoads.count <= idx {
                         matchingItem.actualLoads.append(0)
                     }
-                    while matchingItem.actualRIRs.count <= idx {
-                        matchingItem.actualRIRs.append(RIREntry.unset)
-                    }
+                    if matchingItem.actualRIRs.count <= idx { RIREntry.resize(matchingItem, to: idx + 1) }
                     while matchingItem.usedRestPauseFlags.count <= idx {
                         matchingItem.usedRestPauseFlags.append(false)
                     }
@@ -1418,7 +1416,7 @@ final class SessionScreenViewModel: ObservableObject {
                         exercise.sets[setIdx] = set
                     }
                     let rirToStore = set.actualRIR ?? (isCompoundLift ? RIREntry.unset : (set.plannedRIR ?? matchingItem.targetRIR))
-                    matchingItem.actualRIRs[idx] = rirToStore
+                    RIREntry.setRecorded(matchingItem, at: idx, to: rirToStore)
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
                     matchingItem.dropSetPatternsBySet[idx] = set.usedDropSet && !set.dropSets.isEmpty
@@ -2098,7 +2096,7 @@ final class SessionScreenViewModel: ObservableObject {
                     item.actualLoads[idx] = uiSet.actualLoad ?? 0
                 }
                 if let rir = uiSet.actualRIR, rir >= 0 {
-                    item.actualRIRs[idx] = rir
+                    RIREntry.setRecorded(item, at: idx, to: rir)
                 }
 
                 // RP tracking (persist regardless of whether actuals exist)
@@ -2221,11 +2219,7 @@ final class SessionScreenViewModel: ObservableObject {
                 guard reps > 0 else { continue }
 
                 let load = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
-                let rir: Int? = {
-                    guard idx < item.actualRIRs.count else { return nil }
-                    let raw = item.actualRIRs[idx]
-                    return raw >= 0 ? raw : nil
-                }()
+                let rir: Int? = RIREntry.recorded(item, at: idx)
 
                 let exposure = ExerciseExposure(
                     date: other.date,
@@ -2521,12 +2515,10 @@ extension SessionScreenViewModel {
                 }()
 
                 let actualRIR: Int? = {
-                    guard idx < item.actualRIRs.count else { return nil }
-
                     // Only treat actual RIR as real if the set itself was actually logged.
                     guard actualReps != nil || actualLoad != nil else { return nil }
 
-                    return RIREntry.value(item.actualRIRs[idx])
+                    return RIREntry.recorded(item, at: idx)
                 }()
 
                 // ---- RP flags/patterns ----

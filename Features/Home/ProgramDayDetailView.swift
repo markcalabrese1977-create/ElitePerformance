@@ -1443,11 +1443,7 @@ private struct ProgramExercisePlanRow: View {
         }
         ensureIntArray(&item.actualReps)
         ensureDoubleArray(&item.actualLoads)
-        if item.actualRIRs.count < setCount {
-            item.actualRIRs.append(contentsOf: RIREntry.unsetArray(count: setCount - item.actualRIRs.count))
-        } else if item.actualRIRs.count > setCount {
-            item.actualRIRs = Array(item.actualRIRs.prefix(setCount))
-        }
+        RIREntry.resize(item, to: setCount)
 
         if item.usedRestPauseFlags.count < setCount {
             item.usedRestPauseFlags.append(
