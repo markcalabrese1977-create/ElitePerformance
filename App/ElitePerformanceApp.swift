@@ -212,6 +212,11 @@ struct LaunchRoot<Content: View>: View {
         } message: {
             Text(gate.interrupted?.message ?? "")
         }
+        .alert("Restore interrupted", isPresented: $gate.showsMissingSnapshotNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(StartupGate.missingSnapshotMessage)
+        }
         .alert("Restore failed", isPresented: Binding(get: { gate.errorMessage != nil }, set: { _ in })) {
             Button("Try again") { gate.dismissError() }
             Button("Keep current data", role: .cancel) { gate.dismissError(); gate.keepCurrentData() }

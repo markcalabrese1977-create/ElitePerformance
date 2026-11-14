@@ -233,6 +233,9 @@ final class StartupGate: ObservableObject {
 
     @Published private(set) var interrupted: Interrupted?
     @Published private(set) var errorMessage: String?
+    /// Set once when a marker's safety copy is missing; the app carries on and shows a one-time, non-blocking alert.
+    @Published var showsMissingSnapshotNotice = false
+    static let missingSnapshotMessage = "A restore was interrupted and its safety copy is missing. Your data may be incomplete — import your latest export from Files."
     private var container: ModelContainer?
     private let directory: URL
     private let runBackfills: (ModelContainer) -> Void
@@ -248,8 +251,9 @@ final class StartupGate: ObservableObject {
         self.container = container
         guard let marker = InterruptedImportMarker.read(in: directory) else { runBackfills(container); return }
         guard let snapshot = marker.resolvedSnapshotURL(in: directory) else {
-            // nothing to restore from: the marker is useless; do not block the app forever
+            // nothing to restore from: tell the user once (the marker is deleted, so this never repeats), do not block the app
             InterruptedImportMarker.clear(in: directory)
+            showsMissingSnapshotNotice = true
             runBackfills(container)
             return
         }

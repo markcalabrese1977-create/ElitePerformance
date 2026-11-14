@@ -508,7 +508,7 @@ final class ImportSafetyTests: XCTestCase {
     }
 
     @MainActor
-    func test_noMarker_backfillsRunImmediately_andAMarkerWithoutItsSnapshotDoesNotBlockTheApp() throws {
+    func test_noMarker_backfillsRunImmediately_andAMarkerWithoutItsSnapshotShowsAOneTimeNoticeWithoutBlocking() throws {
         let container = try BackupTestSupport.makeContainer()
         var runs = 0
         let gate = StartupGate(directory: dir, runBackfills: { _ in runs += 1 })
@@ -519,5 +519,13 @@ final class ImportSafetyTests: XCTestCase {
         gate2.begin(container: container)
         XCTAssertEqual(runs, 2); XCTAssertNil(gate2.interrupted)
         XCTAssertFalse(InterruptedImportMarker.exists(in: dir))
+        XCTAssertTrue(gate2.showsMissingSnapshotNotice, "the user is told once, not silently")
+        XCTAssertTrue(StartupGate.missingSnapshotMessage.hasPrefix("A restore was interrupted and its safety copy is missing."))
+        XCTAssertTrue(StartupGate.missingSnapshotMessage.hasSuffix("import your latest export from Files."))
+        gate2.showsMissingSnapshotNotice = false
+        let gate3 = StartupGate(directory: dir, runBackfills: { _ in runs += 1 })
+        gate3.begin(container: container)
+        XCTAssertFalse(gate3.showsMissingSnapshotNotice, "the marker is gone, so the next launch does not repeat it")
+        XCTAssertEqual(runs, 3)
     }
 }
