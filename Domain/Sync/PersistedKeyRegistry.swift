@@ -77,6 +77,8 @@ enum PersistedKeyRegistry {
         // Device-local.
         Entry(match: .exact("activeSwiftDataStoreLabel.v1"),
               disposition: .excluded("device-local store pin; a restore must not carry it to another device")),
+        Entry(match: .exact("prIndexRuleVersion"),
+              disposition: .excluded("PRIndexRuleBackfill's applied rule version: device-local; PRIndex is rebuilt on import")),
         Entry(match: .suffix(".completed"),
               disposition: .excluded("migration completion flag: device-local; migrations are idempotent and report not needed after a restore")),
 

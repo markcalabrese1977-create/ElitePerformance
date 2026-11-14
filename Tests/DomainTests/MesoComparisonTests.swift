@@ -500,9 +500,8 @@ final class MesoComparisonTests: XCTestCase {
     }
 
     func test_csvExport_flagsPRsFromTheEvents_notFromTheStoredFlag_evenForASessionCompletedAfterTheBackfill() throws {
-        let key = "prIndexTwelveRepRule.v1.completed"
-        UserDefaults.standard.removeObject(forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        PRIndexRuleBackfill.resetStoredVersion()
+        defer { PRIndexRuleBackfill.resetStoredVersion() }
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
         let a = item("bench_press", reps: [5], loads: [200]); a.exerciseNameSnapshot = "Bench Press"
         let b = item("bench_press", reps: [5], loads: [210])
@@ -536,12 +535,11 @@ final class MesoComparisonTests: XCTestCase {
     }
 
     func test_prIndexRuleBackfill_rebuildsOnceUnderTheRule_andDoesNothingOnAnEmptyStore() throws {
-        let key = "prIndexTwelveRepRule.v1.completed"
-        UserDefaults.standard.removeObject(forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        PRIndexRuleBackfill.resetStoredVersion()
+        defer { PRIndexRuleBackfill.resetStoredVersion() }
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
         PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: key), "no sessions: not marked done")
+        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, 0, "no sessions: not marked done")
         // a stale index row holding an inflated 20-rep "best"
         ctx.insert(PRIndex(exerciseId: "cable_curl", exerciseName: "Cable Curl", bestSetVolume: 3000, bestLoad: 150, bestReps: 20, bestDate: day(0)))
         let it = item("cable_curl", reps: [5, 20], loads: [200, 150])
@@ -553,8 +551,36 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows.first?.bestReps, 5)
         XCTAssertEqual(rows.first?.bestLoad, 200)
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, PRIndexRuleBackfill.currentVersion)
         XCTAssertFalse(it.isPR, "the lift\'s first-ever session: a baseline, flag recomputed")
+    }
+
+    func test_prIndexRuleBackfill_aStoreDoneUnderV1_rerunsUnderV2_thenReportsNotNeeded() throws {
+        PRIndexRuleBackfill.resetStoredVersion()
+        defer { PRIndexRuleBackfill.resetStoredVersion() }
+        XCTAssertGreaterThanOrEqual(PRIndexRuleBackfill.currentVersion, 2, "N bumped the rule version")
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        // a lift first trained with long sets, then its first <=12-rep set: under v2 that is a record, not a baseline
+        let long = item("cable_curl", reps: [20], loads: [100]); long.isPR = true     // stale v1 copy
+        let first = item("cable_curl", reps: [10], loads: [100])
+        ctx.insert(Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "A", items: [long]))
+        ctx.insert(Session(date: day(8), status: .completed, weekIndex: 1, dayLabel: "B", items: [first]))
+        try ctx.save()
+        PRIndexRuleBackfill.markAppliedUnderV1()
+        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, 1)
+
+        var lines: [String] = []
+        BackfillLog.collector = []
+        PRIndexRuleBackfill.runIfNeeded(in: ctx)
+        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines), "PRIndex rebuilt under rule v\(PRIndexRuleBackfill.currentVersion) (was v1)")
+        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, PRIndexRuleBackfill.currentVersion)
+        XCTAssertFalse(long.isPR, "the stale v1 copy is recomputed")
+
+        BackfillLog.collector = []
+        PRIndexRuleBackfill.runIfNeeded(in: ctx)
+        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines), "not needed")
     }
 
     func test_itemStats_bestE1RM_usesTheTwelveRepRule_whileSetRecordE1RMStaysRaw() throws {
@@ -680,8 +706,8 @@ final class MesoComparisonTests: XCTestCase {
         // AFTER: the import rebuilds the index and recomputes the flags
         let container = try BackupTestSupport.makeContainer()
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
-        UserDefaults.standard.removeObject(forKey: "prIndexTwelveRepRule.v1.completed")
-        defer { UserDefaults.standard.removeObject(forKey: "prIndexTwelveRepRule.v1.completed") }
+        PRIndexRuleBackfill.resetStoredVersion()
+        defer { PRIndexRuleBackfill.resetStoredVersion() }
         let after = ModelContext(container)
         PRIndexRuleBackfill.runIfNeeded(in: after)
         let all = try after.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }

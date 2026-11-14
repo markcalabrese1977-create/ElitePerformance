@@ -32,6 +32,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
     // MARK: - Keys
 
     private static let completionKeys = [
+        "prIndexRuleVersion", "prIndexTwelveRepRule.v1.completed",
         "sessionDayLabelBackfill.v1.completed",
         "d5ExerciseIdRepairMigration.v3.completed",
         "exerciseNameSnapshotBackfill.v1.completed",
@@ -94,7 +95,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
         ("PrescribedSetsBackfill", "prescribedSetsBackfill.v1.completed"),
         ("PlannedDateBackfill", "plannedDateBackfill.v1.completed"),
-        ("PRIndexRuleBackfill", "prIndexTwelveRepRule.v1.completed"),
+        ("PRIndexRuleBackfill", "prIndexRuleVersion"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
