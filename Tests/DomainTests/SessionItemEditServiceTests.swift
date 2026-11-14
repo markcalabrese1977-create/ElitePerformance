@@ -486,7 +486,8 @@ final class SessionItemEditServiceTests: XCTestCase {
         XCTAssertFalse(ids.contains(yesterday.persistentModelID), "a missed session from before today is history")
     }
 
-    /// Prints the 12-week-fixture seed for a lift with RIR-2 history, before (reps only) and after (C3b).
+    /// Prints the 12-week-fixture seed for a lift with RIR-2 history. Seeds are reps-only again (EEE): the logged RIR earns
+/// no credit, so the seed never exceeds the C3 reps-only formula.
     func test_report_12weekSeed_forRIR2History_beforeVsAfter() throws {
         let (ctx, block) = try makeBlock(convert12: true)
         let p = try pick(block)
@@ -508,7 +509,7 @@ final class SessionItemEditServiceTests: XCTestCase {
             let old = E1RMCalculator.rounded(E1RMCalculator.load(for: oldE1, reps: reps, targetRIR: rir), increment: 2.5)
             let new = try XCTUnwrap(t.seedLoad)
             lines.append("wave \(letter.uppercased()) (\(reps) reps @ RIR \(rir)): C3 \(old) -> C3b \(new)")
-            XCTAssertGreaterThan(new, old)
+            XCTAssertLessThanOrEqual(new, old, "no RIR credit: the seed is the reps-only load rounded down")
         }
         print("SEED_COMPARE 130x9@RIR2 history, 12-week fixture\n" + lines.joined(separator: "\n"))
     }

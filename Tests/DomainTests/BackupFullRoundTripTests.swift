@@ -1496,9 +1496,9 @@ final class MissedSourceSeedingTests: XCTestCase {
         let (t, _) = block(ctx)
         let seeds = MissedSourceSeeding.run(in: ctx)
         XCTAssertEqual(seeds.count, 1)
-        // e1RM of 110 x (10 + 2 credited RIR) = 110 * (1 + 12/30) = 154; at 10 reps RIR 2: 154/(1+10/30)*0.95 = 109.725; x 0.975 = 106.98 -> down to 2.5
-        XCTAssertEqual(t.plannedLoadsBySet, [105, 105, 105])
-        XCTAssertEqual(t.suggestedLoad, 105)
+        // reps-only e1RM of 110 x 10 = 146.67; at 10 reps RIR 2: 146.67/(1+10/30)*0.95 = 104.5; x 0.975 = 101.9 -> down to 2.5: 100
+        XCTAssertEqual(t.plannedLoadsBySet, [100, 100, 100])
+        XCTAssertEqual(t.suggestedLoad, 100)
         XCTAssertTrue(t.prescriptionNotes?.contains("Seeded from") == true && t.prescriptionNotes?.contains("was missed") == true, t.prescriptionNotes ?? "nil")
         XCTAssertFalse(t.planEdited)
         XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
@@ -1863,6 +1863,53 @@ final class CustomCompoundTests: XCTestCase {
             let mark = (c.isCompound == nil ? "nil" : String(c.isCompound!)) + " | suggested " + String(suggested)
             let why = s.map { "\($0.confidence.rawValue)\($0.baseConfidence.map { "/" + $0.rawValue } ?? "") like \($0.basedOn)" } ?? "no match"
             lines.append("\(c.name): stored \(mark) · \(why)\(c.isCompound != nil && c.isCompound! != suggested ? "   <-- stored differs from suggestion" : "")")
+        }
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - EEE: next-meso starting loads, with and without RIR credit (local audit)
+
+final class NextMesoSeedAuditTests: XCTestCase {
+
+    // LOCAL ONLY, READ-ONLY.
+    func test_audit_nextMesoStartingLoads_withAndWithoutRIRCredit() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        let meso = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
+        let now = Date(timeIntervalSince1970: 1_794_000_000)   // overridden below by the last completed session
+        let last = meso.sessions.filter { $0.status == .completed }.map(\.date).max() ?? now
+        let at = last.addingTimeInterval(86_400)
+
+        func table(credit: Bool) -> [String: [String]] {
+            let plan = SessionItemEditService.planNextMeso(meso: meso, name: "audit", endOldMesoNow: true, context: ctx, now: at, creditRIR: credit)
+            var out: [String: [String]] = [:]
+            var seen = Set<String>()
+            for s in plan.sessions where s.weekIndex == 1 || s.weekIndex <= 3 {
+                for i in s.items {
+                    let name = ExerciseCatalog.displayName(for: i.exerciseId)
+                    let key = "\(name)|\(s.dayLabel ?? "-")|\(s.letter)"
+                    guard seen.insert(key).inserted else { continue }
+                    out[name, default: []].append("\(s.letter.uppercased()) \(s.dayLabel ?? "-"): \(i.seed) (\(i.seedSource.rawValue))" + (i.topCount > 0 ? " top \(i.topSeed)" : ""))
+                }
+            }
+            return out
+        }
+        let repsOnly = table(credit: false), credited = table(credit: true)
+        let wanted = ["bench", "smith incline", "decline", "single leg press", "t-bar", "t bar"]
+        var lines = ["NEXT MESO STARTING LOADS — reps-only (new) vs RIR-credited (old); source session set: \(meso.name)"]
+        for name in repsOnly.keys.sorted() where wanted.contains(where: { name.lowercased().contains($0) }) {
+            lines.append(name)
+            let a = repsOnly[name] ?? [], b = credited[name] ?? []
+            for (x, y) in zip(a, b) { lines.append("   reps-only \(x)   |   credited \(y)") }
         }
         let text = lines.joined(separator: "\n")
         print(text)

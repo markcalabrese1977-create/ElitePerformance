@@ -168,6 +168,7 @@ final class AnalyticsFoundationTests: XCTestCase {
     private struct LCG { var s: UInt64
         mutating func next(_ n: Int) -> Int { s = s &* 6364136223846793005 &+ 1442695040888963407; return Int((s >> 33) % UInt64(n)) } }
 
+    /// The legacy copy credits RIR, so the comparison turns the opt-in credit on; seeds are reps-only by default (EEE).
     func test_seedReads_areIdenticalToTheLegacyImplementation_onGeneratedHistory() throws {
         let ctx = try makeContext()
         var g = LCG(s: 20_261_112)
@@ -197,13 +198,13 @@ final class AnalyticsFoundationTests: XCTestCase {
         let ref = day(130)
         for id in ids {
             for role in [nil, HistorySeedLoad.Role.backOff, .top] {
-                XCTAssertEqual(HistorySeedLoad.peakE1RM(for: id, in: all, role: role), Legacy.peakE1RM(for: id, in: all, role: role),
+                XCTAssertEqual(HistorySeedLoad.peakE1RM(for: id, in: all, role: role, creditRIR: true), Legacy.peakE1RM(for: id, in: all, role: role),
                                "peakE1RM \(id) \(String(describing: role))")
             }
             for role in [HistorySeedLoad.Role.backOff, .top] {
                 for (reps, rir) in [(8, 2), (5, 1), (12, 3)] {
                     XCTAssertEqual(
-                        HistorySeedLoad.load(for: id, goalReps: reps, targetRIR: rir, in: all, loadIncrement: 5, referenceDate: ref, role: role),
+                        HistorySeedLoad.load(for: id, goalReps: reps, targetRIR: rir, in: all, loadIncrement: 5, referenceDate: ref, role: role, creditRIR: true),
                         Legacy.load(for: id, goalReps: reps, targetRIR: rir, in: all, increment: 5, reference: ref, role: role),
                         "load \(id) \(reps)@\(rir) \(role)")
                 }

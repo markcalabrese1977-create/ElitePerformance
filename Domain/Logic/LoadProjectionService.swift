@@ -677,7 +677,8 @@ enum HistorySeedLoad {
         bodyWeight: Double? = nil,
         customExercises: [CustomExercise] = [],
         referenceDate: Date = Date(),
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> Double? {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return 0
@@ -695,7 +696,7 @@ enum HistorySeedLoad {
             guard !sets.isEmpty else { continue }
             var best = 0.0
             for set in WorkingSetFilter.droppingWarmups(sets) {
-                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                let credited = set.reps + (creditRIR ? min(max(set.rir, 0), maxCreditedRIR) : 0)
                 best = max(best, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
             if best > 0 { candidates.append((best, session.date)) }
@@ -737,10 +738,11 @@ enum HistorySeedLoad {
         unit: LoadUnit = .lb,
         factor: Double = 0.95,
         customExercises: [CustomExercise] = [],
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> Double? {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return 0 }
-        guard let peak = peakE1RM(for: exerciseId, in: sessions, role: role) else { return nil }
+        guard let peak = peakE1RM(for: exerciseId, in: sessions, role: role, creditRIR: creditRIR) else { return nil }
         let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
                                  increment: loadIncrement, unit: unit)
         return seeded > 0 ? seeded : nil
@@ -751,7 +753,7 @@ enum HistorySeedLoad {
     ///
     /// `role: nil` (the default) counts EVERY logged row, top sets included: the lifter's peak is a fact
     /// about the lifter, whichever role the set had. `peakLoad` passes the role of the load it seeds.
-    static func peakE1RM(for exerciseId: String, in sessions: [Session], role: Role? = nil) -> Double? {
+    static func peakE1RM(for exerciseId: String, in sessions: [Session], role: Role? = nil, creditRIR: Bool = false) -> Double? {
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         var peak = 0.0
         for session in sessions where session.status == .completed {
@@ -764,7 +766,7 @@ enum HistorySeedLoad {
             let sets = qualifyingSets(of: match, role: role)
             guard !sets.isEmpty else { continue }
             for set in WorkingSetFilter.droppingWarmups(sets) {
-                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                let credited = set.reps + (creditRIR ? min(max(set.rir, 0), maxCreditedRIR) : 0)
                 peak = max(peak, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
         }
@@ -788,7 +790,8 @@ enum HistorySeedLoad {
         factor: Double = 0.95,
         customExercises: [CustomExercise] = [],
         referenceDate: Date = Date(),
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> (load: Double, source: SeedSource) {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return (0, .bodyweight)
@@ -798,12 +801,12 @@ enum HistorySeedLoad {
             return (0, .none)
         }
         if let peak = peakLoad(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: previousMeso,
-                               loadIncrement: loadIncrement, unit: unit, factor: factor, customExercises: customExercises, role: role) {
+                               loadIncrement: loadIncrement, unit: unit, factor: factor, customExercises: customExercises, role: role, creditRIR: creditRIR) {
             return (peak, .peak)
         }
         if let h = load(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: allSessions,
                         loadIncrement: loadIncrement, unit: unit, bodyWeight: bodyWeight, customExercises: customExercises,
-                        referenceDate: referenceDate, role: role) {
+                        referenceDate: referenceDate, role: role, creditRIR: creditRIR) {
             return (h, .history)
         }
         return (0, .none)

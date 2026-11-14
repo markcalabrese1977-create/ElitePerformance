@@ -41,9 +41,9 @@ final class HistorySeedLoadTests: XCTestCase {
     }
 
     private func seed(_ sessions: [Session], id: String = "bench_press", reps: Int = 8, rir: Int = 2,
-                      increment: Double = 2.5) -> Double? {
+                      increment: Double = 2.5, credit: Bool = false) -> Double? {
         HistorySeedLoad.load(for: id, goalReps: reps, targetRIR: rir, in: sessions,
-                             loadIncrement: increment, referenceDate: now)
+                             loadIncrement: increment, referenceDate: now, creditRIR: credit)
     }
 
     func test_completedHistory_seedsFromInverseEpley() throws {
@@ -69,10 +69,10 @@ final class HistorySeedLoadTests: XCTestCase {
         let ctx = try makeContext()
         let s = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])
         // e1RM 130 x (9+2) = 177.67; / (1 + 4/30) = 156.76; x 0.925 = 145.007 exact.
-        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 2.5), 145.0)
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 2.5, credit: true), 145.0)
         // At a 5 lb step the same exact load floors to 145, and a 10 lb step to 140 — never 150.
-        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 5), 145.0)
-        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 10), 140.0)
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 5, credit: true), 145.0)
+        XCTAssertEqual(seed([s], reps: 4, rir: 3, increment: 10, credit: true), 140.0)
     }
 
     func test_decay_anOldHeavySetCountsLessThanARecentLighterOne() throws {
@@ -147,11 +147,38 @@ final class HistorySeedLoadTests: XCTestCase {
 
     // MARK: - C3b: logged RIR and non-representative sets
 
+    // EEE: seeding is reps-only by default. Old RIRs are plan-prefilled (84% equal the plan) and must not inflate loads.
+    func test_defaultSeeds_ignoreRIR_entirely() throws {
+        let ctx = try makeContext()
+        let rirs: [[Int]] = [[0], [2], [4], [9], [-1]]
+        let seeds = try rirs.map { try XCTUnwrap(seed([session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: $0)])) }
+        XCTAssertEqual(Set(seeds).count, 1, "130 x 9 seeds the same load whatever RIR was logged: \(seeds)")
+        let none = try XCTUnwrap(seed([session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130])]))
+        XCTAssertEqual(seeds[0], none)
+        let peaks = try rirs.map { try XCTUnwrap(peak([session(ctx, status: .completed, daysAgo: 1, reps: [9], loads: [130], rirs: $0)])) }
+        XCTAssertEqual(Set(peaks).count, 1, "the peak seed ignores RIR too: \(peaks)")
+        // And the credited number really is higher, so the default is a real change.
+        let credited = try XCTUnwrap(seed([session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])], credit: true))
+        XCTAssertGreaterThan(credited, seeds[0])
+    }
+
+    func test_missedSourceSeeding_andNextMesoPlan_useRepsOnlyE1RM() throws {
+        // 100 x 10 @ RIR 4 and @ RIR 0 must produce identical next-meso seeds.
+        let ctx = try makeContext()
+        let a = session(ctx, status: .completed, daysAgo: 1, reps: [10], loads: [100], rirs: [4])
+        let b = session(ctx, status: .completed, daysAgo: 1, reps: [10], loads: [100], rirs: [0])
+        for (x, y) in [(a, b)] {
+            let sa = HistorySeedLoad.nextMesoSeed(for: "bench_press", goalReps: 8, targetRIR: 2, previousMeso: [x], allSessions: [x], loadIncrement: 2.5, isFixedLoad: false, referenceDate: now)
+            let sb = HistorySeedLoad.nextMesoSeed(for: "bench_press", goalReps: 8, targetRIR: 2, previousMeso: [y], allSessions: [y], loadIncrement: 2.5, isFixedLoad: false, referenceDate: now)
+            XCTAssertEqual(sa.load, sb.load)
+        }
+    }
+
     func test_loggedRIR_raisesTheSeed() throws {
         let ctx = try makeContext()
         let rir0 = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [0])
         let rir2 = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [2])
-        let heavy = try XCTUnwrap(seed([rir2])), light = try XCTUnwrap(seed([rir0]))
+        let heavy = try XCTUnwrap(seed([rir2], credit: true)), light = try XCTUnwrap(seed([rir0], credit: true))
         XCTAssertGreaterThan(heavy, light, "130x9@2 is a bigger lift than 130x9@0")
         // 130 x (9+2) -> e1RM 177.67; /1.2667 * 0.95 = 133.25 -> floor 132.5
         XCTAssertEqual(heavy, 132.5)
@@ -162,13 +189,13 @@ final class HistorySeedLoadTests: XCTestCase {
         let ctx = try makeContext()
         let none = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130])
         let zero = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [0])
-        XCTAssertEqual(seed([none]), seed([zero]))
+        XCTAssertEqual(seed([none], credit: true), seed([zero], credit: true))
         let four = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [4])
         let seven = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [7])
-        XCTAssertEqual(seed([seven]), seed([four]), "RIR above 4 is not credited")
+        XCTAssertEqual(seed([seven], credit: true), seed([four], credit: true), "RIR above 4 is not credited")
         let negative = session(ctx, status: .completed, daysAgo: 0, reps: [9], loads: [130], rirs: [-3])
-        XCTAssertEqual(seed([negative]), seed([zero]), "negative RIR floors at 0")
-        XCTAssertGreaterThan(try XCTUnwrap(seed([four])), try XCTUnwrap(seed([zero])))
+        XCTAssertEqual(seed([negative], credit: true), seed([zero], credit: true), "negative RIR floors at 0")
+        XCTAssertGreaterThan(try XCTUnwrap(seed([four], credit: true)), try XCTUnwrap(seed([zero], credit: true)))
     }
 
     func test_deloadItem_andMaintenanceBlock_areExcluded() throws {
@@ -208,14 +235,14 @@ final class HistorySeedLoadTests: XCTestCase {
     // MARK: - Peak seed (next meso)
 
     private func peak(_ sessions: [Session], id: String = "bench_press", reps: Int = 8, rir: Int = 2,
-                      factor: Double = 0.95, increment: Double = 2.5) -> Double? {
+                      factor: Double = 0.95, increment: Double = 2.5, credit: Bool = false) -> Double? {
         HistorySeedLoad.peakLoad(for: id, goalReps: reps, targetRIR: rir, in: sessions,
-                                 loadIncrement: increment, factor: factor)
+                                 loadIncrement: increment, factor: factor, creditRIR: credit)
     }
 
     private func expectedPeak(load: Double, reps: Int, rir: Int, goalReps: Int = 8, goalRIR: Int = 2,
-                              factor: Double = 0.95, increment: Double = 2.5) -> Double {
-        let e = E1RMCalculator.e1RM(load: load, reps: reps + rir)
+                              factor: Double = 0.95, increment: Double = 2.5, credit: Bool = false) -> Double {
+        let e = E1RMCalculator.e1RM(load: load, reps: reps + (credit ? rir : 0))
         return HistorySeedLoad.roundedDown(E1RMCalculator.load(for: e, reps: goalReps, targetRIR: goalRIR) * factor, increment: increment)
     }
 
@@ -223,17 +250,17 @@ final class HistorySeedLoadTests: XCTestCase {
         let ctx = try makeContext()
         let heavy = session(ctx, status: .completed, daysAgo: 60, reps: [6, 6], loads: [140, 140], rirs: [1, 1], wave: "a")
         let light = session(ctx, status: .completed, daysAgo: 1, reps: [10, 10], loads: [100, 100], rirs: [2, 2], wave: "b")
-        let p = try XCTUnwrap(peak([heavy, light]))
-        XCTAssertEqual(p, expectedPeak(load: 140, reps: 6, rir: 1))
-        XCTAssertGreaterThan(p, try XCTUnwrap(seed([heavy, light])), "recent light work does not pull a peak down")
+        let p = try XCTUnwrap(peak([heavy, light], credit: true))
+        XCTAssertEqual(p, expectedPeak(load: 140, reps: 6, rir: 1, credit: true))
+        XCTAssertGreaterThan(p, try XCTUnwrap(seed([heavy, light], credit: true)), "recent light work does not pull a peak down")
     }
 
     func test_peak_creditsRIR_andClampsIt() throws {
         let ctx = try makeContext()
         let a = session(ctx, status: .completed, daysAgo: 1, reps: [8], loads: [100], rirs: [4])
         let b = session(ctx, status: .completed, daysAgo: 1, reps: [8], loads: [100], rirs: [9])
-        XCTAssertEqual(peak([a]), peak([b]), "RIR above 4 is not credited")
-        XCTAssertEqual(peak([a]), expectedPeak(load: 100, reps: 8, rir: 4))
+        XCTAssertEqual(peak([a], credit: true), peak([b], credit: true), "RIR above 4 is not credited")
+        XCTAssertEqual(peak([a], credit: true), expectedPeak(load: 100, reps: 8, rir: 4, credit: true))
     }
 
     func test_peak_excludesDeloadInsertedMaintenanceAndPlanned() throws {
@@ -243,9 +270,9 @@ final class HistorySeedLoadTests: XCTestCase {
         inserted.insertedDeload = true
         let maint = session(ctx, status: .completed, daysAgo: 1, reps: [10], loads: [200], wave: "a", maintenance: true)
         let planned = session(ctx, status: .planned, daysAgo: 1, reps: [10], loads: [200], wave: "a")
-        XCTAssertNil(peak([deload, inserted, maint, planned]))
+        XCTAssertNil(peak([deload, inserted, maint, planned], credit: true))
         let real = session(ctx, status: .completed, daysAgo: 5, reps: [8], loads: [100], rirs: [2], wave: "a")
-        XCTAssertEqual(peak([deload, inserted, maint, planned, real]), expectedPeak(load: 100, reps: 8, rir: 2))
+        XCTAssertEqual(peak([deload, inserted, maint, planned, real], credit: true), expectedPeak(load: 100, reps: 8, rir: 2, credit: true))
     }
 
     func test_peak_excludesRestPauseDropSkipAndWarmupSets() throws {
@@ -262,10 +289,10 @@ final class HistorySeedLoadTests: XCTestCase {
     func test_peak_factorIsApplied_andRoundsDown() throws {
         let ctx = try makeContext()
         let s = session(ctx, status: .completed, daysAgo: 1, reps: [8, 8], loads: [137, 137], rirs: [2, 2])
-        let full = try XCTUnwrap(peak([s], factor: 1.0))
-        let ninety = try XCTUnwrap(peak([s], factor: 0.90))
-        XCTAssertEqual(full, expectedPeak(load: 137, reps: 8, rir: 2, factor: 1.0))
-        XCTAssertEqual(ninety, expectedPeak(load: 137, reps: 8, rir: 2, factor: 0.90))
+        let full = try XCTUnwrap(peak([s], factor: 1.0, credit: true))
+        let ninety = try XCTUnwrap(peak([s], factor: 0.90, credit: true))
+        XCTAssertEqual(full, expectedPeak(load: 137, reps: 8, rir: 2, factor: 1.0, credit: true))
+        XCTAssertEqual(ninety, expectedPeak(load: 137, reps: 8, rir: 2, factor: 0.90, credit: true))
         XCTAssertLessThan(ninety, full)
         XCTAssertEqual(full.truncatingRemainder(dividingBy: 2.5), 0)
         let exact = E1RMCalculator.load(for: E1RMCalculator.e1RM(load: 137, reps: 10), reps: 8, targetRIR: 2)

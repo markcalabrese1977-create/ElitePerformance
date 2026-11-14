@@ -218,7 +218,8 @@ extension SessionItemEditService {
         peakFactor: Double = nextMesoPeakFactor,
         context: ModelContext,
         now: Date = Date(),
-        calendar cal: Calendar = .current
+        calendar cal: Calendar = .current,
+        creditRIR: Bool = false
     ) -> NextMesoPlan {
         let startOfToday = cal.startOfDay(for: now)
         let startDay = cal.startOfDay(for: startDate ?? defaultNextMesoStart(for: meso, calendar: cal) ?? now)
@@ -317,7 +318,7 @@ extension SessionItemEditService {
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
                 loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
-                factor: peakFactor, customExercises: custom, referenceDate: now
+                factor: peakFactor, customExercises: custom, referenceDate: now, creditRIR: creditRIR
             )
             // A max load caps the seed (a fixed-load exercise or one without a max is unchanged).
             let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
@@ -332,7 +333,7 @@ extension SessionItemEditService {
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
                 loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
-                factor: peakFactor, customExercises: custom, referenceDate: now, role: .top
+                factor: peakFactor, customExercises: custom, referenceDate: now, role: .top, creditRIR: creditRIR
             )
             let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
             seedCache[key] = capped
