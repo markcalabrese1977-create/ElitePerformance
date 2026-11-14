@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import SQLite3
 @testable import ElitePerformance
 
 /// BA2: a store with EVERY non-excluded field set to a non-default value survives export -> wipe -> import -> export.
@@ -743,5 +744,60 @@ final class StoreSafetyTests: XCTestCase {
         XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Session>()), 0, "the legacy store's sessions were NOT adopted")
         XCTAssertTrue(logs.contains { $0.contains("Legacy store files present") && $0.contains("ElitePerformanceStore_v2.store") })
         XCTAssertEqual(try Data(contentsOf: legacy), legacyBefore, "the legacy file is untouched")
+    }
+
+    // MARK: - With the iCloud entitlement present
+
+    private func entitlementsFile() -> URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("ElitePerformance/ElitePerformance.entitlements")
+    }
+
+    /// Tables SwiftData/CoreData create only when CloudKit mirroring is active.
+    private func cloudKitMirroringTables(_ url: URL) -> [String] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return ["<could not open>"] }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE name LIKE 'ANSCK%' OR name LIKE '%CLOUDKIT%'", -1, &stmt, nil) == SQLITE_OK else { return ["<query failed>"] }
+        defer { sqlite3_finalize(stmt) }
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { names.append(String(cString: sqlite3_column_text(stmt, 0))) }
+        return names
+    }
+
+    func test_withTheICloudEntitlement_aCopyOfAPopulatedStoreOpens_withItsCounts_andNoCloudKitMirroring() throws {
+        let entitlements = try String(contentsOf: entitlementsFile(), encoding: .utf8)
+        XCTAssertTrue(entitlements.contains("iCloud.com.markcalabrese.ElitePerformance"), "this test must run WITH the iCloud entitlement")
+        XCTAssertTrue(entitlements.contains("CloudDocuments"))
+
+        // a populated on-disk store: the Oct 30 fixture when provided, else the BA2 populated store
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let original = dir.appendingPathComponent("original.store")
+        let seed = try ModelContainer(for: AppSchema.makeSchema(), configurations: config(original))
+        let expected: [Int]
+        if let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty, FileManager.default.fileExists(atPath: path) {
+            try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: seed)
+            expected = try BackupContentSummary.of(file: URL(fileURLWithPath: path)).verifiedCounts
+        } else {
+            try PopulatedStoreBuilder.build(in: ModelContext(seed))
+            expected = try BackupContentSummary.of(store: ModelContext(seed)).verifiedCounts
+        }
+        XCTAssertGreaterThan(expected[0], 0)
+        // checkpoint into the main file by closing, then COPY the store files (never open the original again)
+        let copyDir = try tempDir(); defer { try? FileManager.default.removeItem(at: copyDir) }
+        let copy = copyDir.appendingPathComponent("default.store")
+        for suffix in ["", "-wal", "-shm"] {
+            let src = URL(fileURLWithPath: original.path + suffix)
+            if FileManager.default.fileExists(atPath: src.path) { try FileManager.default.copyItem(at: src, to: URL(fileURLWithPath: copy.path + suffix)) }
+        }
+
+        let result = AppStoreOpener.open(appSupport: copyDir, configuration: config(copy), log: { _ in })
+        guard case .opened(let container) = result else { return XCTFail("the copy must open with the entitlement present: \(result)") }
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(container)).verifiedCounts, expected, "the counts of the populated store")
+        // not mirrored: the configuration says so, and the store has no CloudKit mirroring tables
+        let cfg = try XCTUnwrap(container.configurations.first)
+        XCTAssertEqual(String(describing: cfg.cloudKitDatabase), String(describing: ModelConfiguration.CloudKitDatabase.none))
+        XCTAssertEqual(cloudKitMirroringTables(copy), [], "no CloudKit mirroring is active")
     }
 }
