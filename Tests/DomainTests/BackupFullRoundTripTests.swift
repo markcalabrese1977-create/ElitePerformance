@@ -422,4 +422,102 @@ final class ImportSafetyTests: XCTestCase {
         try BackupRestoreCoordinator.restore(from: snap.url, container: targetC, snapshotDirectory: dir, now: t0.addingTimeInterval(120))
         XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(targetC)).verifiedCounts, before.verifiedCounts)
     }
+
+    // MARK: - Interrupted-import marker
+
+    func test_marker_isPresentDuringTheImport_andAbsentAfterSuccess() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, _) = try populated()
+        var seen: InterruptedImportMarker?
+        var markerFileDuring = false
+        let dir = self.dir!
+        try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: dir) { url, container in
+            markerFileDuring = InterruptedImportMarker.exists(in: dir)
+            seen = InterruptedImportMarker.read(in: dir)
+            return try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container)
+        }
+        XCTAssertTrue(markerFileDuring)
+        let snap = try XCTUnwrap(PreImportSnapshots.list(in: dir).first)
+        XCTAssertEqual(seen?.snapshotPath, snap.url.path, "the marker names the snapshot")
+        XCTAssertNotNil(seen?.startedAt)
+        XCTAssertFalse(InterruptedImportMarker.exists(in: dir), "removed after the import succeeded")
+    }
+
+    func test_marker_isRemovedAfterInProcessRecovery_butKeptWhenRecoveryFails() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, _) = try populated()
+        XCTAssertThrowsError(try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: dir,
+                                                                  importer: failingImporter(failRecovery: false, calls: Counter())))
+        XCTAssertFalse(InterruptedImportMarker.exists(in: dir), "recovered in-process")
+        XCTAssertThrowsError(try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: dir,
+                                                                  now: Date().addingTimeInterval(5),
+                                                                  importer: failingImporter(failRecovery: true, calls: Counter())))
+        XCTAssertTrue(InterruptedImportMarker.exists(in: dir), "recovery failed: the next launch must find the marker")
+    }
+
+    /// Simulates a kill mid-import: the snapshot and marker exist, and the store is left in a half-imported state.
+    private func interruptedStore(restoreTo: inout BackupContentSummary) throws -> ModelContainer {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (c, ctx) = try populated()
+        restoreTo = try BackupContentSummary.of(store: ctx)
+        let snap = try XCTUnwrap(PreImportSnapshots.take(from: ctx, in: dir, now: Date(timeIntervalSince1970: 1_800_000_000)))
+        try InterruptedImportMarker.write(snapshot: snap.url, startedAt: snap.date, in: dir)
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: incoming, modelContainer: c)   // the store now differs
+        return c
+    }
+
+    @MainActor
+    func test_markerLeftAtLaunch_promptsAndHoldsBackBackfills_untilAnswered() throws {
+        var expected = BackupContentSummary(exportedAt: nil, sessions: 0, completedSessions: 0, lastCompletedDate: nil, sessionHistory: 0, customExercises: 0, mesoBlocks: 0)
+        let container = try interruptedStore(restoreTo: &expected)
+        var backfillRuns = 0
+        let gate = StartupGate(directory: dir, runBackfills: { _ in backfillRuns += 1 })
+        gate.begin(container: container)
+        let prompt = try XCTUnwrap(gate.interrupted, "a marker at launch raises the prompt")
+        XCTAssertTrue(prompt.message.hasPrefix("A restore was interrupted. Restore your data from"), prompt.message)
+        XCTAssertEqual(backfillRuns, 0, "backfills do not run before the user answers")
+        gate.keepCurrentData()
+        XCTAssertEqual(backfillRuns, 1, "they run once it is answered")
+        XCTAssertNil(gate.interrupted)
+        XCTAssertFalse(InterruptedImportMarker.exists(in: dir), "Keep current data deletes the marker")
+        XCTAssertNotEqual(try BackupContentSummary.of(store: ModelContext(container)).verifiedCounts, expected.verifiedCounts, "the store was left as it was")
+    }
+
+    @MainActor
+    func test_launchRestore_returnsExactPreImportCounts_thenRunsBackfills_andClearsTheMarker() throws {
+        var expected = BackupContentSummary(exportedAt: nil, sessions: 0, completedSessions: 0, lastCompletedDate: nil, sessionHistory: 0, customExercises: 0, mesoBlocks: 0)
+        let container = try interruptedStore(restoreTo: &expected)
+        var backfillRuns = 0
+        let gate = StartupGate(directory: dir, runBackfills: { _ in backfillRuns += 1 })
+        gate.begin(container: container)
+        XCTAssertEqual(backfillRuns, 0)
+        gate.restore()
+        XCTAssertNil(gate.errorMessage)
+        XCTAssertNil(gate.interrupted)
+        let after = try BackupContentSummary.of(store: ModelContext(container))
+        XCTAssertEqual(after.verifiedCounts, expected.verifiedCounts, "exact pre-import counts")
+        XCTAssertEqual(after.completedSessions, expected.completedSessions)
+        XCTAssertFalse(InterruptedImportMarker.exists(in: dir))
+        XCTAssertEqual(backfillRuns, 1)
+    }
+
+    @MainActor
+    func test_noMarker_backfillsRunImmediately_andAMarkerWithoutItsSnapshotDoesNotBlockTheApp() throws {
+        let container = try BackupTestSupport.makeContainer()
+        var runs = 0
+        let gate = StartupGate(directory: dir, runBackfills: { _ in runs += 1 })
+        gate.begin(container: container)
+        XCTAssertEqual(runs, 1); XCTAssertNil(gate.interrupted)
+        try InterruptedImportMarker.write(snapshot: dir.appendingPathComponent("pre-import-gone.json"), startedAt: Date(), in: dir)
+        let gate2 = StartupGate(directory: dir, runBackfills: { _ in runs += 1 })
+        gate2.begin(container: container)
+        XCTAssertEqual(runs, 2); XCTAssertNil(gate2.interrupted)
+        XCTAssertFalse(InterruptedImportMarker.exists(in: dir))
+    }
 }

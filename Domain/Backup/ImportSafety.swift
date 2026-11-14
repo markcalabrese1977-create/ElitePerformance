@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Combine
 
 /// What a backup (a file, or the live store) holds, for the import confirmation and for verifying a pre-import snapshot.
 struct BackupContentSummary: Equatable {
@@ -140,6 +141,45 @@ enum PreImportSnapshots {
     }
 }
 
+/// Written before an import wipes the store, deleted only once the import has fully succeeded (or was recovered in-process).
+/// A marker found at launch means the app was killed mid-import.
+struct InterruptedImportMarker: Codable, Equatable {
+    var snapshotPath: String
+    var startedAt: Date
+
+    static let fileName = "import-in-progress.json"
+
+    private static func fileURL(in directory: URL) -> URL { directory.appendingPathComponent(fileName) }
+
+    static func write(snapshot: URL, startedAt: Date, in directory: URL) throws {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try enc.encode(InterruptedImportMarker(snapshotPath: snapshot.path, startedAt: startedAt)).write(to: fileURL(in: directory), options: .atomic)
+    }
+
+    static func read(in directory: URL = PreImportSnapshots.defaultDirectory()) -> InterruptedImportMarker? {
+        guard let data = try? Data(contentsOf: fileURL(in: directory)) else { return nil }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try? dec.decode(InterruptedImportMarker.self, from: data)
+    }
+
+    static func exists(in directory: URL = PreImportSnapshots.defaultDirectory()) -> Bool {
+        FileManager.default.fileExists(atPath: fileURL(in: directory).path)
+    }
+
+    static func clear(in directory: URL = PreImportSnapshots.defaultDirectory()) {
+        try? FileManager.default.removeItem(at: fileURL(in: directory))
+    }
+
+    /// The snapshot file: the recorded path, or (an app update can move the container) the same file name in `directory`.
+    func resolvedSnapshotURL(in directory: URL) -> URL? {
+        let recorded = URL(fileURLWithPath: snapshotPath)
+        if FileManager.default.fileExists(atPath: recorded.path) { return recorded }
+        let moved = directory.appendingPathComponent(recorded.lastPathComponent)
+        return FileManager.default.fileExists(atPath: moved.path) ? moved : nil
+    }
+}
+
 /// THE import path. Settings' import and "Restore pre-import state" both go through it, so both snapshot first.
 enum BackupRestoreCoordinator {
     typealias Importer = (URL, ModelContainer) throws -> BackupSnapshotImportResult
@@ -147,12 +187,20 @@ enum BackupRestoreCoordinator {
     /// `importer` is the real importer; tests substitute one that fails after it has changed the store.
     @discardableResult
     static func restore(from url: URL, container: ModelContainer, snapshotDirectory: URL = PreImportSnapshots.defaultDirectory(),
-                        now: Date = Date(),
+                        now: Date = Date(), preserveExistingMarker: Bool = false,
                         importer: Importer = { try BackupSnapshotImporter.importFullBackupJSON(from: $0, modelContainer: $1) }) throws -> BackupSnapshotImportResult {
         let context = ModelContext(container)
         let snapshot = try PreImportSnapshots.take(from: context, in: snapshotDirectory, now: now)   // throws: import never starts
+        // Marker: present for the whole import, removed only after it (PR rebuild and final save included) succeeded or the
+        // old data was put back in-process. A kill in between leaves it for the next launch to find.
+        if let snapshot, !preserveExistingMarker {
+            do { try InterruptedImportMarker.write(snapshot: snapshot.url, startedAt: now, in: snapshotDirectory) }
+            catch { throw ImportSafetyError.snapshotFailed("could not write the import marker: \(error.localizedDescription)") }
+        }
         do {
-            return try importer(url, container)
+            let result = try importer(url, container)
+            InterruptedImportMarker.clear(in: snapshotDirectory)
+            return result
         } catch {
             // The importer may have changed the store before it failed; put the old data back from the snapshot.
             // The snapshot file is never deleted here, whatever happens.
@@ -163,8 +211,74 @@ enum BackupRestoreCoordinator {
                 throw NSError(domain: "BackupRestore", code: 2, userInfo: [NSLocalizedDescriptionKey:
                     "\(error.localizedDescription) Putting your previous data back also failed (\(recoveryError.localizedDescription)). It is saved: restore it from Settings → Restore pre-import state."])
             }
+            // recovered in-process (not when this restore is itself the answer to an older interrupted import: that marker
+            // points at the good snapshot, and the store was only put back to the half-imported state)
+            if !preserveExistingMarker { InterruptedImportMarker.clear(in: snapshotDirectory) }
             throw NSError(domain: "BackupRestore", code: 1, userInfo: [NSLocalizedDescriptionKey:
                 "\(error.localizedDescription) Your previous data was put back."])
         }
     }
+}
+
+/// Launch gate: backfills run only once any interrupted restore has been answered.
+@MainActor
+final class StartupGate: ObservableObject {
+    static let shared = StartupGate()
+
+    struct Interrupted: Equatable {
+        let snapshotURL: URL
+        let snapshotDate: Date
+        var message: String { "A restore was interrupted. Restore your data from \(snapshotDate.formatted(date: .abbreviated, time: .shortened))?" }
+    }
+
+    @Published private(set) var interrupted: Interrupted?
+    @Published private(set) var errorMessage: String?
+    private var container: ModelContainer?
+    private let directory: URL
+    private let runBackfills: (ModelContainer) -> Void
+
+    init(directory: URL = PreImportSnapshots.defaultDirectory(),
+         runBackfills: @escaping (ModelContainer) -> Void = { StartupBackfills.run(using: $0) }) {
+        self.directory = directory
+        self.runBackfills = runBackfills
+    }
+
+    /// Called where the app used to run its backfills. With an interrupted-import marker it holds them back and raises the prompt.
+    func begin(container: ModelContainer) {
+        self.container = container
+        guard let marker = InterruptedImportMarker.read(in: directory) else { runBackfills(container); return }
+        guard let snapshot = marker.resolvedSnapshotURL(in: directory) else {
+            // nothing to restore from: the marker is useless; do not block the app forever
+            InterruptedImportMarker.clear(in: directory)
+            runBackfills(container)
+            return
+        }
+        let date = PreImportSnapshots.list(in: directory).first { $0.url.lastPathComponent == snapshot.lastPathComponent }?.date ?? marker.startedAt
+        interrupted = Interrupted(snapshotURL: snapshot, snapshotDate: date)
+    }
+
+    /// "Restore": the coordinator restores from the marker's snapshot (snapshotting the half-imported state first).
+    func restore() {
+        guard let pending = interrupted, let container else { return }
+        do {
+            try BackupRestoreCoordinator.restore(from: pending.snapshotURL, container: container, snapshotDirectory: directory,
+                                                 preserveExistingMarker: true)
+            // the coordinator cleared the marker on success
+            interrupted = nil
+            NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
+            runBackfills(container)
+        } catch {
+            errorMessage = "Restore failed: \(error.localizedDescription) Your data is saved and the prompt will appear again on the next launch."
+            // the marker stays; the app stays blocked on this answer until the user keeps current data or restore succeeds
+        }
+    }
+
+    /// "Keep current data": drops the marker and carries on.
+    func keepCurrentData() {
+        InterruptedImportMarker.clear(in: directory)
+        interrupted = nil
+        if let container { runBackfills(container) }
+    }
+
+    func dismissError() { errorMessage = nil }
 }

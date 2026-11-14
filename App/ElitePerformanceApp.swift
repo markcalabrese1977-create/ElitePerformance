@@ -26,8 +26,9 @@ struct ElitePerformanceApp: App {
             ("ElitePerformanceStore_v2", "ElitePerformanceStore_v2.store")
         ]
 
+        // Backfills run through the gate: an interrupted restore is answered first (see StartupGate).
         func runStartupBackfills(using container: ModelContainer) {
-            StartupBackfills.run(using: container)
+            StartupGate.shared.begin(container: container)
         }
 
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
@@ -184,12 +185,38 @@ struct ElitePerformanceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LaunchRoot(gate: StartupGate.shared) {
+                ContentView()
                 .id(appResetID)
                 .onReceive(NotificationCenter.default.publisher(for: .didRestoreBackup)) { _ in
                     appResetID = UUID()
                 }
                 .modelContainer(sharedModelContainer)
+            }
+        }
+    }
+}
+
+/// Shows the app once any interrupted restore has been answered; until then only the blocking prompt.
+struct LaunchRoot<Content: View>: View {
+    @ObservedObject var gate: StartupGate
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Group {
+            if gate.interrupted == nil { content() } else { Color(.systemBackground).ignoresSafeArea() }
+        }
+        .alert("Restore interrupted", isPresented: Binding(get: { gate.interrupted != nil && gate.errorMessage == nil }, set: { _ in })) {
+            Button("Restore") { gate.restore() }
+            Button("Keep current data", role: .cancel) { gate.keepCurrentData() }
+        } message: {
+            Text(gate.interrupted?.message ?? "")
+        }
+        .alert("Restore failed", isPresented: Binding(get: { gate.errorMessage != nil }, set: { _ in })) {
+            Button("Try again") { gate.dismissError() }
+            Button("Keep current data", role: .cancel) { gate.dismissError(); gate.keepCurrentData() }
+        } message: {
+            Text(gate.errorMessage ?? "")
         }
     }
 }
