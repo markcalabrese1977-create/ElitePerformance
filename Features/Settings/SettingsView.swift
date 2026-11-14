@@ -14,6 +14,14 @@ struct SettingsView: View {
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
 
+    // MARK: - Automatic backups
+    @ObservedObject private var autoBackup = AutoBackupService.shared
+    @State private var backupFiles: [AutoBackupFile] = []
+    @State private var backupsAreOffDevice = true
+    @State private var backupBusy = false
+    @State private var backupMessage: String = ""
+    @State private var showBackupMessage = false
+
     @State private var showImportBackupPicker = false
     @State private var importMessage: String = ""
     @State private var showImportAlert = false
@@ -239,6 +247,35 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                         }
 
+            // MARK: - Backup
+            Section("Backup") {
+                Text(backupStatusLine)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if !backupsAreOffDevice {
+                    Text("iCloud isn't available, so backups are saved on this device only. Sign in to iCloud and turn on iCloud Drive for Elite Performance.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if let e = autoBackup.lastError {
+                    Text("Last backup attempt failed: \(e)").font(.caption).foregroundStyle(.red)
+                }
+                Button(backupBusy ? "Backing up…" : "Back up now") { Task { await backUpNow() } }
+                    .disabled(backupBusy)
+                Button("Verify latest backup") { verifyLatestBackup() }
+                    .disabled(backupBusy || backupFiles.isEmpty)
+                ForEach(backupFiles.prefix(10)) { file in
+                    Button {
+                        try? FileManager.default.startDownloadingUbiquitousItem(at: file.url)
+                        pendingRestore = PendingRestore(url: file.url, isTemporaryCopy: false)
+                    } label: {
+                        Text("Restore from \(file.date.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                    .foregroundStyle(.red)
+                }
+            }
+            .task(id: autoBackup.statusRevision) { await refreshBackups() }
+
             // MARK: - Export
             Section("Export") {
                 Button("Import Full Backup (JSON)") {
@@ -399,12 +436,53 @@ struct SettingsView: View {
         } message: {
             Text(mesoGenerationMessage)
         }
+        .alert("Backup", isPresented: $showBackupMessage) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(backupMessage)
+        }
         .alert("Backup Import", isPresented: $showImportAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(importMessage)
         }
         
+    }
+
+    // MARK: - Automatic backups
+
+    private var backupStatusLine: String {
+        guard let last = autoBackup.status.lastSuccess else { return "Last backup: none yet" }
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
+        let when = f.localizedString(for: last, relativeTo: Date())
+        return "Last backup: \(when) · iCloud \(autoBackup.status.lastWasOffDevice ? "✓" : "✗")\(autoBackup.status.lastVerified ? " · verified" : "")"
+    }
+
+    private func refreshBackups() async {
+        let result = await autoBackup.availableBackups()
+        backupFiles = result.files
+        backupsAreOffDevice = result.destination.isOffDevice
+    }
+
+    private func backUpNow() async {
+        backupBusy = true
+        defer { backupBusy = false }
+        switch await autoBackup.backUpNow(container: context.container) {
+        case .success: await refreshBackups()
+        case .failure(let e): backupMessage = "Backup failed: \(e.localizedDescription)"; showBackupMessage = true
+        }
+    }
+
+    /// Decodes the newest backup into a scratch in-memory store through the real importer and compares counts with this device.
+    private func verifyLatestBackup() {
+        guard let latest = backupFiles.first else { return }
+        do {
+            let report = try AutoBackupVerification.verify(file: latest.url, against: context)
+            backupMessage = "\(latest.date.formatted(date: .abbreviated, time: .shortened))\n\(report.summary)"
+        } catch {
+            backupMessage = "Could not verify \(latest.url.lastPathComponent): \(error.localizedDescription)"
+        }
+        showBackupMessage = true
     }
 
     // MARK: - Restore
