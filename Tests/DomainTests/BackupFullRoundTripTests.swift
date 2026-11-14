@@ -678,4 +678,70 @@ final class StoreSafetyTests: XCTestCase {
         XCTAssertGreaterThan(configurations, 50, "the scan found the configurations")
         XCTAssertEqual(offenders, [])
     }
+
+    // MARK: - Open failure leaves the store alone
+
+    private struct OpenBoom: Error {}
+
+    private func tempDir() throws -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("ep_store_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    private func config(_ url: URL) -> ModelConfiguration {
+        ModelConfiguration(schema: AppSchema.makeSchema(), url: url, cloudKitDatabase: .none)
+    }
+    /// A real populated store on disk (a few sessions), closed again.
+    private func makePopulatedStore(at url: URL) throws {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: config(url))
+        let ctx = ModelContext(c)
+        for i in 0..<5 { ctx.insert(Session(date: Date(timeIntervalSince1970: 1_700_000_000 + Double(i) * 86_400), status: .completed, weekIndex: 1, dayLabel: "D", items: [])) }
+        try ctx.save()
+    }
+    /// Every file in the directory: name -> (bytes, modification date).
+    private func fingerprint(_ dir: URL) throws -> [String: Data] {
+        var out: [String: Data] = [:]
+        for u in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            out[u.lastPathComponent] = try Data(contentsOf: u)
+        }
+        return out
+    }
+
+    func test_openFailure_leavesTheStoreFilesByteForByteUntouched_andReportsFailure() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("default.store")
+        try makePopulatedStore(at: url)
+        let before = try fingerprint(dir)
+        XCTAssertFalse(before.isEmpty)
+        var logs: [String] = []
+        let result = AppStoreOpener.open(appSupport: dir, configuration: config(url), makeContainer: { _, _ in throw OpenBoom() }, log: { logs.append($0) })
+        guard case .failed(let message) = result else { return XCTFail("an open failure must be reported, not papered over") }
+        XCTAssertFalse(message.isEmpty, "the error text is carried to the screen")
+        XCTAssertEqual(try fingerprint(dir), before, "no store file was deleted, moved, recreated or rewritten")
+        XCTAssertTrue(logs.contains { $0.contains("Nothing was changed") })
+    }
+
+    func test_aCorruptStore_failsToOpen_andItsBytesAreUnchanged() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("default.store")
+        try Data("this is not a sqlite database, but it is somebody's data".utf8).write(to: url)
+        let before = try fingerprint(dir)
+        let result = AppStoreOpener.open(appSupport: dir, configuration: config(url), log: { _ in })
+        guard case .failed = result else { return XCTFail("a corrupt store must not open") }
+        XCTAssertEqual(try fingerprint(dir), before, "not deleted, not recreated, not moved aside")
+    }
+
+    func test_legacyStoreFiles_areLoggedAndNeverOpened_theDefaultStoreIsUsed() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let legacy = dir.appendingPathComponent("ElitePerformanceStore_v2.store")
+        try makePopulatedStore(at: legacy)                       // a legacy store with 5 sessions
+        let legacyBefore = try Data(contentsOf: legacy)
+        let defaultURL = dir.appendingPathComponent("default.store")
+        var logs: [String] = []
+        let result = AppStoreOpener.open(appSupport: dir, configuration: config(defaultURL), log: { logs.append($0) })
+        guard case .opened(let container) = result else { return XCTFail("the default store opens") }
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Session>()), 0, "the legacy store's sessions were NOT adopted")
+        XCTAssertTrue(logs.contains { $0.contains("Legacy store files present") && $0.contains("ElitePerformanceStore_v2.store") })
+        XCTAssertEqual(try Data(contentsOf: legacy), legacyBefore, "the legacy file is untouched")
+    }
 }
