@@ -5,9 +5,10 @@ import SwiftData
 /// was never completed, is seeded from history instead of staying at 0.
 ///
 /// Source: the most recent COMPLETED session of the same meso and the same dayLabel (any letter) before the target; when
-/// the block has none, the most recent completed session of that exercise anywhere. Its best RIR-credited working set gives
+/// the block has none, the most recent completed session of that exercise anywhere within the last 12 weeks; older or none
+/// leaves the load at 0 with the note "No recent history — set a load". Its best RIR-credited working set gives
 /// an e1RM, which is converted to the target's reps and RIR, taken 2.5% lower (conservative), and rounded DOWN to the
-/// lifter's load step. A target that has any history is never left at 0. Nothing the lifter edited (`planEdited`) is touched.
+/// lifter's load step. A target with recent history is never left at 0. Nothing the lifter edited (`planEdited`) is touched.
 enum MissedSourceSeeding {
 
     static let conservativeFactor = 0.975
@@ -20,7 +21,15 @@ enum MissedSourceSeeding {
         let note: String
         let fromDate: Date
         let missedDate: Date?
+        /// True when nothing recent exists to seed from: the load stays 0 and only the note is written.
+        var isNoRecentHistory: Bool { loads.allSatisfy { $0 <= 0 } }
     }
+
+    /// The any-block fallback only trusts sessions this recent.
+    static let fallbackWindowWeeks = 12
+    static let noRecentHistoryNote = "No recent history — set a load"
+    private static let seededMarker = "Seeded from"
+
 
     struct Context {
         var profile: UserProfile?
@@ -68,12 +77,20 @@ enum MissedSourceSeeding {
                     $0.date < target.date && $0.meso?.persistentModelID == tm.persistentModelID
                         && SessionDayLabelMatcher.matches($0.dayLabel, target.dayLabel)
                 }.sorted { $0.date > $1.date }
-                let anywhere = completed.filter { $0.date < target.date }.sorted { $0.date > $1.date }
+                let cutoff = Calendar.current.date(byAdding: .weekOfYear, value: -fallbackWindowWeeks, to: now) ?? .distantPast
+                let anywhere = completed.filter { $0.date < target.date && $0.date >= cutoff }.sorted { $0.date > $1.date }
                 var source: (session: Session, e1rm: Double)?
                 for s in sameDay + anywhere {
                     if let e = e1RM(in: s, canonicalId: canonical) { source = (s, e); break }
                 }
-                guard let source else { continue }
+                guard let source else {
+                    // Older than 12 weeks, or none: leave the load at 0 and say so (once).
+                    if item.prescriptionNotes?.contains(noRecentHistoryNote) != true {
+                        seeds.append(Seed(session: target, item: item, loads: item.plannedLoadsBySet.map { _ in 0 }, suggestedLoad: 0,
+                                          note: noRecentHistoryNote + ".", fromDate: target.date, missedDate: nil))
+                    }
+                    continue
+                }
 
                 let rowCount = item.plannedLoadsBySet.count
                 var loads: [Double] = []
@@ -109,10 +126,15 @@ enum MissedSourceSeeding {
 
     static func apply(_ seeds: [Seed]) {
         for s in seeds {
+            var existing = s.item.prescriptionNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if s.isNoRecentHistory {
+                s.item.prescriptionNotes = existing.isEmpty ? s.note : existing + " " + s.note
+                continue
+            }
             s.item.plannedLoadsBySet = s.loads
             s.item.suggestedLoad = s.suggestedLoad
-            let existing = s.item.prescriptionNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !existing.contains("Seeded from") {
+            existing = existing.replacingOccurrences(of: noRecentHistoryNote + ".", with: "").trimmingCharacters(in: .whitespaces)
+            if !existing.contains(seededMarker) {
                 s.item.prescriptionNotes = existing.isEmpty ? s.note : existing + " " + s.note
             }
         }
