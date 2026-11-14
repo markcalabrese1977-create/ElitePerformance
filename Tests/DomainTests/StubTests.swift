@@ -1910,7 +1910,7 @@ final class PropagationToggleAndServiceTests: XCTestCase {
 final class ProgramPlanPropagationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
-        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self, SessionHistory.self, SessionHistoryExercise.self])
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
@@ -2027,6 +2027,45 @@ final class ProgramPlanPropagationTests: XCTestCase {
         XCTAssertEqual(ProgramDayDetailView.editedCount(in: session), 2)
         XCTAssertTrue(ProgramDayDetailView.resetMessage(editedCount: 2).hasPrefix("2 edited exercises will be reset"))
         XCTAssertTrue(ProgramDayDetailView.resetMessage(editedCount: 1).hasPrefix("1 edited exercise will be reset"))
+    }
+
+    // TT: rename covers every same-label session of the SAME meso (planned + completed), never another meso; carry-forward still pairs.
+    func test_TT_renameCoversTheWholeMesoOnly_historyAndCarryForwardStayConsistent() throws {
+        let context = try makeContext()
+        let mesoA = MesoBlock(name: "A", startDate: Date(), totalWeeks: 8)
+        let mesoB = MesoBlock(name: "B", startDate: Date(), totalWeeks: 8)
+        context.insert(mesoA); context.insert(mesoB)
+        let (done, doneItem) = plannedSession(context, daysAhead: -7, label: "Push", meso: mesoA, load: 100)
+        done.status = .completed
+        let (next, nextItem) = plannedSession(context, daysAhead: 7, label: "Push", meso: mesoA)
+        let (pull, _) = plannedSession(context, daysAhead: 8, label: "Pull", meso: mesoA)
+        let (otherMeso, _) = plannedSession(context, daysAhead: 9, label: "Push", meso: mesoB)
+        for s in [done, next, pull, otherMeso] { (s.meso!).sessions.append(s) }
+        let history = SessionHistory(date: done.date, weekIndex: 1, title: "t", subtitle: "s", totalExercises: 1, totalSets: 1, totalVolume: 1,
+                                     sessionId: done.id, dayLabelSnapshot: "Push", exercises: [])
+        context.insert(history)
+        try context.save()
+
+        let plan = try DayLabelRename.plan(renaming: next, to: " Upper A ").get()
+        XCTAssertEqual(plan, .init(oldLabel: "Push", newLabel: "Upper A", planned: 1, completed: 1, other: 0))
+        XCTAssertEqual(plan.sessionCount, 2, "the confirmation count")
+        XCTAssertTrue(ProgramDayDetailView.renameMessage(plan).contains("on 2 sessions"))
+
+        try DayLabelRename.apply(renaming: next, to: " Upper A ", in: context)
+        XCTAssertEqual(done.dayLabel, "Upper A")
+        XCTAssertEqual(next.dayLabel, "Upper A")
+        XCTAssertEqual(history.dayLabelSnapshot, "Upper A", "the history title follows")
+        XCTAssertEqual(pull.dayLabel, "Pull")
+        XCTAssertEqual(otherMeso.dayLabel, "Push", "another meso is never touched")
+
+        // Carry-forward pairing survives: the completed session still finds the planned one.
+        doneItem.actualLoads = [140]; doneItem.actualReps = [8]; doneItem.actualRIRs = [2]
+        XCTAssertTrue(SessionDayLabelMatcher.matches(done.dayLabel, next.dayLabel))
+        XCTAssertTrue(PlanMemoryEngine.nextTargetItem(for: doneItem, after: done, in: [done, next, pull, otherMeso]) === nextItem, "carry-forward still pairs the renamed chain")
+
+        // Collision: another day type already has that name -> refused, nothing changes.
+        XCTAssertThrowsError(try DayLabelRename.apply(renaming: next, to: "pull", in: context))
+        XCTAssertEqual(next.dayLabel, "Upper A")
     }
 }
 

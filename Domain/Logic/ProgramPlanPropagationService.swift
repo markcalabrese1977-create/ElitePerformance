@@ -161,3 +161,81 @@ struct ProgramPlanPropagationService {
         return result
     }
 }
+
+// MARK: - Renaming a day type
+
+/// Renaming a day ("Push" -> "Upper A") rewrites the label on EVERY session of that day type in the same meso, planned,
+/// in-progress and completed, so the data that pairs sessions by dayLabel stays one chain:
+///  - `PlanMemoryEngine.nextTargetItem` (carry-forward) pairs a finished session with the next one by meso + EXACT dayLabel
+///    + wave letter, so a half-renamed block stops carrying loads forward;
+///  - `LoadProjectionService` (Auto+), `CoachingEngine` and `SessionItemEditService` match the same way;
+///  - History cards show `SessionHistory.dayLabelSnapshot` before the session's own label, so the snapshots of the renamed
+///    completed sessions are rewritten too;
+///  - MesoComparison and the summaries read the sessions' labels, which are all renamed together.
+/// Other mesos are never touched.
+enum DayLabelRename {
+
+    struct Plan: Equatable {
+        var oldLabel: String
+        var newLabel: String
+        var planned: Int
+        var completed: Int
+        var other: Int
+        var sessionCount: Int { planned + completed + other }
+    }
+
+    enum Failure: Error, Equatable {
+        case emptyLabel
+        case unchanged
+        case collidesWithAnotherDay(String)
+    }
+
+    private static func key(_ s: String?) -> String { (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Sessions of `session`'s day type in its meso (exact label, as carry-forward compares it), the session itself included.
+    static func targets(of session: Session) -> [Session] {
+        guard let meso = session.meso else { return [session] }
+        let label = session.dayLabel
+        return meso.sessions.filter { $0.id == session.id || SessionDayLabelMatcher.matches($0.dayLabel, label) }
+    }
+
+    static func plan(renaming session: Session, to newLabel: String) -> Result<Plan, Failure> {
+        let trimmed = key(newLabel)
+        guard !trimmed.isEmpty else { return .failure(.emptyLabel) }
+        guard trimmed != key(session.dayLabel) else { return .failure(.unchanged) }
+        if let meso = session.meso {
+            let mine = Set(targets(of: session).map(\.id))
+            if meso.sessions.contains(where: { !mine.contains($0.id) && key($0.dayLabel).lowercased() == trimmed.lowercased() }) {
+                return .failure(.collidesWithAnotherDay(trimmed))
+            }
+        }
+        let t = targets(of: session)
+        return .success(Plan(
+            oldLabel: key(session.dayLabel), newLabel: trimmed,
+            planned: t.filter { $0.status == .planned }.count,
+            completed: t.filter { $0.status == .completed }.count,
+            other: t.filter { $0.status == .inProgress }.count))
+    }
+
+    /// All or nothing: every target is renamed and saved together, or none is.
+    @discardableResult
+    static func apply(renaming session: Session, to newLabel: String, in context: ModelContext) throws -> Plan {
+        let plan: Plan
+        switch Self.plan(renaming: session, to: newLabel) {
+        case .success(let p): plan = p
+        case .failure(let f): throw f
+        }
+        let t = targets(of: session)
+        let ids = Set(t.map(\.id))
+        do {
+            for s in t { s.dayLabel = plan.newLabel }
+            let histories = (try? context.fetch(FetchDescriptor<SessionHistory>())) ?? []
+            for h in histories { if let sid = h.sessionId, ids.contains(sid) { h.dayLabelSnapshot = plan.newLabel } }
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        return plan
+    }
+}

@@ -24,6 +24,7 @@ struct ProgramDayDetailView: View {
     @State private var pendingDelete: PendingDelete?
     @State private var pendingPropagation: ProgramPlanPropagationService.Preview?
     @State private var pendingReset: ResetKind?
+    @State private var pendingRename: DayLabelRename.Plan?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
 
@@ -148,6 +149,12 @@ struct ProgramDayDetailView: View {
         }
         
         
+        .alert("Rename this day?", isPresented: Binding(get: { pendingRename != nil }, set: { if !$0 { pendingRename = nil } })) {
+            Button("Rename") { confirmRename() }
+            Button("Cancel", role: .cancel) { pendingRename = nil }
+        } message: {
+            Text(pendingRename.map(Self.renameMessage) ?? "")
+        }
         .alert("Reset edited plan?", isPresented: Binding(get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } })) {
             Button("Reset", role: .destructive) {
                 let kind = pendingReset
@@ -180,7 +187,7 @@ struct ProgramDayDetailView: View {
                 renameDayLabel(to: dayLabelDraft)
             }
         } message: {
-            Text("This name also updates future sessions on the same day of the week.")
+            Text("This name is used by every session of this day in this block, past and future. You will see the count before it is applied.")
         }
         
         // ✅ ADD THIS
@@ -604,37 +611,34 @@ struct ProgramDayDetailView: View {
     
     // MARK: - CRUD helpers
 
+    /// Asks first: the rename covers every planned, in-progress and completed session of this day type in this block.
     private func renameDayLabel(to newLabel: String) {
-        let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        session.dayLabel = trimmed
-
-        if propagatesToFutureSessions {
-            let today = Calendar.current.startOfDay(for: Date())
-            let targetWeekday = Calendar.current.component(.weekday, from: session.date)
-
-            let descriptor = FetchDescriptor<Session>(
-                predicate: #Predicate { s in s.date > today }
-            )
-
-            if let futureSessions = try? modelContext.fetch(descriptor) {
-                let sameDay = futureSessions.filter {
-                    $0.id != session.id &&
-                    $0.status == .planned &&
-                    Calendar.current.component(.weekday, from: $0.date) == targetWeekday
-                }
-                for future in sameDay {
-                    future.dayLabel = trimmed
-                }
-            }
+        switch DayLabelRename.plan(renaming: session, to: newLabel) {
+        case .success(let plan): pendingRename = plan
+        case .failure(.emptyLabel), .failure(.unchanged): return
+        case .failure(.collidesWithAnotherDay(let name)):
+            presentFeedback("Another day in this block is already called \"\(name)\". Pick a different name.")
         }
+    }
 
+    static func renameMessage(_ p: DayLabelRename.Plan) -> String {
+        let n = p.sessionCount
+        var parts: [String] = []
+        if p.planned > 0 { parts.append("\(p.planned) planned") }
+        if p.other > 0 { parts.append("\(p.other) in progress") }
+        if p.completed > 0 { parts.append("\(p.completed) completed") }
+        return "\"\(p.oldLabel)\" becomes \"\(p.newLabel)\" on \(n) session\(n == 1 ? "" : "s") in this block (\(parts.joined(separator: ", "))). Other blocks are not changed."
+    }
+
+    private func confirmRename() {
+        guard let plan = pendingRename else { return }
+        pendingRename = nil
         do {
-            try modelContext.save()
-            presentFeedback("Day renamed to \"\(trimmed)\".")
+            try DayLabelRename.apply(renaming: session, to: plan.newLabel, in: modelContext)
+            presentFeedback("Day renamed to \"\(plan.newLabel)\" on \(plan.sessionCount) sessions.")
         } catch {
             print("⚠️ Failed to rename day: \(error)")
+            presentFeedback("Couldn’t rename the day. Nothing was changed.")
         }
     }
 
