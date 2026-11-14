@@ -1,5 +1,6 @@
 // Domain/Logic/MesoPerformanceAnalyzer.swift
 import Foundation
+import SwiftData
 
 // MARK: - Output Types
 
@@ -92,6 +93,11 @@ struct MesoAnalysis {
     let totalVolume: Double
     let totalSets: Int
     let totalReps: Int
+
+    /// Record-setting sessions: distinct sessions of this meso that beat a lift's earlier record (a PR event of
+    /// `PersonalRecords`; a lift's first-ever session is a baseline, not a record). The same count as the comparison card's
+    /// "Record-setting sessions". NOT the number of lifts with a PR chip (`exerciseSummaries` isPR).
+    let recordSessions: Int
 
     /// Volume per week — used for the ramp chart.
     let weeklyVolume: [WeeklyVolumeSummary]
@@ -407,6 +413,12 @@ enum MesoPerformanceAnalyzer {
             return $0.exerciseName < $1.exerciseName
         }
 
+        // Record-setting sessions: the PR events over everything up to the end of this meso, counted for this meso's sessions.
+        let eventSnapshot = SetRecordBuilder.build(sessions: allPriorSessions + meso.sessions, bodyWeight: bodyWeight)
+        let mesoKeys = Set(meso.sessions.map { $0.id?.uuidString ?? "\($0.persistentModelID)" })
+        let recordSessions = Set(PersonalRecords.events(from: eventSnapshot.sets)
+            .filter { !$0.isBaseline && mesoKeys.contains($0.sessionKey) }.map(\.sessionKey)).count
+
         return MesoAnalysis(
             mesoName: meso.name,
             totalWeeks: meso.totalWeeks ?? weeklyVolume.count,
@@ -414,6 +426,7 @@ enum MesoPerformanceAnalyzer {
             totalVolume: totalVolume,
             totalSets: totalSets,
             totalReps: totalReps,
+            recordSessions: recordSessions,
             weeklyVolume: weeklyVolume,
             exerciseSummaries: exerciseSummaries
         )

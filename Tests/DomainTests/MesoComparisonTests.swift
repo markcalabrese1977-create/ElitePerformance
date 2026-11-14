@@ -653,6 +653,14 @@ final class MesoComparisonTests: XCTestCase {
                 if oldBadge != newBadge { lines.append("\(block.name): \(e.exerciseName): \(oldBadge) -> \(newBadge)") }
             }
         }
+        if let cur = blocks.last(where: { !$0.isMaintenance }) {
+            let ids = Set(cur.sessions.map { $0.persistentModelID })
+            let first = cur.sessions.map(\.date).min() ?? cur.startDate
+            let prior = all.filter { !ids.contains($0.persistentModelID) && $0.date < first }
+            if let a = MesoPerformanceAnalyzer.analyze(meso: cur, allPriorSessions: prior, bodyWeight: bw) {
+                lines.append("stats tile: \(cur.name): lifts with a PR chip \(a.exerciseSummaries.filter(\.isPR).count) | record-setting sessions \(a.recordSessions)")
+            }
+        }
         if lines.isEmpty { lines = ["no badge changes"] }
         try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
@@ -758,6 +766,24 @@ final class MesoComparisonTests: XCTestCase {
         // training in a maintenance block counts as "trained before" too
         let m = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [20], [100])]], current: [(0, [8], [150])], maintenancePrior: true).exerciseSummaries.first)
         XCTAssertFalse(m.isNew)
+    }
+
+    func test_statsTile_countsRecordSettingSessions_notLiftsWithAPRChip() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let old = MesoBlock(id: UUID(), name: "Old", startDate: day(-100), status: .archived, totalWeeks: 4)
+        let cur = MesoBlock(id: UUID(), name: "Cur", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(old); ctx.insert(cur)
+        func sess(_ d: Int, _ meso: MesoBlock, _ lifts: [(String, Double)]) -> Session {
+            let s = Session(date: day(d), status: .completed, weekIndex: 1 + max(d, 0) / 7, dayLabel: "D",
+                            items: lifts.map { item($0.0, reps: [5], loads: [$0.1]) })
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s); return s
+        }
+        let prior = sess(-50, old, [("bench_press", 200), ("squat_x", 300)])
+        _ = sess(0, cur, [("bench_press", 205), ("squat_x", 305)])        // one session, two lifts beat the record
+        _ = sess(7, cur, [("bench_press", 210), ("squat_x", 310)])        // a second session, the same two lifts again
+        let a = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: cur, allPriorSessions: [prior]))
+        XCTAssertEqual(a.exerciseSummaries.filter(\.isPR).count, 2, "two lifts carry a PR chip")
+        XCTAssertEqual(a.recordSessions, 2, "two sessions set records (four lift-session events)")
     }
 
     func test_prEvents_aLiftFirstTrainedWithLongSets_hasNoBaselineWhenItsFirst12RepSetComes() {

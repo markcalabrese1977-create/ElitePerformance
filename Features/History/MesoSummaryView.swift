@@ -463,7 +463,7 @@ struct MesoSummaryView: View {
             Divider().frame(height: 40)
             statCell(label: "Reps", value: LoadFormatter.grouped(analysis.totalReps))
             Divider().frame(height: 40)
-            statCell(label: "PRs", value: "\(analysis.exerciseSummaries.filter { $0.isPR }.count)")
+            statCell(label: "Record-setting sessions", value: LoadFormatter.grouped(analysis.recordSessions))
         }
         .padding(.vertical, 12)
         .background(
