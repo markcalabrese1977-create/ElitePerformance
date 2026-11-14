@@ -106,3 +106,9 @@ an exercise to a wave-based session (Undo covers the accidental-delete case only
 The Meso Summary verdict (and the % on each By-exercise row) compares a lift's e1RM in the block's FIRST session with its LAST
 (+-3%). Replace it with a trend over all of the block's sessions before it gates starting loads (roadmap 4.4): one noisy
 opening or closing session currently decides the chip.
+
+## PRIndex has no live reader
+PRIndex is stored and rebuilt (import, PRIndexRuleBackfill) but nothing live reads it (PRService.currentPR has no caller). Delete it, or make it the canonical record source.
+
+## full_gate.sh should take a lock
+scripts/full_gate.sh should refuse to start while another gate holds a lock (two runs share one output dir and clobber each other).
