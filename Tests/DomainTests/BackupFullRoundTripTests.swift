@@ -200,3 +200,84 @@ final class AppModeRemovalTests: XCTestCase {
         XCTAssertEqual(restored.warmupHidden, true)
     }
 }
+
+/// Backup safety, layer 1: pre-import snapshot, undo, staleness guard.
+final class ImportSafetyTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var dir: URL!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_snap_\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func populated() throws -> (ModelContainer, ModelContext) {
+        let c = try BackupTestSupport.makeContainer(); let ctx = ModelContext(c)
+        try PopulatedStoreBuilder.build(in: ctx)
+        return (c, ctx)
+    }
+    private func extraSession(_ ctx: ModelContext, day: Double, status: SessionStatus = .completed) throws {
+        let s = Session(date: Date(timeIntervalSince1970: day), status: status, weekIndex: 1, dayLabel: "X", items: [])
+        ctx.insert(s); try ctx.save()
+    }
+    /// An export under a unique name (the exporter's own names are per-second, so a second export would overwrite it).
+    private func fileOf(_ ctx: ModelContext) throws -> URL {
+        let exported = try BackupTestSupport.exportFile(ctx)
+        let unique = FileManager.default.temporaryDirectory.appendingPathComponent("incoming_\(UUID().uuidString).json")
+        try FileManager.default.moveItem(at: exported, to: unique)
+        return unique
+    }
+    private func counts(_ ctx: ModelContext) throws -> [Int] { try BackupContentSummary.of(store: ctx).verifiedCounts }
+
+    func test_importOverAPopulatedStore_leavesAVerifiedSnapshot() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, targetCtx) = try populated()
+        let before = try BackupContentSummary.of(store: targetCtx)
+        XCTAssertFalse(before.isEmpty)
+
+        try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: dir)
+
+        let snaps = PreImportSnapshots.list(in: dir)
+        XCTAssertEqual(snaps.count, 1)
+        let written = try BackupContentSummary.of(file: try XCTUnwrap(snaps.first).url)
+        XCTAssertEqual(written.verifiedCounts, before.verifiedCounts, "the snapshot holds the pre-import store")
+        XCTAssertTrue(snaps[0].url.lastPathComponent.hasPrefix("pre-import-"))
+        XCTAssertEqual(try counts(ModelContext(targetC)), try BackupContentSummary.of(file: incoming).verifiedCounts, "and the import went ahead")
+    }
+
+    func test_aFailedSnapshot_blocksTheImport_andLeavesTheStoreUntouched() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, targetCtx) = try populated()
+        let before = try counts(targetCtx)
+        // a regular FILE where the Backups directory should be: writing the snapshot fails
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("ep_blocker_\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker); defer { try? FileManager.default.removeItem(at: blocker) }
+
+        XCTAssertThrowsError(try BackupRestoreCoordinator.restore(from: incoming, container: targetC, snapshotDirectory: blocker)) { e in
+            guard case ImportSafetyError.snapshotFailed = e else { return XCTFail("expected snapshotFailed, got \(e)") }
+            XCTAssertTrue(e.localizedDescription.contains("Nothing was changed"))
+        }
+        XCTAssertEqual(try counts(ModelContext(targetC)), before, "the import never started")
+    }
+
+    func test_snapshotOfAnEmptyStore_isSkipped_andOnlyTheLastFiveAreKept() throws {
+        let emptyC = try BackupTestSupport.makeContainer()
+        XCTAssertNil(try PreImportSnapshots.take(from: ModelContext(emptyC), in: dir))
+        XCTAssertEqual(PreImportSnapshots.list(in: dir).count, 0)
+        let (_, ctx) = try populated()
+        for i in 0..<7 { try PreImportSnapshots.take(from: ctx, in: dir, now: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 60)) }
+        let kept = PreImportSnapshots.list(in: dir)
+        XCTAssertEqual(kept.count, 5)
+        XCTAssertEqual(kept.first?.date, Date(timeIntervalSince1970: 1_800_000_000 + 6 * 60), "newest first; the 2 oldest were pruned")
+    }
+}

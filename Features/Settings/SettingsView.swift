@@ -361,10 +361,8 @@ struct SettingsView: View {
                     }
                     try? await Task.sleep(for: .milliseconds(150))
                     do {
-                        let restore = try BackupSnapshotImporter.importFullBackupJSON(
-                            from: url,
-                            modelContainer: context.container
-                        )
+                        // Snapshots the current store first (verified); an import never starts without one.
+                        let restore = try BackupRestoreCoordinator.restore(from: url, container: context.container)
                         importMessage = """
                         Restored backup successfully.
 
