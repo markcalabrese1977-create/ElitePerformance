@@ -349,6 +349,7 @@ struct ProgramDayDetailView: View {
                                             item.plannedLoadsBySet = Array(repeating: load, count: setCount)
                                             item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
                                             item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                                            PlanStepperEdits.markReset(item)
                                             continue
                                         }
 
@@ -388,6 +389,7 @@ struct ProgramDayDetailView: View {
                                         }
 
                                         autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
+                                        PlanStepperEdits.markReset(item)
                                     }
 
             do {
@@ -421,9 +423,11 @@ struct ProgramDayDetailView: View {
                     item.plannedLoadsBySet = Array(repeating: load, count: setCount)
                     item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
                     item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                    PlanStepperEdits.markReset(item)
                     continue
                 }
                 autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: false)
+                PlanStepperEdits.markReset(item)
             }
 
         do {

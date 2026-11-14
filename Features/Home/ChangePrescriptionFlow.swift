@@ -9,6 +9,9 @@ import SwiftData
 /// COUNT stepper: a lifter-chosen number of sets is a hand-set target too.
 enum PlanStepperEdits {
 
+    /// Auto / Auto+ put the item back on the defaults, so the engine owns its plan again: carry-forward may write it.
+    static func markReset(_ item: SessionItem) { item.planEdited = false }
+
     /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
     /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
     static func setSets(_ item: SessionItem, to value: Int) {
