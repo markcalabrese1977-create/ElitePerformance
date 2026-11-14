@@ -2093,3 +2093,88 @@ final class LastKnownLoadTests: XCTestCase {
         XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "pull_up", currentSession: bw, context: ctx), 0)
     }
 }
+
+// MARK: - HHH: build identity in backups
+
+final class BackupBuildIdentityTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    private func exportJSON(metadata: BackupMetadataDTO? = nil) throws -> (URL, [String: Any]) {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: ctx)
+        let result = try metadata.map { try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx, metadata: $0) }
+            ?? BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        let url = result.url
+        return (url, try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]))
+    }
+
+    private func rewrite(_ json: [String: Any]) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("hhh-\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        return url
+    }
+
+    func test_theExportCarriesTheBuildIdentity_andTheRestoreSheetTextReadsRight() throws {
+        let meta = BackupMetadataDTO(appVersion: "1.2.2", build: "1", gitCommit: "abc1234", gitBranch: "main", schemaVersion: 1)
+        let (url, json) = try exportJSON(metadata: meta)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let m = try XCTUnwrap(json["metadata"] as? [String: Any])
+        XCTAssertEqual(Set(m.keys), ["appVersion", "build", "gitCommit", "gitBranch", "schemaVersion"])
+        XCTAssertEqual(m["appVersion"] as? String, "1.2.2"); XCTAssertEqual(m["gitCommit"] as? String, "abc1234")
+        let summary = try BackupContentSummary.of(file: url)
+        XCTAssertEqual(summary.buildIdentity, "Backup from 1.2.2 (1) · abc1234")
+        XCTAssertNil(summary.newerFormatWarning)
+
+        // The default export stamps THIS build.
+        let (url2, json2) = try exportJSON()
+        defer { try? FileManager.default.removeItem(at: url2) }
+        let m2 = try XCTUnwrap(json2["metadata"] as? [String: Any])
+        XCTAssertEqual(m2["appVersion"] as? String, BuildInfo.version)
+        XCTAssertEqual(m2["gitCommit"] as? String, BuildInfo.commit)
+        XCTAssertEqual(m2["schemaVersion"] as? Int, BackupMetadataDTO.currentSchemaVersion)
+    }
+
+    func test_aFileWithoutMetadata_importsAsBefore_andShowsNoIdentity() throws {
+        let (url, exported) = try exportJSON()
+        var json = exported
+        defer { try? FileManager.default.removeItem(at: url) }
+        json.removeValue(forKey: "metadata")
+        let old = try rewrite(json)
+        defer { try? FileManager.default.removeItem(at: old) }
+        let summary = try BackupContentSummary.of(file: old)
+        XCTAssertNil(summary.buildIdentity); XCTAssertNil(summary.newerFormatWarning)
+        let target = try BackupTestSupport.makeContainer()
+        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target))
+        XCTAssertFalse(try ModelContext(target).fetch(FetchDescriptor<Session>()).isEmpty)
+        // A partial block (only some keys) is tolerated too.
+        json["metadata"] = ["appVersion": "1.0"]
+        let partial = try rewrite(json)
+        defer { try? FileManager.default.removeItem(at: partial) }
+        XCTAssertEqual(try BackupContentSummary.of(file: partial).buildIdentity, "Backup from 1.0")
+    }
+
+    func test_aNewerSchemaVersion_warns_butStillImports() throws {
+        let newer = BackupMetadataDTO(appVersion: "9.0", build: "7", gitCommit: "ffff000", gitBranch: "main",
+                                      schemaVersion: BackupMetadataDTO.currentSchemaVersion + 1)
+        let (url, _) = try exportJSON(metadata: newer)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let summary = try BackupContentSummary.of(file: url)
+        let warning = try XCTUnwrap(summary.newerFormatWarning)
+        XCTAssertTrue(warning.contains("newer version"), warning)
+        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: try BackupTestSupport.makeContainer()))
+    }
+
+    func test_exportImportExport_keepsTheIdentity() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: source)
+        let first = try BackupTestSupport.exportJSON(source)
+        XCTAssertNotNil(first["metadata"], "BA2's export carries the identity")
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: fresh)
+        XCTAssertEqual((try BackupTestSupport.exportJSON(ModelContext(fresh))["metadata"] as? [String: Any])?["gitCommit"] as? String,
+                       BuildInfo.commit)
+    }
+}

@@ -864,6 +864,8 @@ struct RestoreConfirmSheet: View {
             Text(title).font(.headline)
             if showExported {
                 Text("Exported: \(s.exportedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "unknown")")
+                if let identity = s.buildIdentity { Text(identity) }
+                if let warning = s.newerFormatWarning { Text(warning).foregroundStyle(.red) }
             }
             Text("Completed sessions: \(s.completedSessions)")
             Text("Last completed session: \(s.lastCompletedDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "none")")
