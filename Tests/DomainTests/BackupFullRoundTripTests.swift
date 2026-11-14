@@ -1213,6 +1213,29 @@ final class MissingDataSentinelTests: XCTestCase {
     }
 
     @MainActor
+    func test_theLaunchLogsTheStoredAndWrittenSentinelCounts_andThePersistedValueReadsBackNextLaunch() throws {
+        var lines: [String] = []
+        let (c, ctx) = try populated()
+        let completed = try BackupContentSummary.of(store: ctx).completedSessions
+        sentinel.record(3)
+        let g = StartupGate(directory: dir, sentinel: sentinel, beforeBackfills: { _ in }, runBackfills: { _ in },
+                            findBackups: { [] }, log: { lines.append($0) })
+        g.begin(container: c)
+        XCTAssertTrue(lines.contains { $0.contains("read stored=3") && $0.contains("store holds \(completed) completed sessions") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.contains("wrote \(completed), reads back \(completed)") }, "\(lines)")
+        // a fresh handle on the same defaults (the next launch) reads what this launch wrote
+        let next = DataSentinelStore(defaults: sentinel.defaults)
+        XCTAssertEqual(next.completedSessions, completed)
+        // a blocking launch says so
+        lines = []
+        sentinel.record(7)
+        StartupGate(directory: dir, sentinel: sentinel, beforeBackfills: { _ in }, runBackfills: { _ in }, findBackups: { [] },
+                    log: { lines.append($0) }).begin(container: try BackupTestSupport.makeContainer())
+        XCTAssertTrue(lines.contains { $0.contains("read stored=7") && $0.contains("0 completed sessions") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.contains("BLOCKING") }, "\(lines)")
+    }
+
+    @MainActor
     func test_restoreNewestBackup_returnsTheData_runsBackfillsOnce_andTheNextLaunchIsNotBlocked() async throws {
         // a backup of a populated store exists
         let (_, src) = try populated()
