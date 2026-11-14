@@ -446,6 +446,8 @@ enum LoadProjectionService {
 
     /// Two-pass session scan returning the most recent known load for an exercise.
     /// Pass 1 prefers same-wave sessions; Pass 2 falls back to any session.
+    /// Only COMPLETED sessions dated BEFORE `currentSession` are read, matched on the canonical exerciseId: a future or other
+    /// planned session's `suggestedLoad` is a plan, not something the lifter lifted, and is never used.
     /// Returns 0 when no history exists — caller leaves suggestedLoad at 0.
     ///
     /// BW guard: bodyweight exercises always return 0, preventing a swap from
@@ -460,31 +462,26 @@ enum LoadProjectionService {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return 0
         }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         let descriptor = FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .reverse)])
-        guard let sessions = try? context.fetch(descriptor) else { return 0 }
+        guard let fetched = try? context.fetch(descriptor) else { return 0 }
+        let sessions = fetched.filter {
+            $0.status == .completed && $0.date < currentSession.date && $0.persistentModelID != currentSession.persistentModelID
+        }
+        func load(in s: Session) -> Double? {
+            guard let match = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) else { return nil }
+            if let lastActual = match.backOffValues(match.actualLoads).filter({ $0 > 0 }).last { return lastActual }
+            return match.suggestedLoad > 0 ? match.suggestedLoad : nil   // a finished session's own plan, not a future one
+        }
         let currentWave = currentSession.items.compactMap { $0.waveRaw }.first?.lowercased()
         // Pass 1 — same wave type only
         if let wave = currentWave, !wave.isEmpty {
-            for s in sessions {
-                guard s.persistentModelID != currentSession.persistentModelID else { continue }
-                let sessionWave = s.items.compactMap { $0.waveRaw }.first?.lowercased()
-                guard sessionWave == wave else { continue }
-                if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
-                    let lastActual = match.backOffValues(match.actualLoads).filter { $0 > 0 }.last ?? 0
-                    if lastActual > 0 { return lastActual }
-                    if match.suggestedLoad > 0 { return match.suggestedLoad }
-                }
+            for s in sessions where s.items.compactMap({ $0.waveRaw }).first?.lowercased() == wave {
+                if let l = load(in: s) { return l }
             }
         }
-        // Pass 2 — fallback: any session
-        for s in sessions {
-            guard s.persistentModelID != currentSession.persistentModelID else { continue }
-            if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
-                let lastActual = match.backOffValues(match.actualLoads).filter { $0 > 0 }.last ?? 0
-                if lastActual > 0 { return lastActual }
-                if match.suggestedLoad > 0 { return match.suggestedLoad }
-            }
-        }
+        // Pass 2 — fallback: any earlier completed session
+        for s in sessions { if let l = load(in: s) { return l } }
         return 0
     }
 }

@@ -2029,3 +2029,67 @@ final class SeedBackupGuardTests: XCTestCase {
         }
     }
 }
+
+// MARK: - GGG: lastKnownLoad reads only the past
+
+final class LastKnownLoadTests: XCTestCase {
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+    private func day(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: Calendar.current.startOfDay(for: Date()))! }
+
+    private func session(_ ctx: ModelContext, id: String = "bench_press", status: SessionStatus, at: Int, actual: [Double] = [], suggested: Double = 0, wave: String? = nil) -> Session {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: suggested, waveRaw: wave)
+        i.actualLoads = actual; i.actualReps = actual.map { _ in 8 }
+        let s = Session(date: day(at), status: status, weekIndex: 1, items: [i])
+        ctx.insert(s)
+        return s
+    }
+
+    func test_aFuturePlannedLoad_isIgnored() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0, wave: "a")
+        _ = session(ctx, status: .planned, at: 7, suggested: 300, wave: "a")          // a future plan: must never be read
+        _ = session(ctx, status: .planned, at: -3, suggested: 280, wave: "a")         // a missed, never-completed plan: not lifted
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 0,
+                       "no completed session before today: nothing known, even though plans exist")
+        _ = session(ctx, status: .completed, at: -10, actual: [200, 200, 200], suggested: 205, wave: "a")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 200)
+    }
+
+    func test_aCompletedSessionDatedAfterTheCurrentOne_isIgnored_andTheLatestEarlierOneWins() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0)
+        _ = session(ctx, status: .completed, at: 2, actual: [999, 999, 999])           // dated later (e.g. a back-dated entry)
+        _ = session(ctx, status: .completed, at: -20, actual: [150, 150, 150])
+        _ = session(ctx, status: .completed, at: -5, actual: [160, 160, 160])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 160)
+    }
+
+    func test_matchesOnTheCanonicalExerciseId_notTheRawString() throws {
+        let ctx = try context()
+        let current = session(ctx, id: "bench_press", status: .inProgress, at: 0)
+        // The legacy uuid alias of a built-in resolves to the same canonical id.
+        let legacy = "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58"                           // -> seated_cable_press
+        let cur2 = session(ctx, id: "seated_cable_press", status: .inProgress, at: 0)
+        _ = session(ctx, id: legacy, status: .completed, at: -4, actual: [90, 90, 90])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "seated_cable_press", currentSession: cur2, context: ctx), 90)
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 0, "another lift is not matched")
+    }
+
+    func test_sameWavePreferred_thenAnyEarlierCompleted_andBodyweightIsZero() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0, wave: "b")
+        _ = session(ctx, status: .completed, at: -3, actual: [180, 180, 180], wave: "a")
+        _ = session(ctx, status: .completed, at: -10, actual: [170, 170, 170], wave: "b")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 170, "same wave first")
+        let c2 = session(ctx, status: .inProgress, at: 0, wave: "c")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: c2, context: ctx), 180, "else the latest earlier completed one")
+        let bw = session(ctx, id: "pull_up", status: .inProgress, at: 0)
+        _ = session(ctx, id: "pull_up", status: .completed, at: -2, actual: [25, 25, 25])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "pull_up", currentSession: bw, context: ctx), 0)
+    }
+}
