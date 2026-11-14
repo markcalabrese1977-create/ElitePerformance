@@ -331,12 +331,18 @@ final class StartupGate: ObservableObject {
         }
     }
 
-    /// Only offered when there is no backup to restore (the data is already gone and there is no other way forward).
-    func continueWithEmptyData() {
-        guard let container, backupLookupDone, newestBackup == nil else { return }
+    static let continueWord = "CONTINUE"
+    static func acceptsContinue(typed: String) -> Bool { typed.trimmingCharacters(in: .whitespaces) == continueWord }
+
+    /// Only offered when there is no backup to restore (the data is already gone and there is no other way forward), and only
+    /// after the word CONTINUE has been typed: the app then treats the empty store as the real one.
+    @discardableResult
+    func continueWithEmptyData(typed: String) -> Bool {
+        guard Self.acceptsContinue(typed: typed), let container, backupLookupDone, newestBackup == nil else { return false }
         sentinel.record(0)
         missingData = nil
         runBackfills(container)
+        return true
     }
 
     /// Called where the app used to run its backfills. With an interrupted-import marker it holds them back and raises the prompt.

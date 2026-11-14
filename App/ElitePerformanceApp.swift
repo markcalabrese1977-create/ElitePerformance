@@ -131,6 +131,7 @@ enum StartupBackfills {
 struct MissingDataView: View {
     @ObservedObject var gate: StartupGate
     let expected: Int
+    @State private var typed = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -145,8 +146,14 @@ struct MissingDataView: View {
                     .buttonStyle(.borderedProminent)
             } else {
                 Text("No backup was found on this device or in iCloud.")
-                Button("Continue with empty data", role: .destructive) { gate.continueWithEmptyData() }
+                Text("To use the app with empty data anyway, type \(StartupGate.continueWord).")
+                TextField(StartupGate.continueWord, text: $typed)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                Button("Continue with empty data", role: .destructive) { gate.continueWithEmptyData(typed: typed) }
                     .buttonStyle(.bordered)
+                    .disabled(!StartupGate.acceptsContinue(typed: typed))
             }
             Spacer()
         }

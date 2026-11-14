@@ -1214,7 +1214,14 @@ final class MissingDataSentinelTests: XCTestCase {
         g.begin(container: try BackupTestSupport.makeContainer())
         await g.loadNewestBackup()
         XCTAssertNil(g.newestBackup); XCTAssertTrue(g.backupLookupDone)
-        g.continueWithEmptyData()
+        // without the typed word nothing happens: still blocked, nothing ran, the sentinel is unchanged
+        for wrong in ["", "continue", "Continue", "CONTINU", "yes", "CONTINUE NOW"] {
+            XCTAssertFalse(g.continueWithEmptyData(typed: wrong), wrong)
+        }
+        XCTAssertNotNil(g.missingData); XCTAssertEqual(counts.backfills, 0); XCTAssertEqual(sentinel.completedSessions, 5)
+        XCTAssertFalse(StartupGate.acceptsContinue(typed: "continue"))
+        // the exact word proceeds
+        XCTAssertTrue(g.continueWithEmptyData(typed: "CONTINUE"))
         XCTAssertNil(g.missingData); XCTAssertEqual(sentinel.completedSessions, 0); XCTAssertEqual(counts.backfills, 1)
     }
 
