@@ -118,3 +118,6 @@ PersonalRecords.suspects needs a user "confirmed real" flag before it's ever dis
 
 ## Import is wipe-save-then-insert
 Import is wipe-save-then-insert. A true atomic import needs a scratch-store swap; a single-context rollback attempt crashed SwiftData (_FullFutureBackingData<SessionHistoryExercise>).
+
+## Launch has five store-selection paths, each starting the same startup work
+App/ElitePerformanceApp.swift init() picks the store through a ladder: simulator default store, simulator recreate-after-open-failure (deletes default.store), pinned store, "no legacy store files" fallback to the default store, and the scan-and-score of legacy store files. Each branch returns early and used to call the startup backfills itself (five call sites; StartupGate now funnels them into one). The ladder is a leftover of older builds that named their stores. Collapse it to one "open the store" function (legacy-store scan kept as a separate, tested step) and run startup work once after it.
