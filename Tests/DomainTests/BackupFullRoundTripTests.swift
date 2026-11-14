@@ -916,6 +916,65 @@ final class AutoBackupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("notes.txt").path))
     }
 
+    func test_retention_neverPrunesABackupWithMoreCompletedSessionsThanTheNewestVerifiedOne() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // 60 daily backups whose data SHRINKS toward the present: day -59 had 300 sessions ... today has 40.
+        var counts: [Date: Int] = [:]
+        for d in 0..<60 {
+            let date = t(-Double(d))
+            let f = dir.appendingPathComponent(AutoBackupEngine.fileName(for: date))
+            try Data("{}".utf8).write(to: f)
+            counts[date] = max(40, 300 - (59 - d) * 4 + (d < 5 ? -200 : 0))      // newest few are the smallest
+        }
+        let newest = counts[t(0)]!
+        let all = AutoBackupEngine.list(in: dir)
+        let keep = AutoBackupEngine.keepSet(all.map(\.date), calendar: cal)
+        let wouldPrune = all.filter { !keep.contains($0.date) }
+        XCTAssertGreaterThan(wouldPrune.count, 20, "the plain retention rules would prune a lot")
+        let removed = AutoBackupEngine.prune(in: dir, calendar: cal, completedSessions: { counts[$0.date] })
+        let left = AutoBackupEngine.list(in: dir)
+        for f in all where (counts[f.date] ?? 0) > newest {
+            XCTAssertTrue(left.contains(f), "a backup with \(counts[f.date]!) completed sessions (> the newest's \(newest)) must survive")
+        }
+        for f in removed { XCTAssertLessThanOrEqual(counts[f.date] ?? 0, newest, "only backups no larger than the newest are pruned") }
+        XCTAssertEqual(left.first?.date, t(0), "and the newest is kept")
+        // with a growing history the guard changes nothing: the usual rules apply
+        let growing = dir.appendingPathComponent("growing", isDirectory: true)
+        try FileManager.default.createDirectory(at: growing, withIntermediateDirectories: true)
+        var growCounts: [Date: Int] = [:]
+        for d in 0..<60 {
+            let date = t(-Double(d)); growCounts[date] = 300 - d
+            try Data("{}".utf8).write(to: growing.appendingPathComponent(AutoBackupEngine.fileName(for: date)))
+        }
+        let gl = AutoBackupEngine.list(in: growing)
+        let expectedKeep = AutoBackupEngine.keepSet(gl.map(\.date), calendar: cal)
+        AutoBackupEngine.prune(in: growing, calendar: cal, completedSessions: { growCounts[$0.date] })
+        XCTAssertEqual(Set(AutoBackupEngine.list(in: growing).map(\.date)), expectedKeep)
+    }
+
+    func test_retention_theRealDecodePath_protectsALargerOlderBackup() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        // an old backup of a LARGE store and a newest backup of a SMALL one, real files
+        let (_, big) = try populated()
+        for i in 0..<5 { big.insert(Session(date: t(Double(i)), status: .completed, weekIndex: 1, dayLabel: "B", items: [])) }
+        try big.save()
+        let bigLive = try BackupContentSummary.of(store: big)
+        let (_, small) = try populated()
+        let smallLive = try BackupContentSummary.of(store: small)
+        XCTAssertGreaterThan(bigLive.completedSessions, smallLive.completedSessions)
+        _ = try AutoBackupEngine.place(temp: try BackupTestSupport.exportFile(big), live: bigLive, into: dir, now: t(-600), coordinated: false)
+        // filler (a backup a day for 30 days, then one a month for 15 months) so the old big one falls outside every retention bucket
+        for d in 0..<30 { try Data("{}".utf8).write(to: dir.appendingPathComponent(AutoBackupEngine.fileName(for: t(-Double(d))))) }
+        for k in 1...15 { try Data("{}".utf8).write(to: dir.appendingPathComponent(AutoBackupEngine.fileName(for: t(-Double(31 * k) - 40)))) }
+        _ = try AutoBackupEngine.place(temp: try BackupTestSupport.exportFile(small), live: smallLive, into: dir, now: t(1), coordinated: false)
+        let before = AutoBackupEngine.list(in: dir)
+        let keep = AutoBackupEngine.keepSet(before.map(\.date), calendar: cal)
+        XCTAssertFalse(keep.contains(t(-600)), "without the guard the large old backup would be pruned")
+        AutoBackupEngine.prune(in: dir, calendar: cal)
+        XCTAssertTrue(AutoBackupEngine.list(in: dir).contains { $0.date == t(-600) }, "the larger history survives")
+    }
+
     // MARK: no iCloud
 
     @MainActor

@@ -135,12 +135,24 @@ enum AutoBackupEngine {
         return keep
     }
 
+    /// Completed sessions in a backup file, nil when it cannot be decoded.
+    static let decodeCompletedSessions: (AutoBackupFile) -> Int? = { try? BackupContentSummary.of(file: $0.url).completedSessions }
+
+    /// Prunes by the retention rules, with one more guard: a backup holding MORE completed sessions than the newest verified
+    /// backup is never pruned. If the data shrinks (something went wrong and the newest backups are smaller), the last backups
+    /// that still hold the larger history must survive the rotation. "Newest verified" = the newest file that decodes.
     @discardableResult
-    static func prune(in directory: URL, calendar: Calendar = Calendar(identifier: .gregorian)) -> [AutoBackupFile] {
+    static func prune(in directory: URL, calendar: Calendar = Calendar(identifier: .gregorian),
+                      completedSessions: (AutoBackupFile) -> Int? = decodeCompletedSessions) -> [AutoBackupFile] {
         let files = list(in: directory)
         let keep = keepSet(files.map(\.date), calendar: calendar)
+        let candidates = files.filter { !keep.contains($0.date) }
+        guard !candidates.isEmpty else { return [] }
+        var newestVerified: Int?                                  // files are newest first
+        for f in files { if let n = completedSessions(f) { newestVerified = n; break } }
         var removed: [AutoBackupFile] = []
-        for f in files where !keep.contains(f.date) {
+        for f in candidates {
+            if let newest = newestVerified, let n = completedSessions(f), n > newest { continue }
             if (try? FileManager.default.removeItem(at: f.url)) != nil { removed.append(f) }
         }
         return removed
