@@ -801,3 +801,243 @@ final class StoreSafetyTests: XCTestCase {
         XCTAssertEqual(cloudKitMirroringTables(copy), [], "no CloudKit mirroring is active")
     }
 }
+
+/// Automatic backups: triggers, verify-then-move, retention, fallback, banner, verify button.
+final class AutoBackupTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var dir: URL!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_auto_\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func populated() throws -> (ModelContainer, ModelContext) {
+        let c = try BackupTestSupport.makeContainer(); let ctx = ModelContext(c)
+        try PopulatedStoreBuilder.build(in: ctx)
+        return (c, ctx)
+    }
+    private func freshStatus() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+    @MainActor private func service(_ status: AutoBackupStatusStore, destination: AutoBackupDestination? = nil, now: Date = Date(),
+                         commit: String = "abc123") -> AutoBackupService {
+        let d = destination ?? .local(dir)
+        return AutoBackupService(status: status, resolveDestination: { d }, now: { now }, currentCommit: { commit })
+    }
+    private func waitForBackups(_ count: Int, timeout: TimeInterval = 10) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if AutoBackupEngine.list(in: dir).count >= count { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTFail("expected \(count) backup(s) in \(dir.path), found \(AutoBackupEngine.list(in: dir).count)")
+    }
+    private func t(_ days: Double) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + days * 86_400) }
+
+    // MARK: verify-then-move
+
+    func test_place_verifiesThenMoves_andNamesAreUnique() throws {
+        let (_, ctx) = try populated()
+        let live = try BackupContentSummary.of(store: ctx)
+        let temp = try BackupTestSupport.exportFile(ctx)
+        let placed = try AutoBackupEngine.place(temp: temp, live: live, into: dir, now: t(0), coordinated: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: placed.url.path))
+        XCTAssertEqual(try BackupContentSummary.of(file: placed.url).verifiedCounts, live.verifiedCounts)
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).map(\.date), [t(0)])
+        _ = try AutoBackupEngine.place(temp: temp, live: live, into: dir, now: t(1), coordinated: false)
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 2, "a new backup never overwrites an earlier one")
+    }
+
+    func test_aCorruptWriteOrMismatchedCounts_neverTouchesThePreviousBackup() throws {
+        let (_, ctx) = try populated()
+        let live = try BackupContentSummary.of(store: ctx)
+        let good = try AutoBackupEngine.place(temp: try BackupTestSupport.exportFile(ctx), live: live, into: dir, now: t(0), coordinated: false)
+        let goodBytes = try Data(contentsOf: good.url)
+        // a corrupt export
+        let corrupt = FileManager.default.temporaryDirectory.appendingPathComponent("corrupt_\(UUID().uuidString).json")
+        try Data("{ not json".utf8).write(to: corrupt); defer { try? FileManager.default.removeItem(at: corrupt) }
+        XCTAssertThrowsError(try AutoBackupEngine.place(temp: corrupt, live: live, into: dir, now: t(1), coordinated: false))
+        // a valid export of a DIFFERENT store (counts do not match the live store)
+        let other = ModelContext(try BackupTestSupport.makeContainer())
+        other.insert(Session(date: t(0), status: .completed, weekIndex: 1, dayLabel: "X", items: []))
+        try other.save()
+        let wrong = try BackupTestSupport.exportFile(other); defer { try? FileManager.default.removeItem(at: wrong) }
+        XCTAssertThrowsError(try AutoBackupEngine.place(temp: wrong, live: live, into: dir, now: t(2), coordinated: false)) { e in
+            guard case AutoBackupError.verifyFailed = e else { return XCTFail("\(e)") }
+        }
+        let after = AutoBackupEngine.list(in: dir)
+        XCTAssertEqual(after.map(\.url), [good.url], "no new file, nothing removed")
+        XCTAssertEqual(try Data(contentsOf: good.url), goodBytes, "the previous backup is byte-for-byte intact")
+    }
+
+    // MARK: retention
+
+    func test_retention_keeps7Daily_8Weekly_12Monthly_andNeverTheNewestRemoved() throws {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        // one backup a day for 400 days
+        let dates = (0..<400).map { t(-Double($0)) }
+        let keep = AutoBackupEngine.keepSet(dates, calendar: cal)
+        XCTAssertTrue(keep.contains(dates[0]), "the newest is always kept")
+        for d in 0..<7 { XCTAssertTrue(keep.contains(dates[d]), "each of the 7 most recent days") }
+        XCTAssertLessThan(keep.count, 7 + 9 + 13 + 1, "bounded: daily + weekly + monthly (overlaps collapse)")
+        XCTAssertGreaterThanOrEqual(keep.count, 7 + 7, "more than just the days")
+        XCTAssertFalse(keep.contains(dates[399]), "something a year old and not a month's newest is pruned")
+        // and the pruning removes exactly the others, from a real directory
+        let (_, ctx) = try populated()
+        let live = try BackupContentSummary.of(store: ctx)
+        let temp = try BackupTestSupport.exportFile(ctx)
+        for d in 0..<40 { _ = try AutoBackupEngine.place(temp: temp, live: live, into: dir, now: t(-Double(d)), coordinated: false) }
+        let removed = AutoBackupEngine.prune(in: dir, calendar: cal)
+        let left = AutoBackupEngine.list(in: dir)
+        XCTAssertEqual(left.count + removed.count, 40)
+        XCTAssertEqual(left.first?.date, t(0), "the newest verified backup survives")
+        XCTAssertTrue(removed.count > 0)
+        XCTAssertEqual(Set(left.map(\.date)), AutoBackupEngine.keepSet((0..<40).map { t(-Double($0)) }, calendar: cal))
+        // a lone old backup is never deleted
+        let single = FileManager.default.temporaryDirectory.appendingPathComponent("ep_single_\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: single) }
+        _ = try AutoBackupEngine.place(temp: temp, live: live, into: single, now: t(-900), coordinated: false)
+        XCTAssertEqual(AutoBackupEngine.prune(in: single, calendar: cal).count, 0)
+        XCTAssertEqual(AutoBackupEngine.list(in: single).count, 1)
+        // files that are not ours are never listed, so never pruned
+        try Data("x".utf8).write(to: dir.appendingPathComponent("notes.txt"))
+        AutoBackupEngine.prune(in: dir, calendar: cal)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("notes.txt").path))
+    }
+
+    // MARK: no iCloud
+
+    @MainActor
+    func test_withoutICloud_theBackupGoesToTheLocalFolder_andIsMarkedNotOffDevice() async throws {
+        let (c, _) = try populated()
+        let status = freshStatus()
+        let svc = service(status, destination: .local(dir), now: t(0))
+        let result = await svc.backUpNow(container: c)
+        guard case .success(let file) = result else { return XCTFail("\(result)") }
+        XCTAssertTrue(file.url.path.hasPrefix(dir.path))
+        XCTAssertEqual(status.lastSuccess, t(0))
+        XCTAssertFalse(status.lastWasOffDevice, "local fallback is not off-device")
+        XCTAssertNil(status.lastOffDeviceSuccess)
+        XCTAssertTrue(status.lastVerified)
+        // the iCloud destination reports off-device and its directory
+        let ic = AutoBackupDestination.iCloud(dir.appendingPathComponent("icloud/Documents/Backups"))
+        XCTAssertTrue(ic.isOffDevice); XCTAssertFalse(AutoBackupDestination.local(dir).isOffDevice)
+        let svc2 = service(status, destination: ic, now: t(1))
+        _ = await svc2.backUpNow(container: c)
+        XCTAssertTrue(status.lastWasOffDevice)
+        XCTAssertEqual(status.lastOffDeviceSuccess, t(1))
+        XCTAssertEqual(AutoBackupEngine.list(in: dir.appendingPathComponent("icloud/Documents/Backups")).count, 1)
+    }
+
+    @MainActor
+    func test_anEmptyStore_isNotBackedUp() async throws {
+        let c = try BackupTestSupport.makeContainer()
+        let result = await service(freshStatus(), now: t(0)).backUpNow(container: c)
+        guard case .failure = result else { return XCTFail("an empty store has nothing to back up") }
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 0)
+    }
+
+    // MARK: triggers
+
+    @MainActor
+    func test_trigger1_aCompletedSession_startsABackup() throws {
+        let (c, _) = try populated()
+        let svc = service(freshStatus(), now: t(0))
+        svc.sessionCompleted(container: c)
+        try waitForBackups(1)
+    }
+
+    @MainActor
+    func test_trigger2_aNewBuildCommit_backsUpOnce() throws {
+        let (c, _) = try populated()
+        let status = freshStatus()
+        let svc = service(status, now: t(0), commit: "build-A")
+        XCTAssertTrue(svc.launchBackupIfBuildChanged(container: c))
+        try waitForBackups(1)
+        let deadline = Date().addingTimeInterval(5)
+        while status.lastLaunchCommit != "build-A" && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        XCTAssertEqual(status.lastLaunchCommit, "build-A")
+        XCTAssertFalse(svc.launchBackupIfBuildChanged(container: c), "same commit as the last launch: no backup")
+        let svc2 = service(status, now: t(1), commit: "build-B")
+        XCTAssertTrue(svc2.launchBackupIfBuildChanged(container: c), "a different commit backs up again")
+    }
+
+    @MainActor
+    func test_trigger3_firstForegroundOfTheDay_whenTheLastSuccessIsOlderThan24h() throws {
+        let (c, _) = try populated()
+        let status = freshStatus()
+        status.lastSuccess = t(0)
+        // 23h later: first foreground of the day, but the last backup is recent
+        XCTAssertFalse(service(status, now: t(0).addingTimeInterval(23 * 3600)).foregrounded(container: c))
+        // two days later: a new calendar day, and the last success is more than 24h old
+        let later = t(0).addingTimeInterval(50 * 3600)
+        XCTAssertTrue(service(status, now: later).foregrounded(container: c))
+        try waitForBackups(1)
+        // a second foreground the same day does nothing
+        XCTAssertFalse(service(status, now: later.addingTimeInterval(600)).foregrounded(container: c))
+    }
+
+    @MainActor
+    func test_theBuildChangeBackup_runsAfterTheInterruptedCheck_andBeforeTheBackfills() throws {
+        let c = try BackupTestSupport.makeContainer()
+        var order: [String] = []
+        let gate = StartupGate(directory: dir, beforeBackfills: { _ in order.append("backup") }, runBackfills: { _ in order.append("backfills") })
+        gate.begin(container: c)
+        XCTAssertEqual(order, ["backup", "backfills"])
+        // with an interrupted import pending, neither runs until it is answered, and then in the same order
+        order = []
+        let (_, srcCtx) = try populated()
+        let snap = try XCTUnwrap(PreImportSnapshots.take(from: srcCtx, in: dir, now: t(0)))
+        try InterruptedImportMarker.write(snapshot: snap.url, startedAt: t(0), in: dir)
+        let gate2 = StartupGate(directory: dir, beforeBackfills: { _ in order.append("backup") }, runBackfills: { _ in order.append("backfills") })
+        gate2.begin(container: c)
+        XCTAssertEqual(order, [], "held back behind the interrupted-restore prompt")
+        gate2.keepCurrentData()
+        XCTAssertEqual(order, ["backup", "backfills"])
+    }
+
+    // MARK: banner
+
+    func test_banner_showsWithoutAVerifiedOffDeviceBackupFor7Days_andDismissalLastsUntilTomorrow() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let status = freshStatus()
+        XCTAssertFalse(status.shouldShowBanner(now: t(0), hasData: false, calendar: cal), "nothing to protect")
+        XCTAssertTrue(status.shouldShowBanner(now: t(0), hasData: true, calendar: cal), "never backed up off-device")
+        status.recordSuccess(at: t(0), offDevice: false)
+        XCTAssertTrue(status.shouldShowBanner(now: t(1), hasData: true, calendar: cal), "a local-only backup does not count")
+        status.recordSuccess(at: t(0), offDevice: true)
+        XCTAssertFalse(status.shouldShowBanner(now: t(6.9), hasData: true, calendar: cal))
+        XCTAssertTrue(status.shouldShowBanner(now: t(7.1), hasData: true, calendar: cal))
+        status.dismissBannerForToday(now: t(7.1), calendar: cal)
+        XCTAssertFalse(status.shouldShowBanner(now: t(7.5), hasData: true, calendar: cal), "dismissed for today")
+        XCTAssertTrue(status.shouldShowBanner(now: t(8.2), hasData: true, calendar: cal), "back the next day")
+    }
+
+    // MARK: verify button
+
+    func test_verifyLatestBackup_decodesIntoAScratchContainerAndComparesCounts_withoutTouchingDeviceState() throws {
+        let (_, ctx) = try populated()
+        let live = try BackupContentSummary.of(store: ctx)
+        let placed = try AutoBackupEngine.place(temp: try BackupTestSupport.exportFile(ctx), live: live, into: dir, now: t(0), coordinated: false)
+        let sentinel = "meso.activeStartDateEpoch"
+        UserDefaults.standard.set(123456.0, forKey: sentinel)
+        let report = try AutoBackupVerification.verify(file: placed.url, against: ctx)
+        XCTAssertTrue(report.matches, report.summary)
+        XCTAssertEqual(report.backup, live.verifiedCounts)
+        XCTAssertEqual(UserDefaults.standard.double(forKey: sentinel), 123456.0,
+                       "the scratch import did not write the backup's AppState into this device's UserDefaults")
+        // the live store moves on: the same backup no longer matches
+        ctx.insert(Session(date: t(3), status: .completed, weekIndex: 1, dayLabel: "New", items: [])); try ctx.save()
+        let after = try AutoBackupVerification.verify(file: placed.url, against: ctx)
+        XCTAssertFalse(after.matches)
+        XCTAssertTrue(after.summary.hasPrefix("Does not match"))
+        XCTAssertEqual(try BackupContentSummary.of(store: ctx).sessions, live.sessions + 1, "and the live store was not modified by the verify")
+    }
+}
