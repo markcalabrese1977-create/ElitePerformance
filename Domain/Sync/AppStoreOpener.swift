@@ -35,7 +35,7 @@ enum AppStoreOpener {
         do {
             let container = try makeContainer(schema, config)
             let sessions = (try? ModelContext(container).fetchCount(FetchDescriptor<Session>())) ?? 0
-            log("✅ Opened the default store: sessions=\(sessions)")
+            log("✅ Opened the default store: sessions=\(sessions) at \(config.url.absoluteString)")
             return .opened(container)
         } catch {
             log("🛑 Could not open the store. Nothing was changed. Error: \(error)")
