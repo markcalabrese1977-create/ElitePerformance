@@ -101,3 +101,8 @@ Undo only covers the Program tab item delete; the Settings repairs have no undo 
 After removing and re-adding an exercise on a wave session (A/B/C), the new item has no wave letter or prescription, which
 breaks carry-forward. Offer to restore the slot's prescription from the same-letter template / previous exposure when adding
 an exercise to a wave-based session (Undo covers the accidental-delete case only).
+
+## MesoPerformanceAnalyzer verdict is first-vs-last session
+The Meso Summary verdict (and the % on each By-exercise row) compares a lift's e1RM in the block's FIRST session with its LAST
+(+-3%). Replace it with a trend over all of the block's sessions before it gates starting loads (roadmap 4.4): one noisy
+opening or closing session currently decides the chip.
