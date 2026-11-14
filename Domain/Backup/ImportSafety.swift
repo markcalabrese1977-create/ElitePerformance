@@ -142,20 +142,29 @@ enum PreImportSnapshots {
 
 /// THE import path. Settings' import and "Restore pre-import state" both go through it, so both snapshot first.
 enum BackupRestoreCoordinator {
+    typealias Importer = (URL, ModelContainer) throws -> BackupSnapshotImportResult
+
+    /// `importer` is the real importer; tests substitute one that fails after it has changed the store.
     @discardableResult
     static func restore(from url: URL, container: ModelContainer, snapshotDirectory: URL = PreImportSnapshots.defaultDirectory(),
-                        now: Date = Date()) throws -> BackupSnapshotImportResult {
+                        now: Date = Date(),
+                        importer: Importer = { try BackupSnapshotImporter.importFullBackupJSON(from: $0, modelContainer: $1) }) throws -> BackupSnapshotImportResult {
         let context = ModelContext(container)
         let snapshot = try PreImportSnapshots.take(from: context, in: snapshotDirectory, now: now)   // throws: import never starts
         do {
-            return try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container)
+            return try importer(url, container)
         } catch {
-            // The importer wipes before it inserts; if it fails after that, put the old data back.
-            if let snapshot, (try? BackupSnapshotImporter.importFullBackupJSON(from: snapshot.url, modelContainer: container)) != nil {
-                throw NSError(domain: "BackupRestore", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                    "\(error.localizedDescription) Your previous data was put back."])
+            // The importer may have changed the store before it failed; put the old data back from the snapshot.
+            // The snapshot file is never deleted here, whatever happens.
+            guard let snapshot else { throw error }
+            do {
+                _ = try importer(snapshot.url, container)
+            } catch let recoveryError {
+                throw NSError(domain: "BackupRestore", code: 2, userInfo: [NSLocalizedDescriptionKey:
+                    "\(error.localizedDescription) Putting your previous data back also failed (\(recoveryError.localizedDescription)). It is saved: restore it from Settings → Restore pre-import state."])
             }
-            throw error
+            throw NSError(domain: "BackupRestore", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                "\(error.localizedDescription) Your previous data was put back."])
         }
     }
 }

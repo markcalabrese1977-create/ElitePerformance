@@ -355,4 +355,71 @@ final class ImportSafetyTests: XCTestCase {
         XCTAssertEqual(ImportStalenessGuard.assess(incoming: try BackupContentSummary.of(file: newerURL),
                                                    current: try BackupContentSummary.of(store: olderCtx)), .normalConfirm)
     }
+
+    // MARK: - Failure recovery
+
+    private struct Boom: LocalizedError { var errorDescription: String? { "boom" } }
+
+    /// An importer that really imports (wiping the store and writing the incoming data) and THEN throws: a failure after the wipe.
+    /// `failRecovery`: the second call (re-importing the snapshot) throws as well.
+    private func failingImporter(failRecovery: Bool, calls: Counter) -> BackupRestoreCoordinator.Importer {
+        return { url, container in
+            calls.n += 1
+            if calls.n == 1 {
+                _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container)
+                throw Boom()
+            }
+            if failRecovery { throw Boom() }
+            return try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: container)
+        }
+    }
+    private final class Counter { var n = 0 }
+
+    func test_importThrowsAfterTheWipe_storeReturnsToExactPreImportCounts_snapshotKept_userToldItWasPutBack() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000); try extraSession(srcCtx, day: 1_800_100_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, targetCtx) = try populated()
+        let before = try BackupContentSummary.of(store: targetCtx)
+        let calls = Counter()
+
+        XCTAssertThrowsError(try BackupRestoreCoordinator.restore(
+            from: incoming, container: targetC, snapshotDirectory: dir,
+            importer: failingImporter(failRecovery: false, calls: calls))) { e in
+            XCTAssertTrue(e.localizedDescription.contains("Your previous data was put back."), e.localizedDescription)
+            XCTAssertTrue(e.localizedDescription.contains("boom"))
+        }
+        XCTAssertEqual(calls.n, 2, "the import, then the recovery from the snapshot")
+        let after = try BackupContentSummary.of(store: ModelContext(targetC))
+        XCTAssertEqual(after.verifiedCounts, before.verifiedCounts, "exact pre-import counts")
+        XCTAssertEqual(after.completedSessions, before.completedSessions)
+        let snaps = PreImportSnapshots.list(in: dir)
+        XCTAssertEqual(snaps.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(snaps.first).url.path), "the snapshot file still exists")
+    }
+
+    func test_importFails_andRecoveryFailsToo_snapshotIsKept_undoStillOffered_errorPointsToSettings() throws {
+        let (_, srcCtx) = try populated()
+        try extraSession(srcCtx, day: 1_800_000_000)
+        let incoming = try fileOf(srcCtx); defer { try? FileManager.default.removeItem(at: incoming) }
+        let (targetC, targetCtx) = try populated()
+        let before = try BackupContentSummary.of(store: targetCtx)
+        let t0 = Date()
+        let calls = Counter()
+
+        XCTAssertThrowsError(try BackupRestoreCoordinator.restore(
+            from: incoming, container: targetC, snapshotDirectory: dir, now: t0,
+            importer: failingImporter(failRecovery: true, calls: calls))) { e in
+            let m = e.localizedDescription
+            XCTAssertTrue(m.contains("restore it from Settings"), m)
+            XCTAssertTrue(m.contains("Restore pre-import state"), m)
+            XCTAssertFalse(m.contains("was put back"), m)
+        }
+        XCTAssertEqual(calls.n, 2)
+        let snap = try XCTUnwrap(PreImportSnapshots.undoCandidate(in: dir, now: t0.addingTimeInterval(60)), "Restore pre-import state is still offered")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: snap.url.path), "the snapshot file was not deleted")
+        // and it really holds the pre-import data: restoring from it (through the real importer) works
+        try BackupRestoreCoordinator.restore(from: snap.url, container: targetC, snapshotDirectory: dir, now: t0.addingTimeInterval(120))
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(targetC)).verifiedCounts, before.verifiedCounts)
+    }
 }
