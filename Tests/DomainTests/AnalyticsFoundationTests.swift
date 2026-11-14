@@ -405,11 +405,14 @@ final class AnalyticsFoundationTests: XCTestCase {
         let legacy = "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58"   // alias of seated_cable_press
         let first = item(legacy, reps: [8], loads: [100])
         PRService.updatePR(for: first, in: ctx)
-        XCTAssertTrue(first.isPR)
+        XCTAssertFalse(first.isPR, "a lift's first-ever best is a baseline, not a record")
         XCTAssertEqual(PRService.currentPR(for: "seated_cable_press", in: ctx)?.exerciseId, "seated_cable_press", "keyed by the canonical id")
+        let heavier = item(legacy, reps: [8], loads: [110])
+        PRService.updatePR(for: heavier, in: ctx)
+        XCTAssertTrue(heavier.isPR, "beating the first best is a record")
         let pull = item("pull_up", reps: [8], loads: [0])
         PRService.updatePR(for: pull, in: ctx)
-        XCTAssertTrue(pull.isPR)
+        XCTAssertFalse(pull.isPR, "first-ever: a baseline")
         XCTAssertEqual(PRService.currentPR(for: "pull_up", in: ctx)?.bestLoad, 180)
         profile.bodyWeight = nil
         let pull2 = item("chin_up", reps: [8], loads: [0])

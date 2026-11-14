@@ -486,6 +486,52 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertFalse(again.isPR)
     }
 
+    func test_isPR_isDerivedFromTheRebuiltRecords_baselineAndLongSetsAreNotFlagged_staleFlagsClear() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        func mk(_ d: Int, _ id: String, _ reps: [Int], _ loads: [Double], status: SessionStatus = .completed, stale: Bool = false) -> (Session, SessionItem) {
+            let it = item(id, reps: reps, loads: loads)
+            it.isPR = stale
+            let s = Session(date: day(d), status: status, weekIndex: 1, dayLabel: "D", items: [it])
+            ctx.insert(s)
+            return (s, it)
+        }
+        let (s1, a) = mk(1, "bench_press", [5], [200], stale: true)        // first ever: baseline -> not a record
+        let (s2, b) = mk(8, "bench_press", [5], [210])                      // beats 200 -> record
+        let (s3, c) = mk(15, "bench_press", [20], [180], stale: true)       // long set: no record, stale flag clears
+        let (s4, d) = mk(22, "bench_press", [5], [205])                     // below 210 -> no record
+        let (s5, e) = mk(29, "bench_press", [5], [220], status: .planned, stale: false)   // planned: untouched
+        e.isPR = true
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
+        XCTAssertFalse(a.isPR, "a lift's first-ever session is a baseline")
+        XCTAssertTrue(b.isPR)
+        XCTAssertFalse(c.isPR, "a 20-rep set is no record, and its stale flag is cleared")
+        XCTAssertFalse(d.isPR)
+        XCTAssertTrue(e.isPR, "a planned item is left alone")
+        _ = (s1, s2, s3, s4, s5)
+        // the flags and the index agree
+        let rows = try ctx.fetch(FetchDescriptor<PRIndex>())
+        XCTAssertEqual(rows.first?.bestLoad, 210)
+        // idempotent
+        let first = try ctx.fetch(FetchDescriptor<SessionItem>()).map(\.isPR)
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<SessionItem>()).map(\.isPR), first)
+        // the live service agrees on a first-ever best
+        let fresh = item("squat_x", reps: [5], loads: [300]); ctx.insert(fresh)
+        PRService.updatePR(for: fresh, in: ctx)
+        XCTAssertFalse(fresh.isPR, "first-ever best: baseline")
+    }
+
+    func test_recordSettingSessions_countDistinctSessions_notLiftSessionPairs() throws {
+        // one session beats the record on TWO lifts: one record-setting session
+        var all = sets(10, "bench_press", load: 200, reps: [5], meso: "old", key: "p1") + sets(10, "squat", load: 300, reps: [5], meso: "old", key: "p1")
+        all += sets(110, "bench_press", load: 205, reps: [5], meso: "new", key: "c0") + sets(110, "squat", load: 305, reps: [5], meso: "new", key: "c0")
+        all += sets(117, "bench_press", load: 210, reps: [5], meso: "new", key: "c1") + sets(117, "squat", load: 310, reps: [5], meso: "new", key: "c1")
+        let sessions = [rec("p1", 10, meso: "old"), rec("c0", 110, meso: "new"), rec("c1", 117, meso: "new")]
+        let c = try XCTUnwrap(compare(all, sessions: sessions, asOf: 200))
+        XCTAssertEqual(c.prsCurrent, 2, "two sessions, four lift-session records")
+    }
+
     func test_prIndexRuleBackfill_rebuildsOnceUnderTheRule_andDoesNothingOnAnEmptyStore() throws {
         let key = "prIndexTwelveRepRule.v1.completed"
         UserDefaults.standard.removeObject(forKey: key)
@@ -505,6 +551,7 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(rows.first?.bestReps, 5)
         XCTAssertEqual(rows.first?.bestLoad, 200)
         XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+        XCTAssertFalse(it.isPR, "the lift\'s first-ever session: a baseline, flag recomputed")
     }
 
     func test_itemStats_bestE1RM_usesTheTwelveRepRule_whileSetRecordE1RMStaysRaw() throws {
@@ -564,6 +611,31 @@ final class MesoComparisonTests: XCTestCase {
     }
 
     // MARK: - PR definition report (old vs new; report only)
+
+    func test_report_isPRFlagsBeforeAndAfterTheRecompute() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
+              let out = ProcessInfo.processInfo.environment["EP_ISPR_REPORT"], !out.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_ISPR_REPORT")
+        }
+        // BEFORE: the flags exactly as the backup carries them (completed sessions only)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
+        var bItems = 0, bSessions = 0
+        for s in (json["sessions"] as? [[String: Any]]) ?? [] where (s["statusRaw"] as? String) == "completed" {
+            let n = ((s["items"] as? [[String: Any]]) ?? []).filter { ($0["isPR"] as? Bool) == true }.count
+            bItems += n; if n > 0 { bSessions += 1 }
+        }
+        // AFTER: the import rebuilds the index and recomputes the flags
+        let container = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        UserDefaults.standard.removeObject(forKey: "prIndexTwelveRepRule.v1.completed")
+        defer { UserDefaults.standard.removeObject(forKey: "prIndexTwelveRepRule.v1.completed") }
+        let after = ModelContext(container)
+        PRIndexRuleBackfill.runIfNeeded(in: after)
+        let all = try after.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }
+        let aItems = all.flatMap(\.items).filter(\.isPR).count
+        let aSessions = all.filter { $0.items.contains { $0.isPR } }.count
+        try "flagged items: \(bItems) -> \(aItems); sessions with a flagged item: \(bSessions) -> \(aSessions); completed sessions \(all.count)".write(toFile: out, atomically: true, encoding: .utf8)
+    }
 
     func test_report_prsUnderTheTwelveRepRule() throws {
         guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,

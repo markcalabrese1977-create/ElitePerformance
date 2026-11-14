@@ -60,7 +60,7 @@ struct PRService {
                 let name = ExerciseCatalog.all.first(where: { $0.id == canonical })?.name ?? item.exerciseNameSnapshot ?? "Unknown"
                 context.insert(PRIndex(exerciseId: canonical, exerciseName: name, bestSetVolume: best.load * Double(best.reps),
                                        bestLoad: best.load, bestReps: best.reps, bestDate: Date()))
-                item.isPR = true
+                item.isPR = false      // a lift's first-ever best is a baseline ("New"), not a record: same as the rebuild
             }
         } catch {
             // If the fetch fails for some reason, don't crash the app.

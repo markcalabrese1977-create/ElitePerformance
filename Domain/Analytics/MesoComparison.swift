@@ -216,8 +216,10 @@ enum MesoComparer {
         let events = PersonalRecords.events(from: snapshot.sets.filter { $0.sessionDate <= asOf }).filter { !$0.isBaseline }
         let curSessions = Set(snapshot.sessions.filter { $0.mesoKey == current.key }.map(\.key))
         let prevSessions = Set(snapshot.sessions.filter { $0.mesoKey == previous.key }.map(\.key))
-        let prsC = events.filter { curSessions.contains($0.sessionKey) }.count
-        let prsP = events.filter { prevSessions.contains($0.sessionKey) }.count
+        // "Record-setting sessions": distinct sessions with at least one record event. The same events set `SessionItem.isPR`
+        // (PRRebuildService.recomputeFlags), so this count and the flags have one source.
+        let prsC = Set(events.filter { curSessions.contains($0.sessionKey) }.map(\.sessionKey)).count
+        let prsP = Set(events.filter { prevSessions.contains($0.sessionKey) }.map(\.sessionKey)).count
 
         // Weekly sets per muscle: the last (up to 4) full weeks of each block, adherence-aware.
         let shares = MuscleVolume.customShares(from: customs)
