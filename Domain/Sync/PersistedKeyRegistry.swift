@@ -75,6 +75,8 @@ enum PersistedKeyRegistry {
               disposition: .rebuiltOnImport("derived from SessionHistory; MechanicalLoadProjector.projectAll runs on import")),
 
         // Device-local.
+        Entry(match: .prefix("dataSentinel."),
+              disposition: .excluded("missing-data sentinel: the completed-session count of THIS device's store after its last successful launch (app-group defaults); describes the device, not the training data, so a restore must not carry it")),
         Entry(match: .prefix("autoBackup."),
               disposition: .excluded("automatic-backup status (last success, iCloud or not, last launch commit, banner dismissal): device state about THIS device's backups; a restore must not overwrite it, or an old backup would claim 'backed up just now'")),
         Entry(match: .exact("prIndexRuleVersion"),

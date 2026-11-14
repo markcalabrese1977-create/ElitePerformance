@@ -189,12 +189,16 @@ struct InterruptedImportMarker: Codable, Equatable {
 
 /// THE import path. Settings' import and "Restore pre-import state" both go through it, so both snapshot first.
 enum BackupRestoreCoordinator {
+    private static func recordSentinel(_ sentinel: DataSentinelStore, _ container: ModelContainer) {
+        if let count = try? BackupContentSummary.of(store: ModelContext(container)).completedSessions { sentinel.record(count) }
+    }
+
     typealias Importer = (URL, ModelContainer) throws -> BackupSnapshotImportResult
 
     /// `importer` is the real importer; tests substitute one that fails after it has changed the store.
     @discardableResult
     static func restore(from url: URL, container: ModelContainer, snapshotDirectory: URL = PreImportSnapshots.defaultDirectory(),
-                        now: Date = Date(), preserveExistingMarker: Bool = false,
+                        now: Date = Date(), preserveExistingMarker: Bool = false, sentinel: DataSentinelStore = DataSentinelStore(),
                         importer: Importer = { try BackupSnapshotImporter.importFullBackupJSON(from: $0, modelContainer: $1) }) throws -> BackupSnapshotImportResult {
         let context = ModelContext(container)
         let snapshot = try PreImportSnapshots.take(from: context, in: snapshotDirectory, now: now)   // throws: import never starts
@@ -207,6 +211,7 @@ enum BackupRestoreCoordinator {
         do {
             let result = try importer(url, container)
             InterruptedImportMarker.clear(in: snapshotDirectory)
+            recordSentinel(sentinel, container)          // a legitimate import: the new store is the baseline
             return result
         } catch {
             // The importer may have changed the store before it failed; put the old data back from the snapshot.
@@ -221,6 +226,7 @@ enum BackupRestoreCoordinator {
             // recovered in-process (not when this restore is itself the answer to an older interrupted import: that marker
             // points at the good snapshot, and the store was only put back to the half-imported state)
             if !preserveExistingMarker { InterruptedImportMarker.clear(in: snapshotDirectory) }
+            recordSentinel(sentinel, container)
             throw NSError(domain: "BackupRestore", code: 1, userInfo: [NSLocalizedDescriptionKey:
                 "\(error.localizedDescription) Your previous data was put back."])
         }
@@ -240,6 +246,15 @@ final class StartupGate: ObservableObject {
 
     @Published private(set) var interrupted: Interrupted?
     @Published private(set) var errorMessage: String?
+
+    /// The store opened with no completed sessions although the last successful launch had some.
+    struct MissingData: Equatable { let expectedSessions: Int }
+    @Published private(set) var missingData: MissingData?
+    @Published private(set) var newestBackup: AutoBackupFile?
+    @Published private(set) var newestBackupSummary: BackupContentSummary?
+    @Published private(set) var backupLookupDone = false
+    @Published private(set) var missingDataError: String?
+    static let missingDataMessage = "Your training data wasn't found. Nothing has been changed."
     /// Set once when a marker's safety copy is missing; the app carries on and shows a one-time, non-blocking alert.
     @Published var showsMissingSnapshotNotice = false
     static let missingSnapshotMessage = "A restore was interrupted and its safety copy is missing. Your data may be incomplete — import your latest export from Files."
@@ -247,12 +262,18 @@ final class StartupGate: ObservableObject {
     private let directory: URL
     private let backfills: @MainActor (ModelContainer) -> Void
     private let beforeBackfills: @MainActor (ModelContainer) -> Void
+    private let sentinel: DataSentinelStore
+    private let findBackups: @Sendable () -> [AutoBackupFile]
 
     /// `beforeBackfills` runs after the interrupted-import check has been answered and BEFORE any backfill: the automatic
     /// backup for a new build is taken here, of the data as it was before the backfills touch it.
     init(directory: URL = PreImportSnapshots.defaultDirectory(),
+         sentinel: DataSentinelStore = DataSentinelStore(),
          beforeBackfills: @escaping @MainActor (ModelContainer) -> Void = { AutoBackupService.shared.launchBackupIfBuildChanged(container: $0) },
-         runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) }) {
+         runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) },
+         findBackups: @escaping @Sendable () -> [AutoBackupFile] = StartupGate.defaultFindBackups) {
+        self.sentinel = sentinel
+        self.findBackups = findBackups
         self.directory = directory
         self.beforeBackfills = beforeBackfills
         self.backfills = runBackfills
@@ -263,15 +284,70 @@ final class StartupGate: ObservableObject {
         backfills(container)
     }
 
+    /// Automatic backups, newest first: the iCloud folder and the local fallback folder.
+    static let defaultFindBackups: @Sendable () -> [AutoBackupFile] = {
+        let primary = AutoBackupDestination.resolve().directory
+        let local = AutoBackupDestination.localFallbackDirectory()
+        var files = AutoBackupEngine.list(in: primary)
+        if local != primary { files += AutoBackupEngine.list(in: local) }
+        return files.sorted { $0.date > $1.date }
+    }
+
+    /// Everything that starts the app's work goes through here. A store that opened with 0 completed sessions after a launch that
+    /// had some is treated as missing data: NO backfills and NO automatic backup run until the user answers.
+    private func proceed(_ container: ModelContainer) {
+        let completed = (try? BackupContentSummary.of(store: ModelContext(container)).completedSessions) ?? -1
+        if completed == 0, sentinel.completedSessions > 0 {
+            missingData = MissingData(expectedSessions: sentinel.completedSessions)
+            backupLookupDone = false
+            Task { await loadNewestBackup() }
+            return
+        }
+        runBackfills(container)
+        if completed >= 0 { sentinel.record(completed) }     // after a successful launch
+    }
+
+    /// The newest backup that decodes and holds completed sessions.
+    func loadNewestBackup() async {
+        let finder = findBackups
+        let files = await Task.detached(priority: .utility) { finder() }.value
+        newestBackup = nil; newestBackupSummary = nil
+        for f in files {
+            if let s = try? BackupContentSummary.of(file: f.url), s.completedSessions > 0 { newestBackup = f; newestBackupSummary = s; break }
+        }
+        backupLookupDone = true
+    }
+
+    /// The one option: restore the newest verified backup through the coordinator (snapshot, marker and sentinel included).
+    func restoreNewestBackup() {
+        guard let container, let backup = newestBackup else { return }
+        do {
+            try BackupRestoreCoordinator.restore(from: backup.url, container: container, snapshotDirectory: directory, sentinel: sentinel)
+            missingData = nil; missingDataError = nil
+            NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
+            runBackfills(container)
+        } catch {
+            missingDataError = "Restore failed: \(error.localizedDescription) Nothing was changed."
+        }
+    }
+
+    /// Only offered when there is no backup to restore (the data is already gone and there is no other way forward).
+    func continueWithEmptyData() {
+        guard let container, backupLookupDone, newestBackup == nil else { return }
+        sentinel.record(0)
+        missingData = nil
+        runBackfills(container)
+    }
+
     /// Called where the app used to run its backfills. With an interrupted-import marker it holds them back and raises the prompt.
     func begin(container: ModelContainer) {
         self.container = container
-        guard let marker = InterruptedImportMarker.read(in: directory) else { runBackfills(container); return }
+        guard let marker = InterruptedImportMarker.read(in: directory) else { proceed(container); return }
         guard let snapshot = marker.resolvedSnapshotURL(in: directory) else {
             // nothing to restore from: tell the user once (the marker is deleted, so this never repeats), do not block the app
             InterruptedImportMarker.clear(in: directory)
             showsMissingSnapshotNotice = true
-            runBackfills(container)
+            proceed(container)
             return
         }
         let date = PreImportSnapshots.list(in: directory).first { $0.url.lastPathComponent == snapshot.lastPathComponent }?.date ?? marker.startedAt
@@ -287,7 +363,7 @@ final class StartupGate: ObservableObject {
             // the coordinator cleared the marker on success
             interrupted = nil
             NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
-            runBackfills(container)
+            proceed(container)
         } catch {
             errorMessage = "Restore failed: \(error.localizedDescription) Your data is saved and the prompt will appear again on the next launch."
             // the marker stays; the app stays blocked on this answer until the user keeps current data or restore succeeds
@@ -298,7 +374,7 @@ final class StartupGate: ObservableObject {
     func keepCurrentData() {
         InterruptedImportMarker.clear(in: directory)
         interrupted = nil
-        if let container { runBackfills(container) }
+        if let container { proceed(container) }
     }
 
     func dismissError() { errorMessage = nil }

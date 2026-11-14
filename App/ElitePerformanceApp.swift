@@ -63,7 +63,13 @@ struct LaunchRoot<Content: View>: View {
 
     var body: some View {
         Group {
-            if gate.interrupted == nil { content() } else { Color(.systemBackground).ignoresSafeArea() }
+            if let missing = gate.missingData {
+                MissingDataView(gate: gate, expected: missing.expectedSessions)
+            } else if gate.interrupted == nil {
+                content()
+            } else {
+                Color(.systemBackground).ignoresSafeArea()
+            }
         }
         .alert("Restore interrupted", isPresented: Binding(get: { gate.interrupted != nil && gate.errorMessage == nil }, set: { _ in })) {
             Button("Restore") { gate.restore() }
@@ -118,5 +124,32 @@ enum StartupBackfills {
             print(line)
             BackfillLog.lineSink?(line)
         }
+    }
+}
+
+/// Blocking screen: the store opened with no completed sessions although the last successful launch had some.
+struct MissingDataView: View {
+    @ObservedObject var gate: StartupGate
+    let expected: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(StartupGate.missingDataMessage).font(.title2.bold())
+            Text("The last time the app opened successfully it held \(expected) completed sessions; now it holds none.")
+            if let error = gate.missingDataError { Text(error).foregroundStyle(.red) }
+            if !gate.backupLookupDone {
+                ProgressView("Looking for a backup…")
+            } else if let backup = gate.newestBackup, let summary = gate.newestBackupSummary {
+                Text("Newest verified backup: \(backup.date.formatted(date: .abbreviated, time: .shortened)) · \(summary.completedSessions) completed sessions.")
+                Button("Restore newest backup") { gate.restoreNewestBackup() }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Text("No backup was found on this device or in iCloud.")
+                Button("Continue with empty data", role: .destructive) { gate.continueWithEmptyData() }
+                    .buttonStyle(.bordered)
+            }
+            Spacer()
+        }
+        .padding(24)
     }
 }
