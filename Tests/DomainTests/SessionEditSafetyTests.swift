@@ -9,7 +9,7 @@ final class SessionEditSafetyTests: XCTestCase {
             Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
             UserProfile.self, User.self, CustomExercise.self
         ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         return ModelContext(try ModelContainer(for: schema, configurations: config))
     }
 

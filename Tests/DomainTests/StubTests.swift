@@ -348,7 +348,7 @@ final class MesoAnchoringAndAnalyzerTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -682,7 +682,7 @@ final class MaintenanceBlockSeedingTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1219,7 +1219,7 @@ final class SetStatusBadgeTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1394,7 +1394,7 @@ final class BodyweightMechanicsTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1562,7 +1562,7 @@ final class UserProfileModelCoverageTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1736,7 +1736,7 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1806,7 +1806,7 @@ final class UserProfileSingleRecordTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1847,7 +1847,7 @@ final class PropagationToggleAndServiceTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1911,7 +1911,7 @@ final class ProgramPlanPropagationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -1959,7 +1959,7 @@ final class ReorderTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2024,7 +2024,7 @@ final class DayLabelRenamePropagationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2096,7 +2096,7 @@ final class DataRepairToolTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2153,7 +2153,7 @@ final class BackupRestoreImportTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         return try ModelContainer(for: schema, configurations: config)
     }
 
@@ -2488,7 +2488,7 @@ final class MechanicalLoadAppGroupTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self, SessionHistory.self, SessionHistoryExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2845,7 +2845,7 @@ final class SameDaySessionsTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2899,7 +2899,7 @@ final class LongLayoffAndOverrideTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -2985,7 +2985,7 @@ final class RetroactiveCascadeAndDeletionTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -3086,7 +3086,7 @@ final class UnitAndIncrementChangeTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -3156,7 +3156,7 @@ final class ReplacePlannedProgramDeletionFilterTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }

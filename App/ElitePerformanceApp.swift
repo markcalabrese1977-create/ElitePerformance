@@ -34,10 +34,13 @@ struct ElitePerformanceApp: App {
         func openStore(label: String?) throws -> (container: ModelContainer, sessions: [Session]) {
             let config: ModelConfiguration
 
+            // The app holds the iCloud Documents entitlement (automatic off-device backups). With an iCloud container in the
+            // entitlements SwiftData would otherwise turn CloudKit sync ON for the store (and refuse to open it: the schema
+            // is not CloudKit-shaped). The store is local; iCloud is used only for backup FILES.
             if let name = label, name != "DEFAULT" {
-                config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: false)
+                config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: false, cloudKitDatabase: .none)
             } else {
-                config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+                config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false, cloudKitDatabase: .none)
             }
 
             let container = try ModelContainer(for: schema, configurations: [config])

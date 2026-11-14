@@ -128,7 +128,7 @@ final class UnitDisplayInputTests: XCTestCase {
 
     private func makeSession(kg: Bool) throws -> (ctx: ModelContext, session: Session) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
         ctx.insert(UserProfile(minLoadIncrement: kg ? 2.5 : 5, unit: kg ? .kg : .lb))
         let load = kg ? lb(102.5) : 102.5
         let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: load)

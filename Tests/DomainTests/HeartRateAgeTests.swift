@@ -56,7 +56,7 @@ final class HeartRateAgeTests: XCTestCase {
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         func container() throws -> ModelContainer {
-            try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         }
         for birth in [Date(timeIntervalSince1970: 315_532_800), nil] {   // 1980-01-01 UTC, and none
             let src = try container()

@@ -154,7 +154,7 @@ final class HealthKitSyncWithoutAuthorizationTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         return ModelContext(container)
     }
 

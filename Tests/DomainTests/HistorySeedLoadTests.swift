@@ -12,7 +12,7 @@ final class HistorySeedLoadTests: XCTestCase {
             Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
             UserProfile.self, User.self, CustomExercise.self
         ])
-        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
     }
 
     private func session(

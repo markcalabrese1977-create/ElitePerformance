@@ -23,7 +23,7 @@ final class KgRoundingMatrixTests: XCTestCase {
     private func makeContext(increment: Double = 2.5) throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
         ctx.insert(UserProfile(minLoadIncrement: increment, unit: .kg))
         return ctx
     }

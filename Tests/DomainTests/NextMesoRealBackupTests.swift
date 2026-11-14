@@ -22,7 +22,7 @@ final class NextMesoRealBackupTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
 
     private func export(_ ctx: ModelContext) throws -> (json: [String: Any], url: URL) {

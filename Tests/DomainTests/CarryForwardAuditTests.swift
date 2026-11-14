@@ -21,7 +21,7 @@ final class CarryForwardAuditTests: XCTestCase {
     ])
 
     private func importCopy(_ url: URL) throws -> (ModelContainer, ModelContext) {
-        let c = try ModelContainer(for: Self.schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: Self.schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: c)
         return (c, ModelContext(c))
     }

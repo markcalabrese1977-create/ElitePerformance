@@ -736,6 +736,8 @@ private struct HistoryDayDetailView: View {
 struct HistoryView_Previews: PreviewProvider {
     static var previews: some View {
         HistoryView()
-            .modelContainer(for: SessionHistory.self, inMemory: true)
+            .modelContainer(try! ModelContainer(
+                for: Schema([SessionHistory.self, SessionHistoryExercise.self]),
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
     }
 }

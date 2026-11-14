@@ -21,7 +21,7 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
     private func makeBlock(convert12: Bool = false) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self, AppState.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -113,7 +113,7 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
     private func makeTemplateBlock(_ template: ProgramTemplate, weekdays: [Int], start: Date) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self, AppState.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -336,7 +336,7 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
     private func makeMaintenanceMeso() throws -> (ModelContext, MesoBlock, [Session]) {
         let c = try ModelContainer(for: Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                                                 UserProfile.self, User.self, CustomExercise.self, AppState.self]),
-                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))

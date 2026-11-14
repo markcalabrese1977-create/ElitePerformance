@@ -17,7 +17,7 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         return ModelContext(try ModelContainer(for: schema, configurations: config))
     }
 

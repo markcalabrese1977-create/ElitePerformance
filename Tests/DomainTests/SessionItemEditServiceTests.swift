@@ -20,7 +20,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     private func makeBlock(convert12: Bool = false) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self, AppState.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -320,7 +320,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     func test_nonWaveMaintenanceBlock_chronologicalChainResolvesToY() throws {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -454,7 +454,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     func test_remaining_includesAPlannedSessionDatedEarlierTodayButNotYesterday() throws {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         let meso = MesoBlock(name: "Block", startDate: Date(), status: .active, totalWeeks: 4)
@@ -683,7 +683,7 @@ final class SessionItemEditServiceTests: XCTestCase {
     func test_change_nonWaveBlock_appliesToEverySession_andLetterFilterUsesTheEmptyLetter() throws {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         let meso = MesoBlock(name: "My Own Plan", startDate: date(2026, 10, 5), status: .active, totalWeeks: 4)

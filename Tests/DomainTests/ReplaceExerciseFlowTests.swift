@@ -10,7 +10,7 @@ final class ReplaceExerciseFlowTests: XCTestCase {
     private func makeBlock() throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -141,7 +141,7 @@ final class ReplaceExerciseFlowTests: XCTestCase {
     func test_todaySwap_writeBackResolvesTheSwappedItemByIdentity_notByExerciseId() throws {
         let c = try ModelContainer(for: Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                                                 UserProfile.self, User.self, CustomExercise.self]),
-                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let first = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
         let second = SessionItem(order: 2, exerciseId: "bench_press", targetReps: 12, targetSets: 2, targetRIR: 3, suggestedLoad: 80)

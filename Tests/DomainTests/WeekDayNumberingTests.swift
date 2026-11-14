@@ -10,7 +10,7 @@ final class WeekDayNumberingTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
     }
 
     private func day(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: Date())! }

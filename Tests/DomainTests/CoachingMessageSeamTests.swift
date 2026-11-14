@@ -13,7 +13,7 @@ final class CoachingMessageSeamTests: XCTestCase {
     // populated message from a partial session was wrong.
     func testHandleSetLogged_partialSession_noMessageYet() throws {
         let schema = Schema([Session.self, SessionItem.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         let context = ModelContext(container)
 
@@ -56,7 +56,7 @@ final class CoachingMessageSeamTests: XCTestCase {
     // must reach exercise.coachMessage through the same seam.
     func testHandleSetLogged_completeSession_emitsCoachMessage() throws {
         let schema = Schema([Session.self, SessionItem.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         let context = ModelContext(container)
 
@@ -109,7 +109,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         return ModelContext(c)
     }

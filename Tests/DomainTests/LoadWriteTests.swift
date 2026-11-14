@@ -12,7 +12,7 @@ final class LoadWriteTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }

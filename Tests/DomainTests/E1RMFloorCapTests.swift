@@ -251,7 +251,7 @@ final class E1RMFloorCapTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         return ModelContext(try ModelContainer(for: schema, configurations: config))
     }
 
@@ -510,7 +510,7 @@ final class FixedLoadExemptTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         return ModelContext(try ModelContainer(for: schema, configurations: config))
     }
 
@@ -613,7 +613,7 @@ final class FixedLoadExemptTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
 
     private func exportImport(_ configure: (UserProfile) -> Void) throws -> UserProfile {
@@ -803,7 +803,7 @@ final class MaxLoadTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         Self.parked.append(c)
         return ModelContext(c)
     }
@@ -1079,7 +1079,7 @@ final class MaxLoadTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         Self.parked.append(c)
         return c
     }

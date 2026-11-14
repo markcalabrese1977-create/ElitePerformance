@@ -216,7 +216,7 @@ final class CoachMessageLandingTests: XCTestCase {
             UserProfile.self, User.self, CustomExercise.self
         ])
         let context = ModelContext(
-            try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         )
         context.insert(User(units: .lb, progressionEnabled: true))
 

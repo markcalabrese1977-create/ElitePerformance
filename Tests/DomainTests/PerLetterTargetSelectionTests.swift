@@ -23,7 +23,7 @@ final class PerLetterTargetSelectionTests: XCTestCase {
             Session.self, SessionItem.self, MesoBlock.self,
             UserProfile.self, User.self, CustomExercise.self
         ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return ModelContext(container)
     }
@@ -384,7 +384,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
 
     private func seededBlock() throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         try DUPProgramSeeder.seed(
@@ -509,7 +509,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
         let ctx = ModelContext(c)
@@ -577,7 +577,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
         let ctx = ModelContext(c)
@@ -929,7 +929,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
     /// Opens (or reopens) an on-disk store with the same schema the conversion tests use.
     private func onDiskContainer(at url: URL) throws -> ModelContainer {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
     }
 
 
@@ -997,7 +997,7 @@ final class LastSameLetterPerformanceTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         return ModelContext(c)
     }
@@ -1280,7 +1280,7 @@ final class LastSameLetterPerformanceTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: c)
         let ctx = ModelContext(c)

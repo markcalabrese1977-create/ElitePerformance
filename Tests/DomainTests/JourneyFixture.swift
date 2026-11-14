@@ -27,7 +27,7 @@ struct JourneySessionScript {
 ///
 /// Stands up a ModelContext using the identical pattern to every other DomainTest:
 ///   Schema([Session, SessionItem, MesoBlock, UserProfile, User, CustomExercise])
-///   ModelConfiguration(isStoredInMemoryOnly: true)
+///   ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
 ///
 /// Carry-forward traps documented at each guard site:
 ///   - hasMeaningfulPlan: source suggestedLoad must be > 0 after seedProgram()
@@ -45,7 +45,7 @@ struct JourneyFixture {
             Session.self, SessionItem.self, MesoBlock.self,
             UserProfile.self, User.self, CustomExercise.self
         ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: config)
         return JourneyFixture(context: ModelContext(container))
     }

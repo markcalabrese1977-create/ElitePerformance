@@ -107,7 +107,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
 
     private var appDomain: String { Bundle.main.bundleIdentifier ?? "" }
@@ -567,7 +567,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -737,7 +737,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = empty
         clearKeys()
         PrescribedSetsBackfill.runIfNeeded(in: ModelContext(empty))
@@ -772,7 +772,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let empty = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = empty
         clearKeys()
         PlannedDateBackfill.runIfNeeded(in: ModelContext(empty))
@@ -1145,7 +1145,7 @@ final class InsertDeloadRealBackupTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
 
     /// Export, parsed, with `exportedAt` removed.
@@ -1337,7 +1337,7 @@ final class TopSetBackupTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         Self.parked.append(c)
         return c
     }
@@ -1452,7 +1452,7 @@ extension TopSetBackupTests {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         TopSetBackupTests.keepAlive(c)
         return c
     }

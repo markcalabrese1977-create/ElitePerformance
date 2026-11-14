@@ -158,7 +158,7 @@ final class AppModeRemovalTests: XCTestCase {
         let anchor = BackupTestSupport.date(1_700_086_400)
         do {
             let oldSchema = Schema(versionedSchema: OldSchema.self)
-            let old = try ModelContainer(for: oldSchema, configurations: ModelConfiguration(schema: oldSchema, url: url))
+            let old = try ModelContainer(for: oldSchema, configurations: ModelConfiguration(schema: oldSchema, url: url, cloudKitDatabase: .none))
             let ctx = ModelContext(old)
             ctx.insert(OldSchema.AppState(id: id, activeMesoStartDate: start, mesoAnchorDate: anchor, mesoAnchorDayNumber: 4,
                                           appModeRaw: "mark", warmupHidden: true))
@@ -166,7 +166,7 @@ final class AppModeRemovalTests: XCTestCase {
         }
 
         let schema = AppSchema.makeSchema()
-        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url))
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none))
         let rows = try ModelContext(container).fetch(FetchDescriptor<AppState>())
         XCTAssertEqual(rows.count, 1, "the AppState row survived the migration")
         let row = try XCTUnwrap(rows.first)
@@ -637,5 +637,45 @@ final class ImportSafetyTests: XCTestCase {
         SessionHistoryExerciseOrderBackfill.runIfNeeded(in: ctx)
         lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
         XCTAssertEqual(BackfillLog.result(from: lines), "not needed")
+    }
+}
+
+/// Store safety: the app holds an iCloud container, so SwiftData would switch CloudKit sync on for any configuration that
+/// does not opt out. Every configuration must say `cloudKitDatabase: .none`.
+final class StoreSafetyTests: XCTestCase {
+    private func swiftFiles() -> [URL] {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var out: [URL] = []
+        for dir in ["App", "Domain", "Features", "Shared", "Utilities", "Tests"] {
+            let base = root.appendingPathComponent(dir)
+            guard let e = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
+            for case let u as URL in e where u.pathExtension == "swift" { out.append(u) }
+        }
+        return out
+    }
+
+    func test_everyModelConfiguration_optsOutOfCloudKit_andNoDefaultContainerIsUsed() throws {
+        var offenders: [String] = []
+        var configurations = 0
+        for file in swiftFiles() where file.lastPathComponent != "BackupFullRoundTripTests.swift" {
+            let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
+            for (i, line) in lines.enumerated() {
+                let code = line.trimmingCharacters(in: .whitespaces)
+                if code.hasPrefix("//") || code.hasPrefix("///") { continue }
+                let window = lines[i..<min(i + 3, lines.count)].joined(separator: " ")
+                if line.contains("ModelConfiguration(") {
+                    configurations += 1
+                    if !window.contains("cloudKitDatabase: .none") { offenders.append("\(file.lastPathComponent):\(i + 1) ModelConfiguration without cloudKitDatabase: .none") }
+                }
+                if line.contains("ModelContainer(for") && !window.contains("configurations:") {
+                    offenders.append("\(file.lastPathComponent):\(i + 1) ModelContainer without an explicit configuration")
+                }
+                if line.contains(".modelContainer(for:") {
+                    offenders.append("\(file.lastPathComponent):\(i + 1) .modelContainer(for:) uses the default configuration")
+                }
+            }
+        }
+        XCTAssertGreaterThan(configurations, 50, "the scan found the configurations")
+        XCTAssertEqual(offenders, [])
     }
 }

@@ -28,7 +28,7 @@ final class UnitSwitchTests: XCTestCase {
 
     private func makeWorld(unit: LoadUnit = .lb) throws -> World {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+        let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
         let profile = UserProfile(minLoadIncrement: 2.5, unit: unit)
         ctx.insert(profile)
         let meso = MesoBlock(name: "Block", startDate: day(-14), status: .active, totalWeeks: 8)
@@ -292,7 +292,7 @@ final class UnitSwitchTests: XCTestCase {
     func test_applyingOnboarding_writesTheUnitToTheProfile() throws {
         for unit in LoadUnit.allCases {
             let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
-            let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+            let ctx = ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
             var draft = OnboardingDraft()
             draft.unit = unit
             draft.loadIncrement = UnitAwareRounding.defaultIncrement(unit: unit)

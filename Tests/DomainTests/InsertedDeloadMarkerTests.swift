@@ -12,7 +12,7 @@ final class InsertedDeloadMarkerTests: XCTestCase {
             PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
-        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
 
     private func seed(_ container: ModelContainer) throws {

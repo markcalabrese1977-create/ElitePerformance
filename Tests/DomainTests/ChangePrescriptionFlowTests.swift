@@ -10,7 +10,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
     private func makeBlock() throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))
@@ -59,7 +59,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         // A block with no wave letters: nothing to pick, and a stale letter is ignored.
         let c = try ModelContainer(for: Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                                                 UserProfile.self, User.self, CustomExercise.self]),
-                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                   configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let nctx = ModelContext(c)
         let meso = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: 4)
@@ -426,7 +426,7 @@ final class NoteChangeTests: XCTestCase {
     private func makeBlock() throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
                              UserProfile.self, User.self, CustomExercise.self])
-        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container = c
         let ctx = ModelContext(c)
         ctx.insert(User(units: .lb, progressionEnabled: true))

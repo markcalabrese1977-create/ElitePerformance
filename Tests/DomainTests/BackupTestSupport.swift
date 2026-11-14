@@ -10,7 +10,7 @@ enum BackupTestSupport {
     private static var parked: [ModelContainer] = []
 
     static func makeContainer() throws -> ModelContainer {
-        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         parked.append(c)
         return c
     }
