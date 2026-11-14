@@ -34,12 +34,13 @@ final class ChangePrescriptionFlowTests: XCTestCase {
 
     // MARK: Steppers
 
-    func test_setsStepperDoesNotSetPlanEdited_butTheRIRStepperDoes() {
+    func test_theSetCountStepper_setsPlanEdited_likeTheRIRStepper() {
         let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
         XCTAssertFalse(i.planEdited)
         PlanStepperEdits.setSets(i, to: 4)
         XCTAssertEqual(i.targetSets, 4)
-        XCTAssertFalse(i.planEdited, "the set COUNT stepper is not an edit of loads, reps or RIR")
+        XCTAssertTrue(i.planEdited, "a lifter-chosen set count is a hand-set target")
+        i.planEdited = false
         PlanStepperEdits.setRIR(i, to: 1)
         XCTAssertEqual(i.targetRIR, 1)
         XCTAssertTrue(i.planEdited, "a hand-set RIR is the lifter's")

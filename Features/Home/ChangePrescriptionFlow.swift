@@ -5,13 +5,14 @@ import SwiftData
 
 /// What the Program tab's plan editors write. ANY lifter edit to a planned LOAD, REPS or RIR marks the item
 /// `planEdited`, which freezes carry-forward's earned-load write into it (carry-forward itself only ever writes
-/// loads, never reps or RIR, but a hand-set target of any kind is the lifter's, not the engine's). Only the set
-/// COUNT stepper leaves the flag alone.
+/// loads, never reps or RIR, but a hand-set target of any kind is the lifter's, not the engine's). So does the set
+/// COUNT stepper: a lifter-chosen number of sets is a hand-set target too.
 enum PlanStepperEdits {
 
     /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
     /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
     static func setSets(_ item: SessionItem, to value: Int) {
+        item.planEdited = true
         if item.hasTopSet {
             item.resizeBackOffs(to: value)   // the top tail and the roles move with the back-off count
         } else {
