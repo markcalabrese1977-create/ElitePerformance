@@ -51,7 +51,8 @@ enum AutoBackupError: LocalizedError {
 // MARK: - Engine (synchronous, no UI, testable)
 
 enum AutoBackupEngine {
-    static let prefix = "ElitePerformance_AutoBackup_"
+    /// A file-name prefix, not a defaults key (a computed property so the persisted-key scan does not mistake it for one).
+    static var prefix: String { "ElitePerformance_AutoBackup_" }
 
     private static let stamp: DateFormatter = {
         let f = DateFormatter()

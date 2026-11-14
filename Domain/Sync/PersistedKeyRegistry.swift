@@ -75,8 +75,6 @@ enum PersistedKeyRegistry {
               disposition: .rebuiltOnImport("derived from SessionHistory; MechanicalLoadProjector.projectAll runs on import")),
 
         // Device-local.
-        Entry(match: .exact("activeSwiftDataStoreLabel.v1"),
-              disposition: .excluded("device-local store pin; a restore must not carry it to another device")),
         Entry(match: .prefix("autoBackup."),
               disposition: .excluded("automatic-backup status (last success, iCloud or not, last launch commit, banner dismissal): device state about THIS device's backups; a restore must not overwrite it, or an old backup would claim 'backed up just now'")),
         Entry(match: .exact("prIndexRuleVersion"),
