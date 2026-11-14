@@ -2014,6 +2014,20 @@ final class ProgramPlanPropagationTests: XCTestCase {
         XCTAssertEqual(plain2.suggestedLoad, 250)
         XCTAssertEqual(edited.suggestedLoad, 111, "the lifter's edited target keeps its plan")
     }
+
+    // RR: Auto / Auto+ confirm first when any item is planEdited; the message carries the count.
+    func test_RR_resetConfirmationCountsTheEditedItems() throws {
+        let context = try makeContext()
+        let (session, item) = plannedSession(context, daysAhead: 0, label: "Push", meso: nil)
+        let second = SessionItem(order: 2, exerciseId: "machine_row", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 80)
+        session.items.append(second)
+        XCTAssertEqual(ProgramDayDetailView.editedCount(in: session), 0, "nothing edited: no confirmation needed")
+        item.planEdited = true
+        second.planEdited = true
+        XCTAssertEqual(ProgramDayDetailView.editedCount(in: session), 2)
+        XCTAssertTrue(ProgramDayDetailView.resetMessage(editedCount: 2).hasPrefix("2 edited exercises will be reset"))
+        XCTAssertTrue(ProgramDayDetailView.resetMessage(editedCount: 1).hasPrefix("1 edited exercise will be reset"))
+    }
 }
 
 final class ReorderTests: XCTestCase {

@@ -23,6 +23,7 @@ struct ProgramDayDetailView: View {
     /// Items waiting for the lifter to confirm their removal from this session's plan.
     @State private var pendingDelete: PendingDelete?
     @State private var pendingPropagation: ProgramPlanPropagationService.Preview?
+    @State private var pendingReset: ResetKind?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
 
@@ -135,11 +136,11 @@ struct ProgramDayDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("Auto+") {
-                    autoGenerateSuggestedLoadsFromHistoryForThisDay()
+                    requestReset(.autoPlus)
                 }
 
                 Button("Auto") {
-                    autoGeneratePerSetPlanForThisDay()
+                    requestReset(.resetDefaults)
                 }
 
                 
@@ -147,6 +148,20 @@ struct ProgramDayDetailView: View {
         }
         
         
+        .alert("Reset edited plan?", isPresented: Binding(get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } })) {
+            Button("Reset", role: .destructive) {
+                let kind = pendingReset
+                pendingReset = nil
+                switch kind {
+                case .autoPlus: autoGenerateSuggestedLoadsFromHistoryForThisDay()
+                case .resetDefaults: autoGeneratePerSetPlanForThisDay()
+                case nil: break
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingReset = nil }
+        } message: {
+            Text(Self.resetMessage(editedCount: editedItemCount))
+        }
         .alert("Apply to future sessions?", isPresented: Binding(get: { pendingPropagation != nil }, set: { if !$0 { pendingPropagation = nil } })) {
             Button("Apply") { confirmPropagation() }
             Button("Not now", role: .cancel) { pendingPropagation = nil }
@@ -686,6 +701,26 @@ struct ProgramDayDetailView: View {
             try modelContext.save()
         } catch {
             print("⚠️ Failed to add exercise: \(error)")
+        }
+    }
+
+    // MARK: - Reset (Auto / Auto+), confirmed when the lifter has edited the plan
+
+    enum ResetKind { case autoPlus, resetDefaults }
+
+    private var editedItemCount: Int { Self.editedCount(in: session) }
+
+    static func editedCount(in session: Session) -> Int { session.items.filter { $0.planEdited }.count }
+
+    static func resetMessage(editedCount n: Int) -> String {
+        "\(n) edited exercise\(n == 1 ? "" : "s") will be reset to the defaults. Your hand-set changes to them are replaced."
+    }
+
+    private func requestReset(_ kind: ResetKind) {
+        if editedItemCount > 0 { pendingReset = kind; return }
+        switch kind {
+        case .autoPlus: autoGenerateSuggestedLoadsFromHistoryForThisDay()
+        case .resetDefaults: autoGeneratePerSetPlanForThisDay()
         }
     }
 
