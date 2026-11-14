@@ -755,6 +755,7 @@ private struct SessionExerciseCardView: View {
                             repRange: set.isTop ? topRepRange : repRange,
                             isExtraSet: set.index > exercise.targetSets && !set.isTop,
                             isBodyweightExercise: isBodyweightExercise,
+                            isCompoundLift: RIREntry.isCompound(exercise.exerciseId),
                             bodyWeight: userProfile?.bodyWeight,
                             onBodyweightSettingsTapped: onBodyweightSettingsTapped,
                             onLoadChanged: { text in
@@ -829,6 +830,8 @@ private struct SessionSetRowView: View {
     /// A row past the planned set count: shown as an extra set, with no suggested load.
     var isExtraSet: Bool = false
     let isBodyweightExercise: Bool
+    /// Compound lifts record RIR with one tap on a 0–4 chip (never pre-filled); other lifts keep the optional number field.
+    var isCompoundLift: Bool = false
     let bodyWeight: Double?
     let onBodyweightSettingsTapped: () -> Void
 
@@ -957,22 +960,44 @@ private struct SessionSetRowView: View {
 
                 // RIR
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("RIR")
+                    Text(isCompoundLift ? "RIR (tap one)" : "RIR")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    TextField("0", text: Binding(
-                        get: {
-                            if let actual = uiSet.actualRIR { return "\(actual)" }
-                            if let planned = uiSet.plannedRIR { return "\(planned)" }
-                            return ""
-                        },
-                        set: { onRIRChanged($0) }
-                    ))
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 40)
-                    .disabled(isLocked)
-                    .opacity(isLocked ? 0.6 : 1.0)
+                    if isCompoundLift {
+                        HStack(spacing: 4) {
+                            ForEach(RIREntry.chipValues, id: \.self) { value in
+                                let selected = uiSet.actualRIR == value
+                                Button {
+                                    guard !isLocked else { return }
+                                    onRIRChanged(selected ? "" : "\(value)")
+                                } label: {
+                                    Text("\(value)")
+                                        .font(.callout.weight(.semibold))
+                                        .frame(width: 30, height: 30)
+                                        .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
+                                        .foregroundStyle(selected ? Color.white : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("RIR \(value)")
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                            }
+                        }
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    } else {
+                        TextField("0", text: Binding(
+                            get: {
+                                if let actual = uiSet.actualRIR { return "\(actual)" }
+                                if let planned = uiSet.plannedRIR { return "\(planned)" }
+                                return ""
+                            },
+                            set: { onRIRChanged($0) }
+                        ))
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 40)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
                 }
 
                 Spacer()
@@ -1369,9 +1394,7 @@ final class SessionScreenViewModel: ObservableObject {
                     while matchingItem.actualLoads.count <= idx {
                         matchingItem.actualLoads.append(0)
                     }
-                    while matchingItem.actualRIRs.count <= idx {
-                        matchingItem.actualRIRs.append(0)
-                    }
+                    if matchingItem.actualRIRs.count <= idx { RIREntry.resize(matchingItem, to: idx + 1) }
                     while matchingItem.usedRestPauseFlags.count <= idx {
                         matchingItem.usedRestPauseFlags.append(false)
                     }
@@ -1385,12 +1408,15 @@ final class SessionScreenViewModel: ObservableObject {
 
                     matchingItem.actualReps[idx] = reps
                     matchingItem.actualLoads[idx] = loadToStore
-                    if set.actualRIR == nil {
+                    // A compound set's RIR is the lifter's own tap: never pre-filled from the plan. Isolation keeps the
+                    // old convenience (it never feeds a decision).
+                    let isCompoundLift = RIREntry.isCompound(matchingItem.exerciseId)
+                    if set.actualRIR == nil, !isCompoundLift {
                         set.actualRIR = set.plannedRIR
                         exercise.sets[setIdx] = set
                     }
-                    let rirToStore = set.actualRIR ?? set.plannedRIR ?? matchingItem.targetRIR
-                    matchingItem.actualRIRs[idx] = rirToStore
+                    let rirToStore = set.actualRIR ?? (isCompoundLift ? RIREntry.unset : (set.plannedRIR ?? matchingItem.targetRIR))
+                    RIREntry.setRecorded(matchingItem, at: idx, to: rirToStore)
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
                     matchingItem.dropSetPatternsBySet[idx] = set.usedDropSet && !set.dropSets.isEmpty
@@ -1829,7 +1855,7 @@ final class SessionScreenViewModel: ObservableObject {
                 plannedRIRsBySet: Array(repeating: 3, count: maintenanceSetCount),
                 actualReps: Array(repeating: 0, count: maintenanceSetCount),
                 actualLoads: Array(repeating: 0.0, count: maintenanceSetCount),
-                actualRIRs: Array(repeating: 0, count: maintenanceSetCount)
+                actualRIRs: RIREntry.unsetArray(count: maintenanceSetCount)
             )
         } else {
             newItem = SessionItem(
@@ -1845,7 +1871,7 @@ final class SessionScreenViewModel: ObservableObject {
                 plannedRIRsBySet: Array(repeating: defaultRIR, count: 4),
                 actualReps: Array(repeating: 0, count: 4),
                 actualLoads: Array(repeating: 0.0, count: 4),
-                actualRIRs: Array(repeating: 0, count: 4)
+                actualRIRs: RIREntry.unsetArray(count: 4)
             )
         }
 
@@ -1980,7 +2006,7 @@ final class SessionScreenViewModel: ObservableObject {
                     plannedRIRsBySet: sourceItem.plannedRIRsBySet,
                     actualReps: Array(repeating: 0, count: sourceItem.plannedRepsBySet.count),
                     actualLoads: Array(repeating: 0, count: sourceItem.plannedLoadsBySet.count),
-                    actualRIRs: Array(repeating: 0, count: sourceItem.plannedRIRsBySet.count),
+                    actualRIRs: RIREntry.unsetArray(count: sourceItem.plannedRIRsBySet.count),
                     usedRestPauseFlags: Array(repeating: false, count: sourceItem.plannedRepsBySet.count),
                     restPausePatternsBySet: Array(repeating: "", count: sourceItem.plannedRepsBySet.count),
                     isCompleted: false,
@@ -2039,7 +2065,7 @@ final class SessionScreenViewModel: ObservableObject {
             item.plannedRIRsBySet        = Array(repeating: 0, count: setCount)
             item.actualReps              = Array(repeating: 0, count: setCount)
             item.actualLoads             = Array(repeating: 0, count: setCount)
-            item.actualRIRs              = Array(repeating: 0, count: setCount)
+            item.actualRIRs              = RIREntry.unsetArray(count: setCount)
             item.usedRestPauseFlags      = Array(repeating: false, count: setCount)
             item.restPausePatternsBySet  = Array(repeating: "", count: setCount)
             item.dropSetPatternsBySet    = Array(repeating: "", count: setCount)
@@ -2070,7 +2096,7 @@ final class SessionScreenViewModel: ObservableObject {
                     item.actualLoads[idx] = uiSet.actualLoad ?? 0
                 }
                 if let rir = uiSet.actualRIR, rir >= 0 {
-                    item.actualRIRs[idx] = rir
+                    RIREntry.setRecorded(item, at: idx, to: rir)
                 }
 
                 // RP tracking (persist regardless of whether actuals exist)
@@ -2193,11 +2219,7 @@ final class SessionScreenViewModel: ObservableObject {
                 guard reps > 0 else { continue }
 
                 let load = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
-                let rir: Int? = {
-                    guard idx < item.actualRIRs.count else { return nil }
-                    let raw = item.actualRIRs[idx]
-                    return raw >= 0 ? raw : nil
-                }()
+                let rir: Int? = RIREntry.recorded(item, at: idx)
 
                 let exposure = ExerciseExposure(
                     date: other.date,
@@ -2256,7 +2278,8 @@ final class SessionScreenViewModel: ObservableObject {
 
                 let reps = set.actualReps ?? set.plannedReps
                 let load = set.actualLoad ?? set.plannedLoad
-                let rir  = set.actualRIR ?? set.plannedRIR
+                // A compound set's RIR counts only when the lifter recorded it; the plan's number is never assumed.
+                let rir  = RIREntry.isCompound(exercise.exerciseId) ? set.actualRIR : (set.actualRIR ?? set.plannedRIR)
                 let effLoad = E1RMCalculator.effectiveLoad(
                     actualLoad: load,
                     exerciseId: exercise.exerciseId,
@@ -2492,13 +2515,10 @@ extension SessionScreenViewModel {
                 }()
 
                 let actualRIR: Int? = {
-                    guard idx < item.actualRIRs.count else { return nil }
-
                     // Only treat actual RIR as real if the set itself was actually logged.
                     guard actualReps != nil || actualLoad != nil else { return nil }
 
-                    let stored = item.actualRIRs[idx]
-                    return stored > 0 ? stored : nil
+                    return RIREntry.recorded(item, at: idx)
                 }()
 
                 // ---- RP flags/patterns ----

@@ -702,7 +702,7 @@ struct ProgramDayDetailView: View {
         newItem.plannedRIRsBySet       = Array(repeating: newItem.targetRIR, count: setCount)
         newItem.actualReps             = Array(repeating: 0,                 count: setCount)
         newItem.actualLoads            = Array(repeating: 0.0,               count: setCount)
-        newItem.actualRIRs             = Array(repeating: 0,                 count: setCount)
+        newItem.actualRIRs             = RIREntry.unsetArray(count: setCount)
         newItem.usedRestPauseFlags     = Array(repeating: false,             count: setCount)
         newItem.restPausePatternsBySet = Array(repeating: "",                count: setCount)
 
@@ -1443,7 +1443,7 @@ private struct ProgramExercisePlanRow: View {
         }
         ensureIntArray(&item.actualReps)
         ensureDoubleArray(&item.actualLoads)
-        ensureIntArray(&item.actualRIRs)
+        RIREntry.resize(item, to: setCount)
 
         if item.usedRestPauseFlags.count < setCount {
             item.usedRestPauseFlags.append(

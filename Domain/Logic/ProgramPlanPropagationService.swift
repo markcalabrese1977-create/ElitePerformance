@@ -151,7 +151,7 @@ struct ProgramPlanPropagationService {
                         plannedRIRsBySet: src.plannedRIRsBySet,
                         actualReps: Array(repeating: 0, count: setCount),
                         actualLoads: Array(repeating: 0.0, count: setCount),
-                        actualRIRs: Array(repeating: 0, count: setCount)
+                        actualRIRs: RIREntry.unsetArray(count: setCount)
                     )
                     context.insert(newItem)
                     future.items.append(newItem)

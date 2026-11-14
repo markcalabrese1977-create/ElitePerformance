@@ -280,7 +280,7 @@ struct CoachingEngine {
         let lo = item.topRepMin ?? item.repMin ?? item.targetReps
         let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
         let targetRIR = item.topRIR ?? item.targetRIR
-        let rirs = rows.compactMap { $0 < item.actualRIRs.count ? item.actualRIRs[$0] : nil }
+        let rirs = rows.compactMap { RIREntry.decisionRIR(item, at: $0) }   // recorded, compound lifts only
         let avgRIR: Double? = rirs.isEmpty ? nil : Double(rirs.reduce(0, +)) / Double(rirs.count)
         let what = "Top set: \(compactLoad(load, unit: unit)) x \(reps.map(String.init).joined(separator: ", "))"
         let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
@@ -438,12 +438,11 @@ struct CoachingEngine {
         let repDrop = firstReps - lastReps
         let bestReps = primaryReps.max() ?? 0
 
-        let actualRIRs = item.actualRIRs
+        // RIR is evidence only when the lifter recorded it on a compound lift. An unset RIR, or any isolation set, leaves
+        // these empty: the set is judged on reps against the target alone and is never assumed "on target".
         var primaryRIRs: [Int] = []
-        if !actualRIRs.isEmpty {
-            for idx in primaryIndices where idx < actualRIRs.count {
-                primaryRIRs.append(actualRIRs[idx])
-            }
+        for idx in primaryIndices {
+            if let rir = RIREntry.decisionRIR(item, at: idx) { primaryRIRs.append(rir) }
         }
 
         var avgRIR: Double? = nil
@@ -598,14 +597,25 @@ struct CoachingEngine {
         // From here: safe + complete. Compute the policy signals.
         let repMax = plannedTopReps
         let repMin = plannedBottomReps
-        // RIR on target (existing definition; nil avgRIR treated as on-target).
+        // RIR gate. Nothing recorded (unset, or an isolation lift): the gate does not apply and the call rests on reps alone.
+        // Recorded on a compound: a set logged harder than plan-1 blocks an increase.
+        let rirRecorded = minRIR != nil
         let rirOnTarget: Bool = {
-            guard let avgRIR = avgRIR else { return true }
-            return abs(avgRIR - Double(targetRIR)) <= 0.5
+            guard let minRIR else { return true }
+            return minRIR >= targetRIR - 1
         }()
         // Double-progression trigger (decision B): EVERY primary working set at/above
         // the top of the range — not the best set. Uses the warmup-culled primary sets.
         let allSetsAtTop = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax }
+        // Compound lifts earn an increase on TOTAL reps over the primary working sets (the first up to 3, as every other
+        // progression rule reads them; a 4th or later row is not evidence): the reps add up to at least sets x top-of-range
+        // minus one (21/24 holds, 23/24 earns). The RIR gate above (rirOnTarget) still has to pass: a recorded RIR below plan-1,
+        // the last set included, blocks it. Isolation lifts keep the every-set-at-the-top rule.
+        let isCompoundLift = RIREntry.isCompound(item.exerciseId)
+        let totalReps = primaryReps.reduce(0, +)
+        let totalGoal = primaryReps.count * repMax
+        let totalRepsEarned = totalReps >= totalGoal - 1
+        let earnedByReps = isCompoundLift ? totalRepsEarned : allSetsAtTop
         // Over-performed: every primary set two or more reps beyond the top.
         let overPerformed = primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax + 2 }
 
@@ -693,7 +703,7 @@ struct CoachingEngine {
         if let overrideReason = item.loadOverrideReason,
            overrideReason.suppressesEarnedProgression,
            rirOnTarget,
-           allSetsAtTop || overPerformed {
+           earnedByReps || overPerformed {
             let msg = isProgressionExempt
                 ? "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds."
                 : "This session was flagged as \(overrideReason.displayName.lowercased()), so the load you lifted was already reduced. Hitting the top of the range there doesn't move the plan — your existing plan holds. Log an unflagged session at the planned load to earn an increase."
@@ -707,7 +717,7 @@ struct CoachingEngine {
         // fixed message and a nil load, so nothing is written and the plan stands.
         // Pain, fatigue, failure, drop, incomplete and under-range handling all ran
         // above and are untouched; 5c/5d holds below are not upward and are untouched.
-        if isProgressionExempt, rirOnTarget, allSetsAtTop || overPerformed {
+        if isProgressionExempt, rirOnTarget, earnedByReps || overPerformed {
             return CoachingRecommendation(
                 message: "Fixed-load exercise: load doesn't auto-progress. Change it yourself when you're ready.",
                 nextSuggestedLoad: nil
@@ -740,12 +750,16 @@ struct CoachingEngine {
 
         // 5b) ALL primary sets at the top at target RIR → increase earned (floor-aware).
         //     The core double-progression bump [replaces paths 3.5 / 5.5].
-        if allSetsAtTop && rirOnTarget {
+        if earnedByReps && rirOnTarget {
             let target = qualifyingBump()
             if let cap = loadCap, target > cap.max {
                 return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
-            let lead = "Every working set hit the top of your range at the target difficulty — increase earned."
+            let lead = isCompoundLift
+                ? "\(totalReps)/\(totalGoal) reps — increase earned."
+                : (rirRecorded
+                    ? "Every working set hit the top of your range at the target difficulty — increase earned."
+                    : "Every working set hit the top of your range — increase earned.")
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):
@@ -764,6 +778,9 @@ struct CoachingEngine {
         //     set at repMax → HOLD and climb reps toward the top next session. This is
         //     the key behavior change — partial progress no longer bumps [was path 5].
         if bestReps >= repMin && rirOnTarget {
+            if isCompoundLift && !isProgressionExempt {
+                return CoachingRecommendation(message: "\(totalReps)/\(totalGoal) — hold, climb reps." + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
+            }
             let msg = isProgressionExempt
                 ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when you're ready."
                 : "On target and in range — hold \(LoadFormatter(unit: unit).oneDecimal(baseLoad)). Hit the top of your range (\(repMax)) on all working sets to earn the increase; climb your reps next session."

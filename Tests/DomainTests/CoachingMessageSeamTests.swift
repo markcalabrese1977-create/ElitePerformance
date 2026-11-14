@@ -878,7 +878,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_4a_benchTopSetPattern_backOffsMidRange_holdsAtThirdBackOffLoad() {
         let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [7, 7, 7, 5], loads: [290, 290, 290, 315]))
         XCTAssertEqual(r?.nextSuggestedLoad, 290, "baseLoad is the 3rd working set (a back-off), not the 315 top set")
-        XCTAssertTrue(r?.message.contains("hold 290.0") ?? false, r?.message ?? "nil")
+        XCTAssertTrue(r?.message.contains("21/24 — hold, climb reps") ?? false, r?.message ?? "nil")   // compound: total reps
         // The 315 row is the 4th set, so it is not a primary set: it neither earns a bump nor
         // appears in baseLoad. Primary reps (7,7,7) are below repMax 8, so the outcome is a hold.
     }

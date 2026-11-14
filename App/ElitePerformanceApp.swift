@@ -110,6 +110,8 @@ enum StartupBackfills {
         (String(describing: PRIndexRuleBackfill.self), { PRIndexRuleBackfill.runIfNeeded(in: $0) }),
         (String(describing: LegacyExerciseNotesBackfill.self), { LegacyExerciseNotesBackfill.runIfNeeded(in: $0) }),
         (String(describing: SessionHistoryExerciseOrderBackfill.self), { SessionHistoryExerciseOrderBackfill.runIfNeeded(in: $0) }),
+        (String(describing: RIRUnsetBackfill.self), { RIRUnsetBackfill.runIfNeeded(in: $0) }),
+        (String(describing: MissedSourceSeedBackfill.self), { MissedSourceSeedBackfill.runIfNeeded(in: $0) }),
     ]
 
     /// Runs every registered backfill and logs exactly one line for each: "<TypeName>: <result>".

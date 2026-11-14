@@ -1307,3 +1307,393 @@ final class MissingDataSentinelTests: XCTestCase {
         XCTAssertNil(g.newestBackup, "restoring a backup with no completed sessions would not bring the data back")
     }
 }
+
+// MARK: - VV: RIR entry (unset is distinct from 0)
+
+final class RIREntryTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    /// A completed 3-set item at repMax 8, target RIR 2, 100 lb.
+    private func item(_ id: String, reps: [Int], rirs: [Int], load: Double = 100) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: load)
+        i.actualReps = reps
+        i.actualLoads = Array(repeating: load, count: reps.count)
+        i.actualRIRs = rirs
+        i.plannedRepsBySet = Array(repeating: 8, count: reps.count)
+        i.repMin = 6; i.repMax = 8
+        return i
+    }
+
+    func test_unsetIsDistinctFromZero_andOnlyCompoundsFeedDecisions() {
+        let bench = item("bench_press", reps: [8, 8], rirs: [RIREntry.unset, 0])
+        XCTAssertNil(RIREntry.recorded(bench, at: 0), "unset")
+        XCTAssertEqual(RIREntry.recorded(bench, at: 1), 0, "a recorded zero is a value")
+        XCTAssertNil(RIREntry.recorded(bench, at: 5), "no entry")
+        XCTAssertEqual(RIREntry.decisionRIR(bench, at: 1), 0)
+
+        XCTAssertTrue(RIREntry.isCompound("bench_press"))
+        XCTAssertTrue(RIREntry.isCompound("barbell_row"))
+        XCTAssertTrue(RIREntry.isCompound("hack_squat"))
+        XCTAssertFalse(RIREntry.isCompound("cable_tricep_pushdown_straight_bar"), "a pushdown shares a cluster with the presses but is isolation")
+        XCTAssertFalse(RIREntry.isCompound("seated_cable_fly"))
+        XCTAssertFalse(RIREntry.isCompound("some_custom_exercise"), "no cluster, no RIR decisions")
+        let fly = item("seated_cable_fly", reps: [8], rirs: [1])
+        XCTAssertEqual(RIREntry.recorded(fly, at: 0), 1)
+        XCTAssertNil(RIREntry.decisionRIR(fly, at: 0), "an isolation set never feeds a decision")
+    }
+
+    func test_compound_unsetRIR_isJudgedOnRepsAlone_andNeverClaimsTheTargetDifficulty() throws {
+        let unset = item("bench_press", reps: [8, 8, 8], rirs: Array(repeating: RIREntry.unset, count: 3))
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: unset))
+        XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100, "every set at the top: reps alone earn the increase")
+        XCTAssertFalse(rec.message.contains("target difficulty"), rec.message)
+
+        let short = item("bench_press", reps: [7, 6, 6], rirs: Array(repeating: RIREntry.unset, count: 3))
+        let hold = try XCTUnwrap(CoachingEngine.recommend(for: short))
+        XCTAssertEqual(hold.nextSuggestedLoad, 100, "an unset RIR is not assumed on target; reps under the top hold")
+    }
+
+    func test_compound_aRecordedRIRBelowPlanMinusOne_blocksAnIncrease() throws {
+        let hard = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 0])      // plan 2: 0 < 1
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: hard)).nextSuggestedLoad, 100, "an RIR 0 set blocks the bump")
+        let ok = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 1])        // 1 = plan-1 is allowed
+        XCTAssertGreaterThan(try XCTUnwrap(CoachingEngine.recommend(for: ok)).nextSuggestedLoad ?? 0, 100)
+        let onTarget = item("bench_press", reps: [8, 8, 8], rirs: [2, 2, 2])
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: onTarget))
+        XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100)
+        XCTAssertTrue(rec.message.hasPrefix("24/24 reps — increase earned"), rec.message)
+    }
+
+    func test_isolation_ignoresRIRCompletely_repsAgainstTargetOnly() throws {
+        for rirs in [[0, 0, 0], [RIREntry.unset, RIREntry.unset, RIREntry.unset], [4, 4, 4]] {
+            let fly = item("seated_cable_fly", reps: [8, 8, 8], rirs: rirs)
+            let rec = try XCTUnwrap(CoachingEngine.recommend(for: fly))
+            XCTAssertGreaterThan(rec.nextSuggestedLoad ?? 0, 100, "RIR \(rirs) on an isolation lift never blocks nor earns")
+            XCTAssertFalse(rec.message.contains("target difficulty"), rec.message)
+        }
+        let under = item("seated_cable_fly", reps: [6, 6, 6], rirs: [2, 2, 2])
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: under)).nextSuggestedLoad, 100, "reps under the top hold, whatever the RIR says")
+    }
+
+    func test_progressionSnapshots_carryNoRIR_forUnsetOrIsolation() {
+        let bench = item("bench_press", reps: [8, 8], rirs: [RIREntry.unset, 1])
+        XCTAssertEqual(bench.toSetSnapshots().map(\.rir), [nil, 1.0])
+        let fly = item("seated_cable_fly", reps: [8], rirs: [1])
+        XCTAssertEqual(fly.toSetSnapshots().map(\.rir), [nil])
+    }
+
+    func test_unsetAndZeroAndOldValues_roundTripThroughABackupAsRecorded() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: source)
+        // A new-style item (unset + a real 0 + a value) next to the old-style values the builder wrote.
+        let session = try XCTUnwrap(try source.fetch(FetchDescriptor<Session>()).first { !$0.items.isEmpty })
+        let fresh3 = SessionItem(order: 9, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        fresh3.actualReps = [8, 8, 8]; fresh3.actualLoads = [100, 100, 100]; fresh3.actualRIRs = [RIREntry.unset, 0, 3]
+        source.insert(fresh3); session.items.append(fresh3)
+        try source.save()
+        let before = try source.fetch(FetchDescriptor<SessionItem>()).map { ($0.id, $0.actualRIRs) }
+        XCTAssertTrue(before.contains { $0.1 == [-1, 0, 3] })
+
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: fresh)
+        let after = try ModelContext(fresh).fetch(FetchDescriptor<SessionItem>()).map { ($0.id, $0.actualRIRs) }
+        XCTAssertEqual(Set(after.map { "\($0.0 as Any)|\($0.1)" }), Set(before.map { "\($0.0 as Any)|\($0.1)" }),
+                       "unset stays unset, 0 stays 0, every old value is exactly as recorded")
+    }
+}
+
+// MARK: - WW: total-rep progression for compounds
+
+final class TotalRepProgressionTests: XCTestCase {
+
+    private func bench(_ reps: [Int], rirs: [Int]? = nil, id: String = "bench_press") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: 185)
+        i.actualReps = reps
+        i.actualLoads = Array(repeating: 185, count: reps.count)
+        i.actualRIRs = rirs ?? RIREntry.unsetArray(count: reps.count)
+        i.plannedRepsBySet = Array(repeating: 8, count: reps.count)
+        i.repMin = 6; i.repMax = 8
+        return i
+    }
+
+    func test_benchPattern_8_7_6_is21of24_hold() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 7, 6], rirs: [2, 2, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(rec.nextSuggestedLoad, 185)
+        XCTAssertTrue(rec.message.hasPrefix("21/24 — hold, climb reps"), rec.message)
+    }
+
+    func test_benchPattern_8_8_7_is23of24_increase_byTheLoadStep() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], rirs: [2, 2, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(rec.nextSuggestedLoad, 187.5, "the configured 2.5 step")
+        XCTAssertTrue(rec.message.hasPrefix("23/24 reps — increase earned"), rec.message)
+    }
+
+    func test_theLastSetsRecordedRIR_belowPlanMinusOne_blocksTheIncrease_andUnsetDoesNot() throws {
+        let hard = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], rirs: [2, 2, 0]), minLoadIncrement: 2.5))
+        XCTAssertEqual(hard.nextSuggestedLoad, 185, "last set at RIR 0 (< plan-1): hold")
+        let unset = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7]), minLoadIncrement: 2.5))
+        XCTAssertEqual(unset.nextSuggestedLoad, 187.5, "unset RIR: reps decide")
+    }
+
+    func test_aFourSetCompound_sumsThePrimaryThreeSets_aFourthRowIsNotEvidence() throws {
+        let four = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7, 4], rirs: [2, 2, 1, 1]), minLoadIncrement: 2.5))
+        XCTAssertEqual(four.nextSuggestedLoad, 187.5)
+        XCTAssertTrue(four.message.hasPrefix("23/24 reps — increase earned"), four.message)
+    }
+
+    func test_isolationKeepsTheEverySetAtTheTopRule() throws {
+        let fly = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7], id: "seated_cable_fly"), minLoadIncrement: 2.5))
+        XCTAssertEqual(fly.nextSuggestedLoad, 185, "8,8,7 on an isolation lift is not every set at the top")
+        let all = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 8], id: "seated_cable_fly"), minLoadIncrement: 2.5))
+        XCTAssertEqual(all.nextSuggestedLoad, 187.5)
+    }
+
+    func test_theReduceRuleIsUnchanged_twoBadlyMissedSetsBackTheLoadOff() throws {
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: bench([5, 4, 4], rirs: [2, 1, 1]), minLoadIncrement: 2.5))
+        XCTAssertLessThan(rec.nextSuggestedLoad ?? 999, 185)
+    }
+}
+
+// MARK: - XX: missed-source seeding
+
+final class MissedSourceSeedingTests: XCTestCase {
+
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    private func item(_ wave: String, reps: [Int] = [], loads: [Double] = [], rirs: [Int] = [], planned: Bool) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "barbell_row", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0, waveRaw: wave)
+        i.plannedRepsBySet = [10, 10, 10]; i.plannedRIRsBySet = [2, 2, 2]
+        i.plannedLoadsBySet = [0, 0, 0]
+        if !planned { i.actualReps = reps; i.actualLoads = loads; i.actualRIRs = rirs; i.suggestedLoad = loads.first ?? 0; i.plannedLoadsBySet = loads }
+        return i
+    }
+
+    /// Pull A (wk4, done) -> Pull B (wk5, MISSED) -> Pull C (wk6, done) -> Pull B again wk8 target at 0 load.
+    private func block(_ ctx: ModelContext, otherMeso: Bool = false) -> (target: SessionItem, targetSession: Session) {
+        let meso = MesoBlock(name: "M", startDate: day(-40), totalWeeks: 8)
+        ctx.insert(meso)
+        let a = Session(date: day(-20), status: .completed, weekIndex: 4, dayLabel: "Pull", items: [item("a", reps: [10, 10, 9], loads: [100, 100, 100], rirs: [2, 2, 2], planned: false)])
+        let missed = Session(date: day(-13), status: .planned, weekIndex: 5, dayLabel: "Pull", items: [item("b", planned: true)])
+        let c = Session(date: day(-6), status: .completed, weekIndex: 6, dayLabel: "Pull", items: [item("c", reps: [10, 10, 10], loads: [110, 110, 110], rirs: [2, 2, 2], planned: false)])
+        let tItem = item("b", planned: true)
+        let target = Session(date: day(8), status: .planned, weekIndex: 8, dayLabel: "Pull", items: [tItem])
+        for s in [a, missed, c, target] { s.meso = meso; ctx.insert(s); meso.sessions.append(s) }
+        return (tItem, target)
+    }
+
+    func test_aZeroLoadTarget_isSeededFromTheLatestCompletedSameDaySession_converted_minus2_5Percent_andNoted() throws {
+        let ctx = try context()
+        let (t, _) = block(ctx)
+        let seeds = MissedSourceSeeding.run(in: ctx)
+        XCTAssertEqual(seeds.count, 1)
+        // e1RM of 110 x (10 + 2 credited RIR) = 110 * (1 + 12/30) = 154; at 10 reps RIR 2: 154/(1+10/30)*0.95 = 109.725; x 0.975 = 106.98 -> down to 2.5
+        XCTAssertEqual(t.plannedLoadsBySet, [105, 105, 105])
+        XCTAssertEqual(t.suggestedLoad, 105)
+        XCTAssertTrue(t.prescriptionNotes?.contains("Seeded from") == true && t.prescriptionNotes?.contains("was missed") == true, t.prescriptionNotes ?? "nil")
+        XCTAssertFalse(t.planEdited)
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
+    }
+
+    func test_anEditedTarget_aTargetWithALoad_aBodyweightLift_andPastTargets_areLeftAlone() throws {
+        let ctx = try context()
+        let (t, session) = block(ctx)
+        t.planEdited = true
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty)
+        XCTAssertEqual(t.plannedLoadsBySet, [0, 0, 0])
+        t.planEdited = false
+        session.date = day(-1)
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a session already in the past is not seeded")
+        session.date = day(8)
+        t.plannedLoadsBySet = [95, 95, 95]; t.suggestedLoad = 95
+        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a target with a load is never overwritten")
+    }
+
+    func test_anyBlockFallback_usesOnlyTheLast12Weeks_olderOrNoneLeavesZeroWithTheNote() throws {
+        func scenario(daysAgo: Int) throws -> SessionItem {
+            let ctx = try context()
+            let old = MesoBlock(name: "Old", startDate: day(-daysAgo - 60), totalWeeks: 8)
+            let cur = MesoBlock(name: "Cur", startDate: day(-3), totalWeeks: 8)
+            ctx.insert(old); ctx.insert(cur)
+            let done = Session(date: day(-daysAgo), status: .completed, weekIndex: 3, dayLabel: "Pull", items: [item("a", reps: [10, 10, 10], loads: [90, 90, 90], rirs: [2, 2, 2], planned: false)])
+            done.meso = old
+            let tItem = item("a", planned: true)
+            let target = Session(date: day(4), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [tItem]); target.meso = cur
+            for s in [done, target] { ctx.insert(s) }
+            old.sessions.append(done); cur.sessions.append(target)
+            _ = MissedSourceSeeding.run(in: ctx)
+            XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent")
+            return tItem
+        }
+        let recent = try scenario(daysAgo: 60)
+        XCTAssertGreaterThan(recent.suggestedLoad, 0, "another block, 60 days ago: still seeds")
+        XCTAssertFalse(recent.prescriptionNotes?.contains("was missed") == true)
+
+        let stale = try scenario(daysAgo: 13 * 7)
+        XCTAssertEqual(stale.suggestedLoad, 0, "13 weeks old: not used")
+        XCTAssertEqual(stale.plannedLoadsBySet, [0, 0, 0])
+        XCTAssertEqual(stale.prescriptionNotes, "No recent history — set a load.")
+
+        let empty = try context()
+        let m = MesoBlock(name: "E", startDate: day(-3), totalWeeks: 8); empty.insert(m)
+        let lone = item("a", planned: true)
+        let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [lone]); s.meso = m; empty.insert(s); m.sessions.append(s)
+        _ = MissedSourceSeeding.run(in: empty)
+        XCTAssertEqual(lone.suggestedLoad, 0)
+        XCTAssertEqual(lone.prescriptionNotes, "No recent history — set a load.", "no history at all: the same note")
+    }
+
+    // LOCAL ONLY, READ-ONLY: what the seeding would write on a real backup.
+    func test_audit_whatTheSeedingWouldWriteOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(
+            for: AppSchema.makeSchema(),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        let profile = try? ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let custom = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let seeds = MissedSourceSeeding.plan(in: ctx, ctx: .init(profile: profile, customExercises: custom))
+        let fmt = DateFormatter(); fmt.dateFormat = "EEE MMM d"
+        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        var lines = ["MISSED-SOURCE SEEDING DRY RUN — \(seeds.filter { !$0.isNoRecentHistory }.count) planned exercises would be seeded, \(seeds.filter { $0.isNoRecentHistory }.count) would get the no-recent-history note (nothing was saved)"]
+        for s in seeds.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
+            lines.append("\(fmt.string(from: s.session.date)) wk\(s.session.weekIndex) \(s.session.dayLabel ?? "-") · \(s.item.exerciseId) (\(s.item.waveRaw ?? "-")): " + (s.isNoRecentHistory ? "stays 0 · \(s.note)" : "0 -> \(s.loads.map(n).joined(separator: "/")) · \(s.note)"))
+        }
+        let zeroLeft = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .planned && $0.date >= Calendar.current.startOfDay(for: Date()) }
+            .flatMap { s in s.items.filter { $0.suggestedLoad <= 0 && $0.plannedLoadsBySet.allSatisfy { $0 <= 0 } }.map { (s, $0) } }
+        let seededIds = Set(seeds.filter { !$0.isNoRecentHistory }.map { ObjectIdentifier($0.item) })
+        let staying = zeroLeft.filter { !seededIds.contains(ObjectIdentifier($0.1)) }
+        lines.append("planned future exercises at 0 load that would STAY at 0: \(staying.count) (bodyweight, deload, edited, exempt or no history)")
+        for (sess, it) in staying { lines.append("  stays 0: \(fmt.string(from: sess.date)) wk\(sess.weekIndex) \(sess.dayLabel ?? "-") · \(it.exerciseId) (\(it.waveRaw ?? "-")) edited=\(it.planEdited)") }
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - YY: RIRUnsetBackfill
+
+final class RIRUnsetBackfillTests: XCTestCase {
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    private func item(_ id: String, reps: [Int], rirs: [Int]) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100)
+        i.actualReps = reps; i.actualRIRs = rirs
+        return i
+    }
+
+    func test_paddedFutureCompoundSets_becomeUnset_loggedZeroStays_isolationAndCompletedUntouched_idempotent() throws {
+        let ctx = try context()
+        let padded = item("bench_press", reps: [0, 0, 0], rirs: [0, 0, 0])
+        let midSession = item("bench_press", reps: [8, 0, 0], rirs: [0, 0, 0])          // set 1 logged at a real RIR 0
+        let isolation = item("seated_cable_fly", reps: [0, 0], rirs: [0, 0])
+        let done = item("bench_press", reps: [0, 0], rirs: [0, 0])                       // completed: never touched
+        let planned = Session(date: Date(), status: .planned, weekIndex: 1, items: [padded, isolation])
+        let running = Session(date: Date(), status: .inProgress, weekIndex: 1, items: [midSession])
+        let complete = Session(date: Date(), status: .completed, weekIndex: 1, items: [done])
+        for s in [planned, running, complete] { ctx.insert(s) }
+        try ctx.save()
+
+        RIRUnsetBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(padded.actualRIRs, [-1, -1, -1])
+        XCTAssertEqual(midSession.actualRIRs, [0, -1, -1], "the logged set keeps its recorded 0")
+        XCTAssertEqual(isolation.actualRIRs, [0, 0])
+        XCTAssertEqual(done.actualRIRs, [0, 0])
+
+        let lines = LineSink()
+        BackfillLog.collector = []
+        RIRUnsetBackfill.runIfNeeded(in: ctx)
+        lines.notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines.notes), "not needed", "idempotent")
+        XCTAssertEqual(padded.actualRIRs, [-1, -1, -1])
+    }
+
+    private final class LineSink { var notes: [String] = [] }
+
+    // LOCAL ONLY, READ-ONLY.
+    func test_audit_whatTheBackfillWouldChangeOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let todo = RIRUnsetBackfill.candidates(in: ctx)
+        let items = Set(todo.map { ObjectIdentifier($0.item) }).count
+        let text = "RIR UNSET BACKFILL DRY RUN — \(todo.count) sets on \(items) compound items would become unset (nothing was saved)"
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - ZZ: no raw RIR reads
+
+final class RIRAccessScanTests: XCTestCase {
+
+    private func sourceRoot(file: StaticString = #filePath) throws -> URL {
+        var dir = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while dir.path != "/" {
+            let ok = ["App", "Domain", "Features"].allSatisfy { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) }
+            if ok { return dir }
+            dir.deleteLastPathComponent()
+        }
+        throw XCTSkip("production source root not found")
+    }
+
+    /// Element access to `actualRIRs` (subscript, enumeration, or any sequence read) belongs to `RIREntry`; the backup
+    /// DTO, exporter and importer carry the array whole. Whole-array copies and `.count` are fine.
+    func test_noProductionCodeReadsOrWritesActualRIRsElementsOutsideRIREntry() throws {
+        let root = try sourceRoot()
+        let pattern = try NSRegularExpression(pattern:
+            #"actualRIRs\s*\[|actualRIRs\.(enumerated|safe\w*|first|last|map|compactMap|flatMap|reduce|filter|min|max|prefix|suffix|append|insert|remove\w*|contains|indices|sorted)|at\(\s*[\w.]*actualRIRs"#)
+        var offenders: [String] = []
+        for folder in ["App", "Domain", "Features", "Shared", "Utilities"] {
+            guard let walker = FileManager.default.enumerator(at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                let rel = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                if rel.hasSuffix("Programs/RIREntry.swift") || rel.hasPrefix("Domain/Backup/") { continue }
+                let text = try String(contentsOf: url, encoding: .utf8)
+                for (n, raw) in text.components(separatedBy: "\n").enumerated() {
+                    let line = raw.range(of: "//").map { String(raw[..<$0.lowerBound]) } ?? raw
+                    if pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil { offenders.append("\(rel):\(n + 1): \(raw.trimmingCharacters(in: .whitespaces))") }
+                }
+            }
+        }
+        XCTAssertTrue(offenders.isEmpty, "read and write RIR through RIREntry so -1 never reaches arithmetic:\n" + offenders.joined(separator: "\n"))
+    }
+
+    func test_anUnsetRIR_givesTheRepsOnlyE1RM_andTheCSVCellIsEmpty() throws {
+        func bench(_ rir: Int) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 1, targetRIR: 2, suggestedLoad: 200)
+            i.actualReps = [8]; i.actualLoads = [200]; i.actualRIRs = [rir]; i.plannedRepsBySet = [8]
+            return i
+        }
+        func best(_ i: SessionItem) -> Double {
+            WorkingSetFilter.workingRows(of: i).map { E1RMCalculator.e1RM(load: $0.load, reps: $0.reps + min(max($0.rir, 0), HistorySeedLoad.maxCreditedRIR)) }.max() ?? 0
+        }
+        let repsOnly = E1RMCalculator.e1RM(load: 200, reps: 8)
+        XCTAssertEqual(best(bench(RIREntry.unset)), repsOnly, accuracy: 0.0001, "unset credits nothing")
+        XCTAssertEqual(best(bench(0)), repsOnly, accuracy: 0.0001, "a recorded 0 credits nothing either")
+        XCTAssertGreaterThan(best(bench(2)), repsOnly, "a recorded RIR 2 is credited")
+        XCTAssertNil(RIREntry.recorded(bench(RIREntry.unset), at: 0))
+    }
+}

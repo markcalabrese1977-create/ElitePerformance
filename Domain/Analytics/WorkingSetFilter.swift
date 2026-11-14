@@ -64,7 +64,7 @@ enum WorkingSetFilter {
             if at(item.usedRestPauseFlags, i) == true { return nil }
             if let p = at(item.restPausePatternsBySet, i), !p.isEmpty { return nil }   // includes "SKIP"
             if let d = at(item.dropSetPatternsBySet, i), !d.isEmpty { return nil }
-            return Row(index: i, reps: reps, load: load, rir: at(item.actualRIRs, i) ?? 0,
+            return Row(index: i, reps: reps, load: load, rir: RIREntry.recorded(item, at: i) ?? 0,
                        isTop: item.isTopRow(i), usedRestPause: false, hasDrop: false)
         }
     }
@@ -92,7 +92,7 @@ enum WorkingSetFilter {
             if isSkipped(item, row: i) { return nil }
             let rp = at(item.usedRestPauseFlags, i) == true || !(at(item.restPausePatternsBySet, i) ?? "").isEmpty
             let drop = !(at(item.dropSetPatternsBySet, i) ?? "").isEmpty
-            return Row(index: i, reps: reps, load: load, rir: at(item.actualRIRs, i) ?? 0,
+            return Row(index: i, reps: reps, load: load, rir: RIREntry.recorded(item, at: i) ?? 0,
                        isTop: item.isTopRow(i), usedRestPause: rp, hasDrop: drop)
         }
         return droppingWarmups(logged)

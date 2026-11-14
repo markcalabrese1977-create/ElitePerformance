@@ -171,10 +171,11 @@ final class SessionItemEditServiceTests: XCTestCase {
         XCTAssertEqual(i.targetSets, sets)
         XCTAssertEqual(i.plannedLoadsBySet, Array(repeating: 0.0, count: sets), "no history -> 0, sized to targetSets")
         XCTAssertEqual(i.suggestedLoad, 0)
-        for arr in [i.actualReps.map(Double.init), i.actualLoads, i.actualRIRs.map(Double.init), i.pumpRatingsBySet.map(Double.init)] {
+        for arr in [i.actualReps.map(Double.init), i.actualLoads, i.pumpRatingsBySet.map(Double.init)] {
             XCTAssertEqual(arr.count, sets)
             XCTAssertTrue(arr.allSatisfy { $0 == 0 })
         }
+        XCTAssertEqual(i.actualRIRs, RIREntry.unsetArray(count: sets), "a reset exercise has no recorded RIR (unset, not 0)")
         XCTAssertEqual(i.usedRestPauseFlags, Array(repeating: false, count: sets))
         XCTAssertEqual(i.restPausePatternsBySet, Array(repeating: "", count: sets))
         XCTAssertEqual(i.dropSetPatternsBySet, Array(repeating: "", count: sets))
