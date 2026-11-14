@@ -161,6 +161,7 @@ struct StartNextMesoModel {
 /// the first week with its starting loads, then create.
 struct StartNextMesoFlow: View {
     @Environment(\.modelContext) private var modelContext
+    @StateObject private var seedGuard = SeedBackupGuard()
 
     let meso: MesoBlock
     let onFinish: () -> Void
@@ -259,6 +260,7 @@ struct StartNextMesoFlow: View {
                 }
             }
             .id(refreshToken)
+            .seedBackupGuard(seedGuard)
             .navigationTitle(StartNextMesoModel.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -266,13 +268,16 @@ struct StartNextMesoFlow: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    switch model.apply(plan) {
-                    case .success:
-                        Haptics.success()
-                        onFinish()
-                    case .failure(let failure):
-                        errorMessage = failure.message
-                        if failure.needsRefresh { refreshToken += 1 }
+                    // A verified backup first; if it fails the meso is not created (see SeedBackupGuard).
+                    seedGuard.run(container: modelContext.container) {
+                        switch model.apply(plan) {
+                        case .success:
+                            Haptics.success()
+                            onFinish()
+                        case .failure(let failure):
+                            errorMessage = failure.message
+                            if failure.needsRefresh { refreshToken += 1 }
+                        }
                     }
                 } label: {
                     Text("Create next meso").frame(maxWidth: .infinity)

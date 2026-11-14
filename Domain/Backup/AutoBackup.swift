@@ -250,7 +250,7 @@ struct AutoBackupVerification: Equatable {
 final class AutoBackupService: ObservableObject {
     static let shared = AutoBackupService()
 
-    enum Reason: String { case sessionCompleted, buildChanged, daily, manual }
+    enum Reason: String { case sessionCompleted, buildChanged, daily, manual, beforeMesoSeed }
 
     @Published private(set) var statusRevision = 0
     @Published private(set) var lastError: String?
@@ -317,6 +317,20 @@ final class AutoBackupService: ObservableObject {
         do {
             let pending = try export(container: container)
             return .success(try await place(pending, reason: .manual, launchCommit: nil))
+        } catch { lastError = error.localizedDescription; return .failure(error) }
+    }
+
+    /// Before any next-meso, new-program or maintenance seeding writes: export, verify and place a backup, and only then say
+    /// go. `.success(nil)` = the store is empty, so there is nothing to protect (a first run). A failure blocks the seed.
+    func backUpBeforeMesoSeed(container: ModelContainer) async -> Result<AutoBackupFile?, Error> {
+        do {
+            let pending: Pending
+            do { pending = try export(container: container) }
+            catch AutoBackupError.emptyStore {
+                log("ℹ️ AutoBackup [beforeMesoSeed] skipped: the store is empty, nothing to protect")
+                return .success(nil)
+            }
+            return .success(try await place(pending, reason: .beforeMesoSeed, launchCommit: nil))
         } catch { lastError = error.localizedDescription; return .failure(error) }
     }
 

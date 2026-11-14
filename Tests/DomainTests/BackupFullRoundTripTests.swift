@@ -1916,3 +1916,116 @@ final class NextMesoSeedAuditTests: XCTestCase {
         if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
     }
 }
+
+// MARK: - FFF: a verified backup before any seeding
+
+@MainActor
+final class SeedBackupGuardTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var dir: URL!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        DataSentinelStore.overrideDefaults = UserDefaults(suiteName: "ep.sentinel.suite.\(UUID().uuidString)")
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_seed_\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDown() {
+        DataSentinelStore.overrideDefaults = nil
+        try? FileManager.default.removeItem(at: dir)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func status() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+
+    private func populatedContainer() throws -> ModelContainer {
+        let c = try BackupTestSupport.makeContainer()
+        try PopulatedStoreBuilder.build(in: ModelContext(c))
+        return c
+    }
+
+    func test_beforeMesoSeed_runsAVerifiedBackup_andLogsTheReason() async throws {
+        var lines: [String] = []
+        let d = dir!
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(d) }, log: { lines.append($0) })
+        let result = await svc.backUpBeforeMesoSeed(container: try populatedContainer())
+        let file = try XCTUnwrap(try result.get())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.url.path))
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1)
+        XCTAssertTrue(lines.contains { $0.contains("[beforeMesoSeed] local verified") }, lines.joined(separator: "\n"))
+    }
+
+    func test_anEmptyStore_hasNothingToProtect_andGoesStraightThrough() async throws {
+        let d = dir!
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(d) }, log: { _ in })
+        let result = await svc.backUpBeforeMesoSeed(container: try BackupTestSupport.makeContainer())
+        XCTAssertNil(try result.get(), "success with no file")
+        XCTAssertTrue(AutoBackupEngine.list(in: dir).isEmpty)
+    }
+
+    func test_aFailedBackup_blocksTheSeed_untilBackUpNowSucceeds() async throws {
+        // The destination is a regular file, so the backup cannot be placed.
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("ep_blocker_\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let container = try populatedContainer()
+        final class Box: @unchecked Sendable { var url: URL; init(_ u: URL) { url = u } }
+        let destination = Box(blocker)
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(destination.url) }, log: { _ in })
+        let guardian = SeedBackupGuard(backup: { await svc.backUpBeforeMesoSeed(container: $0) })
+
+        var seeded = 0
+        guardian.run(container: container) { seeded += 1 }
+        try await waitUntil { guardian.failure != nil }
+        XCTAssertEqual(seeded, 0, "the seed did not run")
+        XCTAssertTrue(guardian.failure?.contains("Nothing has been changed") == true, guardian.failure ?? "nil")
+
+        destination.url = dir                   // the lifter fixes the problem and taps Back up now
+        guardian.retry()
+        try await waitUntil { seeded == 1 }
+        XCTAssertNil(guardian.failure)
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1)
+    }
+
+    func test_continueWithoutBackup_needsTheTypedWord() async throws {
+        let guardian = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        var seeded = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { seeded += 1 }
+        try await waitUntil { guardian.failure != nil }
+        XCTAssertFalse(guardian.continueWithoutBackup(typed: "continue"))
+        XCTAssertFalse(guardian.continueWithoutBackup(typed: ""))
+        XCTAssertEqual(seeded, 0)
+        XCTAssertTrue(guardian.continueWithoutBackup(typed: "CONTINUE"))
+        XCTAssertEqual(seeded, 1)
+        XCTAssertEqual(guardian.proceededWithoutBackup, 1)
+        XCTAssertNil(guardian.failure)
+    }
+
+    func test_cancel_dropsTheSeed_andTheBackupAlwaysComesFirst() async throws {
+        var order: [String] = []
+        let guardian = SeedBackupGuard(backup: { _ in order.append("backup"); return .success(nil) })
+        var cancelled = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { order.append("seed") }
+        try await waitUntil { order.count == 2 }
+        XCTAssertEqual(order, ["backup", "seed"])
+
+        let failing = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        failing.run(container: try BackupTestSupport.makeContainer(), cancel: { cancelled += 1 }) { order.append("never") }
+        try await waitUntil { failing.failure != nil }
+        failing.cancel()
+        XCTAssertEqual(cancelled, 1)
+        XCTAssertFalse(order.contains("never"))
+        XCTAssertNil(failing.failure)
+    }
+
+    private func waitUntil(_ condition: @escaping () -> Bool, timeout: TimeInterval = 10) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { XCTFail("timed out"); return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+}

@@ -22,6 +22,7 @@ struct HomeView: View {
     // Deferred replace/apply after onboarding dismisses
     @State private var pendingOnboardingResult: OnboardingResult?
     @State private var pendingExerciseOverrides: PreviewOverrides = .empty
+    @StateObject private var seedGuard = SeedBackupGuard()
 
     // Start date seeded into the onboarding flow. Set from the meso-summary
     // picker when arriving via "Start new hypertrophy meso"; reset to today
@@ -130,11 +131,14 @@ struct HomeView: View {
         pendingExerciseOverrides = .empty
 
         DispatchQueue.main.async {
-            MesoSeedingCoordinator.applyOnboardingResult(
-                result,
-                context: modelContext,
-                overrides: overrides
-            )
+            // A verified backup first; if it fails the program is not seeded (see SeedBackupGuard).
+            seedGuard.run(container: modelContext.container) {
+                MesoSeedingCoordinator.applyOnboardingResult(
+                    result,
+                    context: modelContext,
+                    overrides: overrides
+                )
+            }
         }
     }
 }
