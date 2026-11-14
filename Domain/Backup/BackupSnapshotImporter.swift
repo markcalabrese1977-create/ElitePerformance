@@ -10,7 +10,10 @@ struct BackupSnapshotImportResult {
 }
 
 enum BackupSnapshotImporter {
-    static func importFullBackupJSON(from url: URL, modelContainer: ModelContainer) throws -> BackupSnapshotImportResult {
+    /// `applyingDeviceSideEffects: false` is for verifying a backup in a scratch container: the model data is imported exactly
+    /// as in a real restore, but the UserDefaults / App Group projections of the restored data are NOT written, so a scratch
+    /// import cannot overwrite the live device's state.
+    static func importFullBackupJSON(from url: URL, modelContainer: ModelContainer, applyingDeviceSideEffects: Bool = true) throws -> BackupSnapshotImportResult {
         let modelContext = ModelContext(modelContainer)
         let data = try Data(contentsOf: url)
 
@@ -318,18 +321,18 @@ enum BackupSnapshotImporter {
         // there instead of keeping a stale index or starting empty.
         try PRRebuildService.rebuild(in: modelContext)
 
-        if let restoredAppState = try modelContext.fetch(FetchDescriptor<AppState>()).first {
+        if applyingDeviceSideEffects, let restoredAppState = try modelContext.fetch(FetchDescriptor<AppState>()).first {
             AppStateBridge.syncToUserDefaults(from: restoredAppState)
         }
 
         // The App Group mechanicalLoad.* day totals are a projection of SessionHistory, which was just restored:
         // rebuild them (this also clears totals left behind by the data that was replaced).
-        MechanicalLoadProjector.projectAll(in: modelContext)
+        if applyingDeviceSideEffects { MechanicalLoadProjector.projectAll(in: modelContext) }
 
         // Rebuild the UserDefaults mirror of the custom exercises from the restored rows so
         // ExerciseCatalog.all can resolve their names (and isBodyweight) without a ModelContext.
         // Always rewritten, an empty list included: a backup with no customs must clear a stale mirror.
-        ExerciseCatalog.rebuildCustomMirror(from: modelContext)
+        if applyingDeviceSideEffects { ExerciseCatalog.rebuildCustomMirror(from: modelContext) }
 
         return BackupSnapshotImportResult(
             mesoBlockCount: snapshot.mesoBlocks.count,

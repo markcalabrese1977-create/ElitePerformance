@@ -2396,6 +2396,8 @@ final class SessionScreenViewModel: ObservableObject {
 
         try context.save()
         print("✅ SessionHistory saved/updated")
+        // Automatic backup: a session was just completed.
+        AutoBackupService.shared.sessionCompleted(container: context.container)
         // ✅ Link Apple Health workout + pull metrics after completion is saved.
         Task { @MainActor in
             await HealthKitWorkoutSummarySyncService

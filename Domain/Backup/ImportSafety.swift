@@ -245,12 +245,22 @@ final class StartupGate: ObservableObject {
     static let missingSnapshotMessage = "A restore was interrupted and its safety copy is missing. Your data may be incomplete — import your latest export from Files."
     private var container: ModelContainer?
     private let directory: URL
-    private let runBackfills: (ModelContainer) -> Void
+    private let backfills: @MainActor (ModelContainer) -> Void
+    private let beforeBackfills: @MainActor (ModelContainer) -> Void
 
+    /// `beforeBackfills` runs after the interrupted-import check has been answered and BEFORE any backfill: the automatic
+    /// backup for a new build is taken here, of the data as it was before the backfills touch it.
     init(directory: URL = PreImportSnapshots.defaultDirectory(),
-         runBackfills: @escaping (ModelContainer) -> Void = { StartupBackfills.run(using: $0) }) {
+         beforeBackfills: @escaping @MainActor (ModelContainer) -> Void = { AutoBackupService.shared.launchBackupIfBuildChanged(container: $0) },
+         runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) }) {
         self.directory = directory
-        self.runBackfills = runBackfills
+        self.beforeBackfills = beforeBackfills
+        self.backfills = runBackfills
+    }
+
+    private func runBackfills(_ container: ModelContainer) {
+        beforeBackfills(container)
+        backfills(container)
     }
 
     /// Called where the app used to run its backfills. With an interrupted-import marker it holds them back and raises the prompt.

@@ -43,9 +43,13 @@ struct ContentView: View {
                 }
 
                 requestHealthKitAccessIfNeeded()
+                AutoBackupService.shared.foregrounded(container: modelContext.container)
             }
             .onChange(of: scenePhase) { phase in
-                if phase == .active { requestHealthKitAccessIfNeeded() }
+                if phase == .active {
+                    requestHealthKitAccessIfNeeded()
+                    AutoBackupService.shared.foregrounded(container: modelContext.container)
+                }
             }
             .onChange(of: showFirstRunOnboarding) { showing in
                 if !showing { requestHealthKitAccessIfNeeded() }
