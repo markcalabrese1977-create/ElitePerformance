@@ -2067,6 +2067,28 @@ final class ProgramPlanPropagationTests: XCTestCase {
         XCTAssertThrowsError(try DayLabelRename.apply(renaming: next, to: "pull", in: context))
         XCTAssertEqual(next.dayLabel, "Upper A")
     }
+
+    // UU: apply-to-block stays in the source meso, skips edited items, and the preview carries the counts.
+    func test_UU_applyToBlockStaysInTheMesoSkipsEditedItemsAndCounts() throws {
+        let context = try makeContext()
+        let mesoA = MesoBlock(name: "A", startDate: Date(), totalWeeks: 8)
+        let mesoB = MesoBlock(name: "B", startDate: Date(), totalWeeks: 8)
+        context.insert(mesoA); context.insert(mesoB)
+        let (source, _) = plannedSession(context, daysAhead: 0, label: "Push", meso: mesoA, load: 250)
+        let (t1, i1) = plannedSession(context, daysAhead: 3, label: "Push", meso: mesoA)
+        let (t2, i2) = plannedSession(context, daysAhead: 10, label: "Push", meso: mesoA, load: 111, edited: true)
+        let (t3, i3) = plannedSession(context, daysAhead: 11, label: "Push", meso: mesoB)
+        for s in [source, t1, t2, t3] { s.meso!.sessions.append(s) }
+        try context.save()
+
+        let preview = ProgramPlanPropagationService.blockPreview(from: source, in: context)
+        XCTAssertEqual(preview, .init(sessionsToChange: 2, editedItemsSkipped: 1, sessionsWithSkippedItems: 1))
+        ProgramPlanPropagationService.applyToBlock(from: source, in: context)
+        XCTAssertEqual(i1.suggestedLoad, 250)
+        XCTAssertEqual(i2.suggestedLoad, 111, "an edited item is skipped")
+        XCTAssertEqual(i3.suggestedLoad, 100, "another meso is never touched")
+        _ = t3
+    }
 }
 
 final class ReorderTests: XCTestCase {

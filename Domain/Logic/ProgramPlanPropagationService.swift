@@ -162,6 +162,82 @@ struct ProgramPlanPropagationService {
     }
 }
 
+// MARK: - Apply to the block (by position)
+
+extension ProgramPlanPropagationService {
+    /// Future planned sessions of the SOURCE's meso with the same (trimmed) dayLabel. Never another meso.
+    static func blockTargets(from source: Session, in context: ModelContext) -> [Session] {
+        guard !WavePrescriptionGuard.isWaveBasedBlock(source), let meso = source.meso else { return [] }
+        let label = source.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !label.isEmpty else { return [] }
+        let today = Calendar.current.startOfDay(for: Date())
+        return meso.sessions.filter {
+            $0.id != source.id && $0.status == .planned && $0.date > today &&
+            ($0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") == label
+        }
+    }
+
+    static func blockPreview(from source: Session, in context: ModelContext) -> Preview {
+        var skipped = 0, sessionsSkipping = 0
+        let targets = blockTargets(from: source, in: context)
+        for t in targets {
+            let n = t.items.filter { $0.planEdited }.count
+            skipped += n
+            if n > 0 { sessionsSkipping += 1 }
+        }
+        return Preview(sessionsToChange: targets.count, editedItemsSkipped: skipped, sessionsWithSkippedItems: sessionsSkipping)
+    }
+
+    /// Copies the source's plan onto each block target by position. Items the lifter edited by hand are skipped, never
+    /// overwritten or deleted. Callers save.
+    @discardableResult
+    static func applyToBlock(from source: Session, in context: ModelContext) -> Preview {
+        let result = blockPreview(from: source, in: context)
+        let sourceItems = source.items.sorted { $0.order < $1.order }
+        for other in blockTargets(from: source, in: context) {
+            let sorted = other.items.sorted { $0.order < $1.order }
+            if sorted.count > sourceItems.count {
+                for extra in sorted[sourceItems.count...] where !extra.planEdited { context.delete(extra) }
+            }
+            if sorted.count < sourceItems.count {
+                for idx in sorted.count..<sourceItems.count {
+                    let src = sourceItems[idx]
+                    let n = SessionItem(
+                        order: idx + 1, exerciseId: src.exerciseId, exerciseNameSnapshot: src.exerciseNameSnapshot,
+                        targetReps: src.targetReps, targetSets: src.targetSets, targetRIR: src.targetRIR, suggestedLoad: src.suggestedLoad,
+                        waveRaw: src.waveRaw, priorityRaw: src.priorityRaw, setMin: src.setMin, setMax: src.setMax,
+                        repMin: src.repMin, repMax: src.repMax, targetRIRMin: src.targetRIRMin, targetRIRMax: src.targetRIRMax,
+                        intensifierRaw: src.intensifierRaw, intensifierNotes: src.intensifierNotes, prescriptionNotes: src.prescriptionNotes,
+                        plannedRepsBySet: src.plannedRepsBySet, plannedLoadsBySet: src.plannedLoadsBySet)
+                    context.insert(n)
+                    other.items.append(n)
+                }
+            }
+            let aligned = other.items.sorted { $0.order < $1.order }
+            for (idx, src) in sourceItems.enumerated() where idx < aligned.count {
+                let dst = aligned[idx]
+                guard !dst.planEdited else { continue }
+                dst.order = idx + 1
+                dst.exerciseId = src.exerciseId
+                dst.exerciseNameSnapshot = src.exerciseNameSnapshot
+                dst.targetReps = src.targetReps
+                dst.targetSets = src.effectivePrescribedSets
+                dst.prescribedSets = src.effectivePrescribedSets
+                dst.targetRIR = src.targetRIR
+                dst.suggestedLoad = src.suggestedLoad
+                dst.waveRaw = src.waveRaw; dst.priorityRaw = src.priorityRaw
+                dst.setMin = src.setMin; dst.setMax = src.setMax; dst.repMin = src.repMin; dst.repMax = src.repMax
+                dst.targetRIRMin = src.targetRIRMin; dst.targetRIRMax = src.targetRIRMax
+                dst.intensifierRaw = src.intensifierRaw; dst.intensifierNotes = src.intensifierNotes
+                dst.prescriptionNotes = src.prescriptionNotes
+                dst.plannedRepsBySet = src.plannedRepsBySet
+                dst.plannedLoadsBySet = src.plannedLoadsBySet
+            }
+        }
+        return result
+    }
+}
+
 // MARK: - Renaming a day type
 
 /// Renaming a day ("Push" -> "Upper A") rewrites the label on EVERY session of that day type in the same meso, planned,
