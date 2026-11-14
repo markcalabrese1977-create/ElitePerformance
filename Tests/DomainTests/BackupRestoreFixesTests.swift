@@ -72,13 +72,20 @@ final class BackupRestorePRIndexTests: XCTestCase {
         try BackupTestSupport.restore(from: source, into: target)
         let ctx = ModelContext(target)
 
-        let lighter = BackupTestSupport.item(1, "bench_press", name: "Bench Press", reps: [5], loads: [180])
-        PRService.updatePR(for: lighter, in: ctx)
-        XCTAssertFalse(lighter.isPR, "180x5 does not beat the restored 200x5")
-
-        let heavier = BackupTestSupport.item(1, "bench_press", name: "Bench Press", reps: [5], loads: [210])
-        PRService.updatePR(for: heavier, in: ctx)
-        XCTAssertTrue(heavier.isPR)
+        func newSession(_ d: Int, load: Double) -> SessionItem {
+            let it = BackupTestSupport.item(1, "bench_press", name: "Bench Press", reps: [5], loads: [load])
+            let s = Session(date: late.addingTimeInterval(Double(d) * 86_400), status: .completed, weekIndex: 1, dayLabel: "D", items: [it])
+            ctx.insert(s)
+            return it
+        }
+        let lighter = newSession(1, load: 180)
+        let heavier = newSession(2, load: 210)
+        try ctx.save()
+        let sessions = try ctx.fetch(FetchDescriptor<Session>())
+        let records = SetRecordBuilder.build(sessions: sessions)
+        let flagged = PRRebuildService.recordItems(sessions: sessions, records: records)
+        XCTAssertFalse(flagged.contains(lighter.persistentModelID), "180x5 does not beat the restored 200x5")
+        XCTAssertTrue(flagged.contains(heavier.persistentModelID))
     }
 
     func test_restoreOntoNonEmptyInstall_replacesStalePRs() throws {

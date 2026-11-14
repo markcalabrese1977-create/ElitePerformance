@@ -377,47 +377,53 @@ final class AnalyticsFoundationTests: XCTestCase {
 
     // MARK: - PRService and the PRIndex rebuild (the e1RM definition)
 
-    func test_prService_isTheE1RMDefinition_notVolume() throws {
+    func test_prDefinition_isTheE1RMDefinition_notVolume() throws {
         let ctx = try makeContext()
-        ctx.insert(PRIndex(exerciseId: "bench_press", exerciseName: "Bench Press", bestSetVolume: 1000, bestLoad: 200, bestReps: 5, bestDate: day(0)))
-        // 100x15 has MORE volume (1500) than 200x5 (1000) but a lower e1RM (150 vs 233): not a PR.
+        let m = meso(ctx)
+        let base = item("bench_press", reps: [5], loads: [200])
+        // 100x15 has MORE volume (1500) than 200x5 (1000) but a lower e1RM (150 vs 233), and 15 reps are not a record set: not a PR.
         let high = item("bench_press", reps: [15], loads: [100])
-        PRService.updatePR(for: high, in: ctx)
-        XCTAssertFalse(high.isPR)
         // 215x5: e1RM 251 > 233: a PR, and the index holds the set.
         let real = item("bench_press", reps: [5], loads: [215])
-        PRService.updatePR(for: real, in: ctx)
+        session(ctx, meso: m, day: 1, items: [base]); session(ctx, meso: m, day: 2, items: [high]); session(ctx, meso: m, day: 3, items: [real])
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
+        XCTAssertFalse(base.isPR, "first-ever: a baseline")
+        XCTAssertFalse(high.isPR)
         XCTAssertTrue(real.isPR)
         let row = try XCTUnwrap(PRService.currentPR(for: "bench_press", in: ctx))
         XCTAssertEqual(row.bestLoad, 215)
         XCTAssertEqual(row.bestReps, 5)
         XCTAssertEqual(row.bestSetVolume, 1075)
-        // A warm-up or an RP row never sets one.
+        // A rest-pause row never sets one.
         let rp = item("bench_press", reps: [12], loads: [300], rp: [true])
-        PRService.updatePR(for: rp, in: ctx)
+        session(ctx, meso: m, day: 4, items: [rp])
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
         XCTAssertFalse(rp.isPR)
     }
 
-    func test_prService_bodyweightUsesProfileBodyWeight_andCanonicalIds() throws {
+    func test_prDefinition_bodyweightUsesProfileBodyWeight_andCanonicalIds() throws {
         let ctx = try makeContext()
         let profile = UserProfile(); profile.bodyWeight = 180
         ctx.insert(profile)
+        let m = meso(ctx)
         let legacy = "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58"   // alias of seated_cable_press
         let first = item(legacy, reps: [8], loads: [100])
-        PRService.updatePR(for: first, in: ctx)
-        XCTAssertFalse(first.isPR, "a lift's first-ever best is a baseline, not a record")
-        XCTAssertEqual(PRService.currentPR(for: "seated_cable_press", in: ctx)?.exerciseId, "seated_cable_press", "keyed by the canonical id")
         let heavier = item(legacy, reps: [8], loads: [110])
-        PRService.updatePR(for: heavier, in: ctx)
-        XCTAssertTrue(heavier.isPR, "beating the first best is a record")
         let pull = item("pull_up", reps: [8], loads: [0])
-        PRService.updatePR(for: pull, in: ctx)
+        session(ctx, meso: m, day: 1, items: [first, pull]); session(ctx, meso: m, day: 2, items: [heavier])
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
+        XCTAssertFalse(first.isPR, "a lift's first-ever best is a baseline, not a record")
+        XCTAssertTrue(heavier.isPR, "beating the first best is a record")
+        XCTAssertEqual(PRService.currentPR(for: "seated_cable_press", in: ctx)?.exerciseId, "seated_cable_press", "keyed by the canonical id")
         XCTAssertFalse(pull.isPR, "first-ever: a baseline")
         XCTAssertEqual(PRService.currentPR(for: "pull_up", in: ctx)?.bestLoad, 180)
         profile.bodyWeight = nil
-        let pull2 = item("chin_up", reps: [8], loads: [0])
-        PRService.updatePR(for: pull2, in: ctx)
-        XCTAssertFalse(pull2.isPR, "no body weight: no PR for a bodyweight lift")
+        try ctx.save()
+        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
+        XCTAssertNil(PRService.currentPR(for: "pull_up", in: ctx), "no body weight: no PR for a bodyweight lift")
     }
 
     func test_prRebuild_countsMaintenanceAndDeload_bodyweight_andIgnoresPlannedAndInProgress() throws {

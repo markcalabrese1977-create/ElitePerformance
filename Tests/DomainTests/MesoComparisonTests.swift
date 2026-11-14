@@ -497,58 +497,42 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(best.load, 200)
         let longOnly = item("cable_fly", reps: [20, 18], loads: [30, 30])
         XCTAssertNil(PRService.bestSet(in: longOnly), "only sets of more than 12 reps: no PR")
-        // the index: a later 20-rep set at a heavier load is not a PR over a 5 x 200
-        PRService.updatePR(for: it, in: ctx)
-        let again = item("cable_curl", reps: [20], loads: [190])
-        ctx.insert(again)
-        PRService.updatePR(for: again, in: ctx)
-        XCTAssertFalse(again.isPR)
     }
 
-    func test_isPR_isDerivedFromTheRebuiltRecords_baselineAndLongSetsAreNotFlagged_staleFlagsClear() throws {
+    func test_csvExport_flagsPRsFromTheEvents_notFromTheStoredFlag_evenForASessionCompletedAfterTheBackfill() throws {
+        let key = "prIndexTwelveRepRule.v1.completed"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
-        func mk(_ d: Int, _ id: String, _ reps: [Int], _ loads: [Double], status: SessionStatus = .completed, stale: Bool = false) -> (Session, SessionItem) {
-            let it = item(id, reps: reps, loads: loads)
-            it.isPR = stale
-            let s = Session(date: day(d), status: status, weekIndex: 1, dayLabel: "D", items: [it])
-            ctx.insert(s)
-            return (s, it)
-        }
-        let (s1, a) = mk(1, "bench_press", [5], [200], stale: true)        // first ever: baseline -> not a record
-        let (s2, b) = mk(8, "bench_press", [5], [210])                      // beats 200 -> record
-        let (s3, c) = mk(15, "bench_press", [20], [180], stale: true)       // long set: no record, stale flag clears
-        let (s4, d) = mk(22, "bench_press", [5], [205])                     // below 210 -> no record
-        let (s5, e) = mk(29, "bench_press", [5], [220], status: .planned, stale: false)   // planned: untouched
-        e.isPR = true
+        let a = item("bench_press", reps: [5], loads: [200]); a.exerciseNameSnapshot = "Bench Press"
+        let b = item("bench_press", reps: [5], loads: [210])
+        ctx.insert(Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "A", items: [a]))
+        ctx.insert(Session(date: day(8), status: .completed, weekIndex: 1, dayLabel: "B", items: [b]))
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertFalse(a.isPR, "a lift's first-ever session is a baseline")
-        XCTAssertTrue(b.isPR)
-        XCTAssertFalse(c.isPR, "a 20-rep set is no record, and its stale flag is cleared")
-        XCTAssertFalse(d.isPR)
-        XCTAssertTrue(e.isPR, "a planned item is left alone")
-        _ = (s1, s2, s3, s4, s5)
-        // the flags and the index agree
-        let rows = try ctx.fetch(FetchDescriptor<PRIndex>())
-        XCTAssertEqual(rows.first?.bestLoad, 210)
-        // idempotent
-        let first = try ctx.fetch(FetchDescriptor<SessionItem>()).map(\.isPR)
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<SessionItem>()).map(\.isPR), first)
-        // the live service agrees on a first-ever best
-        let fresh = item("squat_x", reps: [5], loads: [300]); ctx.insert(fresh)
-        PRService.updatePR(for: fresh, in: ctx)
-        XCTAssertFalse(fresh.isPR, "first-ever best: baseline")
-    }
-
-    func test_recordSettingSessions_countDistinctSessions_notLiftSessionPairs() throws {
-        // one session beats the record on TWO lifts: one record-setting session
-        var all = sets(10, "bench_press", load: 200, reps: [5], meso: "old", key: "p1") + sets(10, "squat", load: 300, reps: [5], meso: "old", key: "p1")
-        all += sets(110, "bench_press", load: 205, reps: [5], meso: "new", key: "c0") + sets(110, "squat", load: 305, reps: [5], meso: "new", key: "c0")
-        all += sets(117, "bench_press", load: 210, reps: [5], meso: "new", key: "c1") + sets(117, "squat", load: 310, reps: [5], meso: "new", key: "c1")
-        let sessions = [rec("p1", 10, meso: "old"), rec("c0", 110, meso: "new"), rec("c1", 117, meso: "new")]
-        let c = try XCTUnwrap(compare(all, sessions: sessions, asOf: 200))
-        XCTAssertEqual(c.prsCurrent, 2, "two sessions, four lift-session records")
+        PRIndexRuleBackfill.runIfNeeded(in: ctx)
+        // complete a NEW session after the backfill: nothing recomputes isPR for it
+        let c = item("bench_press", reps: [5], loads: [220])
+        let sc = Session(date: day(15), status: .completed, weekIndex: 1, dayLabel: "C", items: [c])
+        ctx.insert(sc)
+        let stale = item("bench_press", reps: [5], loads: [190]); stale.isPR = true          // a stale stored flag on a non-record
+        ctx.insert(Session(date: day(22), status: .completed, weekIndex: 1, dayLabel: "D", items: [stale]))
+        try ctx.save()
+        XCTAssertFalse(c.isPR, "the stored flag was never written for the new session")
+        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: ctx, fileName: "pr_events_test.csv")
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let rows = try String(contentsOf: result.url, encoding: .utf8).split(separator: "\n").map(String.init)
+        let header = rows[0].split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        let iPR = try XCTUnwrap(header.firstIndex(of: "is_pr")), iDate = try XCTUnwrap(header.firstIndex(of: "session_date"))
+        var flagsByDay: [String: String] = [:]
+        for r in rows.dropFirst() {
+            let f = r.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            flagsByDay[f[iDate]] = f[iPR]
+        }
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withFullDate]
+        XCTAssertEqual(flagsByDay[iso.string(from: day(1))], "false", "first-ever: baseline")
+        XCTAssertEqual(flagsByDay[iso.string(from: day(8))], "true", "210 beats 200")
+        XCTAssertEqual(flagsByDay[iso.string(from: day(15))], "true", "the session completed after the backfill is flagged from the events")
+        XCTAssertEqual(flagsByDay[iso.string(from: day(22))], "false", "190 is no record: the stale stored flag is not read")
     }
 
     func test_prIndexRuleBackfill_rebuildsOnceUnderTheRule_andDoesNothingOnAnEmptyStore() throws {

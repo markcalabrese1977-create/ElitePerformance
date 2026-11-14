@@ -34,40 +34,6 @@ struct PRService {
         return best
     }
 
-    /// Update the PR index based on a single SessionItem's newly saved logs: a strictly higher e1RM is a new PR.
-    static func updatePR(for item: SessionItem, in context: ModelContext) {
-        let bodyWeight = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.bodyWeight
-        guard let best = bestSet(in: item, bodyWeight: bodyWeight) else {
-            item.isPR = false
-            return
-        }
-        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-        do {
-            let existing = try context.fetch(FetchDescriptor<PRIndex>())
-                .first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
-            if let existing {
-                if best.e1RM > BestSetRule.e1RM(load: existing.bestLoad, reps: existing.bestReps) {
-                    existing.exerciseId = canonical
-                    existing.bestSetVolume = best.load * Double(best.reps)
-                    existing.bestLoad = best.load
-                    existing.bestReps = best.reps
-                    existing.bestDate = Date()
-                    item.isPR = true
-                } else {
-                    item.isPR = false
-                }
-            } else {
-                let name = ExerciseCatalog.all.first(where: { $0.id == canonical })?.name ?? item.exerciseNameSnapshot ?? "Unknown"
-                context.insert(PRIndex(exerciseId: canonical, exerciseName: name, bestSetVolume: best.load * Double(best.reps),
-                                       bestLoad: best.load, bestReps: best.reps, bestDate: Date()))
-                item.isPR = false      // a lift's first-ever best is a baseline ("New"), not a record: same as the rebuild
-            }
-        } catch {
-            // If the fetch fails for some reason, don't crash the app.
-            item.isPR = false
-        }
-    }
-
     /// Convenience getter if we want to display current PR elsewhere.
     static func currentPR(for exerciseId: String, in context: ModelContext) -> PRIndex? {
         let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)

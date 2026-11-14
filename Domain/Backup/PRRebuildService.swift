@@ -40,31 +40,40 @@ enum PRRebuildService {
         try context.save()
     }
 
-    /// `SessionItem.isPR` is derived data: true exactly on the item whose session beat the lift's earlier record (a record
-    /// EVENT of `PersonalRecords`, a lift's first-ever session being a baseline, not a record). Every completed session's
-    /// items are rewritten so the flags always match the rebuilt index; planned and in-progress items are left alone.
-    /// Only the flag changes (no `updatedAt`). Returns (flagged items, sessions with a flagged item).
-    @discardableResult
-    static func recomputeFlags(sessions: [Session], records: AnalyticsSnapshot) -> (items: Int, sessions: Int) {
+    /// The items that carry a record: for every PR EVENT of `PersonalRecords` (a session that beat a lift's earlier record; a
+    /// lift's first-ever session is a baseline, not a record), the one item of that lift in that session with the best
+    /// working-set e1RM (a session can hold the same lift twice). This is THE source of "is this a PR": the CSV export reads
+    /// it, the Meso Summary's record-setting sessions count its events, and `isPR` is only ever a copy of it.
+    static func recordItems(sessions: [Session], records: AnalyticsSnapshot) -> Set<PersistentIdentifier> {
         var recordKeys = Set<String>()
         for e in PersonalRecords.events(from: records.sets) where !e.isBaseline { recordKeys.insert("\(e.sessionKey)|\(e.exerciseId)") }
-        var flaggedItems = 0, flaggedSessions = 0
+        var out = Set<PersistentIdentifier>()
         for s in sessions where s.status == .completed {
             let key = s.id?.uuidString ?? "\(s.persistentModelID)"
-            // the best item of a lift in a session carries the flag (a session can hold the same lift twice)
-            var carrier: [String: SessionItem] = [:]
+            var carrier: [String: (item: SessionItem, e1RM: Double)] = [:]
             for item in s.items {
                 let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
                 guard recordKeys.contains("\(key)|\(id)") else { continue }
-                let bw = ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId)
-                let mine = BestSetRule.best(of: item, bodyWeight: nil)?.e1RM ?? (bw ? 0 : 0)
-                let theirs = carrier[id].flatMap { BestSetRule.best(of: $0, bodyWeight: nil)?.e1RM } ?? -1
-                if carrier[id] == nil || mine > theirs { carrier[id] = item }
+                let mine = BestSetRule.best(of: item, bodyWeight: nil)?.e1RM ?? 0
+                if let cur = carrier[id], cur.e1RM >= mine { continue }
+                carrier[id] = (item, mine)
             }
+            for c in carrier.values { out.insert(c.item.persistentModelID) }
+        }
+        return out
+    }
+
+    /// `SessionItem.isPR` is a legacy copy kept for backup compatibility; nothing displays or exports it (the CSV reads
+    /// `recordItems`). The one-time backfill rewrites it so a backup written by this version carries a true copy.
+    /// Only the flag changes (no `updatedAt`). Returns (flagged items, sessions with a flagged item).
+    @discardableResult
+    static func recomputeFlags(sessions: [Session], records: AnalyticsSnapshot) -> (items: Int, sessions: Int) {
+        let flagged = recordItems(sessions: sessions, records: records)
+        var flaggedItems = 0, flaggedSessions = 0
+        for s in sessions where s.status == .completed {
             var any = false
             for item in s.items {
-                let id = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-                let flag = carrier[id] === item
+                let flag = flagged.contains(item.persistentModelID)
                 if item.isPR != flag { item.isPR = flag }
                 if flag { flaggedItems += 1; any = true }
             }

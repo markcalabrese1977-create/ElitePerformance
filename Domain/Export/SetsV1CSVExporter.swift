@@ -24,6 +24,12 @@ enum SetsV1CSVExporter {
             .filter { $0.status == .completed }
             .sorted { $0.date < $1.date }
 
+        // is_pr comes from the PR EVENTS (PersonalRecords via PRRebuildService.recordItems), never from SessionItem.isPR.
+        let customs = (try? modelContext.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let bodyWeight = (try? modelContext.fetch(FetchDescriptor<UserProfile>()))?.first?.bodyWeight
+        let records = SetRecordBuilder.build(sessions: sessions, customExercises: customs, bodyWeight: bodyWeight)
+        let recordItems = PRRebuildService.recordItems(sessions: sessions, records: records)
+
         let header = [
             "session_id",
             "session_date",
@@ -77,7 +83,7 @@ enum SetsV1CSVExporter {
                 let targetReps = String(item.targetReps)
                 let targetRIR  = String(item.targetRIR)
                 let suggestedLoad = formatDouble(unit.fromStoredLb(item.suggestedLoad))
-                let isPR = item.isPR ? "true" : "false"
+                let isPR = recordItems.contains(item.persistentModelID) ? "true" : "false"
                 let coachNote = item.coachNote ?? ""
 
                 // Every planned row, plus any later row that has a logged set.
