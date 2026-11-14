@@ -115,3 +115,6 @@ scripts/full_gate.sh should refuse to start while another gate holds a lock (two
 
 ## PersonalRecords.suspects needs a user "confirmed real" flag
 PersonalRecords.suspects needs a user "confirmed real" flag before it's ever displayed (e.g. Smith Machine Hip Thrust 351×10 is genuine).
+
+## Import is wipe-save-then-insert
+Import is wipe-save-then-insert. A true atomic import needs a scratch-store swap; a single-context rollback attempt crashed SwiftData (_FullFutureBackingData<SessionHistoryExercise>).
