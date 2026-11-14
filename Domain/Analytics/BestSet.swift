@@ -19,7 +19,13 @@ enum BestSetRule {
 
     static func isE1RMEligible(reps: Int) -> Bool { reps >= 1 && reps <= maxRepsForE1RM }
 
-    /// e1RM of a set under the rule: 0 for a set of more than 12 reps.
+    /// THE e1RM for anything a lifter reads as a strength number: records and PR badges, the exercise history sheet, the live
+    /// recap and the Meso Summary rows all use it (best working set, warm-ups out, sets of 12 reps or fewer, 0 for a longer set).
+    ///
+    /// The one deliberate exception is `SetRecord.e1RM` (raw Epley on any rep count), used by stall detection, fatigue and the
+    /// meso comparison. Those compare a lift with ITSELF at similar reps (this session's sets against the same lift's earlier
+    /// sets on the same wave letter), so Epley's loss of accuracy at high reps cancels out; dropping the long sets there would
+    /// instead leave high-rep lifts with no series to compare. Do not use `SetRecord.e1RM` to rank or display a strength number.
     static func e1RM(load: Double, reps: Int) -> Double {
         isE1RMEligible(reps: reps) ? E1RMCalculator.e1RM(load: load, reps: reps) : 0
     }

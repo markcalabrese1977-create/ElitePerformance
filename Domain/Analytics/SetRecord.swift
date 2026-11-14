@@ -118,7 +118,8 @@ struct SetRecord: Equatable {
     /// A working set of regular completed training: the sets e1RM, PRs and chains are built from.
     var isPerformanceSet: Bool { isWorkingSet && isRegularCompleted }
 
-    /// Epley e1RM of this row through `E1RMCalculator` on the effective load (0 without load and reps).
+    /// Raw Epley e1RM of this row on the effective load, ANY rep count (0 without load and reps). Only for comparing a lift
+    /// with itself (stalls, fatigue, meso comparison); every displayed strength number uses `BestSetRule.e1RM`, which explains why.
     var e1RM: Double { E1RMCalculator.e1RM(load: effectiveLoad, reps: reps) }
 
     /// The e1RM a RECORD may use: only sets of 12 reps or fewer (`BestSetRule`); 0 for a longer set. PRs, records and PR

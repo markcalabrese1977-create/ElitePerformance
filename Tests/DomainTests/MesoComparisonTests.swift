@@ -507,6 +507,62 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
     }
 
+    func test_itemStats_bestE1RM_usesTheTwelveRepRule_whileSetRecordE1RMStaysRaw() throws {
+        let it = item("cable_curl", reps: [5, 20, 20], loads: [200, 150, 150])
+        let st = AnalyticsEngine.ItemStats.of(it, bodyWeight: nil)
+        XCTAssertEqual(st.bestE1RM, E1RMCalculator.e1RM(load: 200, reps: 5), accuracy: 1e-9, "the 20-rep set (raw 250) is not the best")
+        XCTAssertEqual(st.bestReps, 5)
+        XCTAssertEqual(st.sets, 3, "set counts are untouched")
+        let longOnly = AnalyticsEngine.ItemStats.of(item("cable_fly", reps: [20, 18], loads: [30, 30]), bodyWeight: nil)
+        XCTAssertEqual(longOnly.bestE1RM, 0, "no set of 12 reps or fewer: no e1RM")
+        XCTAssertEqual(longOnly.sets, 2)
+        // the documented exception: SetRecord.e1RM stays raw (any reps) for self-comparison
+        let rec = sets(10, "fly", load: 30, reps: [20], meso: "m")[0]
+        XCTAssertEqual(rec.e1RM, E1RMCalculator.e1RM(load: 30, reps: 20), accuracy: 1e-9)
+        XCTAssertEqual(rec.recordE1RM, 0)
+    }
+
+    func test_report_screenValuesThatChangeUnderTheItemStatsRule() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
+              let out = ProcessInfo.processInfo.environment["EP_E1RM_REPORT"], !out.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_E1RM_REPORT")
+        }
+        let container = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let all = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }
+        let bw = try ctx.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
+        var entries = 0, changed = 0, lost = 0
+        var perLift: [String: (changed: Int, lost: Int, entries: Int, oldMax: Double, newMax: Double)] = [:]
+        var recapChanged = 0
+        for s in all {
+            for it in s.items {
+                let id = ExerciseCatalog.canonicalExerciseId(for: it.exerciseId)
+                let isBW = ExerciseCatalog.isBodyweight(exerciseId: it.exerciseId)
+                var old = 0.0
+                for r in WorkingSetFilter.workingRows(of: it, isBodyweight: isBW) {
+                    let load = r.load > 0 ? r.load : (isBW ? (bw ?? 0) : 0)
+                    old = max(old, E1RMCalculator.e1RM(load: load, reps: r.reps))
+                }
+                let new = AnalyticsEngine.ItemStats.of(it, bodyWeight: bw).bestE1RM
+                guard old > 0 else { continue }
+                entries += 1
+                var e = perLift[id] ?? (0, 0, 0, 0, 0)
+                e.entries += 1; e.oldMax = max(e.oldMax, old); e.newMax = max(e.newMax, new)
+                if new == 0 { lost += 1; e.lost += 1 } else if abs(new - old) > 1e-6 { changed += 1; e.changed += 1 }
+                if abs(new - old) > 1e-6 { recapChanged += 1 }
+                perLift[id] = e
+            }
+        }
+        var lines = ["session x lift entries with an e1RM: \(entries); value changes: \(changed); e1RM disappears (long sets only): \(lost)",
+                     "(exercise history sheet: per-entry e1RM, chart and the top e1RM; live recap: top e1RM; the Analytics tab shows no e1RM)"]
+        let nm: (String) -> String = { ExerciseCatalog.displayName(for: $0) }
+        for (id, e) in perLift.sorted(by: { nm($0.key) < nm($1.key) }) where e.changed + e.lost > 0 {
+            lines.append("\(nm(id)): \(e.changed + e.lost) of \(e.entries) entries change (\(e.lost) lose their e1RM); best on the sheet \(Int(e.oldMax)) -> \(e.newMax > 0 ? String(Int(e.newMax)) : "none")")
+        }
+        try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - PR definition report (old vs new; report only)
 
     func test_report_prsUnderTheTwelveRepRule() throws {

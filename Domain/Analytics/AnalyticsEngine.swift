@@ -29,7 +29,7 @@ struct AnalyticsEngine {
         var reps = 0
         /// Sum of effective load x reps over the hard sets (stored lb x reps).
         var volume = 0.0
-        /// Best working-set e1RM (Epley on the effective load); 0 when there is none (or a bodyweight lift has no body weight).
+        /// Best working-set e1RM (Epley on the effective load, sets of 12 reps or fewer); 0 when there is none (or a bodyweight lift has no body weight).
         var bestE1RM = 0.0
         /// The set that gave `bestE1RM` (effective load, reps).
         var bestLoad = 0.0
@@ -51,7 +51,7 @@ struct AnalyticsEngine {
             }
             for row in WorkingSetFilter.workingRows(of: item, isBodyweight: isBodyweight) {
                 let load = effective(row.load)
-                let e1rm = E1RMCalculator.e1RM(load: load, reps: row.reps)
+                let e1rm = BestSetRule.e1RM(load: load, reps: row.reps)      // sets of 12 reps or fewer (see BestSetRule.e1RM)
                 if e1rm > out.bestE1RM { out.bestE1RM = e1rm; out.bestLoad = load; out.bestReps = row.reps }
             }
             return out
