@@ -24,6 +24,8 @@ struct ProgramDayDetailView: View {
     @State private var pendingDelete: PendingDelete?
     @State private var pendingPropagation: ProgramPlanPropagationService.Preview?
     @State private var pendingReset: ResetKind?
+    @State private var pendingBlockApply: ProgramPlanPropagationService.Preview?
+    @State private var pendingRename: DayLabelRename.Plan?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
 
@@ -148,6 +150,18 @@ struct ProgramDayDetailView: View {
         }
         
         
+        .alert("Apply to this block?", isPresented: Binding(get: { pendingBlockApply != nil }, set: { if !$0 { pendingBlockApply = nil } })) {
+            Button("Apply") { confirmBlockApply() }
+            Button("Not now", role: .cancel) { pendingBlockApply = nil }
+        } message: {
+            Text(Self.propagationMessage(pendingBlockApply))
+        }
+        .alert("Rename this day?", isPresented: Binding(get: { pendingRename != nil }, set: { if !$0 { pendingRename = nil } })) {
+            Button("Rename") { confirmRename() }
+            Button("Cancel", role: .cancel) { pendingRename = nil }
+        } message: {
+            Text(pendingRename.map(Self.renameMessage) ?? "")
+        }
         .alert("Reset edited plan?", isPresented: Binding(get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } })) {
             Button("Reset", role: .destructive) {
                 let kind = pendingReset
@@ -180,7 +194,7 @@ struct ProgramDayDetailView: View {
                 renameDayLabel(to: dayLabelDraft)
             }
         } message: {
-            Text("This name also updates future sessions on the same day of the week.")
+            Text("This name is used by every session of this day in this block, past and future. You will see the count before it is applied.")
         }
         
         // ✅ ADD THIS
@@ -349,6 +363,7 @@ struct ProgramDayDetailView: View {
                                             item.plannedLoadsBySet = Array(repeating: load, count: setCount)
                                             item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
                                             item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                                            PlanStepperEdits.markReset(item)
                                             continue
                                         }
 
@@ -388,6 +403,7 @@ struct ProgramDayDetailView: View {
                                         }
 
                                         autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: true)
+                                        PlanStepperEdits.markReset(item)
                                     }
 
             do {
@@ -421,9 +437,11 @@ struct ProgramDayDetailView: View {
                     item.plannedLoadsBySet = Array(repeating: load, count: setCount)
                     item.plannedRepsBySet = Array(repeating: item.targetReps, count: setCount)
                     item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: setCount)
+                    PlanStepperEdits.markReset(item)
                     continue
                 }
                 autoGeneratePerSetPlan(for: item, overwriteLoadsFromSuggested: false)
+                PlanStepperEdits.markReset(item)
             }
 
         do {
@@ -600,37 +618,34 @@ struct ProgramDayDetailView: View {
     
     // MARK: - CRUD helpers
 
+    /// Asks first: the rename covers every planned, in-progress and completed session of this day type in this block.
     private func renameDayLabel(to newLabel: String) {
-        let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        session.dayLabel = trimmed
-
-        if propagatesToFutureSessions {
-            let today = Calendar.current.startOfDay(for: Date())
-            let targetWeekday = Calendar.current.component(.weekday, from: session.date)
-
-            let descriptor = FetchDescriptor<Session>(
-                predicate: #Predicate { s in s.date > today }
-            )
-
-            if let futureSessions = try? modelContext.fetch(descriptor) {
-                let sameDay = futureSessions.filter {
-                    $0.id != session.id &&
-                    $0.status == .planned &&
-                    Calendar.current.component(.weekday, from: $0.date) == targetWeekday
-                }
-                for future in sameDay {
-                    future.dayLabel = trimmed
-                }
-            }
+        switch DayLabelRename.plan(renaming: session, to: newLabel) {
+        case .success(let plan): pendingRename = plan
+        case .failure(.emptyLabel), .failure(.unchanged): return
+        case .failure(.collidesWithAnotherDay(let name)):
+            presentFeedback("Another day in this block is already called \"\(name)\". Pick a different name.")
         }
+    }
 
+    static func renameMessage(_ p: DayLabelRename.Plan) -> String {
+        let n = p.sessionCount
+        var parts: [String] = []
+        if p.planned > 0 { parts.append("\(p.planned) planned") }
+        if p.other > 0 { parts.append("\(p.other) in progress") }
+        if p.completed > 0 { parts.append("\(p.completed) completed") }
+        return "\"\(p.oldLabel)\" becomes \"\(p.newLabel)\" on \(n) session\(n == 1 ? "" : "s") in this block (\(parts.joined(separator: ", "))). Other blocks are not changed."
+    }
+
+    private func confirmRename() {
+        guard let plan = pendingRename else { return }
+        pendingRename = nil
         do {
-            try modelContext.save()
-            presentFeedback("Day renamed to \"\(trimmed)\".")
+            try DayLabelRename.apply(renaming: session, to: plan.newLabel, in: modelContext)
+            presentFeedback("Day renamed to \"\(plan.newLabel)\" on \(plan.sessionCount) sessions.")
         } catch {
             print("⚠️ Failed to rename day: \(error)")
+            presentFeedback("Couldn’t rename the day. Nothing was changed.")
         }
     }
 
@@ -863,143 +878,31 @@ struct ProgramDayDetailView: View {
 
     // MARK: - Apply to Block
 
-    /// Apply the current day's PLAN to other sessions in the same block that share the same day type.
-    ///
-    /// Copies PLAN fields only (sets / reps / RIR / suggested load / per-set plan / DUP prescription metadata)
-    /// and does NOT touch logged Actuals.
+    /// Copies this day's plan onto the other future planned sessions of the same day type IN THIS BLOCK, after a confirmation
+    /// that shows the count and how many hand-edited exercises are left alone. (No button calls this yet.)
     private func applyPlanChangesToBlock() {
-        // Copies the full prescription (waveRaw, rep/RIR/set ranges, per-set arrays)
-        // onto every other session of this day type — which on a wave-based block
-        // overwrites the B and C weeks with this week's wave.
         guard !isWaveBasedBlock else {
-            print("⛔️ applyPlanChangesToBlock skipped: wave-based block.")
             presentFeedback("Changes apply to this session only for wave-based programs.")
             return
         }
-
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        // Day-type identity, not calendar weekday — a session's weekday can shift
-        // (e.g. the "Rest today" push) without its day type changing, and weekday
-        // is not a reliable stand-in for day type once that happens.
-        let sourceDayLabel = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        guard !sourceDayLabel.isEmpty else {
-            print("ℹ️ applyPlanChangesToBlock: source session has no dayLabel to match on.")
-            presentFeedback("Can’t apply changes: this session has no day type set.")
+        let preview = ProgramPlanPropagationService.blockPreview(from: session, in: modelContext)
+        guard preview.sessionsToChange > 0 else {
+            presentFeedback("No future planned sessions of this day in this block.")
             return
         }
+        pendingBlockApply = preview
+    }
 
-        let descriptor = FetchDescriptor<Session>(
-            predicate: #Predicate { s in
-                s.date > today
-            },
-            sortBy: [SortDescriptor(\.date, order: .forward)]
-        )
-
+    private func confirmBlockApply() {
+        pendingBlockApply = nil
+        let result = ProgramPlanPropagationService.applyToBlock(from: session, in: modelContext)
         do {
-            let futureSessions = try modelContext.fetch(descriptor)
-
-            let targets = futureSessions.filter { other in
-                other.id != session.id &&
-                other.status == .planned &&
-                other.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) == sourceDayLabel
-            }
-
-            guard !targets.isEmpty else {
-                print("ℹ️ No future planned sessions matched for applyPlanChangesToBlock.")
-                presentFeedback("No future planned sessions matched this day type.")
-                return
-            }
-
-            let sourceItems = orderedItems
-
-            for other in targets {
-                let targetItemsSorted = other.items.sorted { $0.order < $1.order }
-
-                // 1) Delete extras
-                if targetItemsSorted.count > sourceItems.count {
-                    for extra in targetItemsSorted[sourceItems.count...] {
-                        modelContext.delete(extra)
-                    }
-                }
-
-                // 2) Add missing
-                if targetItemsSorted.count < sourceItems.count {
-                    for idx in targetItemsSorted.count..<sourceItems.count {
-                        let src = sourceItems[idx]
-
-                        let newItem = SessionItem(
-                            order: idx + 1,
-                            exerciseId: src.exerciseId,
-                            exerciseNameSnapshot: src.exerciseNameSnapshot,
-                            targetReps: src.targetReps,
-                            targetSets: src.targetSets,
-                            targetRIR: src.targetRIR,
-                            suggestedLoad: src.suggestedLoad,
-
-                            waveRaw: src.waveRaw,
-                            priorityRaw: src.priorityRaw,
-                            setMin: src.setMin,
-                            setMax: src.setMax,
-                            repMin: src.repMin,
-                            repMax: src.repMax,
-                            targetRIRMin: src.targetRIRMin,
-                            targetRIRMax: src.targetRIRMax,
-                            intensifierRaw: src.intensifierRaw,
-                            intensifierNotes: src.intensifierNotes,
-                            prescriptionNotes: src.prescriptionNotes,
-
-                            plannedRepsBySet: src.plannedRepsBySet,
-                            plannedLoadsBySet: src.plannedLoadsBySet
-                        )
-
-                        other.items.append(newItem)
-                    }
-                }
-
-                // 3) Align & copy by order
-                let aligned = other.items.sorted { $0.order < $1.order }
-
-                for (idx, src) in sourceItems.enumerated() {
-                    guard idx < aligned.count else { continue }
-                    let dst = aligned[idx]
-
-                    dst.order = idx + 1
-                    dst.exerciseId = src.exerciseId
-                    dst.exerciseNameSnapshot = src.exerciseNameSnapshot
-
-                    // Flattened execution defaults
-                    dst.targetReps = src.targetReps
-                    dst.targetSets = src.effectivePrescribedSets
-                    dst.prescribedSets = src.effectivePrescribedSets
-                    dst.targetRIR = src.targetRIR
-                    dst.suggestedLoad = src.suggestedLoad
-
-                    // Rich DUP prescription metadata
-                    dst.waveRaw = src.waveRaw
-                    dst.priorityRaw = src.priorityRaw
-                    dst.setMin = src.setMin
-                    dst.setMax = src.setMax
-                    dst.repMin = src.repMin
-                    dst.repMax = src.repMax
-                    dst.targetRIRMin = src.targetRIRMin
-                    dst.targetRIRMax = src.targetRIRMax
-                    dst.intensifierRaw = src.intensifierRaw
-                    dst.intensifierNotes = src.intensifierNotes
-                    dst.prescriptionNotes = src.prescriptionNotes
-
-                    // Planned per-set editor state
-                    dst.plannedRepsBySet = src.plannedRepsBySet
-                    dst.plannedLoadsBySet = src.plannedLoadsBySet
-                }
-            }
-
             try modelContext.save()
-            print("✅ Applied plan changes from \(session.date) to \(targets.count) future planned sessions.")
-            presentFeedback("Applied plan changes to \(targets.count) future session\(targets.count == 1 ? "" : "s").")
+            var text = "Applied plan changes to \(result.sessionsToChange) future session\(result.sessionsToChange == 1 ? "" : "s")."
+            if result.editedItemsSkipped > 0 { text += " \(result.editedItemsSkipped) exercise\(result.editedItemsSkipped == 1 ? "" : "s") you edited by hand were left as they are." }
+            presentFeedback(text)
         } catch {
-            print("⚠️ Failed to apply plan changes to block: \(error)")
+            modelContext.rollback()
             presentFeedback("Couldn’t apply changes: \(error.localizedDescription)")
         }
     }

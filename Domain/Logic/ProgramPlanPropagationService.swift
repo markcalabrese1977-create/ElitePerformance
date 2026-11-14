@@ -161,3 +161,157 @@ struct ProgramPlanPropagationService {
         return result
     }
 }
+
+// MARK: - Apply to the block (by position)
+
+extension ProgramPlanPropagationService {
+    /// Future planned sessions of the SOURCE's meso with the same (trimmed) dayLabel. Never another meso.
+    static func blockTargets(from source: Session, in context: ModelContext) -> [Session] {
+        guard !WavePrescriptionGuard.isWaveBasedBlock(source), let meso = source.meso else { return [] }
+        let label = source.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !label.isEmpty else { return [] }
+        let today = Calendar.current.startOfDay(for: Date())
+        return meso.sessions.filter {
+            $0.id != source.id && $0.status == .planned && $0.date > today &&
+            ($0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") == label
+        }
+    }
+
+    static func blockPreview(from source: Session, in context: ModelContext) -> Preview {
+        var skipped = 0, sessionsSkipping = 0
+        let targets = blockTargets(from: source, in: context)
+        for t in targets {
+            let n = t.items.filter { $0.planEdited }.count
+            skipped += n
+            if n > 0 { sessionsSkipping += 1 }
+        }
+        return Preview(sessionsToChange: targets.count, editedItemsSkipped: skipped, sessionsWithSkippedItems: sessionsSkipping)
+    }
+
+    /// Copies the source's plan onto each block target by position. Items the lifter edited by hand are skipped, never
+    /// overwritten or deleted. Callers save.
+    @discardableResult
+    static func applyToBlock(from source: Session, in context: ModelContext) -> Preview {
+        let result = blockPreview(from: source, in: context)
+        let sourceItems = source.items.sorted { $0.order < $1.order }
+        for other in blockTargets(from: source, in: context) {
+            let sorted = other.items.sorted { $0.order < $1.order }
+            if sorted.count > sourceItems.count {
+                for extra in sorted[sourceItems.count...] where !extra.planEdited { context.delete(extra) }
+            }
+            if sorted.count < sourceItems.count {
+                for idx in sorted.count..<sourceItems.count {
+                    let src = sourceItems[idx]
+                    let n = SessionItem(
+                        order: idx + 1, exerciseId: src.exerciseId, exerciseNameSnapshot: src.exerciseNameSnapshot,
+                        targetReps: src.targetReps, targetSets: src.targetSets, targetRIR: src.targetRIR, suggestedLoad: src.suggestedLoad,
+                        waveRaw: src.waveRaw, priorityRaw: src.priorityRaw, setMin: src.setMin, setMax: src.setMax,
+                        repMin: src.repMin, repMax: src.repMax, targetRIRMin: src.targetRIRMin, targetRIRMax: src.targetRIRMax,
+                        intensifierRaw: src.intensifierRaw, intensifierNotes: src.intensifierNotes, prescriptionNotes: src.prescriptionNotes,
+                        plannedRepsBySet: src.plannedRepsBySet, plannedLoadsBySet: src.plannedLoadsBySet)
+                    context.insert(n)
+                    other.items.append(n)
+                }
+            }
+            let aligned = other.items.sorted { $0.order < $1.order }
+            for (idx, src) in sourceItems.enumerated() where idx < aligned.count {
+                let dst = aligned[idx]
+                guard !dst.planEdited else { continue }
+                dst.order = idx + 1
+                dst.exerciseId = src.exerciseId
+                dst.exerciseNameSnapshot = src.exerciseNameSnapshot
+                dst.targetReps = src.targetReps
+                dst.targetSets = src.effectivePrescribedSets
+                dst.prescribedSets = src.effectivePrescribedSets
+                dst.targetRIR = src.targetRIR
+                dst.suggestedLoad = src.suggestedLoad
+                dst.waveRaw = src.waveRaw; dst.priorityRaw = src.priorityRaw
+                dst.setMin = src.setMin; dst.setMax = src.setMax; dst.repMin = src.repMin; dst.repMax = src.repMax
+                dst.targetRIRMin = src.targetRIRMin; dst.targetRIRMax = src.targetRIRMax
+                dst.intensifierRaw = src.intensifierRaw; dst.intensifierNotes = src.intensifierNotes
+                dst.prescriptionNotes = src.prescriptionNotes
+                dst.plannedRepsBySet = src.plannedRepsBySet
+                dst.plannedLoadsBySet = src.plannedLoadsBySet
+            }
+        }
+        return result
+    }
+}
+
+// MARK: - Renaming a day type
+
+/// Renaming a day ("Push" -> "Upper A") rewrites the label on EVERY session of that day type in the same meso, planned,
+/// in-progress and completed, so the data that pairs sessions by dayLabel stays one chain:
+///  - `PlanMemoryEngine.nextTargetItem` (carry-forward) pairs a finished session with the next one by meso + EXACT dayLabel
+///    + wave letter, so a half-renamed block stops carrying loads forward;
+///  - `LoadProjectionService` (Auto+), `CoachingEngine` and `SessionItemEditService` match the same way;
+///  - History cards show `SessionHistory.dayLabelSnapshot` before the session's own label, so the snapshots of the renamed
+///    completed sessions are rewritten too;
+///  - MesoComparison and the summaries read the sessions' labels, which are all renamed together.
+/// Other mesos are never touched.
+enum DayLabelRename {
+
+    struct Plan: Equatable {
+        var oldLabel: String
+        var newLabel: String
+        var planned: Int
+        var completed: Int
+        var other: Int
+        var sessionCount: Int { planned + completed + other }
+    }
+
+    enum Failure: Error, Equatable {
+        case emptyLabel
+        case unchanged
+        case collidesWithAnotherDay(String)
+    }
+
+    private static func key(_ s: String?) -> String { (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Sessions of `session`'s day type in its meso (exact label, as carry-forward compares it), the session itself included.
+    static func targets(of session: Session) -> [Session] {
+        guard let meso = session.meso else { return [session] }
+        let label = session.dayLabel
+        return meso.sessions.filter { $0.id == session.id || SessionDayLabelMatcher.matches($0.dayLabel, label) }
+    }
+
+    static func plan(renaming session: Session, to newLabel: String) -> Result<Plan, Failure> {
+        let trimmed = key(newLabel)
+        guard !trimmed.isEmpty else { return .failure(.emptyLabel) }
+        guard trimmed != key(session.dayLabel) else { return .failure(.unchanged) }
+        if let meso = session.meso {
+            let mine = Set(targets(of: session).map(\.id))
+            if meso.sessions.contains(where: { !mine.contains($0.id) && key($0.dayLabel).lowercased() == trimmed.lowercased() }) {
+                return .failure(.collidesWithAnotherDay(trimmed))
+            }
+        }
+        let t = targets(of: session)
+        return .success(Plan(
+            oldLabel: key(session.dayLabel), newLabel: trimmed,
+            planned: t.filter { $0.status == .planned }.count,
+            completed: t.filter { $0.status == .completed }.count,
+            other: t.filter { $0.status == .inProgress }.count))
+    }
+
+    /// All or nothing: every target is renamed and saved together, or none is.
+    @discardableResult
+    static func apply(renaming session: Session, to newLabel: String, in context: ModelContext) throws -> Plan {
+        let plan: Plan
+        switch Self.plan(renaming: session, to: newLabel) {
+        case .success(let p): plan = p
+        case .failure(let f): throw f
+        }
+        let t = targets(of: session)
+        let ids = Set(t.map(\.id))
+        do {
+            for s in t { s.dayLabel = plan.newLabel }
+            let histories = (try? context.fetch(FetchDescriptor<SessionHistory>())) ?? []
+            for h in histories { if let sid = h.sessionId, ids.contains(sid) { h.dayLabelSnapshot = plan.newLabel } }
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        return plan
+    }
+}

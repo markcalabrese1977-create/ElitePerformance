@@ -117,6 +117,30 @@ final class LoadWriteTests: XCTestCase {
         XCTAssertEqual(edited.plannedLoadsBySet, [50])
     }
 
+    // SS: a reset (Auto / Auto+) clears planEdited, so carry-forward writes that target again.
+    func test_SS_afterAReset_carryForwardWritesTheTargetAgain() throws {
+        let context = try makeContext()
+        let yesterday = cal.date(byAdding: .day, value: -1, to: Date())!
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date())!
+        let t = item(reps: [0], loads: [0], rirs: [0], suggestedLoad: 50)
+        t.plannedLoadsBySet = [50]; t.plannedRepsBySet = [10]; t.plannedRIRsBySet = [2]
+        PlanStepperEdits.setPlannedReps(t, at: 0, to: 12)
+        XCTAssertTrue(t.planEdited)
+        let src = item(reps: [10], loads: [999], rirs: [2], suggestedLoad: 999)
+        src.plannedLoadsBySet = [999]
+        let sourceSession = Session(date: yesterday, status: .completed, weekIndex: 1, items: [src])
+        let targetSession = Session(date: tomorrow, status: .planned, weekIndex: 2, items: [t])
+        context.insert(sourceSession); context.insert(targetSession)
+        try context.save()
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+        XCTAssertEqual(t.plannedLoadsBySet, [50], "edited: frozen")
+
+        PlanStepperEdits.markReset(t)
+        XCTAssertFalse(t.planEdited)
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+        XCTAssertGreaterThan(t.suggestedLoad, 50, "after the reset carry-forward writes this target again")
+    }
+
     // A rep-only edit marks the plan edited, and carry-forward then leaves that target's reps AND loads alone. (An unedited
     // target, as a control, takes the earned load but its reps and RIR are never written by carry-forward.)
     func test_B2b_aRepOnlyEditFreezesTheTarget_carryForwardLeavesRepsAndLoadsAlone() throws {
