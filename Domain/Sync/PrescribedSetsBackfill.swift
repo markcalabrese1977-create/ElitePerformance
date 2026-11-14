@@ -19,16 +19,16 @@ enum PrescribedSetsBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ prescribedSets backfill not needed.")
+            BackfillLog.note("ℹ️ prescribedSets backfill not needed.")
             return
         }
 
         guard let sessions = try? context.fetch(FetchDescriptor<Session>()) else {
-            print("⚠️ prescribedSets backfill failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ prescribedSets backfill failed: could not fetch sessions.")
             return
         }
         guard !sessions.isEmpty else {
-            print("ℹ️ prescribedSets backfill: no sessions yet, will run once there are.")
+            BackfillLog.note("ℹ️ prescribedSets backfill: no sessions yet, will run once there are.")
             return
         }
 
@@ -43,13 +43,13 @@ enum PrescribedSetsBackfill {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ prescribedSets backfill completed. Updated \(changedCount) items.")
+                BackfillLog.note("✅ prescribedSets backfill completed. Updated \(changedCount) items.")
             } else {
-                print("ℹ️ prescribedSets backfill found nothing to update.")
+                BackfillLog.note("ℹ️ prescribedSets backfill found nothing to update.")
             }
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ prescribedSets backfill save failed: \(error)")
+            BackfillLog.note("⚠️ prescribedSets backfill save failed: \(error)")
         }
     }
 }

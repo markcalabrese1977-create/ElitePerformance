@@ -5,13 +5,14 @@ enum CustomExerciseStoreMigration {
     private static let completionKey = "customExerciseStoreMigration.v1.completed"
 
     static func runIfNeeded(in context: ModelContext) {
-        guard !UserDefaults.standard.bool(forKey: completionKey) else { return }
+        guard !UserDefaults.standard.bool(forKey: completionKey) else { BackfillLog.note("not needed"); return }
 
         let key = "custom_exercises_v2"
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([CatalogExercise].self, from: data),
               !decoded.isEmpty else {
             UserDefaults.standard.set(true, forKey: completionKey)
+            BackfillLog.note("nothing to migrate (no legacy custom exercises)")
             return
         }
 
@@ -29,9 +30,9 @@ enum CustomExerciseStoreMigration {
             try context.save()
             UserDefaults.standard.removeObject(forKey: key)
             UserDefaults.standard.set(true, forKey: completionKey)
-            print("✅ CustomExerciseStoreMigration: migrated \(decoded.count) custom exercises to SwiftData.")
+            BackfillLog.note("✅ CustomExerciseStoreMigration: migrated \(decoded.count) custom exercises to SwiftData.")
         } catch {
-            print("⚠️ CustomExerciseStoreMigration failed: \(error)")
+            BackfillLog.note("⚠️ CustomExerciseStoreMigration failed: \(error)")
         }
     }
 }

@@ -16,16 +16,16 @@ enum PlannedDateBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ plannedDate backfill not needed.")
+            BackfillLog.note("ℹ️ plannedDate backfill not needed.")
             return
         }
 
         guard let sessions = try? context.fetch(FetchDescriptor<Session>()) else {
-            print("⚠️ plannedDate backfill failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ plannedDate backfill failed: could not fetch sessions.")
             return
         }
         guard !sessions.isEmpty else {
-            print("ℹ️ plannedDate backfill: no sessions yet, will run once there are.")
+            BackfillLog.note("ℹ️ plannedDate backfill: no sessions yet, will run once there are.")
             return
         }
 
@@ -38,13 +38,13 @@ enum PlannedDateBackfill {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ plannedDate backfill completed. Updated \(changedCount) sessions.")
+                BackfillLog.note("✅ plannedDate backfill completed. Updated \(changedCount) sessions.")
             } else {
-                print("ℹ️ plannedDate backfill found nothing to update.")
+                BackfillLog.note("ℹ️ plannedDate backfill found nothing to update.")
             }
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ plannedDate backfill save failed: \(error)")
+            BackfillLog.note("⚠️ plannedDate backfill save failed: \(error)")
         }
     }
 }

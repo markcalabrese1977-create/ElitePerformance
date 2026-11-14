@@ -7,20 +7,20 @@ enum MechanicalLoadRecoveryMigration {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ Mechanical load recovery not needed.")
+            BackfillLog.note("ℹ️ Mechanical load recovery not needed.")
             return
         }
 
         guard let histories = try? context.fetch(
             FetchDescriptor<SessionHistory>(sortBy: [SortDescriptor(\.date, order: .forward)])
         ) else {
-            print("⚠️ Mechanical load recovery: could not fetch history.")
+            BackfillLog.note("⚠️ Mechanical load recovery: could not fetch history.")
             return
         }
         guard let sessions = try? context.fetch(
             FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)])
         ) else {
-            print("⚠️ Mechanical load recovery: could not fetch sessions.")
+            BackfillLog.note("⚠️ Mechanical load recovery: could not fetch sessions.")
             return
         }
 
@@ -50,9 +50,9 @@ enum MechanicalLoadRecoveryMigration {
 
         do {
             if recovered > 0 { try context.save() }
-            print("✅ Mechanical load recovery: repopulated \(recovered) rows.")
+            BackfillLog.note("✅ Mechanical load recovery: repopulated \(recovered) rows.")
         } catch {
-            print("⚠️ Mechanical load recovery save failed: \(error)")
+            BackfillLog.note("⚠️ Mechanical load recovery save failed: \(error)")
             return
         }
 

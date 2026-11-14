@@ -6,13 +6,13 @@ enum ExerciseNameSnapshotBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ Exercise name snapshot backfill not needed.")
+            BackfillLog.note("ℹ️ Exercise name snapshot backfill not needed.")
             return
         }
 
         let descriptor = FetchDescriptor<Session>()
         guard let sessions = try? context.fetch(descriptor) else {
-            print("⚠️ Exercise name snapshot backfill failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ Exercise name snapshot backfill failed: could not fetch sessions.")
             return
         }
 
@@ -39,14 +39,14 @@ enum ExerciseNameSnapshotBackfill {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ Exercise name snapshot backfill completed. Updated \(changedCount) items.")
+                BackfillLog.note("✅ Exercise name snapshot backfill completed. Updated \(changedCount) items.")
             } else {
-                print("ℹ️ Exercise name snapshot backfill found nothing to update.")
+                BackfillLog.note("ℹ️ Exercise name snapshot backfill found nothing to update.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ Exercise name snapshot backfill save failed: \(error)")
+            BackfillLog.note("⚠️ Exercise name snapshot backfill save failed: \(error)")
         }
     }
 

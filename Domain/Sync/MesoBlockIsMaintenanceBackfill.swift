@@ -18,12 +18,12 @@ enum MesoBlockIsMaintenanceBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ MesoBlock isMaintenance backfill not needed.")
+            BackfillLog.note("ℹ️ MesoBlock isMaintenance backfill not needed.")
             return
         }
 
         guard let blocks = try? context.fetch(FetchDescriptor<MesoBlock>()) else {
-            print("⚠️ MesoBlock isMaintenance backfill failed: could not fetch meso blocks.")
+            BackfillLog.note("⚠️ MesoBlock isMaintenance backfill failed: could not fetch meso blocks.")
             return
         }
 
@@ -37,14 +37,14 @@ enum MesoBlockIsMaintenanceBackfill {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ MesoBlock isMaintenance backfill completed. Updated \(changedCount) blocks.")
+                BackfillLog.note("✅ MesoBlock isMaintenance backfill completed. Updated \(changedCount) blocks.")
             } else {
-                print("ℹ️ MesoBlock isMaintenance backfill found nothing to update.")
+                BackfillLog.note("ℹ️ MesoBlock isMaintenance backfill found nothing to update.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ MesoBlock isMaintenance backfill save failed: \(error)")
+            BackfillLog.note("⚠️ MesoBlock isMaintenance backfill save failed: \(error)")
         }
     }
 }

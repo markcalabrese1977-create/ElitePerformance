@@ -10,16 +10,17 @@ enum CustomExerciseUserDefaultsSyncRepair {
     private static let completionKey = "customExerciseUserDefaultsSync.v1.completed"
 
     static func runIfNeeded(in context: ModelContext) {
-        guard !UserDefaults.standard.bool(forKey: completionKey) else { return }
+        guard !UserDefaults.standard.bool(forKey: completionKey) else { BackfillLog.note("not needed"); return }
 
         let descriptor = FetchDescriptor<CustomExercise>()
         guard let exercises = try? context.fetch(descriptor), !exercises.isEmpty else {
             UserDefaults.standard.set(true, forKey: completionKey)
+            BackfillLog.note("nothing to sync (no custom exercises)")
             return
         }
 
         ExerciseCatalog.rebuildCustomMirror(from: context)
-        print("✅ CustomExerciseUserDefaultsSyncRepair: synced \(exercises.count) exercise(s) to UserDefaults")
+        BackfillLog.note("✅ CustomExerciseUserDefaultsSyncRepair: synced \(exercises.count) exercise(s) to UserDefaults")
 
         UserDefaults.standard.set(true, forKey: completionKey)
     }

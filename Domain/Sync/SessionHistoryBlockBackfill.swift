@@ -6,7 +6,7 @@ enum SessionHistoryBlockBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ SessionHistory block backfill not needed.")
+            BackfillLog.note("ℹ️ SessionHistory block backfill not needed.")
             return
         }
 
@@ -18,12 +18,12 @@ enum SessionHistoryBlockBackfill {
         )
 
         guard let histories = try? context.fetch(historyDescriptor) else {
-            print("⚠️ SessionHistory block backfill failed: could not fetch history rows.")
+            BackfillLog.note("⚠️ SessionHistory block backfill failed: could not fetch history rows.")
             return
         }
 
         guard let sessions = try? context.fetch(sessionDescriptor) else {
-            print("⚠️ SessionHistory block backfill failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ SessionHistory block backfill failed: could not fetch sessions.")
             return
         }
 
@@ -55,14 +55,14 @@ enum SessionHistoryBlockBackfill {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ SessionHistory block backfill completed. Updated \(changedCount) rows.")
+                BackfillLog.note("✅ SessionHistory block backfill completed. Updated \(changedCount) rows.")
             } else {
-                print("ℹ️ SessionHistory block backfill found nothing to update.")
+                BackfillLog.note("ℹ️ SessionHistory block backfill found nothing to update.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ SessionHistory block backfill save failed: \(error)")
+            BackfillLog.note("⚠️ SessionHistory block backfill save failed: \(error)")
         }
     }
 

@@ -642,6 +642,40 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
+    /// Every startup backfill logs EXACTLY ONE line, "<TypeName>: <result>", in registered order, and the names logged are the
+    /// registered list (the harness's own list included). A second launch (all done) reports "not needed" for each.
+    func test_everyStartupBackfill_logsExactlyOneLine_withItsTypeNameAndResult() throws {
+        let c = try BackupTestSupport.makeContainer()
+        var lines: [String] = []
+        BackfillLog.lineSink = { lines.append($0) }
+        defer { BackfillLog.lineSink = nil }
+        clearKeys()
+        StartupBackfills.run(using: c)
+        let firstLaunch = lines; lines = []
+        StartupBackfills.run(using: c)
+        let secondLaunch = lines
+        let registered = StartupBackfills.registered.map(\.name)
+        XCTAssertEqual(registered, [
+            "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
+            "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
+            "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
+            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 13)
+        for launch in [firstLaunch, secondLaunch] {
+            XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
+            for (line, name) in zip(launch, registered) {
+                XCTAssertTrue(line.hasPrefix("ℹ️ Backfill \(name): "), line)
+                XCTAssertFalse(line.dropFirst("ℹ️ Backfill \(name): ".count).isEmpty, "a result: \(line)")
+                XCTAssertFalse(line.contains("\n"))
+            }
+        }
+        // after the first launch every flag-gated backfill is done; an empty store leaves the data-dependent ones waiting
+        let notNeeded = secondLaunch.filter { $0.hasSuffix(": not needed") }.count
+        XCTAssertGreaterThanOrEqual(notNeeded, 8, "second launch: \(secondLaunch)")
+        print("BACKFILL LOG (first launch on an empty store):\n" + firstLaunch.joined(separator: "\n"))
+        print("BACKFILL LOG (second launch):\n" + secondLaunch.joined(separator: "\n"))
+    }
+
     /// Every registered backfill but PrescribedSetsBackfill and PlannedDateBackfill leaves the store byte-identical;
     /// those two add `prescribedSets` (= targetSets) to PLANNED items and `plannedDate` (= date) to PLANNED sessions
     /// and change nothing else. The comparison removes exactly those keys from planned rows (and requires them to be

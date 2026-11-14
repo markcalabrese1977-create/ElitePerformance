@@ -14,19 +14,19 @@ enum PRIndexRuleBackfill {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ PRIndex 12-rep rebuild not needed.")
+            BackfillLog.note("ℹ️ PRIndex 12-rep rebuild not needed.")
             return
         }
         guard let sessions = try? context.fetch(FetchDescriptor<Session>()), !sessions.isEmpty else {
-            print("ℹ️ PRIndex 12-rep rebuild: no sessions yet, will run once there are.")
+            BackfillLog.note("ℹ️ PRIndex 12-rep rebuild: no sessions yet, will run once there are.")
             return
         }
         do {
             try PRRebuildService.rebuild(in: context, recomputeFlags: true)
             UserDefaults.standard.set(true, forKey: completionKey)
-            print("✅ PRIndex rebuilt under the 12-rep rule.")
+            BackfillLog.note("✅ PRIndex rebuilt under the 12-rep rule.")
         } catch {
-            print("⚠️ PRIndex 12-rep rebuild failed: \(error)")
+            BackfillLog.note("⚠️ PRIndex 12-rep rebuild failed: \(error)")
         }
     }
 }

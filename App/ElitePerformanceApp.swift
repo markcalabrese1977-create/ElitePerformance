@@ -197,20 +197,34 @@ struct ElitePerformanceApp: App {
 /// The startup migration list, in app order. Only repairs that are safe on any user's store are registered;
 /// one-shot repairs have been removed (see git history).
 enum StartupBackfills {
+    /// The registered backfills, in run order. `run` iterates this list, so the log lines and this list cannot drift apart.
+    static let registered: [(name: String, run: (ModelContext) -> Void)] = [
+        (String(describing: ExerciseNameSnapshotBackfill.self), { ExerciseNameSnapshotBackfill.runIfNeeded(in: $0) }),
+        (String(describing: CanonicalExerciseIdMigration.self), { CanonicalExerciseIdMigration.runIfNeeded(in: $0) }),
+        (String(describing: CustomExerciseDedupMigration.self), { CustomExerciseDedupMigration.runIfNeeded(in: $0) }),
+        (String(describing: SessionHistoryBlockBackfill.self), { SessionHistoryBlockBackfill.runIfNeeded(in: $0) }),
+        (String(describing: MechanicalLoadRecoveryMigration.self), { MechanicalLoadRecoveryMigration.runIfNeeded(in: $0) }),
+        (String(describing: CustomExerciseStoreMigration.self), { CustomExerciseStoreMigration.runIfNeeded(in: $0) }),
+        (String(describing: CustomExerciseUserDefaultsSyncRepair.self), { CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: $0) }),
+        (String(describing: MesoBlockIsMaintenanceBackfill.self), { MesoBlockIsMaintenanceBackfill.runIfNeeded(in: $0) }),
+        (String(describing: BodyweightPhantomLoadMigration.self), { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
+        (String(describing: PrescribedSetsBackfill.self), { PrescribedSetsBackfill.runIfNeeded(in: $0) }),
+        (String(describing: PlannedDateBackfill.self), { PlannedDateBackfill.runIfNeeded(in: $0) }),
+        (String(describing: PRIndexRuleBackfill.self), { PRIndexRuleBackfill.runIfNeeded(in: $0) }),
+        (String(describing: LegacyExerciseNotesBackfill.self), { LegacyExerciseNotesBackfill.runIfNeeded(in: $0) }),
+    ]
+
+    /// Runs every registered backfill and logs exactly one line for each: "<TypeName>: <result>".
     static func run(using container: ModelContainer) {
         let context = ModelContext(container)
-        ExerciseNameSnapshotBackfill.runIfNeeded(in: context)
-        CanonicalExerciseIdMigration.runIfNeeded(in: context)
-        CustomExerciseDedupMigration.runIfNeeded(in: context)
-        SessionHistoryBlockBackfill.runIfNeeded(in: context)
-        MechanicalLoadRecoveryMigration.runIfNeeded(in: context)
-        CustomExerciseStoreMigration.runIfNeeded(in: context)
-        CustomExerciseUserDefaultsSyncRepair.runIfNeeded(in: context)
-        MesoBlockIsMaintenanceBackfill.runIfNeeded(in: context)
-        BodyweightPhantomLoadMigration.runIfNeeded(in: context)
-        PrescribedSetsBackfill.runIfNeeded(in: context)
-        PlannedDateBackfill.runIfNeeded(in: context)
-        PRIndexRuleBackfill.runIfNeeded(in: context)
-        LegacyExerciseNotesBackfill.runIfNeeded(in: context)
+        for backfill in registered {
+            BackfillLog.collector = []
+            backfill.run(context)
+            let notes = BackfillLog.collector ?? []
+            BackfillLog.collector = nil
+            let line = "ℹ️ Backfill \(backfill.name): \(BackfillLog.result(from: notes))"
+            print(line)
+            BackfillLog.lineSink?(line)
+        }
     }
 }

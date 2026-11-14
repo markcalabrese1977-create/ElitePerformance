@@ -6,13 +6,13 @@ enum CanonicalExerciseIdMigration {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ Canonical exercise ID migration not needed.")
+            BackfillLog.note("ℹ️ Canonical exercise ID migration not needed.")
             return
         }
 
         let descriptor = FetchDescriptor<Session>()
         guard let sessions = try? context.fetch(descriptor) else {
-            print("⚠️ Canonical exercise ID migration failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ Canonical exercise ID migration failed: could not fetch sessions.")
             return
         }
 
@@ -39,14 +39,14 @@ enum CanonicalExerciseIdMigration {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ Canonical exercise ID migration completed. Updated \(changedCount) items.")
+                BackfillLog.note("✅ Canonical exercise ID migration completed. Updated \(changedCount) items.")
             } else {
-                print("ℹ️ Canonical exercise ID migration found nothing to update.")
+                BackfillLog.note("ℹ️ Canonical exercise ID migration found nothing to update.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ Canonical exercise ID migration save failed: \(error)")
+            BackfillLog.note("⚠️ Canonical exercise ID migration save failed: \(error)")
         }
     }
 }

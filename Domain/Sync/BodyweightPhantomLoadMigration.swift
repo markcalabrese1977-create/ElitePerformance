@@ -26,12 +26,12 @@ enum BodyweightPhantomLoadMigration {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ Bodyweight phantom-load migration not needed.")
+            BackfillLog.note("ℹ️ Bodyweight phantom-load migration not needed.")
             return
         }
 
         guard let items = try? context.fetch(FetchDescriptor<SessionItem>()) else {
-            print("⚠️ Bodyweight phantom-load migration failed: could not fetch session items.")
+            BackfillLog.note("⚠️ Bodyweight phantom-load migration failed: could not fetch session items.")
             return
         }
 
@@ -56,14 +56,14 @@ enum BodyweightPhantomLoadMigration {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ Bodyweight phantom-load migration completed. Cleared \(changedCount) items.")
+                BackfillLog.note("✅ Bodyweight phantom-load migration completed. Cleared \(changedCount) items.")
             } else {
-                print("ℹ️ Bodyweight phantom-load migration found nothing to clear.")
+                BackfillLog.note("ℹ️ Bodyweight phantom-load migration found nothing to clear.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ Bodyweight phantom-load migration save failed: \(error)")
+            BackfillLog.note("⚠️ Bodyweight phantom-load migration save failed: \(error)")
         }
     }
 }

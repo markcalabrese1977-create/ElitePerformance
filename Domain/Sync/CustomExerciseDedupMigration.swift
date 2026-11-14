@@ -6,7 +6,7 @@ enum CustomExerciseDedupMigration {
 
     static func runIfNeeded(in context: ModelContext) {
         if UserDefaults.standard.bool(forKey: completionKey) {
-            print("ℹ️ Custom exercise dedup migration not needed.")
+            BackfillLog.note("ℹ️ Custom exercise dedup migration not needed.")
             return
         }
 
@@ -26,14 +26,14 @@ enum CustomExerciseDedupMigration {
         )
 
         guard !duplicateCustomToBuiltIn.isEmpty else {
-            print("ℹ️ Custom exercise dedup migration found no duplicate custom exercises.")
+            BackfillLog.note("ℹ️ Custom exercise dedup migration found no duplicate custom exercises.")
             UserDefaults.standard.set(true, forKey: completionKey)
             return
         }
 
         let descriptor = FetchDescriptor<Session>()
         guard let sessions = try? context.fetch(descriptor) else {
-            print("⚠️ Custom exercise dedup migration failed: could not fetch sessions.")
+            BackfillLog.note("⚠️ Custom exercise dedup migration failed: could not fetch sessions.")
             return
         }
 
@@ -59,14 +59,14 @@ enum CustomExerciseDedupMigration {
         do {
             if changedCount > 0 {
                 try context.save()
-                print("✅ Custom exercise dedup migration completed. Updated \(changedCount) items.")
+                BackfillLog.note("✅ Custom exercise dedup migration completed. Updated \(changedCount) items.")
             } else {
-                print("ℹ️ Custom exercise dedup migration found nothing to update.")
+                BackfillLog.note("ℹ️ Custom exercise dedup migration found nothing to update.")
             }
 
             UserDefaults.standard.set(true, forKey: completionKey)
         } catch {
-            print("⚠️ Custom exercise dedup migration save failed: \(error)")
+            BackfillLog.note("⚠️ Custom exercise dedup migration save failed: \(error)")
         }
     }
 
