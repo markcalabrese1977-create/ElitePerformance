@@ -32,6 +32,16 @@ struct TodayTabView: View {
 
     @State private var showRestToday = false
 
+    // No verified off-device backup for 7 days: a banner, dismissed only until tomorrow.
+    @ObservedObject private var autoBackup = AutoBackupService.shared
+    @State private var bannerTick = 0
+    @State private var bannerBusy = false
+
+    private var showBackupBanner: Bool {
+        _ = bannerTick; _ = autoBackup.statusRevision
+        return autoBackup.status.shouldShowBanner(now: Date(), hasData: sessions.contains { $0.status == .completed })
+    }
+
     private var activeBlockSessions: [Session] {
         let todayStart = Calendar.current.startOfDay(for: Date())
 
@@ -86,6 +96,36 @@ struct TodayTabView: View {
     var body: some View {
         NavigationStack {
             List {
+                if showBackupBanner {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("No verified iCloud backup in the last 7 days", systemImage: "exclamationmark.icloud")
+                                .font(.subheadline.bold())
+                            Text("Your training history lives only on this device until a backup reaches iCloud. Check Settings → Backup.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Button(bannerBusy ? "Backing up…" : "Back up now") {
+                                    bannerBusy = true
+                                    Task {
+                                        _ = await autoBackup.backUpNow(container: context.container)
+                                        bannerBusy = false
+                                        bannerTick += 1
+                                    }
+                                }
+                                .disabled(bannerBusy)
+                                Spacer()
+                                Button("Dismiss") {
+                                    autoBackup.status.dismissBannerForToday(now: Date())
+                                    bannerTick += 1
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section {
                     headerCard
                 }
