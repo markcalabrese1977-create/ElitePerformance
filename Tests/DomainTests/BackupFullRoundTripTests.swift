@@ -831,9 +831,9 @@ final class AutoBackupTests: XCTestCase {
         AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
     }
     @MainActor private func service(_ status: AutoBackupStatusStore, destination: AutoBackupDestination? = nil, now: Date = Date(),
-                         commit: String = "abc123") -> AutoBackupService {
+                         commit: String = "abc123", log: @escaping (String) -> Void = { _ in }) -> AutoBackupService {
         let d = destination ?? .local(dir)
-        return AutoBackupService(status: status, resolveDestination: { d }, now: { now }, currentCommit: { commit })
+        return AutoBackupService(status: status, resolveDestination: { d }, now: { now }, currentCommit: { commit }, log: log)
     }
     private func waitForBackups(_ count: Int, timeout: TimeInterval = 10) throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -1064,6 +1064,51 @@ final class AutoBackupTests: XCTestCase {
         XCTAssertEqual(order, [], "held back behind the interrupted-restore prompt")
         gate2.keepCurrentData()
         XCTAssertEqual(order, ["backup", "backfills"])
+    }
+
+    // MARK: log lines
+
+    @MainActor
+    func test_everyAttemptLogsOneLine_withTriggerDestinationOutcomeAndCounts() async throws {
+        let (c, ctx) = try populated()
+        let counts = try BackupContentSummary.of(store: ctx).verifiedCounts
+        let countsText = "sessions=\(counts[0]) history=\(counts[1]) custom=\(counts[2]) blocks=\(counts[3])"
+        var lines: [String] = []
+        // success, local fallback
+        let svc = service(freshStatus(), destination: .local(dir), now: t(0), log: { lines.append($0) })
+        _ = await svc.backUpNow(container: c)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].contains("[manual]") && lines[0].contains(" local ") && lines[0].contains("verified") && lines[0].contains(countsText), lines[0])
+        // success, iCloud destination
+        lines = []
+        let ic = AutoBackupDestination.iCloud(dir.appendingPathComponent("icloud"))
+        _ = await service(freshStatus(), destination: ic, now: t(1), log: { lines.append($0) }).backUpNow(container: c)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].contains(" iCloud ") && lines[0].contains("verified"), lines[0])
+        // failure: the destination cannot be written
+        lines = []
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("blocker_\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker); defer { try? FileManager.default.removeItem(at: blocker) }
+        _ = await service(freshStatus(), destination: .local(blocker), now: t(2), log: { lines.append($0) }).backUpNow(container: c)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].contains("FAILED") && lines[0].contains(" local ") && lines[0].contains(countsText), lines[0])
+        // skipped: an empty store
+        lines = []
+        service(freshStatus(), now: t(3), log: { lines.append($0) }).sessionCompleted(container: try BackupTestSupport.makeContainer())
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].contains("[sessionCompleted]") && lines[0].contains("skipped"), lines[0])
+    }
+
+    @MainActor
+    func test_theBuildChangeTrigger_logsWhyItDidNotFire() throws {
+        let (c, _) = try populated()
+        var lines: [String] = []
+        let status = freshStatus()
+        status.lastLaunchCommit = "0f94a26"
+        let svc = service(status, now: t(0), commit: "0f94a26", log: { lines.append($0) })
+        XCTAssertFalse(svc.launchBackupIfBuildChanged(container: c))
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].contains("[buildChanged]") && lines[0].contains("not needed") && lines[0].contains("0f94a26"), lines[0])
     }
 
     // MARK: banner
