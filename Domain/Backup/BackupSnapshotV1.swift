@@ -15,6 +15,36 @@ struct BackupSnapshotV1: Codable {
     // Added (backup-completeness fix). Optional so OLD backup files that predate
     // this key still decode: synthesized Codable maps an absent key to nil.
     let user: UserBackupDTO?
+
+    /// Which build wrote the file. Absent in files from older builds: they decode with nil and import as before.
+    var metadata: BackupMetadataDTO? = nil
+}
+
+// MARK: - Build identity
+
+struct BackupMetadataDTO: Codable, Equatable {
+    var appVersion: String?
+    var build: String?
+    var gitCommit: String?
+    var gitBranch: String?
+    /// The backup file format the writer used. A file whose value is newer than `currentSchemaVersion` was written by a newer
+    /// app and may hold data this build does not know.
+    var schemaVersion: Int?
+
+    /// The newest backup format this build reads and writes.
+    static let currentSchemaVersion = 1
+
+    static func current() -> BackupMetadataDTO {
+        BackupMetadataDTO(appVersion: BuildInfo.version, build: BuildInfo.build, gitCommit: BuildInfo.commit,
+                          gitBranch: BuildInfo.branch, schemaVersion: currentSchemaVersion)
+    }
+
+    /// "Backup from 1.2.2 (1) · abc1234", or nil when the file carries no identity.
+    var summaryText: String? {
+        let version = [appVersion, build.map { "(\($0))" }].compactMap { $0 }.joined(separator: " ")
+        let parts = [version.isEmpty ? nil : "Backup from \(version)", gitCommit].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 }
 
 // MARK: - User

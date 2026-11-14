@@ -9,6 +9,7 @@ import SwiftData
 /// MaintenanceProgramSeeder.seedFromNewProgram(...).
 struct MaintenanceProgramPickerView: View {
     @Environment(\.modelContext) private var context
+    @StateObject private var seedGuard = SeedBackupGuard()
     @Environment(\.dismiss) private var dismiss
 
     let startDate: Date
@@ -77,6 +78,7 @@ struct MaintenanceProgramPickerView: View {
                     }
                 }
             }
+            .seedBackupGuard(seedGuard)
             .navigationTitle("New Program")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -94,10 +96,15 @@ struct MaintenanceProgramPickerView: View {
     }
 
     private func seed() {
-        guard let template = selectedTemplate else { return }
+        guard selectedTemplate != nil else { return }
         isSeeding = true
         errorMessage = nil
+        // A verified backup first; if it fails nothing is seeded (see SeedBackupGuard).
+        seedGuard.run(container: context.container, cancel: { isSeeding = false }) { performSeed() }
+    }
 
+    private func performSeed() {
+        guard let template = selectedTemplate else { isSeeding = false; return }
         do {
             try MaintenanceProgramSeeder.seedFromNewProgram(
                 template: template,

@@ -1496,9 +1496,9 @@ final class MissedSourceSeedingTests: XCTestCase {
         let (t, _) = block(ctx)
         let seeds = MissedSourceSeeding.run(in: ctx)
         XCTAssertEqual(seeds.count, 1)
-        // e1RM of 110 x (10 + 2 credited RIR) = 110 * (1 + 12/30) = 154; at 10 reps RIR 2: 154/(1+10/30)*0.95 = 109.725; x 0.975 = 106.98 -> down to 2.5
-        XCTAssertEqual(t.plannedLoadsBySet, [105, 105, 105])
-        XCTAssertEqual(t.suggestedLoad, 105)
+        // reps-only e1RM of 110 x 10 = 146.67; at 10 reps RIR 2: 146.67/(1+10/30)*0.95 = 104.5; x 0.975 = 101.9 -> down to 2.5: 100
+        XCTAssertEqual(t.plannedLoadsBySet, [100, 100, 100])
+        XCTAssertEqual(t.suggestedLoad, 100)
         XCTAssertTrue(t.prescriptionNotes?.contains("Seeded from") == true && t.prescriptionNotes?.contains("was missed") == true, t.prescriptionNotes ?? "nil")
         XCTAssertFalse(t.planEdited)
         XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
@@ -1867,5 +1867,314 @@ final class CustomCompoundTests: XCTestCase {
         let text = lines.joined(separator: "\n")
         print(text)
         if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - EEE: next-meso starting loads, with and without RIR credit (local audit)
+
+final class NextMesoSeedAuditTests: XCTestCase {
+
+    // LOCAL ONLY, READ-ONLY.
+    func test_audit_nextMesoStartingLoads_withAndWithoutRIRCredit() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        let meso = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
+        let now = Date(timeIntervalSince1970: 1_794_000_000)   // overridden below by the last completed session
+        let last = meso.sessions.filter { $0.status == .completed }.map(\.date).max() ?? now
+        let at = last.addingTimeInterval(86_400)
+
+        func table(credit: Bool) -> [String: [String]] {
+            let plan = SessionItemEditService.planNextMeso(meso: meso, name: "audit", endOldMesoNow: true, context: ctx, now: at, creditRIR: credit)
+            var out: [String: [String]] = [:]
+            var seen = Set<String>()
+            for s in plan.sessions where s.weekIndex == 1 || s.weekIndex <= 3 {
+                for i in s.items {
+                    let name = ExerciseCatalog.displayName(for: i.exerciseId)
+                    let key = "\(name)|\(s.dayLabel ?? "-")|\(s.letter)"
+                    guard seen.insert(key).inserted else { continue }
+                    out[name, default: []].append("\(s.letter.uppercased()) \(s.dayLabel ?? "-"): \(i.seed) (\(i.seedSource.rawValue))" + (i.topCount > 0 ? " top \(i.topSeed)" : ""))
+                }
+            }
+            return out
+        }
+        let repsOnly = table(credit: false), credited = table(credit: true)
+        let wanted = ["bench", "smith incline", "decline", "single leg press", "t-bar", "t bar"]
+        var lines = ["NEXT MESO STARTING LOADS — reps-only (new) vs RIR-credited (old); source session set: \(meso.name)"]
+        for name in repsOnly.keys.sorted() where wanted.contains(where: { name.lowercased().contains($0) }) {
+            lines.append(name)
+            let a = repsOnly[name] ?? [], b = credited[name] ?? []
+            for (x, y) in zip(a, b) { lines.append("   reps-only \(x)   |   credited \(y)") }
+        }
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - FFF: a verified backup before any seeding
+
+@MainActor
+final class SeedBackupGuardTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var dir: URL!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        DataSentinelStore.overrideDefaults = UserDefaults(suiteName: "ep.sentinel.suite.\(UUID().uuidString)")
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_seed_\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDown() {
+        DataSentinelStore.overrideDefaults = nil
+        try? FileManager.default.removeItem(at: dir)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func status() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+
+    private func populatedContainer() throws -> ModelContainer {
+        let c = try BackupTestSupport.makeContainer()
+        try PopulatedStoreBuilder.build(in: ModelContext(c))
+        return c
+    }
+
+    func test_beforeMesoSeed_runsAVerifiedBackup_andLogsTheReason() async throws {
+        var lines: [String] = []
+        let d = dir!
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(d) }, log: { lines.append($0) })
+        let result = await svc.backUpBeforeMesoSeed(container: try populatedContainer())
+        let file = try XCTUnwrap(try result.get())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.url.path))
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1)
+        XCTAssertTrue(lines.contains { $0.contains("[beforeMesoSeed] local verified") }, lines.joined(separator: "\n"))
+    }
+
+    func test_anEmptyStore_hasNothingToProtect_andGoesStraightThrough() async throws {
+        let d = dir!
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(d) }, log: { _ in })
+        let result = await svc.backUpBeforeMesoSeed(container: try BackupTestSupport.makeContainer())
+        XCTAssertNil(try result.get(), "success with no file")
+        XCTAssertTrue(AutoBackupEngine.list(in: dir).isEmpty)
+    }
+
+    func test_aFailedBackup_blocksTheSeed_untilBackUpNowSucceeds() async throws {
+        // The destination is a regular file, so the backup cannot be placed.
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("ep_blocker_\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let container = try populatedContainer()
+        final class Box: @unchecked Sendable { var url: URL; init(_ u: URL) { url = u } }
+        let destination = Box(blocker)
+        let svc = AutoBackupService(status: status(), resolveDestination: { .local(destination.url) }, log: { _ in })
+        let guardian = SeedBackupGuard(backup: { await svc.backUpBeforeMesoSeed(container: $0) })
+
+        var seeded = 0
+        guardian.run(container: container) { seeded += 1 }
+        try await waitUntil { guardian.failure != nil }
+        XCTAssertEqual(seeded, 0, "the seed did not run")
+        XCTAssertTrue(guardian.failure?.contains("Nothing has been changed") == true, guardian.failure ?? "nil")
+
+        destination.url = dir                   // the lifter fixes the problem and taps Back up now
+        guardian.retry()
+        try await waitUntil { seeded == 1 }
+        XCTAssertNil(guardian.failure)
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1)
+    }
+
+    func test_continueWithoutBackup_needsTheTypedWord() async throws {
+        let guardian = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        var seeded = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { seeded += 1 }
+        try await waitUntil { guardian.failure != nil }
+        XCTAssertFalse(guardian.continueWithoutBackup(typed: "continue"))
+        XCTAssertFalse(guardian.continueWithoutBackup(typed: ""))
+        XCTAssertEqual(seeded, 0)
+        XCTAssertTrue(guardian.continueWithoutBackup(typed: "CONTINUE"))
+        XCTAssertEqual(seeded, 1)
+        XCTAssertEqual(guardian.proceededWithoutBackup, 1)
+        XCTAssertNil(guardian.failure)
+    }
+
+    func test_cancel_dropsTheSeed_andTheBackupAlwaysComesFirst() async throws {
+        var order: [String] = []
+        let guardian = SeedBackupGuard(backup: { _ in order.append("backup"); return .success(nil) })
+        var cancelled = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { order.append("seed") }
+        try await waitUntil { order.count == 2 }
+        XCTAssertEqual(order, ["backup", "seed"])
+
+        let failing = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        failing.run(container: try BackupTestSupport.makeContainer(), cancel: { cancelled += 1 }) { order.append("never") }
+        try await waitUntil { failing.failure != nil }
+        failing.cancel()
+        XCTAssertEqual(cancelled, 1)
+        XCTAssertFalse(order.contains("never"))
+        XCTAssertNil(failing.failure)
+    }
+
+    private func waitUntil(_ condition: @escaping () -> Bool, timeout: TimeInterval = 10) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { XCTFail("timed out"); return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+}
+
+// MARK: - GGG: lastKnownLoad reads only the past
+
+final class LastKnownLoadTests: XCTestCase {
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+    private func day(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: Calendar.current.startOfDay(for: Date()))! }
+
+    private func session(_ ctx: ModelContext, id: String = "bench_press", status: SessionStatus, at: Int, actual: [Double] = [], suggested: Double = 0, wave: String? = nil) -> Session {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: suggested, waveRaw: wave)
+        i.actualLoads = actual; i.actualReps = actual.map { _ in 8 }
+        let s = Session(date: day(at), status: status, weekIndex: 1, items: [i])
+        ctx.insert(s)
+        return s
+    }
+
+    func test_aFuturePlannedLoad_isIgnored() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0, wave: "a")
+        _ = session(ctx, status: .planned, at: 7, suggested: 300, wave: "a")          // a future plan: must never be read
+        _ = session(ctx, status: .planned, at: -3, suggested: 280, wave: "a")         // a missed, never-completed plan: not lifted
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 0,
+                       "no completed session before today: nothing known, even though plans exist")
+        _ = session(ctx, status: .completed, at: -10, actual: [200, 200, 200], suggested: 205, wave: "a")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 200)
+    }
+
+    func test_aCompletedSessionDatedAfterTheCurrentOne_isIgnored_andTheLatestEarlierOneWins() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0)
+        _ = session(ctx, status: .completed, at: 2, actual: [999, 999, 999])           // dated later (e.g. a back-dated entry)
+        _ = session(ctx, status: .completed, at: -20, actual: [150, 150, 150])
+        _ = session(ctx, status: .completed, at: -5, actual: [160, 160, 160])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 160)
+    }
+
+    func test_matchesOnTheCanonicalExerciseId_notTheRawString() throws {
+        let ctx = try context()
+        let current = session(ctx, id: "bench_press", status: .inProgress, at: 0)
+        // The legacy uuid alias of a built-in resolves to the same canonical id.
+        let legacy = "e8f675c1-2bc2-4eeb-a0b2-d701a6412f58"                           // -> seated_cable_press
+        let cur2 = session(ctx, id: "seated_cable_press", status: .inProgress, at: 0)
+        _ = session(ctx, id: legacy, status: .completed, at: -4, actual: [90, 90, 90])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "seated_cable_press", currentSession: cur2, context: ctx), 90)
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 0, "another lift is not matched")
+    }
+
+    func test_sameWavePreferred_thenAnyEarlierCompleted_andBodyweightIsZero() throws {
+        let ctx = try context()
+        let current = session(ctx, status: .inProgress, at: 0, wave: "b")
+        _ = session(ctx, status: .completed, at: -3, actual: [180, 180, 180], wave: "a")
+        _ = session(ctx, status: .completed, at: -10, actual: [170, 170, 170], wave: "b")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: current, context: ctx), 170, "same wave first")
+        let c2 = session(ctx, status: .inProgress, at: 0, wave: "c")
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "bench_press", currentSession: c2, context: ctx), 180, "else the latest earlier completed one")
+        let bw = session(ctx, id: "pull_up", status: .inProgress, at: 0)
+        _ = session(ctx, id: "pull_up", status: .completed, at: -2, actual: [25, 25, 25])
+        XCTAssertEqual(LoadProjectionService.lastKnownLoad(for: "pull_up", currentSession: bw, context: ctx), 0)
+    }
+}
+
+// MARK: - HHH: build identity in backups
+
+final class BackupBuildIdentityTests: XCTestCase {
+
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    private func exportJSON(metadata: BackupMetadataDTO? = nil) throws -> (URL, [String: Any]) {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: ctx)
+        let result = try metadata.map { try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx, metadata: $0) }
+            ?? BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        let url = result.url
+        return (url, try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]))
+    }
+
+    private func rewrite(_ json: [String: Any]) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("hhh-\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        return url
+    }
+
+    func test_theExportCarriesTheBuildIdentity_andTheRestoreSheetTextReadsRight() throws {
+        let meta = BackupMetadataDTO(appVersion: "1.2.2", build: "1", gitCommit: "abc1234", gitBranch: "main", schemaVersion: 1)
+        let (url, json) = try exportJSON(metadata: meta)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let m = try XCTUnwrap(json["metadata"] as? [String: Any])
+        XCTAssertEqual(Set(m.keys), ["appVersion", "build", "gitCommit", "gitBranch", "schemaVersion"])
+        XCTAssertEqual(m["appVersion"] as? String, "1.2.2"); XCTAssertEqual(m["gitCommit"] as? String, "abc1234")
+        let summary = try BackupContentSummary.of(file: url)
+        XCTAssertEqual(summary.buildIdentity, "Backup from 1.2.2 (1) · abc1234")
+        XCTAssertNil(summary.newerFormatWarning)
+
+        // The default export stamps THIS build.
+        let (url2, json2) = try exportJSON()
+        defer { try? FileManager.default.removeItem(at: url2) }
+        let m2 = try XCTUnwrap(json2["metadata"] as? [String: Any])
+        XCTAssertEqual(m2["appVersion"] as? String, BuildInfo.version)
+        XCTAssertEqual(m2["gitCommit"] as? String, BuildInfo.commit)
+        XCTAssertEqual(m2["schemaVersion"] as? Int, BackupMetadataDTO.currentSchemaVersion)
+    }
+
+    func test_aFileWithoutMetadata_importsAsBefore_andShowsNoIdentity() throws {
+        let (url, exported) = try exportJSON()
+        var json = exported
+        defer { try? FileManager.default.removeItem(at: url) }
+        json.removeValue(forKey: "metadata")
+        let old = try rewrite(json)
+        defer { try? FileManager.default.removeItem(at: old) }
+        let summary = try BackupContentSummary.of(file: old)
+        XCTAssertNil(summary.buildIdentity); XCTAssertNil(summary.newerFormatWarning)
+        let target = try BackupTestSupport.makeContainer()
+        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target))
+        XCTAssertFalse(try ModelContext(target).fetch(FetchDescriptor<Session>()).isEmpty)
+        // A partial block (only some keys) is tolerated too.
+        json["metadata"] = ["appVersion": "1.0"]
+        let partial = try rewrite(json)
+        defer { try? FileManager.default.removeItem(at: partial) }
+        XCTAssertEqual(try BackupContentSummary.of(file: partial).buildIdentity, "Backup from 1.0")
+    }
+
+    func test_aNewerSchemaVersion_warns_butStillImports() throws {
+        let newer = BackupMetadataDTO(appVersion: "9.0", build: "7", gitCommit: "ffff000", gitBranch: "main",
+                                      schemaVersion: BackupMetadataDTO.currentSchemaVersion + 1)
+        let (url, _) = try exportJSON(metadata: newer)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let summary = try BackupContentSummary.of(file: url)
+        let warning = try XCTUnwrap(summary.newerFormatWarning)
+        XCTAssertTrue(warning.contains("newer version"), warning)
+        XCTAssertNoThrow(try BackupSnapshotImporter.importFullBackupJSON(from: url, modelContainer: try BackupTestSupport.makeContainer()))
+    }
+
+    func test_exportImportExport_keepsTheIdentity() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: source)
+        let first = try BackupTestSupport.exportJSON(source)
+        XCTAssertNotNil(first["metadata"], "BA2's export carries the identity")
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: fresh)
+        XCTAssertEqual((try BackupTestSupport.exportJSON(ModelContext(fresh))["metadata"] as? [String: Any])?["gitCommit"] as? String,
+                       BuildInfo.commit)
     }
 }

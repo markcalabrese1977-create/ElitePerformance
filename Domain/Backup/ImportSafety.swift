@@ -15,6 +15,16 @@ struct BackupContentSummary: Equatable {
     var lastCompletedSessionId: UUID? = nil
     /// Ids of every completed session (a file's only; used to see whether the file contains this device's latest session).
     var completedSessionIds: Set<UUID> = []
+    /// A file's build identity ("Backup from 1.2.2 (1) · abc1234"); nil for a store or a file from an older build.
+    var buildIdentity: String? = nil
+    /// The backup format version the file's writer used (nil = not stated).
+    var fileSchemaVersion: Int? = nil
+
+    /// Set when the file was written by a newer backup format than this app reads.
+    var newerFormatWarning: String? {
+        guard let v = fileSchemaVersion, v > BackupMetadataDTO.currentSchemaVersion else { return nil }
+        return "This backup was made by a newer version of the app (backup format \(v); this app reads up to \(BackupMetadataDTO.currentSchemaVersion)). Some of its data may not be restored. Update the app first."
+    }
 
     var isEmpty: Bool { sessions == 0 && sessionHistory == 0 && customExercises == 0 && mesoBlocks == 0 }
 
@@ -31,7 +41,9 @@ struct BackupContentSummary: Equatable {
             lastCompletedDate: completed.map(\.date).max(), sessionHistory: snap.sessionHistory.count,
             customExercises: snap.customExercises.count, mesoBlocks: snap.mesoBlocks.count,
             lastCompletedSessionId: completed.max(by: { $0.date < $1.date })?.id,
-            completedSessionIds: Set(completed.compactMap(\.id)))
+            completedSessionIds: Set(completed.compactMap(\.id)),
+            buildIdentity: snap.metadata?.summaryText,
+            fileSchemaVersion: snap.metadata?.schemaVersion ?? (snap.version > 1 ? snap.version : nil))
     }
 
     static func of(store context: ModelContext) throws -> BackupContentSummary {

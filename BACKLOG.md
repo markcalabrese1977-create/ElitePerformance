@@ -13,7 +13,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - (Done) Dead code removed: `SessionRecapView`, `ExerciseRecapRow` (Features/Session/SessionRecapView.swift keeps `LoadOverridePromptRow` and the SessionItem helpers the live screens use) and the Home `ExerciseHistoryView`. The live recap sheet (`SessionRecapSheet` in SessionView.swift) now takes its per-exercise top e1RM from `AnalyticsEngine.ItemStats` (working sets only, warm-ups no longer count). Open: a PR chip on the live recap (from `AnalyticsEngine.recordExerciseIds`) if wanted.
 - PR candidates to verify (analytics): `PersonalRecords.suspects` lists a record more than 1.25x the lifter's next best session for the lift (typos, wrong-unit loads). Nothing shows it yet: surface it (a "verify this record" row on the lift's history, with a fix-or-confirm action) when the screens move to the new definitions. On the Nov 12 backup it flags 4: Smith Machine Hip Thrust 351x10 (x1.27, a maintenance-block set), DB Skull Crushers 10x10 (x2.00), DB Skull Crusher [Rehab] (x1.50), Decline Cable Crunch 50x12 (x1.33).
 - Analytics next: switch the screens (History summary, exercise history sheet, Home history, Analytics tab, meso summary) to the single definitions in Domain/Analytics (records include maintenance; seeds, fatigue baselines and meso comparisons exclude it); FatigueMonitor performance signals are watch-only until tuned on more than one lifter's history (see its header).
-- Install: install current HEAD after the Fri Oct 30 Push A backup checks out; commits after 46039ee are deinit (a5b3b74), baseline (48e6bcb), test-only (c3ca2d0) and docs. 46039ee carries top set + back-off, the prescribed set count and its backfill, and the next-meso clone. Verify the launch log lists the 10 StartupBackfills (the new one last) and that the Push A next-meso preview shows 3 back-offs on B/C weeks.
+- OBSOLETE (Nov 14): "Install current HEAD after the Fri Oct 30 Push A backup checks out"; the commits it names are many rounds old. Installs are done by hand on request.
 - HealthKitAuthorizationCoordinator: add `nonisolated deinit {}` defensively (same shape
   as SessionScreenViewModel; tests pass today). Low priority.
 - Top set follow-ups (feat/top-set, shipped): (a) planEdited is one flag, so a manual load edit freezes carry-forward for both roles; split per role if it bites; (b) Change prescription only offers a top count of 1 (the model allows up to 3); (c) MesoPerformanceAnalyzer, PR and recap code were not reviewed for top rows (they count every row; verify the first/last-load comparisons); (d) Add Set on an item without a top set still appends a plain row; adding a top set is done from Change prescription.
@@ -21,21 +21,20 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Deload in place (fallback, works today; Insert deload week has since shipped, see Done): log the week light with load-override reason Deliberate Deload. Follow-ups: (a) verify a deload-flagged source never seeds an EMPTY same-letter target (new-lift first exposure) with light loads; (b) the "Last A/B/C" caption and the meso summary verdicts must skip items flagged Deliberate Deload, as they already skip deload-wave items.
 - Earned volume (v5.2): Pull A hammer curl 4th set if earned on Oct 18 (>20 reps at 102 or heavier vs Sept 27); parameterized one-shot repair, weeks 5-12; later decline the 4th set, then one open slot chosen at rotation 3. (Status not re-checked in the Oct 26 sweep.)
 - Rotation 4 (weeks 10-12): optional RIR 1 on upper compounds and hack squat/hip thrust A/B weeks; decide ~Nov 20.
-- Swap/add service (partly done: the Today "Apply to future <weekday>" propagation is retired and the replace service sizes arrays and seeds from completed history, see Done). Remaining, not re-verified: Today "Apply to future <weekday>" is unscoped and zeroes loads (guard or scope it); arrays sized to sets; rep range and wave on adds; lastKnownLoad must not read future plans; custom names from the table.
+- Swap/add service (partly done: the Today "Apply to future <weekday>" propagation is retired and the replace service sizes arrays and seeds from completed history, see Done). Remaining, not re-verified: Today "Apply to future <weekday>" is unscoped and zeroes loads (guard or scope it); arrays sized to sets; rep range and wave on adds; (lastKnownLoad no longer reads future plans: d8c0967); custom names from the table.
 - Empty-target seeding ignores the incomplete-evidence guard and can bump (DB row:
   60 x 20, 20 of 3 sets -> 65 seeded into an empty target). When evidence is incomplete,
   seed the last load without a bump.
 - Pushdown follows the lifter's last load (parked; user raises by hand).
-- Import hardening: atomic import with pre-restore safety copy, tolerant decoding, version check, history order, HealthDashboard rebuild after import, build identity in export, custom-exercise mirror (clear when empty, isBodyweight), tolerant dedup (Dictionary(uniqueKeysWithValues:) trap), idempotent CustomExerciseStoreMigration.
-- Test infrastructure: J4 flake; B10/F6/M7 no longer abort the host (48e6bcb); synchronized test folder (no hand-edited pbxproj); keep Tests/known_failures.txt set-based. Never run two gates concurrently (shared simulator / memory pressure kills the test host without a crash report); before a full-suite or fixture run, check `ps -axo pid,command | grep xcodebuild` and `xcrun simctl list devices booted`, and wait if one is running. New test files in Tests/DomainTests need a hand-added pbxproj entry (that folder is an explicit group, not synchronized), with Xcode quit.
-- Device builds: run xcodebuild as a tracked/background task; foreground runs can be
-  killed by the tool timeout (two BUILD INTERRUPTED on Oct 25 before a clean third run).
+- Import hardening (partly done). Done: pre-restore safety copy and typed-REPLACE staleness guard (b862c7c, 0a6aa84), failure recovery (1af1b46), interrupted-import marker (a5aa6ba), custom-exercise mirror (96ba644), history order, build identity in the export and on the restore sheet (f3f0019). Open: a true atomic import (see the wipe-save-then-insert item below); tolerant dedup (`Dictionary(uniqueKeysWithValues:)` at CustomExerciseDedupMigration.swift:15, SessionItemEditService.swift:1519, SessionItemEditService+NextMeso.swift:272, :504 not re-verified for duplicate keys).
+- Test infrastructure: J4 flake (still the one flaky entry in Tests/known_failures.txt; A7 and D12 left it in ee97f03); B10/F6/M7 no longer abort the host (48e6bcb); synchronized test folder (no hand-edited pbxproj); keep Tests/known_failures.txt set-based. Never run two gates concurrently (shared simulator / memory pressure kills the test host without a crash report); before a full-suite or fixture run, check `ps -axo pid,command | grep xcodebuild` and `xcrun simctl list devices booted`, and wait if one is running. New test files in Tests/DomainTests need a hand-added pbxproj entry (that folder is an explicit group, not synchronized), with Xcode quit.
+- OBSOLETE (Nov 14): device-build tooling note (run xcodebuild as a tracked/background task). Process note, not a code item.
 - Universality guard (C5): never extend the allowlist except for unregistered one-shot repairs; add new patterns when new user-specific data appears. The guard itself shipped (0eef263); this is the standing rule.
 - Optional: give the two hand-added week-1 lifts their wave letters; slotOverrides per-day key; isCleanSession vs deliberateDeload; onChange deprecations.
 - Hack squat re-entry after Dr. Alexander clears (sled + 135 at W1 stance pain-free -> fresh anchors per letter); cable hip adduction returns only after hips clear.
 - E1RM RIR model (low priority): HistorySeedLoad credits RIR additively on input (reps+RIR); load(for:reps:targetRIR:) applies 2.5%/RIR on output. Within ~1% at RIR<=2, ~2% at RIR 4 / low reps. Unify into one E1RMCalculator RIR function used by both; run a C3b-style before/after seed comparison.
 - Replace: optional prescription override (e.g. RIR) applied by the service without setting planEdited (planEdited blocks carry-forward writes into the item).
-- kg support: User.units is unused; loads/increments/display/backups.
+- DONE (e6c28a0 every rounding site through UnitAwareRounding; Domain/Logic/LoadUnit.swift; KgRoundingMatrixTests, UnitSwitchTests): kg support.
 - Settings (low priority): 'Use Health date of birth' row next to the Birthdate field, calling requestAuthorizationIfNeeded(), so users grant it in context instead of after a workout. Helper text: Health's date of birth is used when available, otherwise the Birthdate above (iOS can't report whether access was granted). Footer stays as is.
 - HR zones: when age is available, HRR uses 220 - age as max HR even if observed max exists. Prefer observed max (with a sanity floor); 220 - age only as fallback.
 - Set band (low priority): stepper/prescription widen setMin/setMax but never narrow, so a +1/-1 round
@@ -83,6 +82,27 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Fixture-dependent tests (CarryForwardAudit, DUPMesoLengthConversion fixture, LastSameLetter fixture, InsertDeloadRealBackup...): 4 fail against the Oct 30 backup because they pin old data. Make them backup-agnostic (assert invariants, not specific dates/loads) or retire them; then run them with the latest backup in the gate.
 - Store the weekday pattern on UserProfile so Change Program prefills it (today it falls back to the default pattern for the day count).
 
+## Done (Nov 2026)
+
+- DONE (d90c70d AppStoreOpener: one way to open the store, a failure changes nothing; a5aa6ba interrupted-import marker; b862c7c, 0a6aa84 restore confirmation, staleness guard, pre-import snapshots and undo; 1af1b46 failure recovery; ca91e3d, 59f4057 missing-data sentinel and its launch logging): launch has one store-selection path (replaces "Launch has five store-selection paths") and import is snapshot-first with recovery.
+- DONE (23e8876 verified automatic backups to iCloud Documents/Backups with local fallback, 5223234 one log line per attempt, f9588b1 reason beforeMesoSeed: a verified backup before next-meso, new-program and maintenance seeding, blocked with Back up now / typed CONTINUE on failure): automatic backups.
+- DONE (f3f0019): backups carry build identity (appVersion, build, gitCommit, gitBranch, schemaVersion); the restore sheet shows "Backup from <version> (<build>) · <commit>" and warns on a newer backup format.
+- DONE (9d0de36, 28b60f5 planEdited on every lifter edit including the set-count stepper; cf7609b propagation only to the same weekday + dayLabel + wave letter + meso, edited items skipped, always confirmed; 5eab7e6 Auto/Auto+ clear planEdited; 5fb36ab Auto/Auto+ confirm when edited; b4fa1d8 day rename across the whole meso, confirmed, history titles follow; 702da06 apply-plan-to-block scoped and confirmed): plan editing safety. Replaces the open "Today 'Apply to future <weekday>' is unscoped" concern.
+- DONE (9c55ce8 compound RIR starts unset, 0-4 chips, unset = -1; b24e99d total-rep progression for compounds; a9719d9 RIRUnsetBackfill; 86f0681 every actualRIRs access through RIREntry; 11009b6, 6572eba custom exercises can be compound, with the suggester tie rule): RIR entry and progression.
+- DONE (d7b8a77 missed-source seeding and backfill, b59c2b4 12-week fallback, 8340976 all seeding and anchoring e1RMs reps-only): zero-load targets are seeded from history; plan-prefilled RIRs no longer inflate starting loads.
+- DONE (d8c0967): lastKnownLoad reads only completed sessions dated before the current one, matched on the canonical exerciseId.
+- DONE (564e941, ac08310, bb7915f): records use the 12-rep rule; PRIndexRuleBackfill is versioned.
+- DONE (ee97f03): A7 and D12 removed from Tests/known_failures.txt.
+
+## Open (found Nov 14)
+
+- Maintenance and deload carry-forward use a flat 60% factor (PlanMemoryEngine.swift:22, applied at :159-163); derive it from RIR when deload RIR targets are reliable.
+- Maintenance is still detected by name in places: ProgramDayDetailView.swift:90, :352, :432, :659, SessionView.swift:1829, MaintenanceProgramSeeder.swift:533, :566, DUPWaveModels.swift:29. `MesoBlock.isMaintenance` exists; switch these to it.
+- Bodyweight "BW" display: StartNextMesoFlow, InsertDeloadFlow, ExerciseSessionDetailView, HistoryView, ExerciseHistorySheet and the session row handle it; the other screens are not audited.
+- Coaching Cut 6 (coaching-style tuning; `consecutiveCleanCount` is deliberately unused, CoachingEngine.swift:491) is not built. There is no Cut 4 or Cut 5 in the code.
+- `PreviewOverrides.slotOverrides` is keyed by exerciseId; `slotKeyed` exists beside it. Program start (onboarding, HomeView) is the only user; next-meso does not use it.
+- Existing custom exercises whose stored `isCompound` is false by default (never toggled) are not re-inferred; only nil is decided by the backfill.
+
 ## Muscle volume: custom exercises are credited by their coarse group only (resolved)
 Resolved by the custom fine-muscle mapping (CustomExercise.fineMuscleRaw + shares, mapping editor, "Unmapped exercises" row).
 Unmapped customs are now counted in no muscle's total instead of being credited by coarse group.
@@ -116,8 +136,8 @@ scripts/full_gate.sh should refuse to start while another gate holds a lock (two
 ## PersonalRecords.suspects needs a user "confirmed real" flag
 PersonalRecords.suspects needs a user "confirmed real" flag before it's ever displayed (e.g. Smith Machine Hip Thrust 351×10 is genuine).
 
-## Import is wipe-save-then-insert
+## Import is wipe-save-then-insert (mitigated: verified pre-import snapshot b862c7c/0a6aa84, in-process recovery 1af1b46, interrupted-import marker a5aa6ba)
 Import is wipe-save-then-insert. A true atomic import needs a scratch-store swap; a single-context rollback attempt crashed SwiftData (_FullFutureBackingData<SessionHistoryExercise>).
 
-## Launch has five store-selection paths, each starting the same startup work
+## DONE (d90c70d, a5aa6ba): Launch has five store-selection paths, each starting the same startup work
 App/ElitePerformanceApp.swift init() picks the store through a ladder: simulator default store, simulator recreate-after-open-failure (deletes default.store), pinned store, "no legacy store files" fallback to the default store, and the scan-and-score of legacy store files. Each branch returns early and used to call the startup backfills itself (five call sites; StartupGate now funnels them into one). The ladder is a leftover of older builds that named their stores. Collapse it to one "open the store" function (legacy-store scan kept as a separate, tested step) and run startup work once after it.

@@ -23,6 +23,7 @@ struct MesoSummaryView: View {
     let onNextBlock: (NextBlockChoice) -> Void
 
     @Environment(\.modelContext) private var context
+    @StateObject private var seedGuard = SeedBackupGuard()
     @Environment(\.dismiss) private var dismiss
 
     @State private var analysis: MesoAnalysis? = nil
@@ -117,6 +118,7 @@ struct MesoSummaryView: View {
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 }
             }
+            .seedBackupGuard(seedGuard)
             .navigationTitle(meso.status == .archived ? "Meso Complete" : "Meso Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -181,6 +183,11 @@ struct MesoSummaryView: View {
         }
     
     private func seedMaintenanceBlock() {
+        // A verified backup first; if it fails the maintenance block is not seeded (see SeedBackupGuard).
+        seedGuard.run(container: context.container) { performSeedMaintenanceBlock() }
+    }
+
+    private func performSeedMaintenanceBlock() {
             // Derive training weekdays from the MODE weekday per dayLabel, not a
             // union of every weekday ever seen across the meso. Unioning absorbs
             // one-off anomalies (e.g. a skip/reorder that landed a session on a

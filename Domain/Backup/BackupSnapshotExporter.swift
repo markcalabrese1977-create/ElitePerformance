@@ -11,7 +11,7 @@ struct BackupSnapshotExportResult {
 }
 
 enum BackupSnapshotExporter {
-    static func exportFullBackupJSON(modelContext: ModelContext) throws -> BackupSnapshotExportResult {
+    static func exportFullBackupJSON(modelContext: ModelContext, metadata: BackupMetadataDTO = .current()) throws -> BackupSnapshotExportResult {
         let appState = try modelContext.fetch(FetchDescriptor<AppState>()).first
 
         let mesoBlocks = try modelContext.fetch(
@@ -250,7 +250,8 @@ enum BackupSnapshotExporter {
                     coachVoiceRaw: $0.coachVoiceRaw,
                     progressionEnabled: $0.progressionEnabled
                 )
-            }
+            },
+            metadata: metadata
         )
 
         let encoder = JSONEncoder()

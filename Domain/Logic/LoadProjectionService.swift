@@ -446,6 +446,8 @@ enum LoadProjectionService {
 
     /// Two-pass session scan returning the most recent known load for an exercise.
     /// Pass 1 prefers same-wave sessions; Pass 2 falls back to any session.
+    /// Only COMPLETED sessions dated BEFORE `currentSession` are read, matched on the canonical exerciseId: a future or other
+    /// planned session's `suggestedLoad` is a plan, not something the lifter lifted, and is never used.
     /// Returns 0 when no history exists — caller leaves suggestedLoad at 0.
     ///
     /// BW guard: bodyweight exercises always return 0, preventing a swap from
@@ -460,31 +462,26 @@ enum LoadProjectionService {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return 0
         }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         let descriptor = FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .reverse)])
-        guard let sessions = try? context.fetch(descriptor) else { return 0 }
+        guard let fetched = try? context.fetch(descriptor) else { return 0 }
+        let sessions = fetched.filter {
+            $0.status == .completed && $0.date < currentSession.date && $0.persistentModelID != currentSession.persistentModelID
+        }
+        func load(in s: Session) -> Double? {
+            guard let match = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) else { return nil }
+            if let lastActual = match.backOffValues(match.actualLoads).filter({ $0 > 0 }).last { return lastActual }
+            return match.suggestedLoad > 0 ? match.suggestedLoad : nil   // a finished session's own plan, not a future one
+        }
         let currentWave = currentSession.items.compactMap { $0.waveRaw }.first?.lowercased()
         // Pass 1 — same wave type only
         if let wave = currentWave, !wave.isEmpty {
-            for s in sessions {
-                guard s.persistentModelID != currentSession.persistentModelID else { continue }
-                let sessionWave = s.items.compactMap { $0.waveRaw }.first?.lowercased()
-                guard sessionWave == wave else { continue }
-                if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
-                    let lastActual = match.backOffValues(match.actualLoads).filter { $0 > 0 }.last ?? 0
-                    if lastActual > 0 { return lastActual }
-                    if match.suggestedLoad > 0 { return match.suggestedLoad }
-                }
+            for s in sessions where s.items.compactMap({ $0.waveRaw }).first?.lowercased() == wave {
+                if let l = load(in: s) { return l }
             }
         }
-        // Pass 2 — fallback: any session
-        for s in sessions {
-            guard s.persistentModelID != currentSession.persistentModelID else { continue }
-            if let match = s.items.first(where: { $0.exerciseId == exerciseId }) {
-                let lastActual = match.backOffValues(match.actualLoads).filter { $0 > 0 }.last ?? 0
-                if lastActual > 0 { return lastActual }
-                if match.suggestedLoad > 0 { return match.suggestedLoad }
-            }
-        }
+        // Pass 2 — fallback: any earlier completed session
+        for s in sessions { if let l = load(in: s) { return l } }
         return 0
     }
 }
@@ -677,7 +674,8 @@ enum HistorySeedLoad {
         bodyWeight: Double? = nil,
         customExercises: [CustomExercise] = [],
         referenceDate: Date = Date(),
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> Double? {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return 0
@@ -695,7 +693,7 @@ enum HistorySeedLoad {
             guard !sets.isEmpty else { continue }
             var best = 0.0
             for set in WorkingSetFilter.droppingWarmups(sets) {
-                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                let credited = set.reps + (creditRIR ? min(max(set.rir, 0), maxCreditedRIR) : 0)
                 best = max(best, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
             if best > 0 { candidates.append((best, session.date)) }
@@ -737,10 +735,11 @@ enum HistorySeedLoad {
         unit: LoadUnit = .lb,
         factor: Double = 0.95,
         customExercises: [CustomExercise] = [],
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> Double? {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) { return 0 }
-        guard let peak = peakE1RM(for: exerciseId, in: sessions, role: role) else { return nil }
+        guard let peak = peakE1RM(for: exerciseId, in: sessions, role: role, creditRIR: creditRIR) else { return nil }
         let seeded = roundedDown(E1RMCalculator.load(for: peak, reps: goalReps, targetRIR: targetRIR) * factor,
                                  increment: loadIncrement, unit: unit)
         return seeded > 0 ? seeded : nil
@@ -751,7 +750,7 @@ enum HistorySeedLoad {
     ///
     /// `role: nil` (the default) counts EVERY logged row, top sets included: the lifter's peak is a fact
     /// about the lifter, whichever role the set had. `peakLoad` passes the role of the load it seeds.
-    static func peakE1RM(for exerciseId: String, in sessions: [Session], role: Role? = nil) -> Double? {
+    static func peakE1RM(for exerciseId: String, in sessions: [Session], role: Role? = nil, creditRIR: Bool = false) -> Double? {
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         var peak = 0.0
         for session in sessions where session.status == .completed {
@@ -764,7 +763,7 @@ enum HistorySeedLoad {
             let sets = qualifyingSets(of: match, role: role)
             guard !sets.isEmpty else { continue }
             for set in WorkingSetFilter.droppingWarmups(sets) {
-                let credited = set.reps + min(max(set.rir, 0), maxCreditedRIR)
+                let credited = set.reps + (creditRIR ? min(max(set.rir, 0), maxCreditedRIR) : 0)
                 peak = max(peak, E1RMCalculator.e1RM(load: set.load, reps: credited))
             }
         }
@@ -788,7 +787,8 @@ enum HistorySeedLoad {
         factor: Double = 0.95,
         customExercises: [CustomExercise] = [],
         referenceDate: Date = Date(),
-        role: Role = .backOff
+        role: Role = .backOff,
+        creditRIR: Bool = false
     ) -> (load: Double, source: SeedSource) {
         if ExerciseCatalog.isBodyweight(exerciseId: exerciseId, customExercises: customExercises) {
             return (0, .bodyweight)
@@ -798,12 +798,12 @@ enum HistorySeedLoad {
             return (0, .none)
         }
         if let peak = peakLoad(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: previousMeso,
-                               loadIncrement: loadIncrement, unit: unit, factor: factor, customExercises: customExercises, role: role) {
+                               loadIncrement: loadIncrement, unit: unit, factor: factor, customExercises: customExercises, role: role, creditRIR: creditRIR) {
             return (peak, .peak)
         }
         if let h = load(for: exerciseId, goalReps: goalReps, targetRIR: targetRIR, in: allSessions,
                         loadIncrement: loadIncrement, unit: unit, bodyWeight: bodyWeight, customExercises: customExercises,
-                        referenceDate: referenceDate, role: role) {
+                        referenceDate: referenceDate, role: role, creditRIR: creditRIR) {
             return (h, .history)
         }
         return (0, .none)

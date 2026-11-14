@@ -6,7 +6,7 @@ import SwiftData
 ///
 /// Source: the most recent COMPLETED session of the same meso and the same dayLabel (any letter) before the target; when
 /// the block has none, the most recent completed session of that exercise anywhere within the last 12 weeks; older or none
-/// leaves the load at 0 with the note "No recent history — set a load". Its best RIR-credited working set gives
+/// leaves the load at 0 with the note "No recent history — set a load". Its best working set (reps only, no RIR credit) gives
 /// an e1RM, which is converted to the target's reps and RIR, taken 2.5% lower (conservative), and rounded DOWN to the
 /// lifter's load step. A target with recent history is never left at 0. Nothing the lifter edited (`planEdited`) is touched.
 enum MissedSourceSeeding {
@@ -42,14 +42,14 @@ enum MissedSourceSeeding {
         !item.planEdited && item.suggestedLoad <= 0 && !item.plannedLoadsBySet.isEmpty && item.plannedLoadsBySet.allSatisfy { $0 <= 0 }
     }
 
-    /// Best RIR-credited e1RM of one session's matching item (working sets only).
+    /// Best reps-only e1RM of one session's matching item (working sets only).
     private static func e1RM(in session: Session, canonicalId: String) -> Double? {
         guard let match = session.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId }) else { return nil }
         if match.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" { return nil }
         let rows = WorkingSetFilter.droppingWarmups(WorkingSetFilter.qualifyingRows(of: match, role: nil))
         var best = 0.0
         for r in rows {
-            best = max(best, E1RMCalculator.e1RM(load: r.load, reps: r.reps + min(max(r.rir, 0), HistorySeedLoad.maxCreditedRIR)))
+            best = max(best, E1RMCalculator.e1RM(load: r.load, reps: r.reps))
         }
         return best > 0 ? best : nil
     }

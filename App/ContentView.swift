@@ -9,18 +9,23 @@ struct ContentView: View {
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
     @Environment(\.scenePhase) private var scenePhase
     @State private var showFirstRunOnboarding = false
+    @StateObject private var seedGuard = SeedBackupGuard()
 
     var body: some View {
         MainTabView()
             .injectLoadUnit()
+            .seedBackupGuard(seedGuard)
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
                     OnboardingFlowView { result, overrides in
-                        MesoSeedingCoordinator.applyOnboardingResult(
-                            result,
-                            context: modelContext,
-                            overrides: overrides
-                        )
+                        // A verified backup first (an empty store has nothing to protect and goes straight through).
+                        seedGuard.run(container: modelContext.container) {
+                            MesoSeedingCoordinator.applyOnboardingResult(
+                                result,
+                                context: modelContext,
+                                overrides: overrides
+                            )
+                        }
                     }
                     .navigationTitle("Welcome")
                     .toolbar {
