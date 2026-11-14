@@ -619,6 +619,44 @@ final class MesoComparisonTests: XCTestCase {
 
     // MARK: - PR definition report (old vs new; report only)
 
+    func test_report_badgeChanges_newVersusPR() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
+              let out = ProcessInfo.processInfo.environment["EP_BADGE_REPORT"], !out.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_BADGE_REPORT")
+        }
+        let container = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>()).sorted { $0.startDate < $1.startDate }
+        let bw = try ctx.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
+        var lines: [String] = []
+        for block in blocks where !block.isMaintenance {
+            let ids = Set(block.sessions.map { $0.persistentModelID })
+            let first = block.sessions.map(\.date).min() ?? block.startDate
+            let prior = all.filter { !ids.contains($0.persistentModelID) && $0.date < first }
+            guard let a = MesoPerformanceAnalyzer.analyze(meso: block, allPriorSessions: prior, bodyWeight: bw) else { continue }
+            // OLD rule: New = no earlier 12-rep peak; PR = beat an earlier 12-rep peak
+            var oldPeak: [String: Double] = [:]
+            for s in prior where s.meso?.isMaintenance != true { for it in s.items {
+                let id = ExerciseCatalog.canonicalExerciseId(for: it.exerciseId)
+                for i in 0..<min(it.actualLoads.count, it.actualReps.count) where it.actualReps[i] > 0 {
+                    let load = it.actualLoads[i] > 0 ? it.actualLoads[i] : (ExerciseCatalog.isBodyweight(exerciseId: it.exerciseId) ? (bw ?? 0) : 0)
+                    guard load > 0 else { continue }
+                    oldPeak[id] = max(oldPeak[id] ?? 0, BestSetRule.e1RM(load: load, reps: it.actualReps[i]))
+                } } }
+            for e in a.exerciseSummaries {
+                guard let peak = e.peakE1RM else { continue }
+                let p = oldPeak[e.exerciseId] ?? 0
+                let oldBadge = p <= 0 ? "New" : (peak > p ? "PR" : "-")
+                let newBadge = e.isNew ? "New" : (e.isPR ? "PR" : "-")
+                if oldBadge != newBadge { lines.append("\(block.name): \(e.exerciseName): \(oldBadge) -> \(newBadge)") }
+            }
+        }
+        if lines.isEmpty { lines = ["no badge changes"] }
+        try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
     func test_report_isPRFlagsBeforeAndAfterTheRecompute() throws {
         guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
               let out = ProcessInfo.processInfo.environment["EP_ISPR_REPORT"], !out.isEmpty else {
@@ -674,6 +712,61 @@ final class MesoComparisonTests: XCTestCase {
         let oldEvents = Dictionary(grouping: PersonalRecords.events(from: snap.sets).filter { !$0.isBaseline }, by: \.exerciseId).mapValues(\.count)
         lines.insert("lifts with a record: \(old.count); record changed: \(changed); record lost: \(lost); lifts with PR events now: \(oldEvents.count) (total \(oldEvents.values.reduce(0, +)))", at: 0)
         try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - New vs PR
+
+    private func mesoAnalysisWith(prior: [[(Int, [Int], [Double])]], current: [(Int, [Int], [Double])], maintenancePrior: Bool = false) throws -> MesoAnalysis {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let old = MesoBlock(id: UUID(), name: "Old", startDate: day(-100), status: .archived, totalWeeks: 4, isMaintenance: maintenancePrior)
+        let cur = MesoBlock(id: UUID(), name: "Cur", startDate: day(0), status: .active, totalWeeks: 4)
+        ctx.insert(old); ctx.insert(cur)
+        var priorSessions: [Session] = []
+        for block in prior { for (d, reps, loads) in block {
+            let s = Session(date: day(d), status: .completed, weekIndex: 1, dayLabel: "D", items: [item("curl", reps: reps, loads: loads)])
+            s.meso = old; old.sessions.append(s); ctx.insert(s); priorSessions.append(s)
+        } }
+        for (d, reps, loads) in current {
+            let s = Session(date: day(d), status: .completed, weekIndex: 1 + d / 7, dayLabel: "D", items: [item("curl", reps: reps, loads: loads)])
+            s.meso = cur; cur.sessions.append(s); ctx.insert(s)
+        }
+        return try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: cur, allPriorSessions: priorSessions))
+    }
+
+    func test_badge_aLiftTrainedBeforeWithOnlyLongSets_showsPR_notNew_whenItsFirst12RepRecordFallsInThisMeso() throws {
+        let a = try mesoAnalysisWith(prior: [[(-50, [20, 20], [100, 100])]], current: [(0, [10, 10], [120, 120])])
+        let e = try XCTUnwrap(a.exerciseSummaries.first)
+        XCTAssertFalse(e.isNew, "it has a completed working set (20 reps) before this meso")
+        XCTAssertTrue(e.isPR, "its first set of 12 reps or fewer is a record")
+    }
+
+    func test_badge_aLiftNeverTrainedBefore_isNew_notPR() throws {
+        let a = try mesoAnalysisWith(prior: [], current: [(0, [10, 10], [120, 120]), (7, [10], [125])])
+        let e = try XCTUnwrap(a.exerciseSummaries.first)
+        XCTAssertTrue(e.isNew)
+        XCTAssertFalse(e.isPR)
+        // a lift whose only sets this meso are long: no e1RM, no badge at all
+        let long = try mesoAnalysisWith(prior: [], current: [(0, [20, 20], [100, 100])])
+        XCTAssertFalse(try XCTUnwrap(long.exerciseSummaries.first).isNew)
+    }
+
+    func test_badge_beatingAnEarlier12RepPeak_isPR_andNotBeatingItIsNeither() throws {
+        let beat = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [5], [200])]], current: [(0, [5], [215])]).exerciseSummaries.first)
+        XCTAssertTrue(beat.isPR); XCTAssertFalse(beat.isNew)
+        let held = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [5], [200])]], current: [(0, [5], [190])]).exerciseSummaries.first)
+        XCTAssertFalse(held.isPR); XCTAssertFalse(held.isNew)
+        // training in a maintenance block counts as "trained before" too
+        let m = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [20], [100])]], current: [(0, [8], [150])], maintenancePrior: true).exerciseSummaries.first)
+        XCTAssertFalse(m.isNew)
+    }
+
+    func test_prEvents_aLiftFirstTrainedWithLongSets_hasNoBaselineWhenItsFirst12RepSetComes() {
+        let all = sets(10, "curl", load: 100, reps: [20, 20], meso: "old", key: "a") + sets(17, "curl", load: 120, reps: [10], meso: "new", key: "b")
+        let events = PersonalRecords.events(from: all)
+        XCTAssertEqual(events.map(\.isBaseline), [false], "an earlier (long-set) exposure exists: the first record is a record")
+        // the same lift with a 12-rep first session: baseline as before
+        let plain = sets(10, "curl", load: 100, reps: [10], meso: "old", key: "a") + sets(17, "curl", load: 120, reps: [10], meso: "new", key: "b")
+        XCTAssertEqual(PersonalRecords.events(from: plain).map(\.isBaseline), [true, false])
     }
 
     func test_noPreviousBlock_noComparison() {

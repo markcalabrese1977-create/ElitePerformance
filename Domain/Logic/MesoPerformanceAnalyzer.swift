@@ -221,6 +221,17 @@ enum MesoPerformanceAnalyzer {
         // Build prior e1RM peaks for PR detection
         // Maintenance blocks are held at deliberately reduced work: they never set or raise a prior peak.
         var priorPeakE1RM: [String: Double] = [:]
+        // Lifts trained before this meso at ANY rep count, maintenance blocks included: they are not "New" (a first record
+        // that falls in this meso is then a PR, not a baseline).
+        var trainedBefore = Set<String>()
+        for session in allPriorSessions {
+            for item in session.items {
+                let setCount = min(item.actualLoads.count, item.actualReps.count)
+                for idx in 0..<setCount where item.actualReps[idx] > 0 && effective(item.actualLoads[idx], item) > 0 {
+                    trainedBefore.insert(ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)); break
+                }
+            }
+        }
         for session in allPriorSessions where session.meso?.isMaintenance != true {
             for item in session.items {
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
@@ -335,12 +346,15 @@ enum MesoPerformanceAnalyzer {
 
 
             // PR detection
-            // A record needs something to beat: a lift with no earlier exposure (prior 0) sets a baseline ("New"), not a PR.
-            let isNew: Bool = peakE1RM != nil && (priorPeakE1RM[exerciseId] ?? 0) <= 0
+            // A record needs an earlier exposure to beat: a lift with none sets a baseline ("New"), not a PR.
+            // "New" = no completed working set (any rep count) before this meso. A lift trained before whose first qualifying
+            // (12 reps or fewer) record falls in this meso is a PR, not New.
+            let wasTrained = trainedBefore.contains(exerciseId)
+            let isNew: Bool = peakE1RM != nil && !wasTrained
             let isPR: Bool = {
-                guard let peak = peakE1RM else { return false }
+                guard let peak = peakE1RM, wasTrained else { return false }
                 let prior = priorPeakE1RM[exerciseId] ?? 0
-                return prior > 0 && peak > prior
+                return peak > prior
             }()
 
             // Display name and muscle

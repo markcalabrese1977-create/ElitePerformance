@@ -23,7 +23,7 @@ enum PersonalRecords {
         let sessionKey: String
         let date: Date
         let e1RM: Double
-        /// The first counted session of the lift: a baseline, not a beaten record.
+        /// The lift's first-ever trained session: a baseline, not a beaten record.
         let isBaseline: Bool
     }
 
@@ -47,6 +47,13 @@ enum PersonalRecords {
             if let b = best[k], b.e1RM >= s.recordE1RM { continue }
             best[k] = (s.recordE1RM, s.sessionDate)
         }
+        // A lift's first-ever TRAINED session (a working set of any rep count) is its baseline. A lift first trained with long
+        // sets only and later with a set of 12 reps or fewer has a real earlier exposure: its first record is a record, not a baseline.
+        var firstTrained: [String: (date: Date, session: String)] = [:]
+        for s in sets where s.isRecordSet && s.e1RM > 0 {
+            if let f = firstTrained[s.exerciseId], (f.date, f.session) <= (s.sessionDate, s.sessionKey) { continue }
+            firstTrained[s.exerciseId] = (s.sessionDate, s.sessionKey)
+        }
         let ordered = best.map { (key: $0.key, e1RM: $0.value.e1RM, date: $0.value.date) }
             .sorted { ($0.date, $0.key.session, $0.key.exercise) < ($1.date, $1.key.session, $1.key.exercise) }
         var running: [String: Double] = [:]
@@ -54,8 +61,10 @@ enum PersonalRecords {
         for o in ordered {
             let prior = running[o.key.exercise] ?? 0
             if o.e1RM > prior {
+                let first = firstTrained[o.key.exercise]
+                let isFirstSession = first.map { $0.date == o.date && $0.session == o.key.session } ?? true
                 out.append(Event(exerciseId: o.key.exercise, sessionKey: o.key.session, date: o.date,
-                                 e1RM: o.e1RM, isBaseline: prior == 0))
+                                 e1RM: o.e1RM, isBaseline: prior == 0 && isFirstSession))
                 running[o.key.exercise] = o.e1RM
             }
         }
