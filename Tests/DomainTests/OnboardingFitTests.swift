@@ -282,4 +282,35 @@ final class OnboardingFitTests: XCTestCase {
         // 3 days is Mon/Wed/Fri (Calendar weekdays 2, 4, 6).
         XCTAssertEqual(OnboardingDraft.defaultTrainingDays(for: 3), [2, 4, 6])
     }
+
+    // MARK: Seeding failure is visible
+
+    func test_apply_withWrongWeekdayCount_failsWithReason_andWritesNothing() throws {
+        let context = try makeContext()
+        // A good program first, so "nothing changed" means the existing one survives.
+        XCTAssertNoThrow(try ProgramApplicationService.apply(result(days: 4), context: context, startDate: Date()).get())
+        let sessionsBefore = try context.fetchCount(FetchDescriptor<Session>())
+        let blocksBefore = try context.fetch(FetchDescriptor<MesoBlock>()).map(\.status)
+        XCTAssertGreaterThan(sessionsBefore, 0)
+
+        var bad = result(days: 4, joints: [.wrists])
+        bad.trainingDaysOfWeek = [2]   // one chip left selected
+        let outcome = ProgramApplicationService.apply(bad, context: context, startDate: Date())
+
+        guard case .failure(let error) = outcome else { return XCTFail("a 1-day schedule must not seed") }
+        XCTAssertTrue(error.message.contains("4"), error.message)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Session>()), sessionsBefore, "existing sessions untouched")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<MesoBlock>()).map(\.status), blocksBefore, "existing meso not archived")
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertTrue(profile.injuryFlags.isEmpty, "profile must not take the failed answers")
+    }
+
+    func test_apply_onEmptyStore_withWrongWeekdayCount_writesNoProfile() throws {
+        let context = try makeContext()
+        var bad = result(days: 4)
+        bad.trainingDaysOfWeek = [2]
+        guard case .failure = ProgramApplicationService.apply(bad, context: context, startDate: Date()) else { return XCTFail() }
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<UserProfile>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Session>()), 0)
+    }
 }

@@ -4,12 +4,21 @@ import SwiftData
 
 enum ProgramApplicationService {
 
+    /// Why a program could not be created, in words the lifter can read.
+    struct ApplyError: LocalizedError, Equatable {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Seeds the program for `result`, then saves the profile. When seeding fails nothing is written (no profile, no
+    /// sessions) and the reason is returned so the caller can show it.
+    @discardableResult
     static func apply(
         _ result: OnboardingResult,
         context: ModelContext,
         startDate: Date = Date(),
         overrides: PreviewOverrides? = nil
-    ) {
+    ) -> Result<Void, ApplyError> {
         let weekdays = normalizedWeekdays(from: result)
         // The same fit the onboarding preview shows; preview overrides are keyed to this fitted template.
         let template = fittedProgram(for: result).template
@@ -24,9 +33,18 @@ enum ProgramApplicationService {
             )
         } catch {
             print("ERROR ProgramApplicationService.apply – seeding failed: \(error)")
+            return .failure(ApplyError(message: describe(error)))
         }
 
         writeUserProfile(from: result, context: context)
+        return .success(())
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let e = error as? DUPProgramSeederError, case .invalidWeekdayCount(let expected, let got) = e {
+            return "This program trains \(expected) days a week, but \(got) training day\(got == 1 ? " is" : "s are") selected. Go back to the schedule page and select \(expected) days. Nothing was changed."
+        }
+        return "The program could not be created: \(error.localizedDescription) Nothing was changed."
     }
 
     // MARK: - Fit

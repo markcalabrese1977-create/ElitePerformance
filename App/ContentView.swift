@@ -17,14 +17,18 @@ struct ContentView: View {
             .seedBackupGuard(seedGuard)
             .sheet(isPresented: $showFirstRunOnboarding) {
                 NavigationStack {
-                    OnboardingFlowView { result, overrides in
+                    OnboardingFlowView { result, overrides, finished in
                         // A verified backup first (an empty store has nothing to protect and goes straight through).
-                        seedGuard.run(container: modelContext.container) {
-                            MesoSeedingCoordinator.applyOnboardingResult(
+                        // The sheet stays up until the program exists; a failure keeps the lifter on the preview.
+                        seedGuard.run(container: modelContext.container, cancel: { finished(.cancelled) }) {
+                            switch MesoSeedingCoordinator.applyOnboardingResult(
                                 result,
                                 context: modelContext,
                                 overrides: overrides
-                            )
+                            ) {
+                            case .success:          finished(.done)
+                            case .failure(let e):   finished(.failed(e.message))
+                            }
                         }
                     }
                     .navigationTitle("Welcome")

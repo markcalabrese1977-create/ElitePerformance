@@ -23,6 +23,7 @@ struct HomeView: View {
     @State private var pendingOnboardingResult: OnboardingResult?
     @State private var pendingExerciseOverrides: PreviewOverrides = .empty
     @StateObject private var seedGuard = SeedBackupGuard()
+    @State private var seedFailure: String?
 
     /// Change Program, after the wizard: what it would delete, shown before anything is deleted.
     struct PendingReplace {
@@ -53,9 +54,12 @@ struct HomeView: View {
                 .navigationTitle("Program")
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides in
+                        OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides, finished in
+                            // Creation happens after this sheet closes, behind the replace confirmation; a failure there is
+                            // reported by `seedFailure`.
                             pendingOnboardingResult = result
                             pendingExerciseOverrides = overrides
+                            finished(.done)
                         }
                         .navigationTitle("Change Program")
                         .toolbar {
@@ -90,6 +94,11 @@ struct HomeView: View {
             }
         } message: {
             Text(pendingReplace?.plan.message ?? "")
+        }
+        .alert("Couldn't create your program", isPresented: Binding(get: { seedFailure != nil }, set: { if !$0 { seedFailure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(seedFailure ?? "")
         }
         .sheet(isPresented: $showMesoSummary) {
             if let meso = activeMeso {
@@ -148,11 +157,13 @@ struct HomeView: View {
         DispatchQueue.main.async {
             // A verified backup first; if it fails the program is not seeded (see SeedBackupGuard).
             seedGuard.run(container: modelContext.container) {
-                MesoSeedingCoordinator.applyOnboardingResult(
+                if case .failure(let e) = MesoSeedingCoordinator.applyOnboardingResult(
                     result,
                     context: modelContext,
                     overrides: overrides
-                )
+                ) {
+                    seedFailure = e.message
+                }
             }
         }
     }

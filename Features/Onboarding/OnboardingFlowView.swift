@@ -248,10 +248,23 @@ struct OnboardingDraft: Equatable {
 
 // MARK: - Flow
 
+/// How the host answered "Let's go". The flow dismisses only on `.done`.
+enum OnboardingFinish {
+    case done
+    /// Nothing was created; the flow stays on the preview with the reason in an alert.
+    case failed(String)
+    /// The host stopped before creating anything (for example the lifter declined a backup); the flow stays as it was.
+    case cancelled
+}
+
 struct OnboardingFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let onComplete: (OnboardingResult, PreviewOverrides) -> Void
+    /// The host creates the program and reports back through the third argument.
+    let onComplete: (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
+
+    @State private var isFinishing = false
+    @State private var finishFailure: String?
 
     @State private var pageIndex: Int = 0
 
@@ -307,7 +320,7 @@ struct OnboardingFlowView: View {
     init(
         initialStartDate: Date = Date(),
         profile: UserProfile? = nil,
-        onComplete: @escaping (OnboardingResult, PreviewOverrides) -> Void
+        onComplete: @escaping (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
     ) {
         self.onComplete = onComplete
         let draft = OnboardingDraft(profile: profile)
@@ -358,6 +371,13 @@ struct OnboardingFlowView: View {
             overridesSignature = newValue
         }
         .onAppear { overridesSignature = fitSignature }
+        .alert("Couldn't create your program", isPresented: Binding(
+            get: { finishFailure != nil }, set: { if !$0 { finishFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(finishFailure ?? "")
+        }
     }
 
     // MARK: - Progress bar
@@ -1342,6 +1362,7 @@ struct OnboardingFlowView: View {
                                     .frame(minWidth: 140)
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(isFinishing)
                         }
         }
         .padding(.horizontal)
@@ -1385,8 +1406,15 @@ struct OnboardingFlowView: View {
         draft.injuryFlags = selectedInjuryFlags
         let result = draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
 
-        onComplete(result, previewOverrides)
-        dismiss()
+        isFinishing = true
+        onComplete(result, previewOverrides) { finish in
+            isFinishing = false
+            switch finish {
+            case .done:             dismiss()
+            case .failed(let why):  finishFailure = why
+            case .cancelled:        break
+            }
+        }
     }
 }
 
