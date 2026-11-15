@@ -340,15 +340,28 @@ final class OnboardingFitTests: XCTestCase {
         XCTAssertTrue(text.contains("lower back and knees"), text)
     }
 
-    func test_reason_dropsTheNoJointStressPromise_whenSomethingWasKeptStressed() {
+    func test_reason_withFlags_saysWhenSomethingIsTheLowestStressOptionAvailable() {
         let kept = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
                                                                   injuries: [.knees], fit: fitResult(kept: 2))
+        XCTAssertTrue(kept.contains("2 exercises are the lowest-stress option your equipment allows for your knees"), kept)
         XCTAssertFalse(kept.contains("without joint stress"), kept)
-        XCTAssertTrue(kept.contains("2 exercises were kept because nothing lower-stress exists for your knees"), kept)
-
         let clean = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
                                                                    injuries: [.knees], fit: fitResult(kept: 0))
-        XCTAssertTrue(clean.contains("without joint stress"), clean)
+        XCTAssertTrue(clean.contains("your knees"), clean)
+        XCTAssertFalse(clean.contains("lowest-stress option your equipment allows"), clean)
+    }
+
+    /// No flags: no joint wording at all, for every day count and goal, through the real fit.
+    func test_reason_noFlags_containsNoJointWording() {
+        for goal in Goal.allCases {
+            for days in 2...6 {
+                let r = result(days: days)
+                let fit = ProgramApplicationService.fittedProgram(for: r)
+                let text = ProgramApplicationService.recommendationReason(goal: goal, daysPerWeek: days, injuries: [], fit: fit)
+                XCTAssertFalse(text.lowercased().contains("joint"), "\(goal) \(days)d: \(text)")
+                XCTAssertFalse(ProgramApplicationService.recommendationReason(goal: goal, daysPerWeek: days).lowercased().contains("joint"))
+            }
+        }
     }
 
     func test_reason_withoutFlags_isTheUnchangedBlurb() {

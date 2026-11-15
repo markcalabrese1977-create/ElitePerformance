@@ -107,17 +107,16 @@ enum ProgramApplicationService {
         }
     }
     
-    /// The program blurb plus what the fit did about the flagged joints. It names the joints, and it only promises
-    /// "without joint stress" when no exercise had to be kept because nothing lower-stress existed.
+    /// The program blurb plus what the fit did about the flagged joints. Joint wording appears only when at least one
+    /// joint is flagged, and then it names the joints; the blurbs themselves carry no joint claims.
     static func recommendationReason(goal: Goal, daysPerWeek: Int, injuries: Set<InjuryFlag>, fit: FitResult) -> String {
         let kept = fit.reasons.filter { $0.kind == .keptStressed }
         var text = recommendationReason(goal: goal, daysPerWeek: daysPerWeek)
-        if !kept.isEmpty { text = text.replacingOccurrences(of: " without joint stress.", with: " steadily.") }
-        guard !injuries.isEmpty else { return text }
+        guard !injuries.isEmpty else { return text }   // nothing flagged: the blurb alone, with no joint wording
         let names = ProgramFitter.jointNames(injuries)
         text += "\n\nYou flagged your \(names), so exercises that load \(injuries.count == 1 ? "it" : "them") hard were swapped for lower-stress options where one exists."
         if !kept.isEmpty {
-            text += " \(kept.count) exercise\(kept.count == 1 ? " was" : "s were") kept because nothing lower-stress exists for your \(names); go lighter on \(kept.count == 1 ? "it" : "them")."
+            text += " \(kept.count) exercise\(kept.count == 1 ? " is" : "s are") the lowest-stress option your equipment allows for your \(names); follow the pain-free cues listed with the plan."
         }
         return text
     }
@@ -129,7 +128,7 @@ enum ProgramApplicationService {
             case (_, 5):
                 return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The four upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
             case (_, 4):
-                return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size without joint stress."
+                return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size steadily."
             case (_, 3):
                 return "Three days a week with Push/Pull/Legs hits every major muscle group with a full dedicated session. Each day has a clear primary stimulus — horizontal push, vertical pull, quad and posterior chain — so nothing gets undertrained. The wave progression keeps intensity building across the 10-week block."
             case (_, 2):
