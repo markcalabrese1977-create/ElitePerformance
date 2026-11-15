@@ -214,6 +214,17 @@ struct OnboardingDraft: Equatable {
         }
     }
 
+    /// The schedule page is complete only when the chosen weekdays match the stepper: the program is picked by the
+    /// weekday count and the seeder refuses any other number of days.
+    static func scheduleIsComplete(weekdays: Set<Int>, daysPerWeek: Int) -> Bool {
+        weekdays.count == daysPerWeek
+    }
+
+    /// What the schedule page says while the chips and the stepper disagree; nil when they match.
+    static func scheduleMessage(weekdays: Set<Int>, daysPerWeek: Int) -> String? {
+        scheduleIsComplete(weekdays: weekdays, daysPerWeek: daysPerWeek) ? nil : "Select \(daysPerWeek) days"
+    }
+
     /// What tapping straight through produces.
     func result(startDate: Date, weekdays: Set<Int> = []) -> OnboardingResult {
         let days = (weekdays.isEmpty ? Self.defaultTrainingDays(for: daysPerWeek) : weekdays)
@@ -472,7 +483,8 @@ struct OnboardingFlowView: View {
                         .font(.headline)
                 }
                 .onChange(of: daysPerWeek) { _, _ in
-                    syncSelectedWeekdaysWithDaysPerWeek()
+                    // A new count starts from the default evenly spaced pattern (3 -> Mon/Wed/Fri); the lifter then adjusts.
+                    selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
                 }
             }
 
@@ -506,9 +518,15 @@ struct OnboardingFlowView: View {
                     }
                 }
 
-                Text("Selected \(selectedWeekdays.count) of \(daysPerWeek) days")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                if let message = OnboardingDraft.scheduleMessage(weekdays: selectedWeekdays, daysPerWeek: daysPerWeek) {
+                    Text("\(message) (\(selectedWeekdays.count) selected)")
+                        .font(.caption.bold())
+                        .foregroundColor(.orange)
+                } else {
+                    Text("Selected \(selectedWeekdays.count) of \(daysPerWeek) days")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
@@ -1296,6 +1314,11 @@ struct OnboardingFlowView: View {
 
     // MARK: - Bottom bar
 
+    /// Next is held on the schedule page until the chips match the stepper.
+    private var canAdvance: Bool {
+        pageIndex != 2 || OnboardingDraft.scheduleIsComplete(weekdays: selectedWeekdays, daysPerWeek: daysPerWeek)
+    }
+
     private var bottomBar: some View {
         HStack {
             if pageIndex > 0 {
@@ -1312,6 +1335,7 @@ struct OnboardingFlowView: View {
                                 withAnimation { pageIndex += 1 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(!canAdvance)
                         } else {
                             Button(action: finish) {
                                 Text("Let's go")
@@ -1337,23 +1361,6 @@ struct OnboardingFlowView: View {
 
     private func defaultTrainingDays(for days: Int) -> Set<Int> { OnboardingDraft.defaultTrainingDays(for: days) }
 
-    private func syncSelectedWeekdaysWithDaysPerWeek() {
-        let desired = daysPerWeek
-        if selectedWeekdays.isEmpty {
-            selectedWeekdays = defaultTrainingDays(for: desired)
-            return
-        }
-        if selectedWeekdays.count > desired {
-            selectedWeekdays = Set(selectedWeekdays.sorted().prefix(desired))
-        } else if selectedWeekdays.count < desired {
-            var result = selectedWeekdays
-            for w in defaultTrainingDays(for: desired) where result.count < desired {
-                result.insert(w)
-            }
-            selectedWeekdays = result
-        }
-    }
-
     private func toggleWeekday(_ weekday: Int) {
         if selectedWeekdays.contains(weekday) {
             selectedWeekdays.remove(weekday)
@@ -1366,10 +1373,6 @@ struct OnboardingFlowView: View {
     // MARK: - Finish
 
     private func finish() {
-        if selectedWeekdays.isEmpty {
-            selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
-        }
-
         var draft = OnboardingDraft()
         draft.goal = selectedGoal
         draft.experience = selectedExperience

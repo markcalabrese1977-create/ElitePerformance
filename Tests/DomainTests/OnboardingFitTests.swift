@@ -261,4 +261,25 @@ final class OnboardingFitTests: XCTestCase {
         XCTAssertTrue(again.equipmentChecklist.isEmpty)
         XCTAssertEqual(again.injuryFlags, [.hips])
     }
+
+    // MARK: Schedule page
+
+    func test_chipCountNotEqualToStepper_blocksNext() {
+        for days in 2...6 {
+            for chips in 0...7 where chips != days {
+                let picked = Set(Array(1...7).prefix(chips))
+                XCTAssertFalse(OnboardingDraft.scheduleIsComplete(weekdays: picked, daysPerWeek: days), "\(chips) chips vs \(days)")
+                XCTAssertEqual(OnboardingDraft.scheduleMessage(weekdays: picked, daysPerWeek: days), "Select \(days) days")
+            }
+            let matching = OnboardingDraft.defaultTrainingDays(for: days)
+            XCTAssertTrue(OnboardingDraft.scheduleIsComplete(weekdays: matching, daysPerWeek: days))
+            XCTAssertNil(OnboardingDraft.scheduleMessage(weekdays: matching, daysPerWeek: days))
+        }
+    }
+
+    func test_defaultPatternForEachStepperValue_hasThatManyDays() {
+        for days in 2...6 { XCTAssertEqual(OnboardingDraft.defaultTrainingDays(for: days).count, days) }
+        // 3 days is Mon/Wed/Fri (Calendar weekdays 2, 4, 6).
+        XCTAssertEqual(OnboardingDraft.defaultTrainingDays(for: 3), [2, 4, 6])
+    }
 }
