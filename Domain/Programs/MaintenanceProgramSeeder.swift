@@ -158,6 +158,10 @@ enum MaintenanceProgramSeeder {
         calendar: Calendar = .current
     ) throws {
         let startDay = calendar.startOfDay(for: startDate)
+        // A template-generated path, so the goal step runs. It only edits prescriptions, and this block's own maintenance
+        // prescription replaces them below, so today it changes nothing here; the roster comes from the same template.
+        let goal = (try? context.fetch(FetchDescriptor<UserProfile>()).first).flatMap { Goal(rawValue: $0.primaryGoalRaw) } ?? .hypertrophy
+        let template = GoalModifier.apply(template, goal: goal).0
 
         // 1) Archive active mesos
         let mesoDescriptor = FetchDescriptor<MesoBlock>()

@@ -7,18 +7,22 @@ struct FitProfile: Equatable {
     var injuries: Set<InjuryFlag>
     var sessionMinutes: Int
     var experience: TrainingExperience
+    /// Build muscle is the identity: the goal step changes nothing for it.
+    var goal: Goal
 
     init(equipment: Set<GearTag>, injuries: Set<InjuryFlag> = [], sessionMinutes: Int = 120,
-         experience: TrainingExperience = .intermediate) {
+         experience: TrainingExperience = .intermediate, goal: Goal = .hypertrophy) {
         self.equipment = equipment
         self.injuries = injuries
         self.sessionMinutes = sessionMinutes
         self.experience = experience
+        self.goal = goal
     }
 
     init(_ profile: UserProfile) {
         self.init(equipment: profile.effectiveEquipment, injuries: Set(profile.injuryFlags),
-                  sessionMinutes: profile.sessionLengthMinutes, experience: profile.experience)
+                  sessionMinutes: profile.sessionLengthMinutes, experience: profile.experience,
+                  goal: Goal(rawValue: profile.primaryGoalRaw) ?? .hypertrophy)
     }
 
     /// True when nothing about the profile can rule an exercise out.
@@ -31,7 +35,7 @@ struct FitProfile: Equatable {
 /// ORIGINAL template, so a reason stays addressable after slots are dropped.
 struct FitReason: Equatable {
     enum Kind: String {
-        case substituted, dropped, droppedForTime, trimmedSets, volume   // changes
+        case substituted, dropped, droppedForTime, trimmedSets, volume, goal   // changes
         case keptStressed, jointNote, notEvaluated, overBudget           // notes: nothing was changed
     }
 
@@ -42,7 +46,7 @@ struct FitReason: Equatable {
 
     var isChange: Bool {
         switch kind {
-        case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume: return true
+        case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume, .goal: return true
         case .keptStressed, .jointNote, .notEvaluated, .overBudget: return false
         }
     }
@@ -90,8 +94,11 @@ enum ProgramFitter {
 
     // MARK: - Entry point
 
-    static func fit(_ template: ProgramTemplate, profile: FitProfile) -> FitResult {
-        var reasons: [FitReason] = []
+    static func fit(_ original: ProgramTemplate, profile: FitProfile) -> FitResult {
+        // The goal first: equipment, joints and time then work on the goal-adjusted numbers. It adds no slots, so every
+        // slot index below still means the same slot of the original template.
+        let (template, goalNotes) = GoalModifier.apply(original, goal: profile.goal)
+        var reasons: [FitReason] = goalNotes
         var beginnerChanged = false
         var days: [ProgramDayTemplate] = []
         var adviceDays: [FitAdvice.Day] = []

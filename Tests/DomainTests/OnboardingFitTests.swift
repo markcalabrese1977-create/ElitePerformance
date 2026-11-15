@@ -364,9 +364,10 @@ final class OnboardingFitTests: XCTestCase {
         }
     }
 
-    func test_reason_withoutFlags_isTheUnchangedBlurb() {
+    func test_reason_withoutFlags_isTheBlurbPlusTheGoalSentence() {
         let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4, injuries: [], fit: fitResult(kept: 0))
-        XCTAssertEqual(text, ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4))
+        XCTAssertEqual(text, ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4)
+                       + "\n\n" + ProgramApplicationService.goalSentence(.hypertrophy))
     }
 
     // MARK: Welcome sheet and Today routing

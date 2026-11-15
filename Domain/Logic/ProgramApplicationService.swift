@@ -51,14 +51,14 @@ enum ProgramApplicationService {
 
     /// Gear the fitter may assume: the checklist when one was filled in, else the preset's defaults.
     static func fitProfile(preset: EquipmentPreset, checklist: [GearTag], injuries: [InjuryFlag],
-                           sessionMinutes: Int, experience: TrainingExperience) -> FitProfile {
+                           sessionMinutes: Int, experience: TrainingExperience, goal: Goal = .hypertrophy) -> FitProfile {
         FitProfile(equipment: checklist.isEmpty ? preset.defaultEquipment : Set(checklist),
-                   injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience)
+                   injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience, goal: goal)
     }
 
     static func fitProfile(for result: OnboardingResult) -> FitProfile {
         fitProfile(preset: result.equipmentPreset, checklist: result.equipmentChecklist, injuries: result.injuryFlags,
-                   sessionMinutes: result.sessionLengthMinutes, experience: result.experience)
+                   sessionMinutes: result.sessionLengthMinutes, experience: result.experience, goal: result.goal)
     }
 
     /// The program for `result`: the selected template adapted to the person. Preview and seeding both call this.
@@ -111,14 +111,28 @@ enum ProgramApplicationService {
     /// joint is flagged, and then it names the joints; the blurbs themselves carry no joint claims.
     static func recommendationReason(goal: Goal, daysPerWeek: Int, injuries: Set<InjuryFlag>, fit: FitResult) -> String {
         let kept = fit.reasons.filter { $0.kind == .keptStressed }
-        var text = recommendationReason(goal: goal, daysPerWeek: daysPerWeek)
-        guard !injuries.isEmpty else { return text }   // nothing flagged: the blurb alone, with no joint wording
+        var text = recommendationReason(goal: goal, daysPerWeek: daysPerWeek) + "\n\n" + goalSentence(goal)
+        guard !injuries.isEmpty else { return text }   // nothing flagged: no joint wording
         let names = ProgramFitter.jointNames(injuries)
         text += "\n\nYou flagged your \(names), so exercises that load \(injuries.count == 1 ? "it" : "them") hard were swapped for lower-stress options where one exists."
         if !kept.isEmpty {
             text += " \(kept.count) exercise\(kept.count == 1 ? " is" : "s are") the lowest-stress option your equipment allows for your \(names); follow the pain-free cues listed with the plan."
         }
         return text
+    }
+
+    /// The goal, named, and what it changed in the program: one sentence (see `GoalModifier`).
+    static func goalSentence(_ goal: Goal) -> String {
+        switch goal {
+        case .hypertrophy:
+            return "Goal: Build muscle. The program runs as designed."
+        case .strength:
+            return "Goal: Get stronger. Your main lifts use lower-rep ranges (2 fewer reps, never below 3) while accessories stay as designed."
+        case .fatLoss:
+            return "Goal: Lose fat. Weekly sets ramp up by at most 1 and isolation work trims by a set in the second half of the block."
+        case .longevity:
+            return "Goal: Maintain / move better. Every exercise has 1 fewer set and 1 more rep in reserve, with a gentler weekly ramp."
+        }
     }
 
     static func recommendationReason(goal: Goal, daysPerWeek: Int) -> String {

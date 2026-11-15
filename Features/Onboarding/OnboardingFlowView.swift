@@ -1247,7 +1247,7 @@ struct OnboardingFlowView: View {
             let template = ProgramApplicationService.selectTemplate(goal: selectedGoal, daysPerWeek: currentWeekdayCount)
             return ProgramFitter.fit(template, profile: ProgramApplicationService.fitProfile(
                 preset: selectedPreset, checklist: resultChecklist, injuries: Array(selectedInjuryFlags),
-                sessionMinutes: sessionLengthMinutes, experience: selectedExperience))
+                sessionMinutes: sessionLengthMinutes, experience: selectedExperience, goal: selectedGoal))
         }
 
         /// Everything the fit depends on. Slot-keyed overrides only mean something against the same fitted template,
