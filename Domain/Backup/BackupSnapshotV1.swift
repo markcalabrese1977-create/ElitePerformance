@@ -65,6 +65,9 @@ struct UserProfileBackupDTO: Codable {
     let primaryGoalRaw: String?
     let daysPerWeek: Int?
     let sessionLengthMinutes: Int?
+    /// true when the lifter has no session-length limit (the model value is nil). Without this a nil minutes value is
+    /// indistinguishable from an old backup that never wrote the key, which restores as 60. Absent = not unlimited.
+    var sessionLengthUnlimited: Bool? = nil
     let equipmentProfileRaw: String?
     let injuryFlagRaws: [String]?
     let minLoadIncrement: Double?

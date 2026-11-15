@@ -5,12 +5,13 @@ import Foundation
 struct FitProfile: Equatable {
     var equipment: Set<GearTag>
     var injuries: Set<InjuryFlag>
-    var sessionMinutes: Int
+    /// nil = no limit: the fit skips time trimming and never reports an over-budget day.
+    var sessionMinutes: Int?
     var experience: TrainingExperience
     /// Build muscle is the identity: the goal step changes nothing for it.
     var goal: Goal
 
-    init(equipment: Set<GearTag>, injuries: Set<InjuryFlag> = [], sessionMinutes: Int = 120,
+    init(equipment: Set<GearTag>, injuries: Set<InjuryFlag> = [], sessionMinutes: Int? = 120,
          experience: TrainingExperience = .intermediate, goal: Goal = .hypertrophy) {
         self.equipment = equipment
         self.injuries = injuries
@@ -119,7 +120,10 @@ enum ProgramFitter {
             adviceDays.append(FitAdvice.Day(dayNumber: day.dayNumber,
                                             untrimmedMinutes: (untrimmed + 59) / 60,
                                             minimumMinutes: (estimatedSeconds(floorSlots.map(\.template), template: template) + 59) / 60))
-            trimForTime(day: day, slots: &slots, template: template, budgetSeconds: profile.sessionMinutes * 60, reasons: &reasons)
+            // No limit: no trimming at all, so no trim reasons and no over-budget note.
+            if let minutes = profile.sessionMinutes {
+                trimForTime(day: day, slots: &slots, template: template, budgetSeconds: minutes * 60, reasons: &reasons)
+            }
 
             var exercises = slots.map(\.template)
             if exercises.count != day.exerciseTemplates.count {

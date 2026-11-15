@@ -38,7 +38,6 @@ enum BackupSchemaMap {
         "UserProfile.experienceRaw": "intermediate",
         "UserProfile.primaryGoalRaw": "hypertrophy",
         "UserProfile.daysPerWeek": 4,
-        "UserProfile.sessionLengthMinutes": 60,
         "UserProfile.equipmentProfileRaw": "commercial",
         "UserProfile.minLoadIncrement": 2.5,
     ]

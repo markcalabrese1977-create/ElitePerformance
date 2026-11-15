@@ -62,6 +62,7 @@ enum BackupSnapshotExporter {
                     primaryGoalRaw: $0.primaryGoalRaw,
                     daysPerWeek: $0.daysPerWeek,
                     sessionLengthMinutes: $0.sessionLengthMinutes,
+                    sessionLengthUnlimited: $0.sessionLengthMinutes == nil ? true : nil,
                     equipmentProfileRaw: $0.equipmentProfileRaw,
                     injuryFlagRaws: $0.injuryFlagRaws,
                     minLoadIncrement: $0.minLoadIncrement,

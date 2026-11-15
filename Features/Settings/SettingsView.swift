@@ -257,18 +257,31 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                 }
 
-                                HStack {
+                                VStack(alignment: .leading, spacing: 8) {
                                     Text("Session Length")
-                                    Spacer()
-                                    TextField("min", value: Binding(
-                                        get: { profile.sessionLengthMinutes },
-                                        set: { profile.sessionLengthMinutes = $0 }
-                                    ), format: .number)
-                                    .keyboardType(.numberPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(width: 60)
-                                    Text("min")
-                                        .foregroundStyle(.secondary)
+                                    // "No limit" first: the next program is then never trimmed for time.
+                                    Picker("Session Length", selection: Binding(
+                                        get: { profile.sessionLengthMinutes == nil ? 0 : 1 },
+                                        set: { profile.sessionLengthMinutes = $0 == 0 ? nil : (profile.sessionLengthMinutes ?? 60) }
+                                    )) {
+                                        Text("No limit").tag(0)
+                                        Text("Set a limit").tag(1)
+                                    }
+                                    .pickerStyle(.segmented)
+                                    if profile.sessionLengthMinutes != nil {
+                                        HStack {
+                                            Spacer()
+                                            TextField("min", value: Binding(
+                                                get: { profile.sessionLengthMinutes ?? 60 },
+                                                set: { profile.sessionLengthMinutes = $0 }
+                                            ), format: .number)
+                                            .keyboardType(.numberPad)
+                                            .multilineTextAlignment(.trailing)
+                                            .frame(width: 60)
+                                            Text("min")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
                                 }
 
                                 VStack(alignment: .leading, spacing: 8) {

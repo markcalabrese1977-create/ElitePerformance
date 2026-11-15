@@ -169,13 +169,13 @@ final class ProgramFitterTests: XCTestCase {
                 if adv.untrimmedMinutes < fittedMinutes { fail("\(day.title): advice untrimmed \(adv.untrimmedMinutes) < fitted \(fittedMinutes)") }
                 if adv.minimumMinutes > fittedMinutes { fail("\(day.title): advice minimum \(adv.minimumMinutes) > fitted \(fittedMinutes)") }
                 let over = reasonsForDay.contains { $0.kind == .overBudget }
-                if over && adv.minimumMinutes <= p.sessionMinutes { fail("\(day.title): over note but minimum \(adv.minimumMinutes) <= budget") }
-                if !over && adv.minimumMinutes > p.sessionMinutes { fail("\(day.title): within budget but minimum \(adv.minimumMinutes) > budget") }
+                if over && adv.minimumMinutes <= (p.sessionMinutes ?? 0) { fail("\(day.title): over note but minimum \(adv.minimumMinutes) <= budget") }
+                if !over && adv.minimumMinutes > (p.sessionMinutes ?? 0) { fail("\(day.title): within budget but minimum \(adv.minimumMinutes) > budget") }
             } else { fail("\(day.title): no advice entry") }
-            if seconds > p.sessionMinutes * 60 && !reasonsForDay.contains(where: { $0.kind == .overBudget }) {
-                fail("\(day.title): \(seconds / 60) min over \(p.sessionMinutes) with no over reason")
+            if seconds > (p.sessionMinutes ?? 0) * 60 && !reasonsForDay.contains(where: { $0.kind == .overBudget }) {
+                fail("\(day.title): \(seconds / 60) min over \((p.sessionMinutes ?? 0)) with no over reason")
             }
-            if seconds <= p.sessionMinutes * 60 && reasonsForDay.contains(where: { $0.kind == .overBudget }) {
+            if seconds <= (p.sessionMinutes ?? 0) * 60 && reasonsForDay.contains(where: { $0.kind == .overBudget }) {
                 fail("\(day.title): over reason although within budget")
             }
 

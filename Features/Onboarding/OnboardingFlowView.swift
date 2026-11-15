@@ -36,7 +36,8 @@ struct OnboardingResult: Codable {
     /// 1 = Sunday ... 7 = Saturday (Calendar weekday values)
     var trainingDaysOfWeek: [Int]
     var equipmentProfile: EquipmentProfile
-    var sessionLengthMinutes: Int
+    /// nil = no limit.
+    var sessionLengthMinutes: Int?
     var injuryFlags: [InjuryFlag]
     var minLoadIncrement: Double
     /// User-chosen meso start date from the date picker on the final page.
@@ -64,7 +65,7 @@ extension OnboardingResult {
             daysPerWeek: try c.decode(Int.self, forKey: .daysPerWeek),
             trainingDaysOfWeek: try c.decode([Int].self, forKey: .trainingDaysOfWeek),
             equipmentProfile: try c.decode(EquipmentProfile.self, forKey: .equipmentProfile),
-            sessionLengthMinutes: try c.decode(Int.self, forKey: .sessionLengthMinutes),
+            sessionLengthMinutes: try c.decodeIfPresent(Int.self, forKey: .sessionLengthMinutes),
             injuryFlags: try c.decode([InjuryFlag].self, forKey: .injuryFlags),
             minLoadIncrement: try c.decode(Double.self, forKey: .minLoadIncrement),
             startDate: try c.decode(Date.self, forKey: .startDate),
@@ -182,7 +183,8 @@ struct OnboardingDraft: Equatable {
     var daysPerWeek: Int = 4
     var preset: EquipmentPreset = .fullGym
     var checklist: Set<GearTag> = []
-    var sessionLengthMinutes: Int = 60
+    /// No limit by default.
+    var sessionLengthMinutes: Int? = nil
     var loadIncrement: Double = 2.5
     var unit: LoadUnit = .lb
     var injuryFlags: Set<InjuryFlag> = []
@@ -283,7 +285,7 @@ struct OnboardingFlowView: View {
     // Page 4 — Equipment + Session length
     @State private var selectedPreset: EquipmentPreset
     @State private var selectedChecklist: Set<GearTag>
-    @State private var sessionLengthMinutes: Int
+    @State private var sessionLengthMinutes: Int?
     @State private var selectedLoadIncrement: Double
     @State private var selectedUnit: LoadUnit
 
@@ -649,9 +651,21 @@ struct OnboardingFlowView: View {
                 Text("Session length")
                     .font(.subheadline.bold())
 
-                Stepper(value: $sessionLengthMinutes, in: 30...120, step: 15) {
-                    Text("\(sessionLengthMinutes) minutes")
-                        .font(.headline)
+                // "No limit" first: the fit then never trims for time.
+                Picker("Session length", selection: Binding(
+                    get: { sessionLengthMinutes == nil ? 0 : 1 },
+                    set: { sessionLengthMinutes = $0 == 0 ? nil : (sessionLengthMinutes ?? 60) }
+                )) {
+                    Text("No limit").tag(0)
+                    Text("Set a limit").tag(1)
+                }
+                .pickerStyle(.segmented)
+
+                if let minutes = sessionLengthMinutes {
+                    Stepper(value: Binding(get: { minutes }, set: { sessionLengthMinutes = $0 }), in: 30...120, step: 15) {
+                        Text("\(minutes) minutes")
+                            .font(.headline)
+                    }
                 }
             }
 
@@ -1256,7 +1270,7 @@ struct OnboardingFlowView: View {
             [selectedGoal.rawValue, String(currentWeekdayCount), selectedPreset.rawValue,
              resultChecklist.map(\.rawValue).joined(separator: ","),
              selectedInjuryFlags.map(\.rawValue).sorted().joined(separator: ","),
-             String(sessionLengthMinutes), selectedExperience.rawValue].joined(separator: "|")
+             sessionLengthMinutes.map(String.init) ?? "none", selectedExperience.rawValue].joined(separator: "|")
         }
 
         @ViewBuilder

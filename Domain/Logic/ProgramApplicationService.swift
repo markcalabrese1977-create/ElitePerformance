@@ -51,7 +51,7 @@ enum ProgramApplicationService {
 
     /// Gear the fitter may assume: the checklist when one was filled in, else the preset's defaults.
     static func fitProfile(preset: EquipmentPreset, checklist: [GearTag], injuries: [InjuryFlag],
-                           sessionMinutes: Int, experience: TrainingExperience, goal: Goal = .hypertrophy) -> FitProfile {
+                           sessionMinutes: Int?, experience: TrainingExperience, goal: Goal = .hypertrophy) -> FitProfile {
         FitProfile(equipment: checklist.isEmpty ? preset.defaultEquipment : Set(checklist),
                    injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience, goal: goal)
     }
