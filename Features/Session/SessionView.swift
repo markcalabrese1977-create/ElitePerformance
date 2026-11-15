@@ -2959,11 +2959,11 @@ struct UISessionSet: Identifiable {
             )
         }
     }
-    /// "EXTRA SET  6-8 reps @ 2 RIR": the line for a row past the planned set count (no load).
+    /// "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR": the line for the spare row past the planned set count (no load).
     static func extraSetLabel(repRange: RepRange, rir: Int?) -> String {
         let reps = repRange.min == repRange.max ? "\(repRange.min)" : "\(repRange.min)-\(repRange.max)"
         let rirText = rir.map { " @ \($0) RIR" } ?? ""
-        return "EXTRA SET  \(reps) reps\(rirText)"
+        return "OPTIONAL EXTRA SET  \(reps) reps\(rirText)"
     }
 
     func plannedDescription(with repRange: RepRange, isBodyweight: Bool = false) -> String {

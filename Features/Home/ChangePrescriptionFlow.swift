@@ -350,7 +350,7 @@ private struct ChangePrescriptionForm: View {
                     }
                     let skipped = plan.refusals
                     if !skipped.isEmpty {
-                        Section("Skipped") {
+                        Section(plan.editedSkipped > 0 ? "Skipped (\(plan.editedSkipped) edited by you)" : "Skipped") {
                             ForEach(Array(skipped.enumerated()), id: \.offset) { _, r in
                                 HStack {
                                     Text(r.session.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())

@@ -2802,3 +2802,66 @@ final class MesoStartDateResyncTests: XCTestCase {
         BackfillLog.collector = nil
     }
 }
+
+// MARK: - R5: Program day page
+
+final class ProgramDayPageTests: XCTestCase {
+
+    func test_headerReps_comeFromThePerSetPlan_notTheFlattenedDefault() {
+        let i = SessionItem(order: 1, exerciseId: "t_bar_row", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 340)
+        i.plannedRepsBySet = [8, 8, 8, 0]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "8 reps", "targetReps says 6; the plan says 8")
+        i.plannedRepsBySet = [8, 7, 6, 0]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "6–8 reps")
+        i.plannedRepsBySet = []
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "6 reps", "empty plan: the default")
+        // the spare 4th row is not a planned set
+        let j = SessionItem(order: 1, exerciseId: "t_bar_row", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        j.plannedRepsBySet = [8, 8, 8, 12]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: j), "8 reps")
+    }
+
+    func test_theTodayRowPastThePlannedSets_isLabelledOptionalExtraSet() {
+        XCTAssertTrue(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 10), rir: 2).hasPrefix("OPTIONAL EXTRA SET"))
+    }
+
+    func test_seedingWidensTheSetBandToCoverTheWeeksRamp() {
+        // DUP10: Pull-Up style slot, 2-3 band, ramp [.., 4 in week 8]
+        let ex = ResolvedExercisePlan(order: 2, exerciseId: "pull_up", priority: .standard, notes: nil, wave: .b, setMin: 2, setMax: 3,
+                                      repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2, intensifier: .none, intensifierNotes: nil,
+                                      defaultSets: 4, defaultTargetReps: 8, defaultTargetRIR: 2)
+        let day = MaterializedProgramDay(templateId: "t", weekNumber: 8, wave: .b, dayNumber: 1, title: "Pull A", role: "pull", exercises: [ex])
+        let item = DUPSessionMaterializer.makeSessionItems(from: day)[0]
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual([item.setMin, item.setMax], [2, 4], "the band covers the 4-set week")
+        let ordinary = ResolvedExercisePlan(order: 2, exerciseId: "pull_up", priority: .standard, notes: nil, wave: .a, setMin: 2, setMax: 3,
+                                            repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2, intensifier: .none, intensifierNotes: nil,
+                                            defaultSets: 3, defaultTargetReps: 8, defaultTargetRIR: 2)
+        let i2 = DUPSessionMaterializer.makeSessionItems(from: MaterializedProgramDay(templateId: "t", weekNumber: 1, wave: .a, dayNumber: 1, title: "x", role: "pull", exercises: [ordinary]))[0]
+        XCTAssertEqual([i2.setMin, i2.setMax], [2, 3], "a week inside the band keeps it")
+    }
+
+    func test_changeForRemainingSessions_skipsHandEditedItems_andReportsTheCount_thisSessionStaysExplicit() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(name: "M", startDate: Date(), status: .active, totalWeeks: 8); ctx.insert(meso)
+        func item(edited: Bool) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: "a", repMin: 6, repMax: 8)
+            i.plannedRepsBySet = [8, 8, 8]; i.plannedRIRsBySet = [2, 2, 2]; i.plannedLoadsBySet = [100, 100, 100]; i.planEdited = edited
+            return i
+        }
+        var sessions: [Session] = []
+        for (n, edited) in [(1, false), (8, true), (15, false)] {
+            let s = Session(date: Calendar.current.date(byAdding: .day, value: n, to: Calendar.current.startOfDay(for: Date()))!, status: .planned, weekIndex: n, dayLabel: "Push", items: [item(edited: edited)])
+            s.meso = meso; ctx.insert(s); meso.sessions.append(s); sessions.append(s)
+        }
+        try ctx.save()
+        let change = PrescriptionChange(setDelta: nil, repRange: 8...10, rirRange: nil, note: nil, topSet: nil)
+        let all = SessionItemEditService.planChangePrescription(meso: meso, dayLabel: "Push", exerciseId: "bench_press", scope: .allRemaining, change: change)
+        XCTAssertEqual(all.targets.count, 2, "the two unedited sessions change")
+        XCTAssertEqual(all.editedSkipped, 1, "the hand-edited one is skipped and counted")
+        XCTAssertEqual(ReplaceExerciseModel.reasonText(.planEdited), "edited by you, left as it is")
+        let only = SessionItemEditService.planChangePrescription(meso: meso, dayLabel: "Push", exerciseId: "bench_press", scope: .thisSession(sessions[1]), change: change)
+        XCTAssertEqual(only.targets.count, 1, "an explicit this-session edit of the edited item is allowed")
+        XCTAssertEqual(only.editedSkipped, 0)
+    }
+}

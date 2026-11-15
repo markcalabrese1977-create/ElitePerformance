@@ -877,8 +877,10 @@ private struct ProgramExercisePlanRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            let setRows = isMaintenance ? item.targetSets : max(4, item.targetSets + item.topCount)
-            // Top rows first (storage keeps them at the tail), then the back-offs and spare rows.
+            // Exactly the planned work sets (+ top rows). The spare fourth row Today offers as an optional extra set is not
+            // a planned set and is not shown here.
+            let setRows = item.targetSets + item.topCount
+            // Top rows first (storage keeps them at the tail), then the back-offs.
             let rowOrder = item.topRowIndices.filter { $0 < setRows } + (0..<setRows).filter { !item.isTopRow($0) }
 
                         ForEach(rowOrder, id: \.self) { idx in
@@ -970,7 +972,8 @@ private struct ProgramExercisePlanRow: View {
         }
 
         let setsText = "\(item.targetSets) sets"
-        let repsText = "\(item.targetReps) reps"
+        // The reps shown are the per-set plan's (what the per-set editor below and Today use), not the flattened default.
+        let repsText = ProgramDayDetailView.planRepsText(for: item)
         let rirText = "\(item.targetRIR) RIR"
 
         return "\(muscle) · \(setsText) · \(repsText) · \(rirText)"
@@ -1165,3 +1168,13 @@ private struct ProgramExercisePlanRow: View {
     }
 }
 
+
+extension ProgramDayDetailView {
+    /// "8 reps" when every work set plans the same reps, "6–8 reps" when they differ; the flattened default only when the
+    /// per-set plan is empty.
+    static func planRepsText(for item: SessionItem) -> String {
+        let planned = item.backOffValues(item.plannedRepsBySet).prefix(max(1, item.targetSets)).filter { $0 > 0 }
+        guard let lo = planned.min(), let hi = planned.max() else { return "\(item.targetReps) reps" }
+        return lo == hi ? "\(lo) reps" : "\(lo)–\(hi) reps"
+    }
+}

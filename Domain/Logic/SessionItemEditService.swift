@@ -36,6 +36,8 @@ enum SessionItemEditService {
         case deload
         /// Prescription change: the change would leave this session as it is (already at the bound).
         case noChange
+        /// Prescription change for all remaining sessions: the lifter edited this plan by hand, so it is left as it is.
+        case planEdited
     }
 
     struct Refusal {
@@ -639,6 +641,8 @@ extension SessionItemEditService {
         let refusals: [Refusal]
 
         var isApplicable: Bool { !targets.isEmpty }
+        /// Sessions skipped because the lifter edited their plan by hand.
+        var editedSkipped: Int { refusals.filter { $0.reason == .planEdited }.count }
     }
 
     // MARK: Plan (no writes)
@@ -670,6 +674,10 @@ extension SessionItemEditService {
             if let normalizedLetters, !normalizedLetters.contains(key) { continue }
             if key == "deload", !includeDeload, !meso.isMaintenance {
                 refusals.append(Refusal(session: session, reason: .deload)); continue
+            }
+            // A hand-edited plan is the lifter's: "all remaining" leaves it and says so (this-session is an explicit edit).
+            if case .allRemaining = scope, item.planEdited {
+                refusals.append(Refusal(session: session, reason: .planEdited)); continue
             }
             if let reason = safetyRefusal(meso: meso, session: session) {
                 refusals.append(Refusal(session: session, reason: reason)); continue
