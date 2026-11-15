@@ -3088,4 +3088,13 @@ final class FreshDeviceRestoreTests: XCTestCase {
         XCTAssertFalse(text.range(of: #"NavigationLink\("Restore from a backup"\)[^\n]*\n\s*\.disabled"#, options: .regularExpression) != nil)
         XCTAssertFalse(text.range(of: #"NavigationLink\("Move data[^\n]*\n\s*\.disabled"#, options: .regularExpression) != nil)
     }
+
+    /// A NavigationLink outside a NavigationStack is disabled: Restore and Move data looked greyed and did nothing.
+    func test_settingsIsItsOwnNavigationStack_soItsLinksAreEnabled() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        XCTAssertTrue(text.contains("var body: some View {\n        NavigationStack { settingsForm }"))
+        let tab = try String(contentsOf: root.appendingPathComponent("Features/MainTab/MainTabView.swift"), encoding: .utf8)
+        XCTAssertFalse(tab.contains("NavigationStack {\n                SettingsView()"), "no nested stack around it")
+    }
 }

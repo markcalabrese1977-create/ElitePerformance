@@ -152,9 +152,12 @@ struct SettingsView: View {
     @State private var showMuscleRanges = false
     
 
+    /// The NavigationStack lives here: without one the Restore and Move data links are disabled (greyed, they do nothing).
     var body: some View {
+        NavigationStack { settingsForm }
+    }
 
-
+    @ViewBuilder private var settingsForm: some View {
         Form {
             // MARK: - Profile
                         if let profile = profiles.first {
