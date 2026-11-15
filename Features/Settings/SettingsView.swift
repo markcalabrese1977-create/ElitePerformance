@@ -642,7 +642,7 @@ struct RestoreConfirmSheet: View {
                         Button("Replace my data with this backup", role: .destructive, action: onConfirm)
                             .disabled(verdict.requiresTypedWord && !ImportStalenessGuard.accepts(typed: typed))
                     } footer: {
-                        Text("A copy of your current data is saved first; Settings → Restore pre-import state can bring it back.")
+                        Text("A copy of your current data is saved first; Settings → Backup & Restore → Restore can undo this.")
                     }
                 } else {
                     ProgressView()
