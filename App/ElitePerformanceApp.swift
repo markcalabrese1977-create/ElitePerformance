@@ -65,6 +65,8 @@ struct LaunchRoot<Content: View>: View {
         Group {
             if let missing = gate.missingData {
                 MissingDataView(gate: gate, expected: missing.expectedSessions)
+            } else if gate.launching {
+                StartupBackupWaitView(guardian: gate.startupGuard)
             } else if gate.interrupted == nil {
                 content()
             } else {
@@ -87,6 +89,22 @@ struct LaunchRoot<Content: View>: View {
             Button("Keep current data", role: .cancel) { gate.dismissError(); gate.keepCurrentData() }
         } message: {
             Text(gate.errorMessage ?? "")
+        }
+    }
+}
+
+/// Shown while an upgrade launch backs up before its backfills: a wait screen, or the failure prompt.
+struct StartupBackupWaitView: View {
+    @ObservedObject var guardian: SeedBackupGuard
+    var body: some View {
+        if guardian.failure != nil {
+            SeedBackupGuardPrompt(guardian: guardian, allowsCancel: false)
+        } else {
+            VStack(spacing: 16) {
+                ProgressView()
+                Text("Backing up your data before updating…").font(.headline)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

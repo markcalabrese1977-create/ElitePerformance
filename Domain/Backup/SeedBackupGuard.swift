@@ -16,7 +16,7 @@ final class SeedBackupGuard: ObservableObject {
     /// Count of seeds that went ahead (for tests and logs).
     private(set) var proceededWithoutBackup = 0
 
-    private var pending: (container: ModelContainer, proceed: () -> Void, cancel: () -> Void)?
+    private var pending: (container: ModelContainer, proceed: @MainActor () -> Void, cancel: () -> Void, onContinue: @MainActor () -> Void)?
     private let backup: Backup
 
     init(backup: @escaping Backup = { await AutoBackupService.shared.backUpBeforeMesoSeed(container: $0) }) {
@@ -24,13 +24,14 @@ final class SeedBackupGuard: ObservableObject {
     }
 
     /// Runs `proceed` once a verified backup exists (or the store is empty). On failure `proceed` is held and `failure` is set.
-    func run(container: ModelContainer, cancel: @escaping () -> Void = {}, proceed: @escaping () -> Void) {
-        pending = (container, proceed, cancel)
+    func run(container: ModelContainer, cancel: @escaping () -> Void = {}, onContinueWithoutBackup: @escaping @MainActor () -> Void = {},
+             proceed: @escaping @MainActor () -> Void) {
+        pending = (container, proceed, cancel, onContinueWithoutBackup)
         Task { await attempt() }
     }
 
     /// "Back up now": try again.
-    func retry() { Task { await attempt() } }
+    func retry() { failure = nil; Task { await attempt() } }
 
     /// "Continue without backup": only the typed word goes through.
     @discardableResult
@@ -38,6 +39,7 @@ final class SeedBackupGuard: ObservableObject {
         guard StartupGate.acceptsContinue(typed: typed), let p = pending else { return false }
         pending = nil; failure = nil
         proceededWithoutBackup += 1
+        p.onContinue()
         p.proceed()
         return true
     }
@@ -50,6 +52,7 @@ final class SeedBackupGuard: ObservableObject {
 
     private func attempt() async {
         guard let p = pending else { return }
+        failure = nil
         isBackingUp = true
         let result = await backup(p.container)
         isBackingUp = false
@@ -67,6 +70,8 @@ final class SeedBackupGuard: ObservableObject {
 /// The blocking prompt for a failed pre-seed backup.
 struct SeedBackupGuardPrompt: View {
     @ObservedObject var guardian: SeedBackupGuard
+    /// False at launch: there is nothing to cancel back to, the backfills wait for a backup or the typed word.
+    var allowsCancel = true
     @State private var typed = ""
 
     var body: some View {
@@ -89,7 +94,7 @@ struct SeedBackupGuardPrompt: View {
                 }
             }
             .navigationTitle("Back up first")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { guardian.cancel() } } }
+            .toolbar { if allowsCancel { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { guardian.cancel() } } } }
         }
         .interactiveDismissDisabled()
     }

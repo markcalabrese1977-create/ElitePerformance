@@ -142,11 +142,13 @@ enum AutoBackupEngine {
     /// backup is never pruned. If the data shrinks (something went wrong and the newest backups are smaller), the last backups
     /// that still hold the larger history must survive the rotation. "Newest verified" = the newest file that decodes.
     @discardableResult
-    static func prune(in directory: URL, calendar: Calendar = Calendar(identifier: .gregorian),
+    static func prune(in directory: URL, calendar: Calendar = Calendar(identifier: .gregorian), protecting: Set<String> = [],
                       completedSessions: (AutoBackupFile) -> Int? = decodeCompletedSessions) -> [AutoBackupFile] {
         let files = list(in: directory)
         let keep = keepSet(files.map(\.date), calendar: calendar)
-        let candidates = files.filter { !keep.contains($0.date) }
+        // `protecting`: the build-change backup (the data as it was before an upgrade's backfills) is never rotated away by a
+        // later backup the same day.
+        let candidates = files.filter { !keep.contains($0.date) && !protecting.contains($0.url.lastPathComponent) }
         guard !candidates.isEmpty else { return [] }
         var newestVerified: Int?                                  // files are newest first
         for f in files { if let n = completedSessions(f) { newestVerified = n; break } }
@@ -190,6 +192,11 @@ struct AutoBackupStatusStore {
     var lastForegroundDay: String? {
         get { defaults.string(forKey: "autoBackup.lastForegroundDay") }
         nonmutating set { defaults.set(newValue, forKey: "autoBackup.lastForegroundDay") }
+    }
+    /// File name of the newest build-change backup (the pre-upgrade snapshot): pruning keeps it.
+    var lastBuildChangeBackup: String? {
+        get { defaults.string(forKey: "autoBackup.lastBuildChangeBackup") }
+        nonmutating set { defaults.set(newValue, forKey: "autoBackup.lastBuildChangeBackup") }
     }
     var bannerDismissedDay: String? {
         get { defaults.string(forKey: "autoBackup.bannerDismissedDay") }
@@ -286,23 +293,33 @@ final class AutoBackupService: ObservableObject {
     }
 
     /// (2) Launch of a build whose commit differs from the last launch's. Called by `StartupGate` after the interrupted-import
-    /// check and BEFORE the backfills: the export (the data as it was before any backfill touches it) is taken synchronously
-    /// here; verifying and placing the file continues in the background. Returns whether a backup was started.
-    @discardableResult
-    func launchBackupIfBuildChanged(container: ModelContainer) -> Bool {
+    /// check and BEFORE the backfills, and the backfills wait for it: the data is exported, then verified and placed, and only
+    /// then do the backfills touch the store. `.success(nil)` = no backup was needed (same build, or an empty store).
+    /// A failure is returned so the gate can hold the backfills.
+    func backUpIfBuildChanged(container: ModelContainer) async -> Result<AutoBackupFile?, Error> {
         let commit = currentCommit()
         guard status.lastLaunchCommit != commit else {
             log("ℹ️ AutoBackup [buildChanged] not needed: this build (\(commit)) is the one of the last launch")
-            return false
+            return .success(nil)
         }
-        guard let pending = exportLoggingSkip(container: container, reason: .buildChanged) else { return false }
-        finish(pending, reason: .buildChanged, container: container, launchCommit: commit)
-        return true
+        let pending: Pending
+        do { pending = try export(container: container) }
+        catch {
+            log("ℹ️ AutoBackup [buildChanged] skipped: \(error.localizedDescription)")
+            if case AutoBackupError.emptyStore = error { return .success(nil) }
+            return .failure(error)
+        }
+        do { return .success(try await place(pending, reason: .buildChanged, launchCommit: commit)) }
+        catch { lastError = error.localizedDescription; return .failure(error) }
     }
+
+    /// The lifter chose to go on after a failed build-change backup: record the build so the prompt does not repeat.
+    func recordLaunchWithoutBackup() { status.lastLaunchCommit = currentCommit() }
 
     /// (3) The app came to the foreground: the first time each day, back up if the last success is more than 24h old.
     @discardableResult
     func foregrounded(container: ModelContainer) -> Bool {
+        guard !isRunning else { return false }                       // one backup per launch: another is in flight
         let today = AutoBackupStatusStore.dayString(now(), calendar: calendar)
         guard status.lastForegroundDay != today else { return false }
         status.lastForegroundDay = today
@@ -344,7 +361,11 @@ final class AutoBackupService: ObservableObject {
         let live = try BackupContentSummary.of(store: ctx)
         if live.isEmpty { throw AutoBackupError.emptyStore }
         let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
-        return Pending(temp: result.url, live: live)
+        // The exporter names files by the second; two backups started in the same second (or the host app's own launch backup
+        // and a test's) would share a temp file and delete each other's. Give this one a unique name.
+        let unique = FileManager.default.temporaryDirectory.appendingPathComponent("ep_auto_\(UUID().uuidString).json")
+        try FileManager.default.moveItem(at: result.url, to: unique)
+        return Pending(temp: unique, live: live)
     }
 
     private func exportLoggingSkip(container: ModelContainer, reason: Reason) -> Pending? {
@@ -366,12 +387,16 @@ final class AutoBackupService: ObservableObject {
         defer { isRunning = false; try? FileManager.default.removeItem(at: pending.temp) }
         let resolver = resolveDestination
         let stamp = now()
+        let protectedName = status.lastBuildChangeBackup
+        let isBuildChange = reason == .buildChanged
         let outcome = await Task.detached(priority: .utility) { () -> (AutoBackupDestination, Result<AutoBackupFile, Error>) in
             let destination = resolver()
             do {
                 let file = try AutoBackupEngine.place(temp: pending.temp, live: pending.live, into: destination.directory, now: stamp,
                                                       coordinated: destination.isOffDevice)
-                AutoBackupEngine.prune(in: destination.directory)
+                var keep = Set([protectedName].compactMap { $0 })
+                if isBuildChange { keep.insert(file.url.lastPathComponent) }
+                AutoBackupEngine.prune(in: destination.directory, protecting: keep)
                 return (destination, .success(file))
             } catch { return (destination, .failure(error)) }
         }.value
@@ -383,6 +408,7 @@ final class AutoBackupService: ObservableObject {
         case .success(let file):
             log("ℹ️ AutoBackup [\(reason.rawValue)] \(where_) verified · \(counts) · \(file.url.lastPathComponent)")
             status.recordSuccess(at: stamp, offDevice: destination.isOffDevice)
+            if isBuildChange { status.lastBuildChangeBackup = file.url.lastPathComponent }
             if let launchCommit { status.lastLaunchCommit = launchCommit }
             lastError = nil
             statusRevision += 1

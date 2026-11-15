@@ -273,16 +273,24 @@ final class StartupGate: ObservableObject {
     private var container: ModelContainer?
     private let directory: URL
     private let backfills: @MainActor (ModelContainer) -> Void
-    private let beforeBackfills: @MainActor (ModelContainer) -> Void
+    private let backupFirst: (@MainActor (ModelContainer) async -> Result<AutoBackupFile?, Error>)?
+    /// Holds an upgrade launch back until its pre-backfill backup is verified, or the lifter types CONTINUE.
+    let startupGuard: SeedBackupGuard
+    /// True from the moment the launch work starts until the backfills have run (the app shows a wait screen, not data).
+    @Published private(set) var launching = false
+    private let onContinueWithoutBackup: @MainActor () -> Void
     private let sentinel: DataSentinelStore
     private let findBackups: @Sendable () -> [AutoBackupFile]
     private let log: (String) -> Void
 
-    /// `beforeBackfills` runs after the interrupted-import check has been answered and BEFORE any backfill: the automatic
-    /// backup for a new build is taken here, of the data as it was before the backfills touch it.
+    /// `backupFirst` runs after the interrupted-import check has been answered and BEFORE any backfill, and the backfills wait
+    /// for it: the automatic backup for a new build is exported, verified and placed here, of the data as it was before the
+    /// backfills touch it. If it fails the backfills are held behind a prompt (Back up now / type CONTINUE). nil = no backup
+    /// step (tests that only look at the order of the rest).
     init(directory: URL = PreImportSnapshots.defaultDirectory(),
          sentinel: DataSentinelStore = DataSentinelStore(),
-         beforeBackfills: @escaping @MainActor (ModelContainer) -> Void = { AutoBackupService.shared.launchBackupIfBuildChanged(container: $0) },
+         backupFirst: (@MainActor (ModelContainer) async -> Result<AutoBackupFile?, Error>)? = { await AutoBackupService.shared.backUpIfBuildChanged(container: $0) },
+         onContinueWithoutBackup: @escaping @MainActor () -> Void = { AutoBackupService.shared.recordLaunchWithoutBackup() },
          runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) },
          findBackups: @escaping @Sendable () -> [AutoBackupFile] = StartupGate.defaultFindBackups,
          log: @escaping (String) -> Void = { print($0) }) {
@@ -290,13 +298,19 @@ final class StartupGate: ObservableObject {
         self.sentinel = sentinel
         self.findBackups = findBackups
         self.directory = directory
-        self.beforeBackfills = beforeBackfills
+        self.backupFirst = backupFirst
+        self.onContinueWithoutBackup = onContinueWithoutBackup
+        self.startupGuard = SeedBackupGuard(backup: backupFirst ?? { _ in .success(nil) })
         self.backfills = runBackfills
     }
 
-    private func runBackfills(_ container: ModelContainer) {
-        beforeBackfills(container)
+    private func finishLaunch(_ container: ModelContainer, completed: Int) {
         backfills(container)
+        if completed >= 0 {
+            sentinel.record(completed)                        // after a successful launch
+            log("ℹ️ Data sentinel: wrote \(completed), reads back \(sentinel.completedSessions)")
+        }
+        launching = false
     }
 
     /// Automatic backups, newest first: the iCloud folder and the local fallback folder.
@@ -321,11 +335,14 @@ final class StartupGate: ObservableObject {
             Task { await loadNewestBackup() }
             return
         }
-        runBackfills(container)
-        if completed >= 0 {
-            sentinel.record(completed)                        // after a successful launch
-            log("ℹ️ Data sentinel: wrote \(completed), reads back \(sentinel.completedSessions)")
-        }
+        startLaunchWork(container) { [weak self] in self?.finishLaunch(container, completed: completed) }
+    }
+
+    /// The pre-backfill backup (awaited), then `work`. Without a backup step `work` runs at once.
+    private func startLaunchWork(_ container: ModelContainer, then work: @escaping @MainActor () -> Void) {
+        guard backupFirst != nil else { work(); return }
+        launching = true
+        startupGuard.run(container: container, onContinueWithoutBackup: onContinueWithoutBackup, proceed: work)
     }
 
     /// The newest backup that decodes and holds completed sessions.
@@ -346,7 +363,7 @@ final class StartupGate: ObservableObject {
             try BackupRestoreCoordinator.restore(from: backup.url, container: container, snapshotDirectory: directory, sentinel: sentinel)
             missingData = nil; missingDataError = nil
             NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
-            runBackfills(container)
+            startLaunchWork(container) { [weak self] in self?.backfills(container); self?.launching = false }
         } catch {
             missingDataError = "Restore failed: \(error.localizedDescription) Nothing was changed."
         }
@@ -362,7 +379,7 @@ final class StartupGate: ObservableObject {
         guard Self.acceptsContinue(typed: typed), let container, backupLookupDone, newestBackup == nil else { return false }
         sentinel.record(0)
         missingData = nil
-        runBackfills(container)
+        startLaunchWork(container) { [weak self] in self?.backfills(container); self?.launching = false }
         return true
     }
 
