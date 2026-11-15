@@ -25,13 +25,20 @@ enum AppStoreOpener {
         makeContainer: ContainerFactory = { try ModelContainer(for: $0, configurations: [$1]) },
         log: (String) -> Void = { print($0) }
     ) -> StoreOpenResult {
-        let legacy = legacyStoreFileNames.filter { FileManager.default.fileExists(atPath: appSupport.appendingPathComponent($0).path) }
-        if !legacy.isEmpty {
-            log("ℹ️ Legacy store files present and NOT used: \(legacy.joined(separator: ", ")). Opening the default store.")
-        }
         // The app holds an iCloud container (automatic off-device backups). Without this SwiftData would turn CloudKit sync on
         // for the store and refuse to open it. The store is local; iCloud is used only for backup FILES.
         let config = configuration ?? ModelConfiguration(schema: schema, isStoredInMemoryOnly: false, cloudKitDatabase: .none)
+        // Legacy store files can sit in the sandbox's Application Support (stores from before the app-group entitlement) or in
+        // the app-group folder the default store lives in (a store the old pin named). Look in both.
+        var places: [(label: String, dir: URL)] = [("sandbox Application Support", appSupport)]
+        let storeDirectory = config.url.deletingLastPathComponent()
+        if storeDirectory.standardizedFileURL != appSupport.standardizedFileURL { places.append(("app-group Application Support", storeDirectory)) }
+        let legacy = places.flatMap { place in
+            legacyStoreFileNames.filter { FileManager.default.fileExists(atPath: place.dir.appendingPathComponent($0).path) }.map { "\($0) (\(place.label))" }
+        }
+        if !legacy.isEmpty {
+            log("ℹ️ Legacy store files present and NOT used: \(legacy.joined(separator: ", ")). Opening the default store.")
+        }
         do {
             let container = try makeContainer(schema, config)
             let sessions = (try? ModelContext(container).fetchCount(FetchDescriptor<Session>())) ?? 0

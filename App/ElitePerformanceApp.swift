@@ -65,6 +65,8 @@ struct LaunchRoot<Content: View>: View {
         Group {
             if let missing = gate.missingData {
                 MissingDataView(gate: gate, expected: missing.expectedSessions)
+            } else if let offer = gate.legacyOffer {
+                LegacyStorePromptView(gate: gate, offer: offer)
             } else if gate.launching {
                 StartupBackupWaitView(guardian: gate.startupGuard)
             } else if gate.interrupted == nil {
@@ -90,6 +92,23 @@ struct LaunchRoot<Content: View>: View {
         } message: {
             Text(gate.errorMessage ?? "")
         }
+    }
+}
+
+/// An older store file holds more completed sessions than the data the app opened.
+struct LegacyStorePromptView: View {
+    @ObservedObject var gate: StartupGate
+    let offer: LegacyStoreRelocation.Finding
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Older data found").font(.title2.bold())
+            Text(offer.message)
+            if let error = gate.legacyError { Text(error).foregroundStyle(.red) }
+            Button("Bring the older data over") { gate.relocateLegacyStore() }.buttonStyle(.borderedProminent)
+            Button("Not now") { gate.declineLegacyStore() }.buttonStyle(.bordered)
+            Spacer()
+        }
+        .padding(24)
     }
 }
 

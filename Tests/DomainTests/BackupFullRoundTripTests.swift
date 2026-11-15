@@ -2389,3 +2389,194 @@ final class UpgradeBackupTests: XCTestCase {
         XCTAssertTrue(s.shouldShowBanner(now: t0.addingTimeInterval(86_400 + 8 * 86_400), hasData: true), "the banner works normally again")
     }
 }
+
+// MARK: - JJJ: relocation of data left in an older store
+
+@MainActor
+final class LegacyStoreRelocationTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var root: URL!
+    private var appGroup: URL!      // where default.store lives (and where a pinned named store would be)
+    private var sandboxDir: URL!    // the app's own Application Support
+    private var snapDir: URL!
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        DataSentinelStore.overrideDefaults = UserDefaults(suiteName: "ep.sentinel.suite.\(UUID().uuidString)")
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("ep_legacy_t_\(UUID().uuidString)", isDirectory: true)
+        appGroup = root.appendingPathComponent("group/Application Support", isDirectory: true)
+        sandboxDir = root.appendingPathComponent("sandbox/Application Support", isDirectory: true)
+        snapDir = root.appendingPathComponent("snapshots", isDirectory: true)
+        for d in [appGroup!, sandboxDir!, snapDir!] { try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+        defaults = UserDefaults(suiteName: "ep.legacy.test.\(UUID().uuidString)")
+    }
+    override func tearDown() {
+        DataSentinelStore.overrideDefaults = nil
+        try? FileManager.default.removeItem(at: root)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private var currentURL: URL { appGroup.appendingPathComponent("default.store") }
+
+    /// A store file with `completed` completed sessions and `planned` planned ones.
+    @discardableResult
+    private func makeStore(at url: URL, completed: Int, planned: Int = 0) throws -> ModelContainer {
+        let schema = AppSchema.makeSchema()
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none))
+        let ctx = ModelContext(c)
+        for i in 0..<completed {
+            ctx.insert(Session(date: Date(timeIntervalSince1970: 1_700_000_000 + Double(i) * 86_400), status: .completed, weekIndex: 1, dayLabel: "D\(i)", items: []))
+        }
+        for i in 0..<planned {
+            ctx.insert(Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 86_400), status: .planned, weekIndex: 2, dayLabel: "P\(i)", items: []))
+        }
+        try ctx.save()
+        return c
+    }
+
+    private func find(completed: Int, pin: String? = nil, offered: Set<String> = []) -> LegacyStoreRelocation.Finding? {
+        LegacyStoreRelocation.find(currentStore: currentURL, currentCompleted: completed, sandboxSupport: sandboxDir, pinLabel: pin,
+                                   offered: offered, log: { _ in })
+    }
+
+    func test_noOlderFiles_noOffer() throws {
+        try makeStore(at: currentURL, completed: 2)
+        XCTAssertNil(find(completed: 2))
+    }
+
+    func test_anOlderStoreWithFewerOrEqualCompletedSessions_isNotOffered_evenWithMoreSessionsInTotal() throws {
+        try makeStore(at: currentURL, completed: 4)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 3)              // fewer
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"), completed: 4)           // equal
+        try makeStore(at: sandboxDir.appendingPathComponent("default.store"), completed: 2, planned: 30)             // many sessions, few completed
+        XCTAssertNil(find(completed: 4), "only STRICTLY more completed sessions is offered")
+    }
+
+    func test_strictlyMore_isOffered_fromTheSandboxAndFromTheAppGroupFolder() throws {
+        try makeStore(at: currentURL, completed: 2)
+        let sandboxStore = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: sandboxStore, completed: 5)
+        let a = try XCTUnwrap(find(completed: 2))
+        XCTAssertEqual(a.candidate.location, .sandbox); XCTAssertEqual(a.candidate.completedSessions, 5); XCTAssertEqual(a.currentCompletedSessions, 2)
+        XCTAssertTrue(a.message.contains("5 completed sessions") && a.message.contains("2 in the data"), a.message)
+
+        try FileManager.default.removeItem(at: sandboxStore)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 6)
+        let b = try XCTUnwrap(find(completed: 2, pin: "ElitePerformanceStore"))
+        XCTAssertEqual(b.candidate.location, .appGroup); XCTAssertTrue(b.candidate.wasPinned, "the released build's pin named this file")
+    }
+
+    func test_ofSeveralCandidates_theOneWithTheMostCompletedSessionsIsOffered() throws {
+        try makeStore(at: currentURL, completed: 1)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 3)
+        try makeStore(at: sandboxDir.appendingPathComponent("default.store"), completed: 7)
+        XCTAssertEqual(try XCTUnwrap(find(completed: 1)).candidate.completedSessions, 7)
+    }
+
+    func test_anUnreadableCandidate_isIgnored_andAnAlreadyOfferedOneIsNotOfferedAgain() throws {
+        try makeStore(at: currentURL, completed: 1)
+        try Data("not a database".utf8).write(to: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"))
+        XCTAssertNil(find(completed: 1), "unreadable: ignored, nothing opened for write")
+        let good = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: good, completed: 4)
+        XCTAssertNotNil(find(completed: 1))
+        XCTAssertNil(find(completed: 1, offered: [good.standardizedFileURL.path]))
+    }
+
+    private func gate(finder: @escaping @MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding?, runs: @escaping @MainActor () -> Void,
+                      offered: LegacyStoreRelocation.OfferedStore) -> StartupGate {
+        StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
+                    backupFirst: nil, legacyFinder: finder, offered: offered, runBackfills: { _ in runs() }, findBackups: { [] })
+    }
+
+    func test_bringingTheOlderDataOver_goesThroughTheCoordinator_andNeverTouchesTheOriginal() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 5, planned: 3)
+        let legacyBytes = try Data(contentsOf: legacy)
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        var backfills = 0
+        let g = gate(finder: { c, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: "DEFAULT", offered: offered.paths, log: { _ in })
+        }, runs: { backfills += 1 }, offered: offered)
+
+        g.begin(container: current)
+        XCTAssertNotNil(g.legacyOffer, "asked, not silently moved")
+        XCTAssertEqual(backfills, 0, "nothing runs until it is answered")
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2, "the store is unchanged while the prompt is up")
+
+        g.relocateLegacyStore()
+        XCTAssertNil(g.legacyOffer); XCTAssertNil(g.legacyError)
+        let now = try BackupContentSummary.of(store: ModelContext(current))
+        XCTAssertEqual(now.completedSessions, 5); XCTAssertEqual(now.sessions, 8, "all sessions came over")
+        XCTAssertFalse(PreImportSnapshots.list(in: snapDir).isEmpty, "the coordinator took a verified snapshot of what was there first")
+        XCTAssertEqual(try Data(contentsOf: legacy), legacyBytes, "the original file is byte-for-byte untouched")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path), "and never deleted")
+        XCTAssertEqual(backfills, 1, "the launch carried on")
+        XCTAssertTrue(offered.paths.contains(legacy.standardizedFileURL.path), "the offered marker is set")
+
+        // the next launch: not asked again (the answered file, and the store now holds the same data anyway)
+        let again = gate(finder: { _, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: "DEFAULT", offered: offered.paths, log: { _ in })
+        }, runs: {}, offered: offered)
+        again.begin(container: current)
+        XCTAssertNil(again.legacyOffer)
+    }
+
+    func test_decliningLeavesEverythingAlone_andIsNotAskedAgain() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 9)
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        var backfills = 0
+        let finder: @MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding? = { _, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: nil, offered: offered.paths, log: { _ in })
+        }
+        let g = gate(finder: finder, runs: { backfills += 1 }, offered: offered)
+        g.begin(container: current)
+        XCTAssertNotNil(g.legacyOffer)
+        g.declineLegacyStore()
+        XCTAssertNil(g.legacyOffer)
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2)
+        XCTAssertEqual(backfills, 1)
+        XCTAssertTrue(PreImportSnapshots.list(in: snapDir).isEmpty, "no import, no snapshot")
+        let again = gate(finder: finder, runs: {}, offered: offered)
+        again.begin(container: current)
+        XCTAssertNil(again.legacyOffer, "asked at most once per file")
+    }
+
+    func test_aFailedRelocation_changesNothing_andKeepsTheOffer() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 5)
+        let bad = LegacyStoreRelocation.Finding(candidate: .init(url: legacy, location: .sandbox, completedSessions: 99, sessions: 99, lastCompletedDate: nil, wasPinned: false),
+                                                currentCompletedSessions: 2)   // claims more than the file holds
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        let g = gate(finder: { _, _ in bad }, runs: {}, offered: offered)
+        g.begin(container: current)
+        g.relocateLegacyStore()
+        XCTAssertNotNil(g.legacyOffer, "still offered")
+        XCTAssertTrue(g.legacyError?.contains("Nothing was changed") == true, g.legacyError ?? "nil")
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2)
+        XCTAssertTrue(offered.paths.isEmpty)
+    }
+
+    func test_theOpenerLogsLegacyFilesInTheAppGroupFolderToo() throws {
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"), completed: 1)
+        try makeStore(at: sandboxDir.appendingPathComponent("ElitePerformanceStore.store"), completed: 1)
+        var logs: [String] = []
+        let schema = AppSchema.makeSchema()
+        let config = ModelConfiguration(schema: schema, url: currentURL, cloudKitDatabase: .none)
+        let result = AppStoreOpener.open(appSupport: sandboxDir, configuration: config, log: { logs.append($0) })
+        guard case .opened = result else { return XCTFail("opens") }
+        let line = try XCTUnwrap(logs.first { $0.contains("Legacy store files present") })
+        XCTAssertTrue(line.contains("ElitePerformanceStore_v2.store (app-group Application Support)"), line)
+        XCTAssertTrue(line.contains("ElitePerformanceStore.store (sandbox Application Support)"), line)
+    }
+}

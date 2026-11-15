@@ -279,6 +279,15 @@ final class StartupGate: ObservableObject {
     /// True from the moment the launch work starts until the backfills have run (the app shows a wait screen, not data).
     @Published private(set) var launching = false
     private let onContinueWithoutBackup: @MainActor () -> Void
+
+    /// An older store file holds more completed sessions than the store the app opened: asked once, never silently moved.
+    @Published private(set) var legacyOffer: LegacyStoreRelocation.Finding?
+    @Published private(set) var legacyError: String?
+    private let legacyFinder: (@MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding?)?
+    private let offered: LegacyStoreRelocation.OfferedStore
+
+    /// The default look (see `LegacyStoreRelocation.defaultFinder`).
+    static let defaultLegacyFinder: @MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding? = LegacyStoreRelocation.defaultFinder
     private let sentinel: DataSentinelStore
     private let findBackups: @Sendable () -> [AutoBackupFile]
     private let log: (String) -> Void
@@ -291,6 +300,8 @@ final class StartupGate: ObservableObject {
          sentinel: DataSentinelStore = DataSentinelStore(),
          backupFirst: (@MainActor (ModelContainer) async -> Result<AutoBackupFile?, Error>)? = { await AutoBackupService.shared.backUpIfBuildChanged(container: $0) },
          onContinueWithoutBackup: @escaping @MainActor () -> Void = { AutoBackupService.shared.recordLaunchWithoutBackup() },
+         legacyFinder: (@MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding?)? = StartupGate.defaultLegacyFinder,
+         offered: LegacyStoreRelocation.OfferedStore = LegacyStoreRelocation.OfferedStore(),
          runBackfills: @escaping @MainActor (ModelContainer) -> Void = { StartupBackfills.run(using: $0) },
          findBackups: @escaping @Sendable () -> [AutoBackupFile] = StartupGate.defaultFindBackups,
          log: @escaping (String) -> Void = { print($0) }) {
@@ -299,6 +310,8 @@ final class StartupGate: ObservableObject {
         self.findBackups = findBackups
         self.directory = directory
         self.backupFirst = backupFirst
+        self.legacyFinder = legacyFinder
+        self.offered = offered
         self.onContinueWithoutBackup = onContinueWithoutBackup
         self.startupGuard = SeedBackupGuard(backup: backupFirst ?? { _ in .success(nil) })
         self.backfills = runBackfills
@@ -335,6 +348,40 @@ final class StartupGate: ObservableObject {
             Task { await loadNewestBackup() }
             return
         }
+        if let finding = legacyFinder?(container, completed) {
+            log("ℹ️ Legacy store: offering \(finding.candidate.name) (\(finding.candidate.location.rawValue)): \(finding.candidate.completedSessions) completed sessions vs \(completed) in the current store")
+            legacyOffer = finding
+            return
+        }
+        startLaunchWork(container) { [weak self] in self?.finishLaunch(container, completed: completed) }
+    }
+
+    /// "Bring it over": export the older store's copy and restore it through the coordinator (snapshot first); the file stays.
+    func relocateLegacyStore() {
+        guard let finding = legacyOffer, let container else { return }
+        do {
+            try LegacyStoreRelocation.relocate(finding, into: container, snapshotDirectory: directory, sentinel: sentinel)
+            offered.markOffered(finding.candidate.url)
+            legacyOffer = nil; legacyError = nil
+            log("✅ Legacy store: brought \(finding.candidate.name) over")
+            NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
+            continueAfterLegacyAnswer(container)
+        } catch {
+            legacyError = "Couldn't bring the older data over: \(error.localizedDescription) Nothing was changed; you can keep using the data you have."
+        }
+    }
+
+    /// "Not now": remembered, so it is not asked again for this file; the app carries on with the data it opened.
+    func declineLegacyStore() {
+        guard let finding = legacyOffer, let container else { return }
+        offered.markOffered(finding.candidate.url)
+        legacyOffer = nil; legacyError = nil
+        log("ℹ️ Legacy store: \(finding.candidate.name) declined; not offered again")
+        continueAfterLegacyAnswer(container)
+    }
+
+    private func continueAfterLegacyAnswer(_ container: ModelContainer) {
+        let completed = (try? BackupContentSummary.of(store: ModelContext(container)).completedSessions) ?? -1
         startLaunchWork(container) { [weak self] in self?.finishLaunch(container, completed: completed) }
     }
 
