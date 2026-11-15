@@ -3120,3 +3120,131 @@ final class FreshDeviceRestoreTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Privacy: purpose strings and the privacy manifest match what the app uses (App Store validation)
+
+/// Fails when the app uses a protected capability or a required-reason API that the build does not declare: the purpose string
+/// (from the target's INFOPLIST_KEY_ build settings, in BOTH configurations), the entitlement/Info pairing, or the
+/// PrivacyInfo.xcprivacy entry. Source-driven so it needs no archive, plus the built bundle when the tests are hosted.
+final class PrivacyDeclarationsTests: XCTestCase {
+    private var root: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() }
+
+    private func appSources() throws -> [(path: String, text: String)] {
+        var out: [(String, String)] = []
+        for dir in ["App", "Domain", "Features", "Shared", "Utilities", "ElitePerformance"] {
+            guard let e = FileManager.default.enumerator(at: root.appendingPathComponent(dir), includingPropertiesForKeys: nil) else { continue }
+            for case let u as URL in e where u.pathExtension == "swift" {
+                out.append((u.path.replacingOccurrences(of: root.path + "/", with: ""), try String(contentsOf: u, encoding: .utf8)))
+            }
+        }
+        XCTAssertGreaterThan(out.count, 100)
+        return out
+    }
+
+    private func codeLines(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+    }
+
+    /// Value of an INFOPLIST_KEY_ setting in every configuration that sets it (the app target sets them in Debug and Release).
+    private func infoKeyValues(_ key: String) throws -> [String] {
+        let pbx = try String(contentsOf: root.appendingPathComponent("ElitePerformance.xcodeproj/project.pbxproj"), encoding: .utf8)
+        let re = try NSRegularExpression(pattern: "INFOPLIST_KEY_\(key) = \"([^\"]*)\";")
+        return re.matches(in: pbx, range: NSRange(pbx.startIndex..., in: pbx)).compactMap { Range($0.range(at: 1), in: pbx).map { String(pbx[$0]) } }
+    }
+
+    private func requireKey(_ key: String, because why: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let values = try infoKeyValues(key)
+        XCTAssertEqual(values.count, 2, "\(key) must be set in both Debug and Release (needed: \(why))", file: file, line: line)
+        for v in values { XCTAssertGreaterThan(v.trimmingCharacters(in: .whitespaces).count, 30, "\(key) needs a real, specific sentence", file: file, line: line) }
+    }
+
+    private func manifest() throws -> [String: Any] {
+        let url = root.appendingPathComponent("ElitePerformance/PrivacyInfo.xcprivacy")
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    func test_purposeStrings_coverEveryProtectedCapabilityTheCodeUses() throws {
+        let sources = try appSources()
+        let all = sources.map { codeLines($0.text) }.joined(separator: "\n")
+        let entitlements = try String(contentsOf: root.appendingPathComponent("ElitePerformance/ElitePerformance.entitlements"), encoding: .utf8)
+
+        // HealthKit: reading needs the share string; the authorization API names both directions, so Apple also wants the update string.
+        if all.contains("import HealthKit") || entitlements.contains("com.apple.developer.healthkit") {
+            try requireKey("NSHealthShareUsageDescription", because: "HealthKit read access")
+        }
+        if all.range(of: #"requestAuthorization\(|statusForAuthorizationRequest\("#, options: .regularExpression) != nil {
+            try requireKey("NSHealthUpdateUsageDescription", because: "requestAuthorization(toShare:read:) is referenced (ITMS-90683)")
+        }
+        // Frameworks that need a purpose string the moment they are used.
+        let needs: [(String, [String])] = [
+            ("import AVFoundation", ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]),
+            ("import Photos", ["NSPhotoLibraryUsageDescription"]),
+            ("import PhotosUI", ["NSPhotoLibraryUsageDescription"]),
+            ("import CoreMotion", ["NSMotionUsageDescription"]),
+            ("import CoreLocation", ["NSLocationWhenInUseUsageDescription"]),
+            ("import LocalAuthentication", ["NSFaceIDUsageDescription"]),
+            ("import Contacts", ["NSContactsUsageDescription"]),
+            ("import EventKit", ["NSCalendarsUsageDescription"]),
+            ("import Speech", ["NSSpeechRecognitionUsageDescription"]),
+            ("import CoreBluetooth", ["NSBluetoothAlwaysUsageDescription"]),
+            ("import AppTrackingTransparency", ["NSUserTrackingUsageDescription"]),
+        ]
+        for (marker, keys) in needs where all.contains(marker) {
+            for k in keys { try requireKey(k, because: marker) }
+        }
+        // Entitlement/Info pairing: the iCloud container the backups use must be declared for the Files app.
+        if entitlements.contains("com.apple.developer.ubiquity-container-identifiers") {
+            let plist = try String(contentsOf: root.appendingPathComponent("Config/Info-iCloud.plist"), encoding: .utf8)
+            XCTAssertTrue(plist.contains("NSUbiquitousContainers"))
+        }
+    }
+
+    func test_theAppWritesNothingToHealth_andTheUpdateStringSaysSo() throws {
+        let all = try appSources().map { codeLines($0.text) }.joined(separator: "\n")
+        let writeAPIs = ["HKWorkoutBuilder", "HKWorkoutSession", "HKLiveWorkoutBuilder", "saveObject", "healthStore.save", "store.save(", "HKHealthStore().save", ".delete(self", "HKCategorySample(", "HKQuantitySample(", "HKWorkout(activityType", "addSamples", "finishWorkout", "endCollection"]
+        let found = writeAPIs.filter { all.contains($0) }
+        let update = try infoKeyValues("NSHealthUpdateUsageDescription")
+        if found.isEmpty {
+            XCTAssertFalse(all.range(of: #"toShare:\s*(?!\[\]|nil)[^,)\s]"#, options: .regularExpression) != nil, "no non-empty toShare set anywhere")
+            for v in update { XCTAssertTrue(v.contains("does not write"), "no write API is used, so the update string must not claim a write") }
+        } else {
+            for v in update { XCTAssertFalse(v.contains("does not write"), "write APIs \(found) are used; the update string must name what is written") }
+        }
+    }
+
+    func test_privacyManifest_declaresEveryRequiredReasonAPIUsed() throws {
+        let all = try appSources().map { codeLines($0.text) }.joined(separator: "\n")
+        let m = try manifest()
+        XCTAssertEqual(m["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertNotNil(m["NSPrivacyTrackingDomains"] as? [Any])
+        XCTAssertNotNil(m["NSPrivacyCollectedDataTypes"] as? [Any])
+        let declared = (m["NSPrivacyAccessedAPITypes"] as? [[String: Any]] ?? [])
+        func reasons(_ category: String) -> [String] {
+            declared.first { $0["NSPrivacyAccessedAPIType"] as? String == category }?["NSPrivacyAccessedAPITypeReasons"] as? [String] ?? []
+        }
+        let used: [(category: String, pattern: String)] = [
+            ("NSPrivacyAccessedAPICategoryUserDefaults", #"UserDefaults|@AppStorage|NSUserDefaults"#),
+            ("NSPrivacyAccessedAPICategoryFileTimestamp", #"attributesOfItem|ModificationDate|CreationDate|\.creationDate|\.modificationDate|resourceValues|\bfstat\(|\blstat\(|\bstat\(|getattrlist|\.fileModificationDate"#),
+            ("NSPrivacyAccessedAPICategoryDiskSpace", #"volumeAvailableCapacity|volumeTotalCapacity|systemFreeSize|NSFileSystemFreeSize|\bstatfs\(|\bstatvfs\("#),
+            ("NSPrivacyAccessedAPICategorySystemBootTime", #"systemUptime|mach_absolute_time"#),
+            ("NSPrivacyAccessedAPICategoryActiveKeyboards", #"activeInputModes"#),
+        ]
+        for (category, pattern) in used where all.range(of: pattern, options: .regularExpression) != nil {
+            XCTAssertFalse(reasons(category).isEmpty, "the code uses a \(category) API but PrivacyInfo.xcprivacy declares no reason for it (ITMS-91053)")
+        }
+        // The declaration is not decoration: an app-group suite and @AppStorage are both in use, so both reasons stay.
+        XCTAssertTrue(reasons("NSPrivacyAccessedAPICategoryUserDefaults").contains("CA92.1"))
+    }
+
+    func test_manifestAndStringsAreInTheBuiltBundle_whenHosted() throws {
+        let bundle = Bundle.main
+        guard bundle.bundleIdentifier?.hasSuffix(".xctest") == false, bundle.object(forInfoDictionaryKey: "CFBundleExecutable") != nil else {
+            throw XCTSkip("tests are not app-hosted; the source-level checks above cover the same declarations")
+        }
+        XCTAssertNotNil(bundle.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"), "the manifest must ship in the app bundle")
+        for k in ["NSHealthShareUsageDescription", "NSHealthUpdateUsageDescription"] {
+            XCTAssertNotNil(bundle.object(forInfoDictionaryKey: k) as? String, "built Info.plist lacks \(k)")
+        }
+    }
+}
