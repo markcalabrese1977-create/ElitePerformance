@@ -2673,3 +2673,92 @@ final class ChangeProgramGuardTests: XCTestCase {
         XCTAssertFalse(all.contains { $0.dayLabel == "Push" && $0.date >= day(0) && $0.status == .planned && $0.items.first?.suggestedLoad == 100 }, "the old planned sessions are gone")
     }
 }
+
+// MARK: - R2: per-exercise load step
+
+final class PerExerciseLoadStepTests: XCTestCase {
+
+    private func bench(_ id: String = "bench_press") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        i.actualReps = [8, 8, 8]; i.actualLoads = [100, 100, 100]; i.actualRIRs = [2, 2, 2]
+        i.plannedRepsBySet = [8, 8, 8]; i.repMin = 6; i.repMax = 8
+        return i
+    }
+    private func profile(default step: Double = 5, own: [String: Double] = [:]) -> UserProfile {
+        let p = UserProfile()
+        p.minLoadIncrement = step
+        p.loadStepByExercise = own
+        return p
+    }
+
+    func test_resolutionOrder_perExerciseOverride_thenDefaultStep_thenClusterDefault() {
+        let p = profile(default: 5, own: ["bench_press": 2.5])
+        XCTAssertEqual(UserProfile.loadStep(for: "bench_press", profile: p), 2.5, "the lift's own step wins")
+        XCTAssertEqual(UserProfile.loadStep(for: "machine_chest_press", profile: p), 5, "another lift: the default step")
+        XCTAssertEqual(UserProfile.loadStep(for: "bench_press", profile: nil), UnitAwareRounding.defaultIncrement(unit: .lb), "no profile: the unit's default")
+        // CoachingEngine.loadIncrement: own > default > cluster
+        let item = bench()
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: 5, perExerciseStep: 2.5), 2.5)
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: 5), 5)
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: nil),
+                       ChestArmsLowBackMesoProfile.config(for: .primaryChestPress).primaryLoadIncrement, "the cluster default only when nothing else is set")
+        // aliases resolve to the same lift
+        XCTAssertEqual(UserProfile.loadStepOverride(for: "bench_press", profile: p), 2.5)
+        p.setLoadStep(nil, exerciseId: "bench_press")
+        XCTAssertNil(UserProfile.loadStepOverride(for: "bench_press", profile: p), "cleared")
+    }
+
+    func test_benchEarnsATwoPointFiveIncrease_whileAMachineStaysAtFive() throws {
+        let p = profile(default: 5, own: ["bench_press": 2.5])
+        let b = try XCTUnwrap(CoachingEngine.recommend(for: bench("bench_press"), profile: p))
+        let m = try XCTUnwrap(CoachingEngine.recommend(for: bench("machine_chest_press"), profile: p))
+        XCTAssertEqual(b.nextSuggestedLoad, 102.5, "bench steps by its own 2.5")
+        XCTAssertEqual(m.nextSuggestedLoad, 105, "the machine steps by the default 5")
+        // and with no override, both follow the default
+        let plain = profile(default: 5)
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: bench(), profile: plain)).nextSuggestedLoad, 105)
+    }
+
+    func test_carryForwardWritesTheLiftsOwnStep() throws {
+        let ctx = ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+        let p = profile(default: 5, own: ["bench_press": 2.5]); ctx.insert(p)
+        let cal = Calendar.current
+        func target(_ id: String) -> SessionItem {
+            let t = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+            t.plannedLoadsBySet = [100, 100, 100]; t.plannedRepsBySet = [8, 8, 8]; return t
+        }
+        let benchSrc = bench("bench_press"), machSrc = bench("machine_chest_press")
+        benchSrc.plannedLoadsBySet = [100, 100, 100]; machSrc.plannedLoadsBySet = [100, 100, 100]
+        let done = Session(date: cal.date(byAdding: .day, value: -1, to: Date())!, status: .completed, weekIndex: 1, dayLabel: "Push", items: [benchSrc, machSrc])
+        let tb = target("bench_press"), tm = target("machine_chest_press")
+        let next = Session(date: cal.date(byAdding: .day, value: 6, to: Date())!, status: .planned, weekIndex: 2, dayLabel: "Push", items: [tb, tm])
+        ctx.insert(done); ctx.insert(next)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: done)
+        XCTAssertEqual(tb.suggestedLoad, 102.5, "bench carried forward by 2.5")
+        XCTAssertEqual(tm.suggestedLoad, 105, "the machine by the default 5")
+    }
+
+    func test_theStepSurvivesABackupRoundTrip_andOldBackupsHaveNone() throws {
+        let src = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: src)
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: src, into: fresh)
+        let restored = try XCTUnwrap(ModelContext(fresh).fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertEqual(restored.loadStepByExercise, ["bench_press": 2.5, "machine_chest_press": 5.0])
+        // an old file without the key: no overrides, the default step everywhere
+        let exported = try BackupTestSupport.exportFile(src)
+        defer { try? FileManager.default.removeItem(at: exported) }
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: exported)) as? [String: Any])
+        XCTAssertNotNil((json["userProfile"] as? [String: Any])?["loadStepByExercise"], "the exporter writes it")
+        var profile = try XCTUnwrap(json["userProfile"] as? [String: Any]); profile.removeValue(forKey: "loadStepByExercise"); json["userProfile"] = profile
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("oldstep_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: old) }
+        try JSONSerialization.data(withJSONObject: json).write(to: old)
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target)
+        XCTAssertTrue(try XCTUnwrap(ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first).loadStepByExercise.isEmpty)
+    }
+}

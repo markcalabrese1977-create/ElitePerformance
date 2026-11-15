@@ -308,7 +308,6 @@ extension SessionItemEditService {
         let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
         let unit = profile?.loadUnit ?? .lb
         var seedCache: [String: (load: Double, source: HistorySeedLoad.SeedSource)] = [:]
         func seed(_ exerciseId: String, reps: Int, rir: Int) -> (load: Double, source: HistorySeedLoad.SeedSource) {
@@ -316,7 +315,7 @@ extension SessionItemEditService {
             if let hit = seedCache[key] { return hit }
             let r = HistorySeedLoad.nextMesoSeed(
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
-                loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight,
+                loadIncrement: UserProfile.loadStep(for: exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
                 factor: peakFactor, customExercises: custom, referenceDate: now, creditRIR: creditRIR
             )
@@ -331,7 +330,7 @@ extension SessionItemEditService {
             if let hit = seedCache[key] { return hit.load }
             let r = HistorySeedLoad.nextMesoSeed(
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
-                loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight,
+                loadIncrement: UserProfile.loadStep(for: exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
                 factor: peakFactor, customExercises: custom, referenceDate: now, role: .top, creditRIR: creditRIR
             )

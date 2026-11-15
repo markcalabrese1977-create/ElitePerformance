@@ -112,7 +112,7 @@ enum MissedSourceSeeding {
                     let reps = (i < item.plannedRepsBySet.count && item.plannedRepsBySet[i] > 0) ? item.plannedRepsBySet[i] : item.targetReps
                     let rir = i < item.plannedRIRsBySet.count ? item.plannedRIRsBySet[i] : item.targetRIR
                     let raw = E1RMCalculator.load(for: source.e1rm, reps: reps, targetRIR: rir) * conservativeFactor
-                    let step = CoachingEngine.loadIncrement(for: item, base: raw, minLoadIncrement: ctx.minLoadIncrement, unit: ctx.unit)
+                    let step = CoachingEngine.loadIncrement(for: item, base: raw, minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: ctx.profile, unit: ctx.unit), unit: ctx.unit)
                     let rounded = HistorySeedLoad.roundedDown(raw, increment: step, unit: ctx.unit)
                     loads.append(UserProfile.clampedLoad(rounded, exerciseId: item.exerciseId, profile: ctx.profile, customExercises: ctx.customExercises))
                 }

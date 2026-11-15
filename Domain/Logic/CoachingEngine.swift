@@ -144,7 +144,11 @@ struct CoachingEngine {
 
     /// The step for this exercise, in `unit` (`minLoadIncrement` is in `unit` too). Add it to a stored lb load only
     /// through `UnitAwareRounding.stepLb`.
-    static func loadIncrement(for item: SessionItem, base: Double, minLoadIncrement: Double?, unit: LoadUnit = .lb) -> Double {
+    /// Resolution order: the lifter's per-exercise step (`perExerciseStep`) > the default load step (`minLoadIncrement`) > the
+    /// cluster default > a base-scaled fallback. Callers that hold a profile pass `UserProfile.loadStepOverride`.
+    static func loadIncrement(for item: SessionItem, base: Double, minLoadIncrement: Double?, unit: LoadUnit = .lb,
+                              perExerciseStep: Double? = nil) -> Double {
+        if let own = perExerciseStep, own > 0 { return own }
         if let increment = minLoadIncrement, increment > 0 { return increment }
         if let cluster = ExerciseCatalog.cluster(for: item.exerciseId) {
             return UnitAwareRounding.increment(fromLb: ChestArmsLowBackMesoProfile.config(for: cluster).primaryLoadIncrement, unit: unit)
@@ -157,7 +161,7 @@ struct CoachingEngine {
     static func recommend(for item: SessionItem, profile: UserProfile?) -> CoachingRecommendation? {
         let unit = profile?.loadUnit ?? .lb
         return recommend(for: item,
-                         minLoadIncrement: profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit),
+                         minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: profile, unit: unit),
                          unit: unit)
     }
 

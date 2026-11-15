@@ -74,7 +74,7 @@ struct SettingsView: View {
                                 UnitSection(profile: profile)
 
                                 HStack {
-                                    Text("Min Load Increment")
+                                    Text("Default load step (all lifts unless overridden per exercise)")
                                     Spacer()
                                     TextField(profile.loadUnit.label, value: Binding(
                                         get: { profile.minLoadIncrement },
@@ -86,6 +86,9 @@ struct SettingsView: View {
                                     Text(profile.loadUnit.label)
                                         .foregroundStyle(.secondary)
                                 }
+                                Text("Set a lift's own step from its note sheet.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
 
                                 HStack {
                                     Text("Body Weight")

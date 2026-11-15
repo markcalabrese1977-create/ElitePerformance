@@ -1432,7 +1432,7 @@ final class SessionScreenViewModel: ObservableObject {
                     let allSessionsForRec = (try? context.fetch(FetchDescriptor<Session>())) ?? []
                     let recProfile = try? context.fetch(FetchDescriptor<UserProfile>()).first
                     let recUnit = recProfile?.loadUnit ?? .lb
-                    let recLoadIncrement = recProfile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: recUnit)
+                    let recLoadIncrement = UserProfile.loadStep(for: matchingItem.exerciseId, profile: recProfile, unit: recUnit)
                     let recCustomExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
                     let cleanCount = LoadProjectionService.consecutiveCleanCount(
                         exerciseId: matchingItem.exerciseId,

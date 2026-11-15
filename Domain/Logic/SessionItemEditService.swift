@@ -137,7 +137,6 @@ enum SessionItemEditService {
         let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
         let unit = profile?.loadUnit ?? .lb
 
         var targets: [Target] = []
@@ -151,7 +150,7 @@ enum SessionItemEditService {
             // The seed never exceeds the lifter's max for the replacement (no max / fixed-load / bodyweight: unchanged).
             let seed = HistorySeedLoad.load(
                 for: to, goalReps: item.targetReps, targetRIR: item.targetRIR, in: allSessions,
-                loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
+                loadIncrement: UserProfile.loadStep(for: to, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
             ).map { UserProfile.clampedLoad($0, exerciseId: to, profile: profile, customExercises: custom) }
             targets.append(Target(
                 session: session, item: item, date: session.date, weekIndex: session.weekIndex,
@@ -1142,7 +1141,7 @@ extension SessionItemEditService {
                 } else {
                     load = UserProfile.clampedLoad(HistorySeedLoad.load(
                         for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
-                        loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
+                        loadIncrement: UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
                         referenceDate: now
                     ) ?? 0, exerciseId: i.exerciseId, profile: profile, customExercises: custom)
                 }
