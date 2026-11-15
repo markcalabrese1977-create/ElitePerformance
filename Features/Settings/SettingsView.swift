@@ -20,7 +20,7 @@ struct SettingsView: View {
         List {
             Section {
                 if backupFiles.isEmpty {
-                    Text("No automatic backups yet.").foregroundStyle(.secondary)
+                    Text("No automatic backups found on this device or in iCloud.").foregroundStyle(.secondary)
                 }
                 ForEach(backupFiles.prefix(10)) { file in
                     Button {
@@ -81,6 +81,7 @@ struct SettingsView: View {
                         exportError = error.localizedDescription
                     }
                 }
+                .disabled(!rowAvailability.exportEnabled)
 
                 Button("Export Completed Sessions (CSV)") {
                     exportError = nil
@@ -102,8 +103,13 @@ struct SettingsView: View {
                         exportError = error.localizedDescription
                     }
                 }
+                .disabled(!rowAvailability.exportEnabled)
 
-                if let exportError {
+                if !rowAvailability.exportEnabled {
+                    Text("Nothing to export yet. Import works any time.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let exportError {
                     Text(exportError)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -146,9 +152,12 @@ struct SettingsView: View {
     @State private var showMuscleRanges = false
     
 
+    /// The NavigationStack lives here: without one the Restore and Move data links are disabled (greyed, they do nothing).
     var body: some View {
+        NavigationStack { settingsForm }
+    }
 
-
+    @ViewBuilder private var settingsForm: some View {
         Form {
             // MARK: - Profile
                         if let profile = profiles.first {
@@ -322,9 +331,11 @@ struct SettingsView: View {
                 Button(backupBusy ? "Backing up…" : "Back up now") { Task { await backUpNow() } }
                     .disabled(backupBusy)
                 Button("Verify latest backup") { verifyLatestBackup() }
-                    .disabled(backupBusy || backupFiles.isEmpty)
+                    .disabled(!rowAvailability.verifyEnabled)
                 NavigationLink("Restore from a backup") { restoreScreen }
+                    .foregroundStyle(.primary)
                 NavigationLink("Move data (import and export)") { moveDataScreen }
+                    .foregroundStyle(.primary)
             }
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
             .task { await autoBackup.refreshICloudAvailability() }
@@ -430,6 +441,11 @@ struct SettingsView: View {
         return "Last backup: \(when) · iCloud \(autoBackup.status.lastWasOffDevice ? "✓" : "✗")\(autoBackup.status.lastVerified ? " · verified" : "")"
     }
 
+    /// Restore and Move data are never gated on this device's data or on a backup existing (a new phone has neither).
+    private var rowAvailability: BackupRowAvailability {
+        BackupRowAvailability.of(backupCount: backupFiles.count, storeHasData: !sessions.isEmpty || !profiles.isEmpty, busy: backupBusy)
+    }
+
     private func refreshBackups() async {
         let result = await autoBackup.availableBackups()
         backupFiles = result.files
@@ -468,9 +484,13 @@ struct SettingsView: View {
     private func runRestore(_ pending: PendingRestore) {
         pendingRestore = nil
         // Post notification first — tears down live SwiftData views before deletion
+        RestoreActivity.inProgress = true      // the rebuilt root must not show the first-run welcome sheet over the restore
         NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
         Task { @MainActor in
-            defer { if pending.isTemporaryCopy { try? FileManager.default.removeItem(at: pending.url) } }
+            defer {
+                RestoreActivity.inProgress = false
+                if pending.isTemporaryCopy { try? FileManager.default.removeItem(at: pending.url) }
+            }
             try? await Task.sleep(for: .milliseconds(150))
             do {
                 let restore = try BackupRestoreCoordinator.restore(from: pending.url, container: context.container)
