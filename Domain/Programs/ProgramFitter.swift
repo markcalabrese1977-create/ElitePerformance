@@ -195,7 +195,7 @@ enum ProgramFitter {
     /// 1, and for a stress-2 original it is strictly lower; when no candidate passes there is no replacement at all.
     enum SubstitutionStage: Equatable {
         case pattern    // (a) same pattern, max stress on flagged joints <= 1
-        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1 
+        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1 (never for a vertical pull)
     }
 
     enum SlotOutcome: Equatable {
@@ -205,6 +205,7 @@ enum ProgramFitter {
         case keptStressed   // anchor: gear fine, a flagged joint at stress 2, nothing lower-stress exists; kept
         case unfit          // anchor with no available substitute: kept
         case drop           // no substitute and the slot is not an anchor
+        case noVerticalPull // a vertical pull with no vertical pull possible on this equipment: dropped, never swapped for another pattern
     }
 
     struct SlotPlan: Equatable {
@@ -289,6 +290,9 @@ enum ProgramFitter {
             let found: (Candidate, SubstitutionStage)?
             if let c = preferred(safe(samePattern)) {
                 found = (c, .pattern)
+            } else if traits.pattern == .verticalPull {
+                // Never another pattern under a pulldown's slot.
+                found = nil
             } else if let c = preferred(safe(sameMuscle)) {
                 found = (c, .muscle)
             } else {
@@ -299,6 +303,9 @@ enum ProgramFitter {
             if let (chosen, stage) = found {
                 used.insert(chosen.exercise.id)
                 plan.append(SlotPlan(originalIndex: index, outcome: .replace(exerciseId: chosen.exercise.id, stage: stage)))
+            } else if traits.pattern == .verticalPull && !available
+                        && !candidates.contains(where: { $0.traits.pattern == .verticalPull && $0.traits.isAvailable(with: profile.equipment) }) {
+                plan.append(SlotPlan(originalIndex: index, outcome: .noVerticalPull))
             } else if available {
                 plan.append(SlotPlan(originalIndex: index, outcome: original.priority == .anchor ? .keptStressed : .drop))
             } else if original.priority == .anchor {
@@ -345,6 +352,8 @@ enum ProgramFitter {
             case .drop:
                 // Gear-driven drops name the gear; a stress-2 original with nothing safer to swap to names the joint.
                 note(.dropped, "Dropped \(name) (\(cause(traits!, available: available, profile: profile))" + (available ? "; no lower-stress option)" : ")"))
+            case .noVerticalPull:
+                note(.dropped, "No vertical pull is possible with your equipment (it needs a pull-up bar, a cable machine or an assisted pull-up machine), so \(name) was removed rather than replaced by a different movement")
             }
         }
         return slots
@@ -354,6 +363,7 @@ enum ProgramFitter {
         if !available, let gear = GearTag.allCases.first(where: { traits.equipment.contains($0) && !profile.equipment.contains($0) }) {
             return gearPhrase(gear)
         }
+        if !available, !traits.anchorOneOf.isEmpty { return "nothing to hook your feet under" }
         return jointList(traits, profile)
     }
 

@@ -121,7 +121,11 @@ final class ProgramFitterTests: XCTestCase {
                     fail("\(day.title): slot \(step.originalIndex) has gear and stress <= 1 but was swapped")
                 }
             }
-            for slot in origDay.exerciseTemplates where slot.priority == .anchor && !demoted.contains(slot.id) {
+            var noPull = Set<String>()
+            for step in ProgramFitter.substitutionPlan(origDay, profile: p) where step.outcome == .noVerticalPull {
+                noPull.insert(origDay.exerciseTemplates[step.originalIndex].id)
+            }
+            for slot in origDay.exerciseTemplates where slot.priority == .anchor && !demoted.contains(slot.id) && !noPull.contains(slot.id) {
                 if !day.exerciseTemplates.contains(where: { $0.id == slot.id }) { fail("\(day.title): anchor \(slot.id) dropped") }
             }
             for slot in day.exerciseTemplates where demoted.contains(slot.id) && slot.priority != .standard {
@@ -151,6 +155,7 @@ final class ProgramFitterTests: XCTestCase {
                         guard let t = ExerciseTraits.traits(for: c.id), !inDay.contains(c.id) else { return false }
                         return t.isAvailable(with: p.equipment) && (p.injuries.map { t.stress(for: $0) }.max() ?? 0) <= 1
                             && p.injuries.reduce(0, { $0 + t.stress(for: $1) }) < own
+                            && (traits.pattern != .verticalPull || t.pattern == .verticalPull)
                     }
                     if !lower.isEmpty { fail("\(day.title): \(ex.exerciseId) kept at stress \(own) but a lower-stress option existed") }
                 }
@@ -266,7 +271,8 @@ final class ProgramFitterTests: XCTestCase {
                             let samePattern = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern }
                             let sameMuscle = builtIn.filter { $0.primaryMuscle == current.primaryMuscle }
                             let safeA = usable(samePattern).filter { peak($0.1) <= 1 }
-                            let safeB = usable(sameMuscle).filter { peak($0.1) <= 1 }
+                            // a vertical pull never falls back to another pattern
+                            let safeB = traits.pattern == .verticalPull ? [] : usable(sameMuscle).filter { peak($0.1) <= 1 }
                             let expected: (CatalogExercise?, ProgramFitter.SubstitutionStage, [(CatalogExercise, ExerciseTraits, Int)])
                             if !safeA.isEmpty { expected = (best(safeA), .pattern, safeA) }
                             else if !safeB.isEmpty { expected = (best(safeB), .muscle, safeB) }
@@ -558,6 +564,77 @@ final class ProgramFitterTests: XCTestCase {
                 let day = template.dayTemplates.first { $0.dayNumber == reason.dayNumber }!
                 XCTAssertEqual(day.exerciseTemplates[reason.slotIndex!].priority, .anchor, "only anchors are kept stressed")
             }
+        }
+    }
+
+    // MARK: - Equipment rules
+
+    func test_nordic_needsSomethingToAnchorTheFeet() {
+        let nordic = ExerciseTraits.table["nordic_curl"]!
+        XCTAssertFalse(nordic.isAvailable(with: [.dumbbell, .bench]))
+        XCTAssertFalse(nordic.isAvailable(with: [.dumbbell, .bench, .cable]))
+        XCTAssertTrue(nordic.isAvailable(with: [.barbell, .rack]))
+        XCTAssertTrue(nordic.isAvailable(with: [.machine]))
+        XCTAssertTrue(nordic.isAvailable(with: [.smith]))
+    }
+
+    func test_nordic_isNeverChosenWithoutAnAnchor() {
+        var anchorlessChecked = 0
+        for template in Self.templates {
+            for equipment in [Set<GearTag>([.dumbbell, .bench]), [.dumbbell, .bench, .cable], [.dumbbell], [.cable]] as [Set<GearTag>] {
+                for joints in Self.jointCombos {
+                    let p = FitProfile(equipment: equipment, injuries: joints, sessionMinutes: 120)
+                    let fitted = ProgramFitter.fit(template, profile: p).template
+                    for day in fitted.dayTemplates {
+                        XCTAssertFalse(day.exerciseTemplates.contains { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == "nordic_curl" },
+                                       "\(template.name) \(day.title) \(equipment)")
+                        anchorlessChecked += 1
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(anchorlessChecked, 0)
+    }
+
+    /// Dumbbells + bench with a pulldown slot: no vertical pull is possible, so the slot is removed with a note, never
+    /// filled with a pullover or a row.
+    func test_noVerticalPullPossible_noteInsteadOfOtherPattern() {
+        let p = profile(.dumbbellsBench)
+        var sawNote = false
+        for template in Self.templates {
+            let r = ProgramFitter.fit(template, profile: p)
+            let notes = r.reasons.filter { $0.message.hasPrefix("No vertical pull is possible") }
+            sawNote = sawNote || !notes.isEmpty
+            for n in notes {
+                let day = template.dayTemplates.first { $0.dayNumber == n.dayNumber }!
+                let original = day.exerciseTemplates[n.slotIndex!]
+                XCTAssertEqual(ExerciseTraits.traits(for: original.exerciseId)?.pattern, .verticalPull)
+            }
+            for day in r.template.dayTemplates {
+                for ex in day.exerciseTemplates {
+                    XCTAssertNotEqual(ExerciseTraits.traits(for: ex.exerciseId)?.pattern, .verticalPull,
+                                      "\(template.name): a vertical pull appeared on equipment that cannot do one")
+                }
+            }
+            // pullovers are a different pattern and never fill a pulldown slot
+            for step in day0Steps(template, p) { if case .replace(let id, _) = step, id.contains("pullover") { XCTFail("pullover chosen under a pulldown") } }
+        }
+        XCTAssertTrue(sawNote)
+    }
+
+    private func day0Steps(_ template: ProgramTemplate, _ p: FitProfile) -> [ProgramFitter.SlotOutcome] {
+        template.dayTemplates.flatMap { day in
+            ProgramFitter.substitutionPlan(day, profile: p).enumerated().compactMap { i, step in
+                ExerciseTraits.traits(for: day.exerciseTemplates[i].exerciseId)?.pattern == .verticalPull ? step.outcome : nil
+            }
+        }
+    }
+
+    func test_pullUpBarMakesAVerticalPullPossible() {
+        let p = FitProfile(equipment: [.pullUpBar, .dumbbell, .bench], injuries: [], sessionMinutes: 120)
+        for template in Self.templates {
+            let r = ProgramFitter.fit(template, profile: p)
+            XCTAssertFalse(r.reasons.contains { $0.message.hasPrefix("No vertical pull is possible") }, template.name)
         }
     }
 }
