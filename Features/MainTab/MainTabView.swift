@@ -99,9 +99,11 @@ struct TodayTabView: View {
                 if showBackupBanner {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
-                            Label("No verified iCloud backup in the last 7 days", systemImage: "exclamationmark.icloud")
+                            Label(autoBackup.iCloudAvailability == .available ? "No verified iCloud backup in the last 7 days" : "iCloud backups are unavailable",
+                                  systemImage: "exclamationmark.icloud")
                                 .font(.subheadline.bold())
-                            Text("Your training history lives only on this device until a backup reaches iCloud. Check Settings → Backup.")
+                            Text(autoBackup.iCloudAvailability.explanation.map { $0 + " Your training history lives only on this device until a backup reaches iCloud." }
+                                 ?? "Your training history lives only on this device until a backup reaches iCloud. Check Settings → Backup.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                             HStack {
@@ -115,6 +117,12 @@ struct TodayTabView: View {
                                 }
                                 .disabled(bannerBusy)
                                 Spacer()
+                                if autoBackup.iCloudAvailability != .available {
+                                    Button("Use local backups only") {
+                                        autoBackup.status.localOnly = true
+                                        bannerTick += 1
+                                    }
+                                }
                                 Button("Dismiss") {
                                     autoBackup.status.dismissBannerForToday(now: Date())
                                     bannerTick += 1

@@ -2239,9 +2239,9 @@ final class UpgradeBackupTests: XCTestCase {
         return c
     }
     private func service(_ s: AutoBackupStatusStore, destination: AutoBackupDestination? = nil, commit: String = "new-build",
-                         now: Date = Date()) -> AutoBackupService {
+                         availability: AutoBackupDestination.ICloudAvailability = .available, now: Date = Date()) -> AutoBackupService {
         let d = destination ?? .local(dir!)
-        return AutoBackupService(status: s, resolveDestination: { d }, now: { now }, currentCommit: { commit }, log: { _ in })
+        return AutoBackupService(status: s, resolveDestination: { d }, checkAvailability: { availability }, now: { now }, currentCommit: { commit }, log: { _ in })
     }
     private func spin(_ g: StartupGate, timeout: TimeInterval = 10) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -2288,7 +2288,7 @@ final class UpgradeBackupTests: XCTestCase {
         try Data("x".utf8).write(to: blocker); defer { try? FileManager.default.removeItem(at: blocker) }
         final class Box: @unchecked Sendable { var url: URL; init(_ u: URL) { url = u } }
         let destination = Box(blocker)
-        let svc = AutoBackupService(status: s, resolveDestination: { .local(destination.url) },
+        let svc = AutoBackupService(status: s, resolveDestination: { .local(destination.url) }, checkAvailability: { .available },
                                     currentCommit: { "new-build" }, log: { _ in })
         var backfills = 0
         let gate = StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
@@ -2311,7 +2311,7 @@ final class UpgradeBackupTests: XCTestCase {
         // the other way out: CONTINUE without a backup
         let s2 = status()
         destination.url = blocker
-        let svc2 = AutoBackupService(status: s2, resolveDestination: { .local(destination.url) },
+        let svc2 = AutoBackupService(status: s2, resolveDestination: { .local(destination.url) }, checkAvailability: { .available },
                                      currentCommit: { "build-2" }, log: { _ in })
         var runs2 = 0
         let gate2 = StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
@@ -2354,5 +2354,38 @@ final class UpgradeBackupTests: XCTestCase {
         // 25h later the first foreground of that day does back up
         let later = service(s, now: t0.addingTimeInterval(25 * 3600))
         XCTAssertTrue(later.foregrounded(container: container))
+    }
+
+    // MMM ------------------------------------------------------------------
+
+    func test_iCloudAvailability_saysWhy() {
+        typealias A = AutoBackupDestination
+        XCTAssertEqual(A.availability(hasAccount: false, containerAvailable: false), .noAccount)
+        XCTAssertEqual(A.availability(hasAccount: true, containerAvailable: false), .driveOffForApp)
+        XCTAssertEqual(A.availability(hasAccount: true, containerAvailable: true), .available)
+        XCTAssertTrue(A.ICloudAvailability.noAccount.explanation?.contains("No iCloud account") == true)
+        XCTAssertTrue(A.ICloudAvailability.driveOffForApp.explanation?.contains("iCloud Drive is turned off") == true)
+        XCTAssertNil(A.ICloudAvailability.available.explanation)
+    }
+
+    func test_aLocalBackup_recordsWhyICloudIsUnavailable_andLocalOnlySuppressesTheBannerUntilICloudReturns() async throws {
+        let container = try populated()
+        let s = status()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let svc = service(s, availability: .noAccount, now: t0)
+        _ = await svc.backUpNow(container: container)
+        XCTAssertEqual(svc.iCloudAvailability, .noAccount, "the Settings status line reads this")
+
+        XCTAssertTrue(s.shouldShowBanner(now: t0.addingTimeInterval(8 * 86_400), hasData: true), "no off-device backup for over 7 days")
+        s.localOnly = true                                      // "Use local backups only"
+        XCTAssertFalse(s.shouldShowBanner(now: t0.addingTimeInterval(8 * 86_400), hasData: true))
+        XCTAssertFalse(s.shouldShowBanner(now: t0.addingTimeInterval(30 * 86_400), hasData: true), "stays away")
+
+        // iCloud becomes available: a backup reaches it, and the choice is cleared
+        let ic = AutoBackupDestination.iCloud(dir.appendingPathComponent("icloud"))
+        _ = await service(s, destination: ic, now: t0.addingTimeInterval(86_400)).backUpNow(container: container)
+        XCTAssertFalse(s.localOnly)
+        XCTAssertEqual(AutoBackupService(status: s).iCloudAvailability, .available)
+        XCTAssertTrue(s.shouldShowBanner(now: t0.addingTimeInterval(86_400 + 8 * 86_400), hasData: true), "the banner works normally again")
     }
 }

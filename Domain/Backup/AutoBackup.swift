@@ -23,6 +23,35 @@ enum AutoBackupDestination: Equatable {
         return .local(localFallbackDirectory())
     }
 
+    /// Why iCloud is (not) usable, for the Settings status line and the Today banner.
+    enum ICloudAvailability: Equatable {
+        case available
+        /// No iCloud account is signed in on this device.
+        case noAccount
+        /// An account exists but iCloud Drive is off for this app (or the container is unavailable).
+        case driveOffForApp
+
+        var explanation: String? {
+            switch self {
+            case .available: return nil
+            case .noAccount: return "No iCloud account is signed in on this device."
+            case .driveOffForApp: return "iCloud Drive is turned off for Elite Performance (Settings → your name → iCloud → Drive)."
+            }
+        }
+    }
+
+    /// Pure: the reason for the two inputs the system gives (the identity token says whether an account is signed in).
+    static func availability(hasAccount: Bool, containerAvailable: Bool) -> ICloudAvailability {
+        if containerAvailable { return .available }
+        return hasAccount ? .driveOffForApp : .noAccount
+    }
+
+    /// Blocking; call OFF the main thread.
+    static func currentAvailability() -> ICloudAvailability {
+        availability(hasAccount: FileManager.default.ubiquityIdentityToken != nil,
+                     containerAvailable: FileManager.default.url(forUbiquityContainerIdentifier: containerIdentifier) != nil)
+    }
+
     static func localFallbackDirectory() -> URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
@@ -193,6 +222,12 @@ struct AutoBackupStatusStore {
         get { defaults.string(forKey: "autoBackup.lastForegroundDay") }
         nonmutating set { defaults.set(newValue, forKey: "autoBackup.lastForegroundDay") }
     }
+    /// The lifter chose "Use local backups only" while iCloud was unavailable: the Today banner stays away until a backup
+    /// reaches iCloud again (which clears this).
+    var localOnly: Bool {
+        get { defaults.bool(forKey: "autoBackup.localOnly") }
+        nonmutating set { defaults.set(newValue, forKey: "autoBackup.localOnly") }
+    }
     /// File name of the newest build-change backup (the pre-upgrade snapshot): pruning keeps it.
     var lastBuildChangeBackup: String? {
         get { defaults.string(forKey: "autoBackup.lastBuildChangeBackup") }
@@ -212,12 +247,13 @@ struct AutoBackupStatusStore {
         lastSuccess = date
         lastWasOffDevice = offDevice
         lastVerified = true
-        if offDevice { lastOffDeviceSuccess = date }
+        if offDevice { lastOffDeviceSuccess = date; localOnly = false }
     }
 
     /// FF: no verified off-device backup for 7 days (or ever), and not dismissed today.
     func shouldShowBanner(now: Date, hasData: Bool, calendar: Calendar = .current) -> Bool {
         guard hasData else { return false }
+        if localOnly { return false }
         if bannerDismissedDay == Self.dayString(now, calendar: calendar) { return false }
         guard let last = lastOffDeviceSuccess else { return true }
         return now.timeIntervalSince(last) > 7 * 86_400
@@ -262,9 +298,12 @@ final class AutoBackupService: ObservableObject {
     @Published private(set) var statusRevision = 0
     @Published private(set) var lastError: String?
     @Published private(set) var isRunning = false
+    /// Why backups are not reaching iCloud (updated every time a backup is placed locally).
+    @Published private(set) var iCloudAvailability: AutoBackupDestination.ICloudAvailability = .available
 
     let status: AutoBackupStatusStore
     private let resolveDestination: @Sendable () -> AutoBackupDestination
+    private let checkAvailability: @Sendable () -> AutoBackupDestination.ICloudAvailability
     private let now: () -> Date
     private let currentCommit: () -> String
     private let calendar: Calendar
@@ -272,6 +311,7 @@ final class AutoBackupService: ObservableObject {
 
     init(status: AutoBackupStatusStore = AutoBackupStatusStore(),
          resolveDestination: @escaping @Sendable () -> AutoBackupDestination = { AutoBackupDestination.resolve() },
+         checkAvailability: @escaping @Sendable () -> AutoBackupDestination.ICloudAvailability = { AutoBackupDestination.currentAvailability() },
          now: @escaping () -> Date = { Date() },
          currentCommit: @escaping () -> String = { BuildInfo.commit },
          calendar: Calendar = .current,
@@ -279,6 +319,7 @@ final class AutoBackupService: ObservableObject {
         self.log = log
         self.status = status
         self.resolveDestination = resolveDestination
+        self.checkAvailability = checkAvailability
         self.now = now
         self.currentCommit = currentCommit
         self.calendar = calendar
@@ -386,21 +427,24 @@ final class AutoBackupService: ObservableObject {
         isRunning = true
         defer { isRunning = false; try? FileManager.default.removeItem(at: pending.temp) }
         let resolver = resolveDestination
+        let availabilityCheck = checkAvailability
         let stamp = now()
         let protectedName = status.lastBuildChangeBackup
         let isBuildChange = reason == .buildChanged
-        let outcome = await Task.detached(priority: .utility) { () -> (AutoBackupDestination, Result<AutoBackupFile, Error>) in
+        let outcome = await Task.detached(priority: .utility) { () -> (AutoBackupDestination, Result<AutoBackupFile, Error>, AutoBackupDestination.ICloudAvailability?) in
             let destination = resolver()
+            let availability: AutoBackupDestination.ICloudAvailability? = destination.isOffDevice ? .available : availabilityCheck()
             do {
                 let file = try AutoBackupEngine.place(temp: pending.temp, live: pending.live, into: destination.directory, now: stamp,
                                                       coordinated: destination.isOffDevice)
                 var keep = Set([protectedName].compactMap { $0 })
                 if isBuildChange { keep.insert(file.url.lastPathComponent) }
                 AutoBackupEngine.prune(in: destination.directory, protecting: keep)
-                return (destination, .success(file))
-            } catch { return (destination, .failure(error)) }
+                return (destination, .success(file), availability)
+            } catch { return (destination, .failure(error), availability) }
         }.value
-        let (destination, result) = outcome
+        let (destination, result, availability) = outcome
+        if let availability { iCloudAvailability = availability }
         let c = pending.live.verifiedCounts
         let counts = "sessions=\(c[0]) history=\(c[1]) custom=\(c[2]) blocks=\(c[3])"
         let where_ = destination.isOffDevice ? "iCloud" : "local"
