@@ -262,6 +262,8 @@ struct OnboardingFlowView: View {
 
     /// The host creates the program and reports back through the third argument.
     let onComplete: (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
+    /// Shown under the goal choices when set (the first-run welcome sheet): leave setup and restore a backup instead.
+    let onRestore: (() -> Void)?
 
     @State private var isFinishing = false
     @State private var finishFailure: String?
@@ -320,9 +322,11 @@ struct OnboardingFlowView: View {
     init(
         initialStartDate: Date = Date(),
         profile: UserProfile? = nil,
+        onRestore: (() -> Void)? = nil,
         onComplete: @escaping (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
     ) {
         self.onComplete = onComplete
+        self.onRestore = onRestore
         let draft = OnboardingDraft(profile: profile)
         _selectedGoal = State(initialValue: draft.goal)
         _selectedExperience = State(initialValue: draft.experience)
@@ -431,6 +435,16 @@ struct OnboardingFlowView: View {
                     )
                 }
                 .buttonStyle(.plain)
+            }
+
+            if let onRestore {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Already use Elite Performance?")
+                        .font(.subheadline.bold())
+                    Button("Restore from a backup", action: onRestore)
+                        .font(.subheadline)
+                }
             }
 
             Spacer()

@@ -355,4 +355,18 @@ final class OnboardingFitTests: XCTestCase {
         let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4, injuries: [], fit: fitResult(kept: 0))
         XCTAssertEqual(text, ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4))
     }
+
+    // MARK: Welcome sheet and Today routing
+
+    @MainActor
+    func test_appRoute_restoreOpensSettings_andOnboardingRequestsAreCounted() {
+        let route = AppRoute()
+        route.openRestore()
+        XCTAssertEqual(route.selectedTab, AppRoute.Tab.settings.rawValue)
+        XCTAssertTrue(route.restoreRequested)
+        let before = route.onboardingRequests
+        route.openOnboarding()
+        route.openOnboarding()
+        XCTAssertEqual(route.onboardingRequests, before + 2)
+    }
 }

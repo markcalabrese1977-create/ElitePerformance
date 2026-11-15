@@ -153,8 +153,23 @@ struct SettingsView: View {
     
 
     /// The NavigationStack lives here: without one the Restore and Move data links are disabled (greyed, they do nothing).
+    @ObservedObject private var route = AppRoute.shared
+    @State private var showRestoreScreen = false
+
     var body: some View {
-        NavigationStack { settingsForm }
+        NavigationStack {
+            settingsForm
+                .navigationDestination(isPresented: $showRestoreScreen) { restoreScreen }
+        }
+        // "Restore from a backup" on the welcome sheet lands here, on the same Restore screen as the row below.
+        .onAppear { openRestoreIfRequested() }
+        .onChange(of: route.restoreRequested) { _, _ in openRestoreIfRequested() }
+    }
+
+    private func openRestoreIfRequested() {
+        guard route.restoreRequested else { return }
+        route.restoreRequested = false
+        showRestoreScreen = true
     }
 
     @ViewBuilder private var settingsForm: some View {
