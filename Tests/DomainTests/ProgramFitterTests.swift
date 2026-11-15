@@ -121,8 +121,9 @@ final class ProgramFitterTests: XCTestCase {
                     fail("\(day.title): slot \(step.originalIndex) has gear and stress <= 1 but was swapped")
                 }
             }
+            // equipment is a hard rule: an unavailable anchor is removed (or replaced), never kept
             var noPull = Set<String>()
-            for step in ProgramFitter.substitutionPlan(origDay, profile: p) where step.outcome == .noVerticalPull {
+            for step in ProgramFitter.substitutionPlan(origDay, profile: p) where step.outcome == .noVerticalPull || step.outcome == .drop {
                 noPull.insert(origDay.exerciseTemplates[step.originalIndex].id)
             }
             for slot in origDay.exerciseTemplates where slot.priority == .anchor && !demoted.contains(slot.id) && !noPull.contains(slot.id) {
@@ -137,9 +138,8 @@ final class ProgramFitterTests: XCTestCase {
                 // gear
                 if !traits.isAvailable(with: p.equipment) {
                     let slotIndex = originalSlots[ex.id]?.index
-                    // An anchor with no safe substitute is kept, and must say so.
-                    let flagged = reasonsForDay.contains { $0.kind == .unfit && $0.slotIndex == slotIndex }
-                    if !flagged || originalSlots[ex.id]?.ex.priority != .anchor { fail("\(day.title): \(ex.exerciseId) needs unavailable gear and is not a flagged anchor") }
+                    _ = originalSlots[ex.id]?.index
+                    fail("\(day.title): \(ex.exerciseId) needs gear the profile does not have")
                 }
                 // joint stress: only a stress-2 original is ever swapped for joints, so a kept stress-2 exercise means nothing lower-stress existed
                 let own = p.injuries.reduce(0) { $0 + traits.stress(for: $1) }
@@ -153,7 +153,7 @@ final class ProgramFitterTests: XCTestCase {
                     }
                     let lower = pool.filter { c in
                         guard let t = ExerciseTraits.traits(for: c.id), !inDay.contains(c.id) else { return false }
-                        return t.isAvailable(with: p.equipment) && (p.injuries.map { t.stress(for: $0) }.max() ?? 0) <= 1
+                        return t.isAvailable(with: p.equipment)
                             && p.injuries.reduce(0, { $0 + t.stress(for: $1) }) < own
                             && (traits.pattern != .verticalPull || t.pattern == .verticalPull)
                     }
@@ -234,7 +234,7 @@ final class ProgramFitterTests: XCTestCase {
     /// bodyweight-only substitute when any safe loadable candidate exists in that stage, regardless of compound-ness.
     func test_substitutionStages_areLocallyOptimal() {
         var failures: [String] = []
-        var staged = [0, 0]
+        var staged = [0, 0, 0]
         var passedOverLoadable = 0
         let builtIn = ExerciseCatalog.builtIn
         for template in Self.templates {
@@ -267,15 +267,23 @@ final class ProgramFitterTests: XCTestCase {
                                 (ProgramFitter.isLoadable(traits) && !ProgramFitter.isLoadable(e.1) ? 1 : 0, e.0.isCompound != current.isCompound ? 1 : 0, sum(e.1), e.2)
                             }
                             func best(_ safe: [(CatalogExercise, ExerciseTraits, Int)]) -> CatalogExercise? { safe.min { key($0) < key($1) }?.0 }
+                            func lowest(_ u: [(CatalogExercise, ExerciseTraits, Int)]) -> [(CatalogExercise, ExerciseTraits, Int)] {
+                                guard let m = u.map({ sum($0.1) }).min() else { return [] }
+                                return u.filter { sum($0.1) == m }
+                            }
 
                             let samePattern = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern }
                             let sameMuscle = builtIn.filter { $0.primaryMuscle == current.primaryMuscle }
                             let safeA = usable(samePattern).filter { peak($0.1) <= 1 }
                             // a vertical pull never falls back to another pattern
                             let safeB = traits.pattern == .verticalPull ? [] : usable(sameMuscle).filter { peak($0.1) <= 1 }
+                            let union = builtIn.filter { ExerciseTraits.traits(for: $0.id)?.pattern == traits.pattern
+                                || (traits.pattern != .verticalPull && $0.primaryMuscle == current.primaryMuscle) }
+                            let safeC = lowest(usable(union))
                             let expected: (CatalogExercise?, ProgramFitter.SubstitutionStage, [(CatalogExercise, ExerciseTraits, Int)])
                             if !safeA.isEmpty { expected = (best(safeA), .pattern, safeA) }
                             else if !safeB.isEmpty { expected = (best(safeB), .muscle, safeB) }
+                            else if !safeC.isEmpty { expected = (best(safeC), .fallback, safeC) }
                             else { expected = (nil, .pattern, []) }
                             guard case .replace(let chosenId, let stage) = step.outcome else {
                                 if let e = expected.0 { failures.append("\(tag): \(step.outcome) although \(e.id) was a safe substitute") }
@@ -284,11 +292,11 @@ final class ProgramFitterTests: XCTestCase {
                             if expected.0?.id != chosenId || expected.1 != stage {
                                 failures.append("\(tag): chose \(chosenId) via \(stage), expected \(expected.0?.id ?? "nil") via \(expected.1)")
                             }
-                            switch stage { case .pattern: staged[0] += 1; case .muscle: staged[1] += 1 }
-                            // a replacement never stresses a flagged joint above 1, and is strictly lower than a stress-2 original
+                            switch stage { case .pattern: staged[0] += 1; case .muscle: staged[1] += 1; case .fallback: staged[2] += 1 }
+                            // stages (a)/(b) never stress a flagged joint above 1; an available stress-2 original only ever gets a strictly lower sum
                             if let ct = ExerciseTraits.traits(for: chosenId) {
-                                if peak(ct) > 1 { failures.append("\(tag): stage \(stage) chose peak stress \(peak(ct))") }
-                                if peak(traits) >= 2, peak(ct) >= peak(traits) { failures.append("\(tag): \(chosenId) is not lower-stress than the original") }
+                                if stage != .fallback, peak(ct) > 1 { failures.append("\(tag): stage \(stage) chose peak stress \(peak(ct))") }
+                                if available, sum(ct) >= own { failures.append("\(tag): \(chosenId) is not lower-stress than the doable original") }
                             }
                             // a loaded original never gets a bodyweight-only substitute while any safe loadable candidate exists
                             if let chosenTraits = ExerciseTraits.traits(for: chosenId), ProgramFitter.isLoadable(traits), !ProgramFitter.isLoadable(chosenTraits),
@@ -302,7 +310,7 @@ final class ProgramFitterTests: XCTestCase {
                 }
             }
         }
-        print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) bodyweightOverSafeLoadable=\(passedOverLoadable) failures=\(failures.count)")
+        print("FITTER_STAGES pattern=\(staged[0]) muscle=\(staged[1]) fallback=\(staged[2]) bodyweightOverSafeLoadable=\(passedOverLoadable) failures=\(failures.count)")
         XCTAssertTrue(failures.isEmpty, failures.prefix(15).joined(separator: "\n"))
     }
 
@@ -373,25 +381,37 @@ final class ProgramFitterTests: XCTestCase {
         ProgramDayTemplate(id: "d", dayNumber: 1, title: "Day", role: "", exerciseTemplates: [slot("s1", 1, "hack_squat", priority)])
     }
 
-    /// Nothing passes the stress filter in (a) or (b): there is no replacement. A non-anchor is dropped, an anchor is
-    /// kept with the existing note. Equal-stress "lowest available" options are never taken.
-    func test_noCandidateStrictlySafer_dropsNonAnchor_andKeepsAnchor() {
+    /// Joint stress is soft: with no candidate under the stress filter the lowest-stress doable option is taken (c),
+    /// and a doable original that nothing beats is kept. Equipment is hard: an original the gear cannot do is never kept.
+    func test_softJointRule_fallbackToLowestDoable_keepOriginal_andHardEquipmentRule() {
         let prof = FitProfile(equipment: [.dumbbell, .machine], injuries: [.knees, .hips], sessionMinutes: 120)
         let heavy = fake("heavy", 1, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 2, .hips: 1]))
         let lighter = fake("lighter", 2, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 2]))
         let unavailable = fake("unavailable", 3, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.smith], pattern: .squat))
-        XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(.standard), profile: prof, pool: [heavy, lighter, unavailable]).map(\.outcome), [.drop])
-        XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(.anchor), profile: prof, pool: [heavy, lighter, unavailable]).map(\.outcome), [.keptStressed])
-
-        // one candidate that passes the filter: stage (a) wins
+        // hack squat (knees 2, hips 1) is doable; "lighter" is the lowest doable option and strictly lower: taken as (c)
+        XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(.standard), profile: prof, pool: [heavy, lighter, unavailable]).map(\.outcome),
+                       [.replace(exerciseId: "lighter", stage: .fallback)])
+        // nothing doable is lower: the original stays, anchor or not
+        for priority in [ExercisePriority.standard, .anchor] {
+            XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(priority), profile: prof, pool: [heavy, unavailable]).map(\.outcome), [.keptStressed])
+        }
+        // a safe candidate wins over any (c) option
         let safe = fake("safe", 4, muscle: .quads, compound: true, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 1, .hips: 1]))
         XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(), profile: prof, pool: [heavy, lighter, unavailable, safe]).map(\.outcome),
                        [.replace(exerciseId: "safe", stage: .pattern)])
-
         // stage (b): same muscle, different pattern, passes the filter
         let sibling = fake("sibling", 5, muscle: .quads, compound: false, traits: ExerciseTraits(equipment: [.dumbbell], pattern: .kneeExtension, stress: [.knees: 1]))
         XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(), profile: prof, pool: [heavy, lighter, sibling]).map(\.outcome),
                        [.replace(exerciseId: "sibling", stage: .muscle)])
+
+        // the gear cannot do the original (no machine) and nothing doable exists: removed, even an anchor
+        let noMachine = FitProfile(equipment: [.dumbbell], injuries: [.knees, .hips], sessionMinutes: 120)
+        for priority in [ExercisePriority.standard, .anchor] {
+            XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(priority), profile: noMachine, pool: [unavailable]).map(\.outcome), [.drop])
+        }
+        // ...but the lowest-stress doable option is taken even when it stresses the joint
+        XCTAssertEqual(ProgramFitter.substitutionPlan(hackSquatDay(.anchor), profile: noMachine, pool: [heavy, lighter]).map(\.outcome),
+                       [.replace(exerciseId: "lighter", stage: .fallback)])
     }
 
     /// Loaded original: any safe loadable candidate beats a bodyweight-only one, even when the bodyweight one matches
@@ -530,11 +550,14 @@ final class ProgramFitterTests: XCTestCase {
                     let p = profile(preset, joints)
                     for day in template.dayTemplates {
                         for step in ProgramFitter.substitutionPlan(day, profile: p) {
-                            guard case .replace(let id, _) = step.outcome,
+                            guard case .replace(let id, let stage) = step.outcome,
                                   let new = ExerciseTraits.traits(for: id),
                                   let old = ExerciseTraits.traits(for: day.exerciseTemplates[step.originalIndex].exerciseId) else { continue }
-                            XCTAssertLessThan(new.stress(for: .knees), 2, "\(template.name) \(day.title): \(id) is knee-dominant")
-                            if old.stress(for: .knees) >= 2 {
+                            // (c) is the explicit exception: nothing doable is gentler, so the lowest option is taken (and noted)
+                            if stage != .fallback {
+                                XCTAssertLessThan(new.stress(for: .knees), 2, "\(template.name) \(day.title): \(id) is knee-dominant")
+                            }
+                            if old.stress(for: .knees) >= 2, stage != .fallback {
                                 XCTAssertLessThan(new.stress(for: .knees), old.stress(for: .knees), "\(id) not lower than the original")
                             }
                             checked += 1
@@ -553,7 +576,7 @@ final class ProgramFitterTests: XCTestCase {
         }
     }
 
-    func test_kneeFlag_fullGym_swapsNameTheJoint_andKeptNotesAreOnlyForAnchors() {
+    func test_kneeFlag_fullGym_swapsNameTheJoint_andKeptNotesCarryTheCue() {
         let p = profile(.fullGym, [.knees])
         for template in Self.templates {
             let r = ProgramFitter.fit(template, profile: p)
@@ -561,11 +584,71 @@ final class ProgramFitterTests: XCTestCase {
                 XCTAssertTrue(reason.message.contains("knees") || reason.message.contains("no "), reason.message)
             }
             for reason in r.reasons where reason.kind == .keptStressed {
-                let day = template.dayTemplates.first { $0.dayNumber == reason.dayNumber }!
-                XCTAssertEqual(day.exerciseTemplates[reason.slotIndex!].priority, .anchor, "only anchors are kept stressed")
+                XCTAssertTrue(reason.message.contains("flagged:"), "a kept/lowest-stress note names the joint and the cue: \(reason.message)")
             }
         }
     }
+
+    // MARK: - Equipment is hard, joint stress is soft
+
+    /// Home gym (barbell, rack, dumbbells, bench, pull-up bar; no cable) with elbows flagged: the pulldown slots become
+    /// pull-ups (the only vertical pull the gear allows, though it stresses the elbows) with an elbow note. Never a pulldown.
+    func test_elbowsFlag_homeGym_givesPullUpsWithTheNote_neverPulldown() {
+        let p = profile(.homeBarbell, [.elbows])
+        var sawPullUp = false
+        for template in Self.templates {
+            let r = ProgramFitter.fit(template, profile: p)
+            for day in r.template.dayTemplates {
+                for ex in day.exerciseTemplates {
+                    let id = Self.canon(ex.exerciseId)
+                    XCTAssertFalse(id.contains("pulldown"), "\(template.name) \(day.title): \(id) needs a cable machine")
+                    if id == "pull_up" || id == "chin_up" { sawPullUp = true }
+                }
+            }
+            for (di, day) in template.dayTemplates.enumerated() {
+                for (si, slot) in day.exerciseTemplates.enumerated()
+                where ExerciseTraits.traits(for: slot.exerciseId)?.pattern == .verticalPull
+                    && !(ExerciseTraits.traits(for: slot.exerciseId)?.isAvailable(with: p.equipment) ?? true) {
+                    let notes = r.reasons.filter { $0.dayNumber == day.dayNumber && $0.slotIndex == si && $0.kind == .keptStressed }
+                    XCTAssertTrue(notes.contains { $0.message.contains("Elbows flagged: neutral grip, stop short of pain.") },
+                                  "\(template.name) \(day.title) slot \(si) (\(slot.exerciseId)): no elbow note")
+                    _ = di
+                    let final = r.template.dayTemplates[di].exerciseTemplates.map { Self.canon($0.exerciseId) }
+                    XCTAssertTrue(final.contains("pull_up") || final.contains("chin_up"), "\(template.name) \(day.title): expected a pull-up")
+                }
+            }
+        }
+        XCTAssertTrue(sawPullUp)
+    }
+
+    /// Whatever the flag, preset, session length and experience, no exercise the equipment cannot support is ever kept.
+    private func assertNoUnavailableExerciseKept(flag: InjuryFlag, file: StaticString = #filePath, line: UInt = #line) {
+        var checked = 0
+        for template in Self.templates {
+            for preset in Self.presets {
+                for minutes in [45, 120] {
+                    let p = profile(preset, [flag], minutes)
+                    let fitted = ProgramFitter.fit(template, profile: p).template
+                    for day in fitted.dayTemplates {
+                        for ex in day.exerciseTemplates {
+                            guard let t = ExerciseTraits.traits(for: ex.exerciseId) else { continue }
+                            XCTAssertTrue(t.isAvailable(with: p.equipment),
+                                          "\(flag) \(preset) \(template.name) \(day.title): \(ex.exerciseId) cannot be done with this gear", file: file, line: line)
+                            checked += 1
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(checked, 500, file: file, line: line)
+    }
+
+    func test_lowBackFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .lowBack) }
+    func test_kneesFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .knees) }
+    func test_shouldersFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .shoulders) }
+    func test_elbowsFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .elbows) }
+    func test_wristsFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .wrists) }
+    func test_hipsFlag_neverKeepsAnUnavailableExercise() { assertNoUnavailableExerciseKept(flag: .hips) }
 
     // MARK: - Equipment rules
 

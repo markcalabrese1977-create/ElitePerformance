@@ -32,7 +32,7 @@ struct FitProfile: Equatable {
 struct FitReason: Equatable {
     enum Kind: String {
         case substituted, dropped, droppedForTime, trimmedSets, volume   // changes
-        case keptStressed, notEvaluated, unfit, overBudget               // notes: nothing was changed
+        case keptStressed, notEvaluated, overBudget                      // notes: nothing was changed
     }
 
     let kind: Kind
@@ -43,7 +43,7 @@ struct FitReason: Equatable {
     var isChange: Bool {
         switch kind {
         case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume: return true
-        case .keptStressed, .notEvaluated, .unfit, .overBudget: return false
+        case .keptStressed, .notEvaluated, .overBudget: return false
         }
     }
 }
@@ -191,20 +191,22 @@ enum ProgramFitter {
         joints.reduce(0) { $0 + traits.stress(for: $1) }
     }
 
-    /// Which stage of the substitution order produced a replacement. A substitute never stresses a flagged joint above
-    /// 1, and for a stress-2 original it is strictly lower; when no candidate passes there is no replacement at all.
+    /// Which stage of the substitution order produced a replacement. Equipment is a hard rule (a substitute is always
+    /// doable on the lifter's gear); joint stress is a soft one: (a) and (b) take a candidate that stresses no flagged
+    /// joint above 1 (and, for an available stress-2 original, strictly less), and only when there is none does (c)
+    /// take the lowest-stress available option, with a note naming the joint.
     enum SubstitutionStage: Equatable {
         case pattern    // (a) same pattern, max stress on flagged joints <= 1
         case muscle     // (b) same primary muscle, max stress on flagged joints <= 1 (never for a vertical pull)
+        case fallback   // (c) nothing passes (a)/(b): the lowest-stress available option, still stressing a flagged joint
     }
 
     enum SlotOutcome: Equatable {
         case keep
         case notEvaluated
         case replace(exerciseId: String, stage: SubstitutionStage)
-        case keptStressed   // anchor: gear fine, a flagged joint at stress 2, nothing lower-stress exists; kept
-        case unfit          // anchor with no available substitute: kept
-        case drop           // no substitute and the slot is not an anchor
+        case keptStressed   // gear fine, a flagged joint at stress 2, nothing lower-stress is available: kept, with a note
+        case drop           // the gear is missing and nothing doable replaces it (any priority): removed with the equipment note
         case noVerticalPull // a vertical pull with no vertical pull possible on this equipment: dropped, never swapped for another pattern
     }
 
@@ -290,14 +292,21 @@ enum ProgramFitter {
             let found: (Candidate, SubstitutionStage)?
             if let c = preferred(safe(samePattern)) {
                 found = (c, .pattern)
-            } else if traits.pattern == .verticalPull {
-                // Never another pattern under a pulldown's slot.
-                found = nil
-            } else if let c = preferred(safe(sameMuscle)) {
+            } else if traits.pattern != .verticalPull, let c = preferred(safe(sameMuscle)) {
+                // (never another pattern under a pulldown's slot: a vertical pull skips stage (b))
                 found = (c, .muscle)
             } else {
-                // No candidate is strictly safer than the original: there is no replacement.
-                found = nil
+                // (c) joint stress is a soft rule: the lowest-stress option the gear allows, same preference order. For
+                // an original that is itself doable, `usable` only lets a strictly lower-stress candidate through.
+                let u = usable(candidates.filter {
+                    $0.traits.pattern == traits.pattern || (traits.pattern != .verticalPull && $0.exercise.primaryMuscle == current.exercise.primaryMuscle)
+                })
+                if let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min(),
+                   let c = preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m }) {
+                    found = (c, .fallback)
+                } else {
+                    found = nil
+                }
             }
 
             if let (chosen, stage) = found {
@@ -307,10 +316,10 @@ enum ProgramFitter {
                         && !candidates.contains(where: { $0.traits.pattern == .verticalPull && $0.traits.isAvailable(with: profile.equipment) }) {
                 plan.append(SlotPlan(originalIndex: index, outcome: .noVerticalPull))
             } else if available {
-                plan.append(SlotPlan(originalIndex: index, outcome: original.priority == .anchor ? .keptStressed : .drop))
-            } else if original.priority == .anchor {
-                plan.append(SlotPlan(originalIndex: index, outcome: .unfit))
+                // Doable but stresses a flagged joint and nothing doable is lower: keep it (any priority) and say so.
+                plan.append(SlotPlan(originalIndex: index, outcome: .keptStressed))
             } else {
+                // Equipment is a hard rule: an exercise the gear cannot support is never kept, anchor or not.
                 plan.append(SlotPlan(originalIndex: index, outcome: .drop))
             }
         }
@@ -341,17 +350,20 @@ enum ProgramFitter {
                 // An anchor replaced by an isolation exercise is no longer an anchor: it takes isolation rest and can be trimmed.
                 let demote = original.priority == .anchor && !(entry(id)?.exercise.isCompound ?? true)
                 let suffix = demote ? "; no longer an anchor" : ""
-                note(.substituted, "\(name) -> \(entry(id)?.exercise.name ?? id) (\(why)\(suffix))")
+                let newName = entry(id)?.exercise.name ?? id
+                note(.substituted, "\(name) -> \(newName) (\(why)\(suffix))")
+                if stage == .fallback, let t = ExerciseTraits.traits(for: id) {
+                    // Nothing doable is gentler: the lowest-stress option still loads the joint, so say which and how to train it.
+                    let joints = stressedJoints(t, profile)
+                    note(.keptStressed, "\(newName) is the lowest-stress option your equipment allows for your \(jointNames(Set(joints))). \(cueSentences(joints))")
+                }
                 slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
             case .keptStressed:
-                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))")
-                slots.append(Slot(originalIndex: index, template: original))
-            case .unfit:
-                note(.unfit, "\(name) kept (no substitute for \(cause(traits!, available: false, profile: profile)))")
+                let joints = stressedJoints(traits!, profile)
+                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile))). \(cueSentences(joints))")
                 slots.append(Slot(originalIndex: index, template: original))
             case .drop:
-                // Gear-driven drops name the gear; a stress-2 original with nothing safer to swap to names the joint.
-                note(.dropped, "Dropped \(name) (\(cause(traits!, available: available, profile: profile))" + (available ? "; no lower-stress option)" : ")"))
+                note(.dropped, "Dropped \(name) (\(cause(traits!, available: false, profile: profile)))")
             case .noVerticalPull:
                 note(.dropped, "No vertical pull is possible with your equipment (it needs a pull-up bar, a cable machine or an assisted pull-up machine), so \(name) was removed rather than replaced by a different movement")
             }
@@ -383,6 +395,31 @@ enum ProgramFitter {
     }
 
     private static let jointOrder: [InjuryFlag] = [.lowBack, .knees, .shoulders, .elbows, .wrists, .hips]
+
+    /// What to do on an exercise that still loads a flagged joint.
+    static func painCue(_ joint: InjuryFlag) -> String {
+        switch joint {
+        case .knees:     return "use a pain-free depth"
+        case .elbows:    return "neutral grip, stop short of pain"
+        case .wrists:    return "neutral grip, stop short of pain"
+        case .shoulders: return "pain-free range, stop short of pain"
+        case .lowBack:   return "neutral spine, pain-free range, stop short of pain"
+        case .hips:      return "pain-free range, stop short of pain"
+        }
+    }
+
+    /// The flagged joints an exercise loads at all, in the fitter's order.
+    private static func stressedJoints(_ traits: ExerciseTraits, _ profile: FitProfile) -> [InjuryFlag] {
+        jointOrder.filter { profile.injuries.contains($0) && traits.stress(for: $0) >= 1 }
+    }
+
+    /// "Elbows flagged: neutral grip, stop short of pain." for each joint.
+    private static func cueSentences(_ joints: [InjuryFlag]) -> String {
+        joints.map { joint in
+            let label = jointLabel(joint)
+            return "\(label.prefix(1).uppercased() + label.dropFirst()) flagged: \(painCue(joint))."
+        }.joined(separator: " ")
+    }
 
     static func jointLabel(_ joint: InjuryFlag) -> String {
         switch joint {
@@ -427,7 +464,8 @@ enum ProgramFitter {
         func name(_ s: Slot) -> String { entry(s.template.exerciseId)?.exercise.name ?? s.template.exerciseId }
         func drop(at position: Int) {
             let slot = slots.remove(at: position)
-            reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex && ($0.kind == .trimmedSets || $0.kind == .substituted) }
+            reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex
+                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed) }
             reasons.append(FitReason(kind: .droppedForTime, dayNumber: day.dayNumber, slotIndex: slot.originalIndex,
                                      message: "Dropped \(name(slot)) (session length)"))
         }
