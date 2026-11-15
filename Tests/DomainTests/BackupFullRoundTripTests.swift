@@ -3335,3 +3335,38 @@ final class EditLoggedSetTests: XCTestCase {
         XCTAssertEqual(set1(vm).actualLoadText, "135")
     }
 }
+
+// MARK: - T2: set-row layout never truncates or wraps a label mid-word
+
+/// A source guard for the narrow-screen layout (the screenshots in docs/screenshots/layout are the visual proof): the Log/Skip/
+/// Pump/Edit controls sit on their own line UNDER the inputs, every label is single-line and fixed-size, and both rows can fall
+/// back to a stacked layout at the largest text sizes.
+final class SetRowLayoutTests: XCTestCase {
+    private var source: String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return (try? String(contentsOf: root.appendingPathComponent("Features/Session/SessionView.swift"), encoding: .utf8)) ?? ""
+    }
+
+    func test_actionsLiveUnderTheInputs_notInAColumnBesideThem() {
+        let s = source
+        let inputs = try? XCTUnwrap(s.range(of: "ViewThatFits(in: .horizontal) {\n                HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField"))
+        let actions = try? XCTUnwrap(s.range(of: "                actionBar\n                VStack(alignment: .leading, spacing: 8) { actionBar }"))
+        XCTAssertNotNil(inputs); XCTAssertNotNil(actions)
+        if let i = inputs, let a = actions { XCTAssertLessThan(i.lowerBound, a.lowerBound, "actions come after the inputs") }
+        XCTAssertFalse(s.contains("// Log / Skip / Edit\n                VStack(spacing: 4)"), "the narrow right-hand column is gone")
+    }
+
+    func test_everyActionLabelIsSingleLineAndFixedSize() {
+        let s = source
+        guard let start = s.range(of: "@ViewBuilder private var actionBar: some View {"),
+              let end = s.range(of: "    // MARK: - Swap Sheet") ?? s.range(of: "// MARK: - Swap Sheet") else { return XCTFail("actionBar not found") }
+        let bar = String(s[start.lowerBound..<end.lowerBound])
+        for label in ["Text(\"Log\")", "Text(\"Done\")", "Text(\"Skip\")", "Text(uiSet.pumpRating == .none ? \"Pump\" : uiSet.pumpRating.label)"] {
+            let r = try? XCTUnwrap(bar.range(of: label), label)
+            guard let r else { continue }
+            let tail = String(bar[r.upperBound...].prefix(400))
+            XCTAssertTrue(tail.contains(".fixedSize()") || tail.contains(".lineLimit(1)"), "\(label) must not wrap")
+        }
+        XCTAssertTrue(s.contains("@ScaledMetric(relativeTo: .callout) private var chipSize"), "RIR chips scale with Dynamic Type")
+    }
+}

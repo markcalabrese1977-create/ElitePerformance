@@ -875,6 +875,230 @@ private struct SessionSetRowView: View {
         LoadFormatter(unit: unit).compact(value)
     }
 
+    @ScaledMetric(relativeTo: .callout) private var chipSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var loadFieldWidth: CGFloat = 72
+    @ScaledMetric(relativeTo: .body) private var repsFieldWidth: CGFloat = 52
+
+    private var loadField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text("Load")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if isBodyweightExercise {
+                        if let bodyWeight, bodyWeight > 0 {
+                            Text("BW (\(formattedWeight(bodyWeight)) \(unit.label))")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        } else {
+                            Button(action: onBodyweightSettingsTapped) {
+                                Text("BW — set in Settings")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        TextField("0", text: Binding(
+                            get: { uiSet.actualLoadText },
+                            set: { onLoadChanged($0) }
+                        ))
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: loadFieldWidth)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                }
+    }
+
+    private var repsField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text("Reps")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField("0", text: Binding(
+                        get: { uiSet.actualRepsText },
+                        set: { onRepsChanged($0) }
+                    ))
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 52)
+                    .disabled(isLocked)
+                    .opacity(isLocked ? 0.6 : 1.0)
+                }
+    }
+
+    private var rirField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text(isCompoundLift ? "RIR (tap one)" : "RIR")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if isCompoundLift {
+                        HStack(spacing: 4) {
+                            ForEach(RIREntry.chipValues, id: \.self) { value in
+                                let selected = uiSet.actualRIR == value
+                                Button {
+                                    guard !isLocked else { return }
+                                    onRIRChanged(selected ? "" : "\(value)")
+                                } label: {
+                                    Text("\(value)")
+                                        .font(.callout.weight(.semibold))
+                                        .frame(width: chipSize, height: chipSize)
+                                        .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
+                                        .foregroundStyle(selected ? Color.white : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("RIR \(value)")
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                            }
+                        }
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    } else {
+                        TextField("0", text: Binding(
+                            get: {
+                                if let actual = uiSet.actualRIR { return "\(actual)" }
+                                if let planned = uiSet.plannedRIR { return "\(planned)" }
+                                return ""
+                            },
+                            set: { onRIRChanged($0) }
+                        ))
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 40)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                }
+    }
+
+    @ViewBuilder private var actionBar: some View {
+                if uiSet.isEditing {
+                    HStack(spacing: 16) {
+                        Button("Save") { onEditSave() }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.blue)
+                            .buttonStyle(.plain)
+                        Button("Cancel") { onEditCancel() }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                    }
+                } else {
+                HStack(spacing: 16) {
+                    Button(action: {
+                        guard !isLocked else { return }
+                        onLog()
+                    }) {
+                        switch uiSet.status {
+                                                case .completed:
+                                                    Text("Done")
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.green.opacity(0.2))
+                                                        .foregroundStyle(.green)
+                                                        .clipShape(Capsule())
+                                                case _ where uiSet.status.isAnySkip:
+                                                    Text(uiSet.status.displayLabel)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(uiSet.status.displayColor.opacity(0.2))
+                                                        .foregroundStyle(uiSet.status.displayColor)
+                                                        .clipShape(Capsule())
+                                                default:
+                                                    Text("Log")
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.blue.opacity(0.2))
+                                                        .foregroundStyle(.blue)
+                                                        .clipShape(Capsule())
+                                                }
+                    }
+                    .buttonStyle(.plain)
+                                        .contextMenu {
+                                            if isLocked {
+                                                Button("Edit set") { onEdit() }
+                                            } else {
+                                                Button("Skip") { onSkip(.none) }
+                                                Button("Pain") { onSkip(.pain) }
+                                                Button("Soreness") { onSkip(.soreness) }
+                                                Button("Disruption") { onSkip(.disruption) }
+                                                Button("Fatigue") { onSkip(.fatigue) }
+                                            }
+                                        }
+
+                                        if uiSet.status == .completed {
+                                            Menu {
+                                                Button("Not rated") { onPumpRated(.none) }
+                                                Divider()
+                                                ForEach(PumpRating.allCases.filter { $0 != .none }, id: \.self) { rating in
+                                                    Button(rating.label) { onPumpRated(rating) }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 3) {
+                                                    Image(systemName: "drop.fill")
+                                                        .font(.caption)
+                                                    Text(uiSet.pumpRating == .none ? "Pump" : uiSet.pumpRating.label)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                }
+                                                .fixedSize()
+                                                .padding(.vertical, 6)
+                                                .foregroundStyle(uiSet.pumpRating == .none ? Color.secondary : Color.blue)
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+
+                                        Menu {
+                                            Button("Skip") { onSkip(.none) }
+                                            Divider()
+                                            Button {
+                                                onSkip(.pain)
+                                            } label: {
+                                                Label("Pain", systemImage: "exclamationmark.triangle.fill")
+                                            }
+                                            Button {
+                                                onSkip(.soreness)
+                                            } label: {
+                                                Label("Soreness", systemImage: "flame.fill")
+                                            }
+                                            Button {
+                                                onSkip(.disruption)
+                                            } label: {
+                                                Label("Disruption", systemImage: "bolt.slash.fill")
+                                            }
+                                            Button {
+                                                onSkip(.fatigue)
+                                            } label: {
+                                                Label("Fatigue", systemImage: "zzz")
+                                            }
+                                        } label: {
+                                            Text("Skip")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .fixedSize()
+                                                .padding(.vertical, 6)
+                                        }
+                                        .buttonStyle(.borderless)
+                }
+                }
+    }
+
 
 
     var body: some View {
@@ -930,212 +1154,20 @@ private struct SessionSetRowView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
-            // ACTUAL inputs row
-            HStack(alignment: .bottom, spacing: 8) {
-                // Load
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Load")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if isBodyweightExercise {
-                        if let bodyWeight, bodyWeight > 0 {
-                            Text("BW (\(formattedWeight(bodyWeight)) \(unit.label))")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        } else {
-                            Button(action: onBodyweightSettingsTapped) {
-                                Text("BW — set in Settings")
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } else {
-                        TextField("0", text: Binding(
-                            get: { uiSet.actualLoadText },
-                            set: { onLoadChanged($0) }
-                        ))
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 72)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    }
+            // ACTUAL inputs row: the three inputs get the whole width; at the largest text sizes RIR drops under Load/Reps.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .bottom, spacing: 8) { loadField; repsField; Spacer(minLength: 0) }
+                    rirField
                 }
+            }
 
-                // Reps
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Reps")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    TextField("0", text: Binding(
-                        get: { uiSet.actualRepsText },
-                        set: { onRepsChanged($0) }
-                    ))
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 52)
-                    .disabled(isLocked)
-                    .opacity(isLocked ? 0.6 : 1.0)
-                }
-
-                // RIR
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isCompoundLift ? "RIR (tap one)" : "RIR")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if isCompoundLift {
-                        HStack(spacing: 4) {
-                            ForEach(RIREntry.chipValues, id: \.self) { value in
-                                let selected = uiSet.actualRIR == value
-                                Button {
-                                    guard !isLocked else { return }
-                                    onRIRChanged(selected ? "" : "\(value)")
-                                } label: {
-                                    Text("\(value)")
-                                        .font(.callout.weight(.semibold))
-                                        .frame(width: 30, height: 30)
-                                        .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
-                                        .foregroundStyle(selected ? Color.white : Color.primary)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("RIR \(value)")
-                                .accessibilityAddTraits(selected ? .isSelected : [])
-                            }
-                        }
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    } else {
-                        TextField("0", text: Binding(
-                            get: {
-                                if let actual = uiSet.actualRIR { return "\(actual)" }
-                                if let planned = uiSet.plannedRIR { return "\(planned)" }
-                                return ""
-                            },
-                            set: { onRIRChanged($0) }
-                        ))
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 40)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    }
-                }
-
-                Spacer()
-
-                // Log / Skip / Edit
-                if uiSet.isEditing {
-                    VStack(spacing: 6) {
-                        Button("Save") { onEditSave() }
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.2), in: Capsule())
-                            .foregroundStyle(.blue)
-                            .buttonStyle(.plain)
-                        Button("Cancel") { onEditCancel() }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .buttonStyle(.plain)
-                    }
-                } else {
-                VStack(spacing: 4) {
-                    Button(action: {
-                        guard !isLocked else { return }
-                        onLog()
-                    }) {
-                        switch uiSet.status {
-                                                case .completed:
-                                                    Text("Done")
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(Color.green.opacity(0.2))
-                                                        .foregroundStyle(.green)
-                                                        .clipShape(Capsule())
-                                                case _ where uiSet.status.isAnySkip:
-                                                    Text(uiSet.status.displayLabel)
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(uiSet.status.displayColor.opacity(0.2))
-                                                        .foregroundStyle(uiSet.status.displayColor)
-                                                        .clipShape(Capsule())
-                                                default:
-                                                    Text("Log")
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(Color.blue.opacity(0.2))
-                                                        .foregroundStyle(.blue)
-                                                        .clipShape(Capsule())
-                                                }
-                    }
-                    .buttonStyle(.plain)
-                                        .contextMenu {
-                                            if isLocked {
-                                                Button("Edit set") { onEdit() }
-                                            } else {
-                                                Button("Skip") { onSkip(.none) }
-                                                Button("Pain") { onSkip(.pain) }
-                                                Button("Soreness") { onSkip(.soreness) }
-                                                Button("Disruption") { onSkip(.disruption) }
-                                                Button("Fatigue") { onSkip(.fatigue) }
-                                            }
-                                        }
-
-                                        if uiSet.status == .completed {
-                                            Menu {
-                                                Button("Not rated") { onPumpRated(.none) }
-                                                Divider()
-                                                ForEach(PumpRating.allCases.filter { $0 != .none }, id: \.self) { rating in
-                                                    Button(rating.label) { onPumpRated(rating) }
-                                                }
-                                            } label: {
-                                                HStack(spacing: 3) {
-                                                    Image(systemName: "drop.fill")
-                                                        .font(.caption2)
-                                                    Text(uiSet.pumpRating == .none ? "Pump" : uiSet.pumpRating.label)
-                                                        .font(.caption2)
-                                                }
-                                                .foregroundStyle(uiSet.pumpRating == .none ? Color.secondary : Color.blue)
-                                            }
-                                            .buttonStyle(.borderless)
-                                        }
-
-                                        Menu {
-                                            Button("Skip") { onSkip(.none) }
-                                            Divider()
-                                            Button {
-                                                onSkip(.pain)
-                                            } label: {
-                                                Label("Pain", systemImage: "exclamationmark.triangle.fill")
-                                            }
-                                            Button {
-                                                onSkip(.soreness)
-                                            } label: {
-                                                Label("Soreness", systemImage: "flame.fill")
-                                            }
-                                            Button {
-                                                onSkip(.disruption)
-                                            } label: {
-                                                Label("Disruption", systemImage: "bolt.slash.fill")
-                                            }
-                                            Button {
-                                                onSkip(.fatigue)
-                                            } label: {
-                                                Label("Fatigue", systemImage: "zzz")
-                                            }
-                                        } label: {
-                                            Text("Skip")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .buttonStyle(.borderless)
-                }
-                }
+            // Log / Skip / Pump / Edit live on their own line UNDER the inputs, so no label is squeezed into a narrow column.
+            // Labels never wrap mid-word (fixedSize); if the line cannot fit, the actions stack vertically instead.
+            ViewThatFits(in: .horizontal) {
+                actionBar
+                VStack(alignment: .leading, spacing: 8) { actionBar }
             }
 
             // Intensifier toggles row (hidden when locked)
