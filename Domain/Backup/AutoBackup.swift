@@ -103,6 +103,17 @@ enum AutoBackupEngine {
         }.sorted { $0.date > $1.date }
     }
 
+    /// Every automatic backup found in the (iCloud) primary folder AND the local folder, whoever wrote them, newest first.
+    /// The same file name in both is one backup (the primary copy is kept).
+    static func listAll(primary: URL, local: URL) -> [AutoBackupFile] {
+        var files = list(in: primary)
+        if local != primary {
+            let have = Set(files.map { $0.url.lastPathComponent })
+            files += list(in: local).filter { !have.contains($0.url.lastPathComponent) }
+        }
+        return files.sorted { $0.date > $1.date }
+    }
+
     /// Verify-then-move. `temp` is an export written to a temporary file; it is decoded and its counts (sessions, history,
     /// custom exercises, mesos) compared with `live`. Only then is it placed (copied with file coordination into `directory`
     /// under a NEW name, so an existing backup is never overwritten) and the placed copy verified again. Any failure removes
@@ -304,6 +315,7 @@ final class AutoBackupService: ObservableObject {
     let status: AutoBackupStatusStore
     private let resolveDestination: @Sendable () -> AutoBackupDestination
     private let checkAvailability: @Sendable () -> AutoBackupDestination.ICloudAvailability
+    private let localBackupsDirectory: URL
     private let now: () -> Date
     private let currentCommit: () -> String
     private let calendar: Calendar
@@ -312,6 +324,7 @@ final class AutoBackupService: ObservableObject {
     init(status: AutoBackupStatusStore = AutoBackupStatusStore(),
          resolveDestination: @escaping @Sendable () -> AutoBackupDestination = { AutoBackupDestination.resolve() },
          checkAvailability: @escaping @Sendable () -> AutoBackupDestination.ICloudAvailability = { AutoBackupDestination.currentAvailability() },
+         localBackupsDirectory: URL = AutoBackupDestination.localFallbackDirectory(),
          now: @escaping () -> Date = { Date() },
          currentCommit: @escaping () -> String = { BuildInfo.commit },
          calendar: Calendar = .current,
@@ -320,6 +333,7 @@ final class AutoBackupService: ObservableObject {
         self.status = status
         self.resolveDestination = resolveDestination
         self.checkAvailability = checkAvailability
+        self.localBackupsDirectory = localBackupsDirectory
         self.now = now
         self.currentCommit = currentCommit
         self.calendar = calendar
@@ -477,9 +491,26 @@ final class AutoBackupService: ObservableObject {
 
     func availableBackups() async -> (files: [AutoBackupFile], destination: AutoBackupDestination) {
         let resolver = resolveDestination
+        let localDirectory = localBackupsDirectory
         return await Task.detached(priority: .utility) {
             let d = resolver()
-            return (AutoBackupEngine.list(in: d.directory), d)
+            return (AutoBackupEngine.listAll(primary: d.directory, local: localDirectory), d)
         }.value
+    }
+}
+
+/// What the Settings Backup & Restore rows allow. Pure, so the rules are tested: Restore and Move data never depend on this
+/// device's own data or on this device having written a backup; only the actions that need something to act on are gated.
+struct BackupRowAvailability: Equatable {
+    var restoreEnabled: Bool
+    var importEnabled: Bool
+    var exportEnabled: Bool
+    var verifyEnabled: Bool
+
+    static func of(backupCount: Int, storeHasData: Bool, busy: Bool) -> BackupRowAvailability {
+        BackupRowAvailability(restoreEnabled: true,            // the screen opens and says what it found (or that nothing was)
+                              importEnabled: true,             // always: the point of a new phone
+                              exportEnabled: storeHasData,
+                              verifyEnabled: !busy && backupCount > 0)
     }
 }

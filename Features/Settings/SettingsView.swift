@@ -20,7 +20,7 @@ struct SettingsView: View {
         List {
             Section {
                 if backupFiles.isEmpty {
-                    Text("No automatic backups yet.").foregroundStyle(.secondary)
+                    Text("No automatic backups found on this device or in iCloud.").foregroundStyle(.secondary)
                 }
                 ForEach(backupFiles.prefix(10)) { file in
                     Button {
@@ -81,6 +81,7 @@ struct SettingsView: View {
                         exportError = error.localizedDescription
                     }
                 }
+                .disabled(!rowAvailability.exportEnabled)
 
                 Button("Export Completed Sessions (CSV)") {
                     exportError = nil
@@ -102,8 +103,13 @@ struct SettingsView: View {
                         exportError = error.localizedDescription
                     }
                 }
+                .disabled(!rowAvailability.exportEnabled)
 
-                if let exportError {
+                if !rowAvailability.exportEnabled {
+                    Text("Nothing to export yet. Import works any time.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let exportError {
                     Text(exportError)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -322,9 +328,11 @@ struct SettingsView: View {
                 Button(backupBusy ? "Backing up…" : "Back up now") { Task { await backUpNow() } }
                     .disabled(backupBusy)
                 Button("Verify latest backup") { verifyLatestBackup() }
-                    .disabled(backupBusy || backupFiles.isEmpty)
+                    .disabled(!rowAvailability.verifyEnabled)
                 NavigationLink("Restore from a backup") { restoreScreen }
+                    .foregroundStyle(.primary)
                 NavigationLink("Move data (import and export)") { moveDataScreen }
+                    .foregroundStyle(.primary)
             }
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
             .task { await autoBackup.refreshICloudAvailability() }
@@ -428,6 +436,11 @@ struct SettingsView: View {
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
         let when = f.localizedString(for: last, relativeTo: Date())
         return "Last backup: \(when) · iCloud \(autoBackup.status.lastWasOffDevice ? "✓" : "✗")\(autoBackup.status.lastVerified ? " · verified" : "")"
+    }
+
+    /// Restore and Move data are never gated on this device's data or on a backup existing (a new phone has neither).
+    private var rowAvailability: BackupRowAvailability {
+        BackupRowAvailability.of(backupCount: backupFiles.count, storeHasData: !sessions.isEmpty || !profiles.isEmpty, busy: backupBusy)
     }
 
     private func refreshBackups() async {

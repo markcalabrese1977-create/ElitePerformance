@@ -3015,3 +3015,77 @@ final class ICloudReasonOnAppearTests: XCTestCase {
         }
     }
 }
+
+// MARK: - S1/S2: a new phone can restore and import
+
+@MainActor
+final class FreshDeviceRestoreTests: XCTestCase {
+    private func tempDir() -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("ep_fresh_\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    private func touch(_ dir: URL, _ date: Date) {
+        let u = dir.appendingPathComponent(AutoBackupEngine.fileName(for: date))
+        try? Data("{}".utf8).write(to: u)
+    }
+
+    func test_S1_import_and_restore_areNeverDisabled_onlyExportNeedsData() {
+        for count in [0, 1, 5] {
+            for hasData in [false, true] {
+                for busy in [false, true] {
+                    let a = BackupRowAvailability.of(backupCount: count, storeHasData: hasData, busy: busy)
+                    XCTAssertTrue(a.importEnabled, "import is always enabled")
+                    XCTAssertTrue(a.restoreEnabled, "Restore always opens")
+                    XCTAssertEqual(a.exportEnabled, hasData)
+                }
+            }
+        }
+        let empty = BackupRowAvailability.of(backupCount: 0, storeHasData: false, busy: false)
+        XCTAssertTrue(empty.importEnabled); XCTAssertTrue(empty.restoreEnabled)
+        XCTAssertFalse(empty.exportEnabled); XCTAssertFalse(empty.verifyEnabled)
+    }
+
+    func test_S2_listsBackupsFromICloudAndLocal_whoeverWroteThem_newestFirst() {
+        let icloud = tempDir(), local = tempDir()
+        defer { try? FileManager.default.removeItem(at: icloud); try? FileManager.default.removeItem(at: local) }
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        touch(icloud, t); touch(local, t.addingTimeInterval(60)); touch(local, t.addingTimeInterval(-60))
+        touch(icloud, t)   // same name in both: one backup
+        touch(local, t)
+        let all = AutoBackupEngine.listAll(primary: icloud, local: local)
+        XCTAssertEqual(all.count, 3)
+        XCTAssertEqual(all.map(\.date), [t.addingTimeInterval(60), t, t.addingTimeInterval(-60)])
+        XCTAssertEqual(all[1].url.deletingLastPathComponent().standardizedFileURL, icloud.standardizedFileURL, "the primary copy wins")
+        XCTAssertEqual(AutoBackupEngine.listAll(primary: local, local: local).count, 3, "the same folder given twice lists once")
+    }
+
+    func test_S2_serviceListsLocalBackups_evenWhenICloudIsTheDestination_andOnAnEmptyStore() async {
+        let icloud = tempDir(), local = tempDir()
+        defer { try? FileManager.default.removeItem(at: icloud); try? FileManager.default.removeItem(at: local) }
+        touch(local, Date(timeIntervalSince1970: 1_800_000_000))
+        let viaICloud = AutoBackupService(status: AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.fresh.\(UUID().uuidString)")!),
+                                          resolveDestination: { .iCloud(icloud) }, localBackupsDirectory: local)
+        let r1 = await viaICloud.availableBackups()
+        XCTAssertEqual(r1.files.count, 1)
+        touch(icloud, Date(timeIntervalSince1970: 1_800_000_500))
+        let r2 = await viaICloud.availableBackups()
+        XCTAssertEqual(r2.files.count, 2, "both folders, whichever device wrote them")
+        let viaLocal = AutoBackupService(status: AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.fresh.\(UUID().uuidString)")!),
+                                         resolveDestination: { .local(local) }, localBackupsDirectory: local)
+        let r3 = await viaLocal.availableBackups()
+        XCTAssertEqual(r3.files.count, 1)
+    }
+
+    func test_settingsGatesOnlyThroughTheTestedRules() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        let start = try XCTUnwrap(text.range(of: "private var moveDataScreen"))
+        let end = try XCTUnwrap(text.range(of: ".navigationTitle(\"Move data\")"))
+        let body = String(text[start.lowerBound..<end.lowerBound])
+        XCTAssertFalse(body.contains("showImportBackupPicker = true") && body.range(of: #"Import Full Backup[\s\S]{0,200}\.disabled"#, options: .regularExpression) != nil, "import is never disabled")
+        XCTAssertTrue(text.contains("NavigationLink(\"Restore from a backup\") { restoreScreen }"))
+        XCTAssertFalse(text.range(of: #"NavigationLink\("Restore from a backup"\)[^\n]*\n\s*\.disabled"#, options: .regularExpression) != nil)
+        XCTAssertFalse(text.range(of: #"NavigationLink\("Move data[^\n]*\n\s*\.disabled"#, options: .regularExpression) != nil)
+    }
+}
