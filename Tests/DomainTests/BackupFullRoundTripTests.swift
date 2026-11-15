@@ -3097,4 +3097,15 @@ final class FreshDeviceRestoreTests: XCTestCase {
         let tab = try String(contentsOf: root.appendingPathComponent("Features/MainTab/MainTabView.swift"), encoding: .utf8)
         XCTAssertFalse(tab.contains("NavigationStack {\n                SettingsView()"), "no nested stack around it")
     }
+
+    /// On a new phone the restore rebuilds ContentView while the store is still empty; the welcome sheet must go once data lands.
+    func test_firstRunSheetClosesWhenDataArrives() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("App/ContentView.swift"), encoding: .utf8)
+        XCTAssertTrue(text.contains(".onChange(of: sessions.isEmpty)"))
+        XCTAssertTrue(text.contains("if !empty { showFirstRunOnboarding = false }"))
+        XCTAssertTrue(text.contains("sessions.isEmpty && !RestoreActivity.inProgress"))
+        let settings = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        XCTAssertTrue(settings.contains("RestoreActivity.inProgress = true") && settings.contains("RestoreActivity.inProgress = false"))
+    }
 }

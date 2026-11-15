@@ -43,7 +43,7 @@ struct ContentView: View {
                 AppStateBridge.restoreUserDefaultsFromAppStateIfAvailable(in: modelContext)
 
                 // First launch behavior: if there are no sessions yet, show onboarding
-                if sessions.isEmpty {
+                if sessions.isEmpty && !RestoreActivity.inProgress {
                     showFirstRunOnboarding = true
                 }
 
@@ -55,6 +55,11 @@ struct ContentView: View {
                     requestHealthKitAccessIfNeeded()
                     AutoBackupService.shared.foregrounded(container: modelContext.container)
                 }
+            }
+            // Data arriving (a restore on a new phone rebuilds this view while the store is still empty) ends first-run:
+            // the welcome sheet must not sit on top of the restored program.
+            .onChange(of: sessions.isEmpty) { empty in
+                if !empty { showFirstRunOnboarding = false }
             }
             .onChange(of: showFirstRunOnboarding) { showing in
                 if !showing { requestHealthKitAccessIfNeeded() }

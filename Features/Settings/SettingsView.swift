@@ -484,9 +484,13 @@ struct SettingsView: View {
     private func runRestore(_ pending: PendingRestore) {
         pendingRestore = nil
         // Post notification first — tears down live SwiftData views before deletion
+        RestoreActivity.inProgress = true      // the rebuilt root must not show the first-run welcome sheet over the restore
         NotificationCenter.default.post(name: .didRestoreBackup, object: nil)
         Task { @MainActor in
-            defer { if pending.isTemporaryCopy { try? FileManager.default.removeItem(at: pending.url) } }
+            defer {
+                RestoreActivity.inProgress = false
+                if pending.isTemporaryCopy { try? FileManager.default.removeItem(at: pending.url) }
+            }
             try? await Task.sleep(for: .milliseconds(150))
             do {
                 let restore = try BackupRestoreCoordinator.restore(from: pending.url, container: context.container)

@@ -470,3 +470,11 @@ final class StartupGate: ObservableObject {
 
     func dismissError() { errorMessage = nil }
 }
+
+
+/// True while Settings is restoring a backup. The root view is rebuilt twice (before and after the data lands); while this is
+/// set, a rebuilt root that sees the still-empty store must not present the first-run welcome sheet.
+@MainActor
+enum RestoreActivity {
+    static var inProgress = false
+}
