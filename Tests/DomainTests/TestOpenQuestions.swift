@@ -285,41 +285,15 @@
 //   view-hosting test infrastructure this target doesn't have. All three
 //   History display sites now consult the single source of truth.
 
-// OPEN Q13 (NEW): ProgramCatalog.recommend has zero production call sites,
-//   and its scoring function has at least three confirmed real bugs
-//   Discovered while building T-I.2/T-I.3. Grepped the whole app: only
-//   Features/Home/ProgramPickerView.swift mentions ProgramCatalog at all, in
-//   a "Later we can map this into ProgramCatalog / BlockBuilder" comment —
-//   it is never instantiated or called. The live onboarding completion path
-//   (OnboardingFlowView -> ProgramApplicationService.apply) uses its own,
-//   separate, much simpler ProgramApplicationService.selectTemplate(goal:
-//   daysPerWeek:), a pure days+goal switch over the real DUP/PPL templates
-//   with no experience/equipment/joint-limitation weighting at all.
-//   ProgramCatalog.recommend is real, compiles, and is a pure deterministic
-//   function (T-I.2 passes) — it's just orphaned, so the three bugs below
-//   currently have zero live user-facing impact:
-//     - test_I3_BUG_minimalEquipmentBypassesGoalFilterEntirely: every program
-//       in ProgramCatalog.all requires .commercialGym equipment, so ANY other
-//       equipment profile empties the goal+days filter for every input and
-//       falls back to scoring the entire unfiltered catalog — a fat-loss
-//       user with minimal equipment can be recommended a hypertrophy
-//       program.
-//     - test_I3_BUG_jointIssuesIsOnlyASoftBonusNotAHardExclusion:
-//       hasJointIssues only adds a +2 bonus to jointFriendly programs, it
-//       never excludes non-joint-friendly ones — when goal+days narrows to
-//       exactly the one non-joint-friendly program (ppl_6d_hypertrophy),
-//       hasJointIssues=true changes nothing.
-//     - test_I3_BUG_sessionLengthNeverActuallyChangesTheWinningProgram:
-//       hand-traced every shape of input capable of producing a top-two
-//       contest in this six-program catalog and could not find one where 30
-//       vs 90 minutes changes the winner — the scoring bonus it grants
-//       always lands on programs that are either already winning outright or
-//       already tied (and tie-broken by declaration order) regardless of it.
-//   All three left failing with BUG CONFIRMED comments in
-//   ProgramCatalogRecommendationTests (StubTests.swift). Do not fix here,
-//   flag for next task — and note any fix should consider whether
-//   ProgramCatalog should be wired into onboarding at all, or deleted as
-//   superseded dead code, before investing in repairing its scoring logic.
+// RESOLVED Q13: ProgramCatalog.recommend was dead code and has been deleted.
+//   It had zero production call sites and three confirmed scoring bugs (a minimal-equipment user could be sent a
+//   program of the wrong goal; joint issues were only a soft bonus; session length never changed the winner). The
+//   live onboarding path never used it: OnboardingFlowView -> ProgramApplicationService.selectTemplate(goal:
+//   daysPerWeek:) picks the template (by weekday count) and ProgramFitter adapts it to equipment, joints, session
+//   length and experience; preview and seeding share ProgramApplicationService.fittedProgram(for:). The catalog, its
+//   TrainingProgramDefinition model, ProgramCatalogRecommendationTests and their known_failures entries went with it.
+//   Still open from this finding: selectTemplate ignores goal (only the weekday count picks the template), and
+//   experience only trims starting volume. Both wait on a product decision.
 
 // OPEN Q14 (NEW): there is no persisted propagation toggle anywhere in source
 //   Discovered while building T-J.1. Grepped the whole app for

@@ -4,12 +4,21 @@ import SwiftData
 
 enum ProgramApplicationService {
 
+    /// Why a program could not be created, in words the lifter can read.
+    struct ApplyError: LocalizedError, Equatable {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Seeds the program for `result`, then saves the profile. When seeding fails nothing is written (no profile, no
+    /// sessions) and the reason is returned so the caller can show it.
+    @discardableResult
     static func apply(
         _ result: OnboardingResult,
         context: ModelContext,
         startDate: Date = Date(),
         overrides: PreviewOverrides? = nil
-    ) {
+    ) -> Result<Void, ApplyError> {
         let weekdays = normalizedWeekdays(from: result)
         // The same fit the onboarding preview shows; preview overrides are keyed to this fitted template.
         let template = fittedProgram(for: result).template
@@ -24,23 +33,32 @@ enum ProgramApplicationService {
             )
         } catch {
             print("ERROR ProgramApplicationService.apply – seeding failed: \(error)")
+            return .failure(ApplyError(message: describe(error)))
         }
 
         writeUserProfile(from: result, context: context)
+        return .success(())
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let e = error as? DUPProgramSeederError, case .invalidWeekdayCount(let expected, let got) = e {
+            return "This program trains \(expected) days a week, but \(got) training day\(got == 1 ? " is" : "s are") selected. Go back to the schedule page and select \(expected) days. Nothing was changed."
+        }
+        return "The program could not be created: \(error.localizedDescription) Nothing was changed."
     }
 
     // MARK: - Fit
 
     /// Gear the fitter may assume: the checklist when one was filled in, else the preset's defaults.
     static func fitProfile(preset: EquipmentPreset, checklist: [GearTag], injuries: [InjuryFlag],
-                           sessionMinutes: Int, experience: TrainingExperience) -> FitProfile {
+                           sessionMinutes: Int?, experience: TrainingExperience, goal: Goal = .hypertrophy) -> FitProfile {
         FitProfile(equipment: checklist.isEmpty ? preset.defaultEquipment : Set(checklist),
-                   injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience)
+                   injuries: Set(injuries), sessionMinutes: sessionMinutes, experience: experience, goal: goal)
     }
 
     static func fitProfile(for result: OnboardingResult) -> FitProfile {
         fitProfile(preset: result.equipmentPreset, checklist: result.equipmentChecklist, injuries: result.injuryFlags,
-                   sessionMinutes: result.sessionLengthMinutes, experience: result.experience)
+                   sessionMinutes: result.sessionLengthMinutes, experience: result.experience, goal: result.goal)
     }
 
     /// The program for `result`: the selected template adapted to the person. Preview and seeding both call this.
@@ -49,10 +67,11 @@ enum ProgramApplicationService {
         return ProgramFitter.fit(selectTemplate(goal: result.goal, daysPerWeek: days), profile: fitProfile(for: result))
     }
 
-    /// The session length that makes every day fit: the longest day after all trims, rounded up to the 15 minute
-    /// grid the setup stepper uses. nil when even 120 minutes would not do (fewer training days is the only fix).
+    /// The session length that makes every day fit: the longest day after all trims, rounded up to the next 5 minutes
+    /// (a day that is 3 minutes over asks for 3 more, not 15). nil when even 120 minutes would not do (fewer training
+    /// days is the only fix).
     static func sessionMinutesNeeded(for advice: FitAdvice) -> Int? {
-        let rounded = max((advice.minimumMinutes + 14) / 15 * 15, 30)
+        let rounded = max((advice.minimumMinutes + 4) / 5 * 5, 30)
         return rounded <= 120 ? rounded : nil
     }
 
@@ -88,6 +107,34 @@ enum ProgramApplicationService {
         }
     }
     
+    /// The program blurb plus what the fit did about the flagged joints. Joint wording appears only when at least one
+    /// joint is flagged, and then it names the joints; the blurbs themselves carry no joint claims.
+    static func recommendationReason(goal: Goal, daysPerWeek: Int, injuries: Set<InjuryFlag>, fit: FitResult) -> String {
+        let kept = fit.reasons.filter { $0.kind == .keptStressed }
+        var text = recommendationReason(goal: goal, daysPerWeek: daysPerWeek) + "\n\n" + goalSentence(goal)
+        guard !injuries.isEmpty else { return text }   // nothing flagged: no joint wording
+        let names = ProgramFitter.jointNames(injuries)
+        text += "\n\nYou flagged your \(names), so exercises that load \(injuries.count == 1 ? "it" : "them") hard were swapped for lower-stress options where one exists."
+        if !kept.isEmpty {
+            text += " \(kept.count) exercise\(kept.count == 1 ? " is" : "s are") the lowest-stress option your equipment allows for your \(names); follow the pain-free cues listed with the plan."
+        }
+        return text
+    }
+
+    /// The goal, named, and what it changed in the program: one sentence (see `GoalModifier`).
+    static func goalSentence(_ goal: Goal) -> String {
+        switch goal {
+        case .hypertrophy:
+            return "Goal: Build muscle. The program runs as designed."
+        case .strength:
+            return "Goal: Get stronger. Your main lifts use lower-rep ranges (2 fewer reps, never below 3) while accessories stay as designed."
+        case .fatLoss:
+            return "Goal: Lose fat. Weekly sets ramp up by at most 1 and isolation work trims by a set in the second half of the block."
+        case .longevity:
+            return "Goal: Maintain / move better. Every exercise has 1 fewer set and 1 more rep in reserve, with a gentler weekly ramp."
+        }
+    }
+
     static func recommendationReason(goal: Goal, daysPerWeek: Int) -> String {
             switch (goal, daysPerWeek) {
             case (_, 6):
@@ -95,7 +142,7 @@ enum ProgramApplicationService {
             case (_, 5):
                 return "Five days a week gives you enough frequency to run a hybrid upper/lower split with a dedicated pump day. The four upper/lower days drive progression on key lifts while the pump day targets weak points and detail work. You get the best of both worlds without grinding yourself down."
             case (_, 4):
-                return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size without joint stress."
+                return "Four days a week is the sweet spot for most serious lifters. Upper/lower gives each muscle group two quality exposures per week. Heavy compounds anchor the sessions, higher-rep accessories fill in the detail work. The coach focuses on small, consistent progressions so you build strength and size steadily."
             case (_, 3):
                 return "Three days a week with Push/Pull/Legs hits every major muscle group with a full dedicated session. Each day has a clear primary stimulus — horizontal push, vertical pull, quad and posterior chain — so nothing gets undertrained. The wave progression keeps intensity building across the 10-week block."
             case (_, 2):

@@ -8,6 +8,8 @@ enum ExercisePattern: String, Codable, CaseIterable, Hashable {
     case verticalPress
     case shoulderIsolation
     case verticalPull
+    /// Pullovers train the lats but are not a pulldown or pull-up: they never stand in for a vertical pull.
+    case pullover
     case horizontalPull
     case squat
     case hipHinge
@@ -31,17 +33,27 @@ struct ExerciseTraits: Equatable {
     let pattern: ExercisePattern
     /// Joint stress 0 (none), 1 (some), 2 (high). Joints absent from the dictionary are 0.
     let jointStress: [InjuryFlag: Int]
+    /// When non-empty, at least ONE of these must be available as well (something to hold the feet down). Separate
+    /// from `equipment`, which is "all of".
+    let anchorOneOf: Set<GearTag>
 
-    init(equipment: Set<GearTag>, pattern: ExercisePattern, stress: [InjuryFlag: Int] = [:]) {
+    init(equipment: Set<GearTag>, pattern: ExercisePattern, stress: [InjuryFlag: Int] = [:], anchorOneOf: Set<GearTag> = []) {
         self.equipment = equipment
         self.pattern = pattern
         self.jointStress = stress
+        self.anchorOneOf = anchorOneOf
     }
+
+    /// Gear that can hold a lifter's feet for a Nordic curl: a loaded bar in a rack, a machine pad, or a Smith bar.
+    /// A bench alone, dumbbells and cables do not count.
+    static let footAnchorGear: Set<GearTag> = [.rack, .machine, .smith]
 
     func stress(for joint: InjuryFlag) -> Int { jointStress[joint] ?? 0 }
 
     /// True when every required piece of gear is in `available`.
-    func isAvailable(with available: Set<GearTag>) -> Bool { equipment.isSubset(of: available) }
+    func isAvailable(with available: Set<GearTag>) -> Bool {
+        equipment.isSubset(of: available) && (anchorOneOf.isEmpty || !anchorOneOf.isDisjoint(with: available))
+    }
 
     /// Traits for a catalog id (legacy aliases resolved). nil for customs and unknown ids.
     static func traits(for exerciseId: String) -> ExerciseTraits? {
@@ -97,12 +109,12 @@ struct ExerciseTraits: Equatable {
         "machine_hip_thrust": ExerciseTraits(equipment: [.machine], pattern: .gluteBridge, stress: [.lowBack: 1, .hips: 1]),
         "cable_glute_kickback": ExerciseTraits(equipment: [.cable], pattern: .gluteBridge, stress: [.lowBack: 1]),
         "seated_leg_curl": ExerciseTraits(equipment: [.machine], pattern: .kneeFlexion),
-        "goblet_squat": ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.hips: 1]),
+        "goblet_squat": ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 1, .hips: 1]),
         "front_squat": ExerciseTraits(equipment: [.barbell, .rack], pattern: .squat, stress: [.lowBack: 1, .knees: 2, .wrists: 2, .hips: 1]),
         "smith_machine_squat": ExerciseTraits(equipment: [.smith], pattern: .squat, stress: [.lowBack: 1, .knees: 1]),
         "sumo_deadlift": ExerciseTraits(equipment: [.barbell], pattern: .hipHinge, stress: [.lowBack: 2, .knees: 1, .wrists: 1, .hips: 2]),
         "conventional_deadlift": ExerciseTraits(equipment: [.barbell], pattern: .hipHinge, stress: [.lowBack: 2, .wrists: 1, .hips: 1]),
-        "nordic_curl": ExerciseTraits(equipment: [], pattern: .kneeFlexion, stress: [.knees: 2]),
+        "nordic_curl": ExerciseTraits(equipment: [], pattern: .kneeFlexion, stress: [.knees: 2], anchorOneOf: ExerciseTraits.footAnchorGear),
         "glute_bridge": ExerciseTraits(equipment: [], pattern: .gluteBridge),
         "step_up": ExerciseTraits(equipment: [.bench], pattern: .squat, stress: [.knees: 1, .hips: 1]),
         "reverse_hyperextension": ExerciseTraits(equipment: [.machine], pattern: .hipHinge, stress: [.lowBack: 1, .hips: 1]),
@@ -121,7 +133,7 @@ struct ExerciseTraits: Equatable {
         "pull_up": ExerciseTraits(equipment: [.pullUpBar], pattern: .verticalPull, stress: [.shoulders: 1, .elbows: 2, .wrists: 1]),
         "chin_up": ExerciseTraits(equipment: [.pullUpBar], pattern: .verticalPull, stress: [.shoulders: 1, .elbows: 2, .wrists: 1]),
         "assisted_pull_up": ExerciseTraits(equipment: [.machine], pattern: .verticalPull, stress: [.shoulders: 1, .elbows: 1]),
-        "cable_pullover": ExerciseTraits(equipment: [.cable], pattern: .verticalPull, stress: [.shoulders: 1]),
+        "cable_pullover": ExerciseTraits(equipment: [.cable], pattern: .pullover, stress: [.shoulders: 1]),
         "incline_rear_delt_fly": ExerciseTraits(equipment: [.dumbbell, .bench], pattern: .shoulderIsolation),
         "dumbbell_lateral_raise": ExerciseTraits(equipment: [.dumbbell], pattern: .shoulderIsolation, stress: [.shoulders: 1]),
         "seated_smith_machine_shoulder_press": ExerciseTraits(equipment: [.bench, .smith], pattern: .verticalPress, stress: [.shoulders: 2, .elbows: 1, .wrists: 1]),
@@ -153,6 +165,6 @@ struct ExerciseTraits: Equatable {
         "dumbbell_romanian_deadlift": ExerciseTraits(equipment: [.dumbbell], pattern: .hipHinge, stress: [.lowBack: 1, .hips: 1]),
         "dumbbell_single_leg_calf_raise": ExerciseTraits(equipment: [.dumbbell], pattern: .calfRaise),
         "bodyweight_calf_raise": ExerciseTraits(equipment: [], pattern: .calfRaise),
-        "dumbbell_pullover": ExerciseTraits(equipment: [.dumbbell, .bench], pattern: .verticalPull, stress: [.shoulders: 1]),
+        "dumbbell_pullover": ExerciseTraits(equipment: [.dumbbell, .bench], pattern: .pullover, stress: [.shoulders: 1]),
     ]
 }

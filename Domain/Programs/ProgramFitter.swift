@@ -5,20 +5,25 @@ import Foundation
 struct FitProfile: Equatable {
     var equipment: Set<GearTag>
     var injuries: Set<InjuryFlag>
-    var sessionMinutes: Int
+    /// nil = no limit: the fit skips time trimming and never reports an over-budget day.
+    var sessionMinutes: Int?
     var experience: TrainingExperience
+    /// Build muscle is the identity: the goal step changes nothing for it.
+    var goal: Goal
 
-    init(equipment: Set<GearTag>, injuries: Set<InjuryFlag> = [], sessionMinutes: Int = 120,
-         experience: TrainingExperience = .intermediate) {
+    init(equipment: Set<GearTag>, injuries: Set<InjuryFlag> = [], sessionMinutes: Int? = 120,
+         experience: TrainingExperience = .intermediate, goal: Goal = .hypertrophy) {
         self.equipment = equipment
         self.injuries = injuries
         self.sessionMinutes = sessionMinutes
         self.experience = experience
+        self.goal = goal
     }
 
     init(_ profile: UserProfile) {
         self.init(equipment: profile.effectiveEquipment, injuries: Set(profile.injuryFlags),
-                  sessionMinutes: profile.sessionLengthMinutes, experience: profile.experience)
+                  sessionMinutes: profile.sessionLengthMinutes, experience: profile.experience,
+                  goal: Goal(rawValue: profile.primaryGoalRaw) ?? .hypertrophy)
     }
 
     /// True when nothing about the profile can rule an exercise out.
@@ -31,8 +36,8 @@ struct FitProfile: Equatable {
 /// ORIGINAL template, so a reason stays addressable after slots are dropped.
 struct FitReason: Equatable {
     enum Kind: String {
-        case substituted, dropped, droppedForTime, trimmedSets, volume   // changes
-        case keptStressed, notEvaluated, unfit, overBudget               // notes: nothing was changed
+        case substituted, dropped, droppedForTime, trimmedSets, volume, goal   // changes
+        case keptStressed, jointNote, bodyweightNote, notEvaluated, overBudget   // notes: nothing was changed
     }
 
     let kind: Kind
@@ -42,8 +47,8 @@ struct FitReason: Equatable {
 
     var isChange: Bool {
         switch kind {
-        case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume: return true
-        case .keptStressed, .notEvaluated, .unfit, .overBudget: return false
+        case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume, .goal: return true
+        case .keptStressed, .jointNote, .bodyweightNote, .notEvaluated, .overBudget: return false
         }
     }
 }
@@ -90,8 +95,11 @@ enum ProgramFitter {
 
     // MARK: - Entry point
 
-    static func fit(_ template: ProgramTemplate, profile: FitProfile) -> FitResult {
-        var reasons: [FitReason] = []
+    static func fit(_ original: ProgramTemplate, profile: FitProfile) -> FitResult {
+        // The goal first: equipment, joints and time then work on the goal-adjusted numbers. It adds no slots, so every
+        // slot index below still means the same slot of the original template.
+        let (template, goalNotes) = GoalModifier.apply(original, goal: profile.goal)
+        var reasons: [FitReason] = goalNotes
         var beginnerChanged = false
         var days: [ProgramDayTemplate] = []
         var adviceDays: [FitAdvice.Day] = []
@@ -112,7 +120,10 @@ enum ProgramFitter {
             adviceDays.append(FitAdvice.Day(dayNumber: day.dayNumber,
                                             untrimmedMinutes: (untrimmed + 59) / 60,
                                             minimumMinutes: (estimatedSeconds(floorSlots.map(\.template), template: template) + 59) / 60))
-            trimForTime(day: day, slots: &slots, template: template, budgetSeconds: profile.sessionMinutes * 60, reasons: &reasons)
+            // No limit: no trimming at all, so no trim reasons and no over-budget note.
+            if let minutes = profile.sessionMinutes {
+                trimForTime(day: day, slots: &slots, template: template, budgetSeconds: minutes * 60, reasons: &reasons)
+            }
 
             var exercises = slots.map(\.template)
             if exercises.count != day.exerciseTemplates.count {
@@ -191,20 +202,23 @@ enum ProgramFitter {
         joints.reduce(0) { $0 + traits.stress(for: $1) }
     }
 
-    /// Which stage of the substitution order produced a replacement.
+    /// Which stage of the substitution order produced a replacement. Equipment is a hard rule (a substitute is always
+    /// doable on the lifter's gear); joint stress is a soft one: (a) and (b) take a candidate that stresses no flagged
+    /// joint above 1 (and, for an available stress-2 original, strictly less), and only when there is none does (c)
+    /// take the lowest-stress available option, with a note naming the joint.
     enum SubstitutionStage: Equatable {
         case pattern    // (a) same pattern, max stress on flagged joints <= 1
-        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1
-        case fallback   // (c) nothing passes the (a)/(b) stress filter: lowest-stress available option
+        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1 (never for a vertical pull)
+        case fallback   // (c) nothing passes (a)/(b): the lowest-stress available option, still stressing a flagged joint
     }
 
     enum SlotOutcome: Equatable {
         case keep
         case notEvaluated
         case replace(exerciseId: String, stage: SubstitutionStage)
-        case keptStressed   // gear fine, a flagged joint at stress 2, nothing lower-stress exists
-        case unfit          // anchor with no available substitute: kept
-        case drop           // (d)
+        case keptStressed   // gear fine, a flagged joint at stress 2, nothing lower-stress is available: kept, with a note
+        case drop           // the gear is missing and nothing doable replaces it (any priority): removed with the equipment note
+        case noVerticalPull // a vertical pull with no vertical pull possible on this equipment: dropped, never swapped for another pattern
     }
 
     struct SlotPlan: Equatable {
@@ -289,11 +303,15 @@ enum ProgramFitter {
             let found: (Candidate, SubstitutionStage)?
             if let c = preferred(safe(samePattern)) {
                 found = (c, .pattern)
-            } else if let c = preferred(safe(sameMuscle)) {
+            } else if traits.pattern != .verticalPull, let c = preferred(safe(sameMuscle)) {
+                // (never another pattern under a pulldown's slot: a vertical pull skips stage (b))
                 found = (c, .muscle)
             } else {
-                // (c) nothing passes the stress filter: take the lowest-stress usable option, same preference order.
-                let u = usable(candidates.filter { $0.traits.pattern == traits.pattern || $0.exercise.primaryMuscle == current.exercise.primaryMuscle })
+                // (c) joint stress is a soft rule: the lowest-stress option the gear allows, same preference order. For
+                // an original that is itself doable, `usable` only lets a strictly lower-stress candidate through.
+                let u = usable(candidates.filter {
+                    $0.traits.pattern == traits.pattern || (traits.pattern != .verticalPull && $0.exercise.primaryMuscle == current.exercise.primaryMuscle)
+                })
                 if let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min(),
                    let c = preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m }) {
                     found = (c, .fallback)
@@ -305,11 +323,14 @@ enum ProgramFitter {
             if let (chosen, stage) = found {
                 used.insert(chosen.exercise.id)
                 plan.append(SlotPlan(originalIndex: index, outcome: .replace(exerciseId: chosen.exercise.id, stage: stage)))
+            } else if traits.pattern == .verticalPull && !available
+                        && !candidates.contains(where: { $0.traits.pattern == .verticalPull && $0.traits.isAvailable(with: profile.equipment) }) {
+                plan.append(SlotPlan(originalIndex: index, outcome: .noVerticalPull))
             } else if available {
+                // Doable but stresses a flagged joint and nothing doable is lower: keep it (any priority) and say so.
                 plan.append(SlotPlan(originalIndex: index, outcome: .keptStressed))
-            } else if original.priority == .anchor {
-                plan.append(SlotPlan(originalIndex: index, outcome: .unfit))
             } else {
+                // Equipment is a hard rule: an exercise the gear cannot support is never kept, anchor or not.
                 plan.append(SlotPlan(originalIndex: index, outcome: .drop))
             }
         }
@@ -339,17 +360,40 @@ enum ProgramFitter {
                 let why = cause(traits!, available: available, profile: profile)
                 // An anchor replaced by an isolation exercise is no longer an anchor: it takes isolation rest and can be trimmed.
                 let demote = original.priority == .anchor && !(entry(id)?.exercise.isCompound ?? true)
-                let suffix = (stage == .fallback ? "; no lower-stress option" : "") + (demote ? "; no longer an anchor" : "")
-                note(.substituted, "\(name) -> \(entry(id)?.exercise.name ?? id) (\(why)\(suffix))")
-                slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
+                let suffix = demote ? "; no longer an anchor" : ""
+                let newName = entry(id)?.exercise.name ?? id
+                note(.substituted, "\(name) -> \(newName) (\(why)\(suffix))")
+                if stage == .fallback, let t = ExerciseTraits.traits(for: id) {
+                    // Nothing doable is gentler: the lowest-stress option still loads the joint, so say which and how to train it.
+                    let joints = stressedJoints(t, profile)
+                    note(.keptStressed, "\(newName) is the lowest-stress option your equipment allows for your \(jointNames(Set(joints)))." + cueSuffix(joints))
+                }
+                var replacement = rebuild(original, exerciseId: id, priority: demote ? .standard : nil)
+                // A loaded exercise replaced by a bodyweight one: the slot's loaded rep range (10-12) is not a bodyweight
+                // range, so the substitute gets its own.
+                if let ot = traits, isLoadable(ot), let nt = ExerciseTraits.traits(for: id), !isLoadable(nt),
+                   let range = bodyweightRepRange(for: id) {
+                    replacement = rebuild(replacement, prescriptions: replacement.prescriptions.map {
+                        WavePrescription(wave: $0.wave, setMin: $0.setMin, setMax: $0.setMax, repMin: range.lowerBound, repMax: range.upperBound,
+                                         targetRIRMin: $0.targetRIRMin, targetRIRMax: $0.targetRIRMax,
+                                         intensifier: $0.intensifier, intensifierNotes: $0.intensifierNotes)
+                    })
+                    note(.bodyweightNote, "\(newName): \(range.lowerBound)-\(range.upperBound) reps (bodyweight). If you can't reach the range, use band assistance or slow negatives.")
+                }
+                slots.append(Slot(originalIndex: index, template: replacement))
             case .keptStressed:
-                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))")
-                slots.append(Slot(originalIndex: index, template: original))
-            case .unfit:
-                note(.unfit, "\(name) kept (no substitute for \(cause(traits!, available: false, profile: profile)))")
+                let joints = stressedJoints(traits!, profile)
+                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))." + cueSuffix(joints))
                 slots.append(Slot(originalIndex: index, template: original))
             case .drop:
                 note(.dropped, "Dropped \(name) (\(cause(traits!, available: false, profile: profile)))")
+            case .noVerticalPull:
+                note(.dropped, "No vertical pull is possible with your equipment (it needs a pull-up bar, a cable machine or an assisted pull-up machine), so \(name) was removed rather than replaced by a different movement")
+            }
+            // Knees flagged: every substitute or kept exercise that loads the knees says how to train it.
+            if profile.injuries.contains(.knees), let kept = slots.last, kept.originalIndex == index,
+               let t = ExerciseTraits.traits(for: kept.template.exerciseId), t.stress(for: .knees) >= 1 {
+                note(.jointNote, kneeNote)
             }
         }
         return slots
@@ -359,6 +403,7 @@ enum ProgramFitter {
         if !available, let gear = GearTag.allCases.first(where: { traits.equipment.contains($0) && !profile.equipment.contains($0) }) {
             return gearPhrase(gear)
         }
+        if !available, !traits.anchorOneOf.isEmpty { return "nothing to hook your feet under" }
         return jointList(traits, profile)
     }
 
@@ -379,7 +424,40 @@ enum ProgramFitter {
 
     private static let jointOrder: [InjuryFlag] = [.lowBack, .knees, .shoulders, .elbows, .wrists, .hips]
 
-    private static func jointLabel(_ joint: InjuryFlag) -> String {
+    /// What to do on an exercise that still loads a flagged joint.
+    static func painCue(_ joint: InjuryFlag) -> String {
+        switch joint {
+        case .knees:     return "use a pain-free depth"
+        case .elbows:    return "neutral grip, stop short of pain"
+        case .wrists:    return "neutral grip, stop short of pain"
+        case .shoulders: return "pain-free range, stop short of pain"
+        case .lowBack:   return "neutral spine, pain-free range, stop short of pain"
+        case .hips:      return "pain-free range, stop short of pain"
+        }
+    }
+
+    /// The flagged joints an exercise loads at all, in the fitter's order.
+    private static func stressedJoints(_ traits: ExerciseTraits, _ profile: FitProfile) -> [InjuryFlag] {
+        jointOrder.filter { profile.injuries.contains($0) && traits.stress(for: $0) >= 1 }
+    }
+
+    /// "Elbows flagged: neutral grip, stop short of pain." for each joint. Knees are left out: every exercise that loads
+    /// them already carries the separate knee note.
+    private static func cueSentences(_ joints: [InjuryFlag]) -> String {
+        joints.filter { $0 != .knees }.map { joint in
+            let label = jointLabel(joint)
+            return "\(label.prefix(1).uppercased() + label.dropFirst()) flagged: \(painCue(joint))."
+        }.joined(separator: " ")
+    }
+
+    private static func cueSuffix(_ joints: [InjuryFlag]) -> String {
+        let cues = cueSentences(joints)
+        return cues.isEmpty ? "" : " " + cues
+    }
+
+    static let kneeNote = "Knees flagged: use a pain-free depth."
+
+    static func jointLabel(_ joint: InjuryFlag) -> String {
         switch joint {
         case .lowBack:   return "lower back"
         case .knees:     return "knees"
@@ -387,6 +465,15 @@ enum ProgramFitter {
         case .elbows:    return "elbows"
         case .wrists:    return "wrists"
         case .hips:      return "hips"
+        }
+    }
+
+    /// "knees", "knees and lower back", "knees, lower back and hips": the flagged joints in the order the fitter uses.
+    static func jointNames(_ joints: Set<InjuryFlag>) -> String {
+        let names = jointOrder.filter { joints.contains($0) }.map(jointLabel)
+        switch names.count {
+        case 0, 1: return names.first ?? ""
+        default:   return names.dropLast().joined(separator: ", ") + " and " + names.last!
         }
     }
 
@@ -413,7 +500,9 @@ enum ProgramFitter {
         func name(_ s: Slot) -> String { entry(s.template.exerciseId)?.exercise.name ?? s.template.exerciseId }
         func drop(at position: Int) {
             let slot = slots.remove(at: position)
-            reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex && ($0.kind == .trimmedSets || $0.kind == .substituted) }
+            reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex
+                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed || $0.kind == .jointNote
+                    || $0.kind == .bodyweightNote) }
             reasons.append(FitReason(kind: .droppedForTime, dayNumber: day.dayNumber, slotIndex: slot.originalIndex,
                                      message: "Dropped \(name(slot)) (session length)"))
         }
@@ -459,9 +548,21 @@ enum ProgramFitter {
     // MARK: - Rebuild
 
     private static func rebuild(_ ex: ProgramExerciseTemplate, exerciseId: String? = nil, order: Int? = nil,
-                                setsByWeek: [Int]? = nil, priority: ExercisePriority? = nil) -> ProgramExerciseTemplate {
+                                setsByWeek: [Int]? = nil, priority: ExercisePriority? = nil,
+                                prescriptions: [WavePrescription]? = nil) -> ProgramExerciseTemplate {
         ProgramExerciseTemplate(id: ex.id, order: order ?? ex.order, exerciseId: exerciseId ?? ex.exerciseId,
-                                priority: priority ?? ex.priority, notes: ex.notes, prescriptions: ex.prescriptions,
+                                priority: priority ?? ex.priority, notes: ex.notes, prescriptions: prescriptions ?? ex.prescriptions,
                                 setsByWeek: setsByWeek ?? ex.setsByWeek)
+    }
+
+    /// Rep range for a bodyweight exercise that replaced a loaded one. The catalog carries no per-exercise bodyweight
+    /// default, so these are the fitter's own: 5-8 for pull-ups and chin-ups, 8-12 for dips and push-ups. Other
+    /// bodyweight substitutes (glute bridge, lunges, ...) keep the slot's range.
+    static func bodyweightRepRange(for exerciseId: String) -> ClosedRange<Int>? {
+        switch ExerciseCatalog.canonicalExerciseId(for: exerciseId) {
+        case "pull_up", "chin_up": return 5...8
+        case "dip", "push_up":     return 8...12
+        default:                   return nil
+        }
     }
 }

@@ -1,25 +1,55 @@
 import SwiftUI
+import Combine
 import SwiftData
 
 // MARK: - Main Tab View
 
+/// Cross-screen requests that are not tied to one view: "open the Restore screen" from the welcome sheet and "open
+/// onboarding again" from Today. Views observe it and consume what they own.
+@MainActor
+final class AppRoute: ObservableObject {
+    static let shared = AppRoute()
+
+    enum Tab: Int { case today = 0, program, history, analytics, settings }
+
+    @Published var selectedTab: Int = Tab.today.rawValue
+    /// Set by `openRestore()`, cleared by Settings once it has opened the Restore screen.
+    @Published var restoreRequested = false
+    /// Bumped by `openOnboarding()`; the root view shows the welcome sheet on every change.
+    @Published var onboardingRequests = 0
+
+    func openRestore() {
+        selectedTab = Tab.settings.rawValue
+        restoreRequested = true
+    }
+
+    func openOnboarding() { onboardingRequests += 1 }
+}
+
 struct MainTabView: View {
+    @ObservedObject private var route = AppRoute.shared
+
     var body: some View {
-        TabView {
+        TabView(selection: $route.selectedTab) {
             TodayTabView()
                 .tabItem { Label("Today", systemImage: "bolt.circle") }
+                .tag(AppRoute.Tab.today.rawValue)
 
             HomeView()
                 .tabItem { Label("Program", systemImage: "list.bullet.rectangle") }
+                .tag(AppRoute.Tab.program.rawValue)
 
             HistoryView()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(AppRoute.Tab.history.rawValue)
 
             AnalyticsView()
                 .tabItem { Label("Analytics", systemImage: "chart.bar") }
+                .tag(AppRoute.Tab.analytics.rawValue)
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppRoute.Tab.settings.rawValue)
         }
     }
 }
@@ -129,6 +159,22 @@ struct TodayTabView: View {
                                 }
                             }
                             .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                // Closing the welcome sheet (or a failed setup) leaves no program: Today offers the way back in.
+                if sessions.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("No program yet")
+                                .font(.headline)
+                            Text("Answer a few questions and get a program built for your schedule and equipment.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Button("Set up your program") { AppRoute.shared.openOnboarding() }
+                                .buttonStyle(.borderedProminent)
                         }
                         .padding(.vertical, 4)
                     }

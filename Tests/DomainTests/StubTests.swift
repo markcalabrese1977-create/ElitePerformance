@@ -1556,7 +1556,7 @@ final class UserProfileBackupTests: XCTestCase {
     }
 }
 
-// MARK: - Section I — Onboarding, ProgramCatalog, UserProfile
+// MARK: - Section I — Onboarding, UserProfile
 
 final class UserProfileModelCoverageTests: XCTestCase {
 
@@ -1605,133 +1605,6 @@ final class UserProfileModelCoverageTests: XCTestCase {
     }
 }
 
-final class ProgramCatalogRecommendationTests: XCTestCase {
-
-    // T-I.2: recommend() is wired and deterministic.
-    //
-    // NOTE: ProgramCatalog.recommend is NOT the function the live onboarding
-    // flow actually calls. OnboardingFlowView's completion handler
-    // (App/ContentView.swift, Features/Home/HomeView.swift) calls
-    // ProgramApplicationService.apply, which uses its own, much simpler
-    // ProgramApplicationService.selectTemplate(goal:daysPerWeek:) — a
-    // days+goal-only switch over the real DUP/PPL templates. Confirmed via
-    // grep: ProgramCatalog has zero production call sites anywhere in the
-    // app (Features/Home/ProgramPickerView.swift only mentions it in a
-    // "later we can map this in" comment). recommend() itself is real,
-    // compiles, and is a pure function — it's just orphaned. See OPEN Q13 in
-    // TestOpenQuestions.swift.
-    func test_I2_recommendIsDeterministicAndSnapshotStable() {
-        let input = ProgramCatalog.ProfileInput(
-            goal: .hypertrophy, daysPerWeek: 4, sessionMinutes: 60,
-            experience: .intermediate, equipment: .commercialGym, hasJointIssues: false
-        )
-        let first = ProgramCatalog.recommend(for: input)
-        let second = ProgramCatalog.recommend(for: input)
-
-        XCTAssertEqual(first.program.id, second.program.id, "identical input must produce an identical program")
-        XCTAssertEqual(first.reason, second.reason)
-        XCTAssertTrue(ProgramCatalog.all.contains { $0.id == first.program.id })
-    }
-
-    // T-I.3: constraint filters shape the recommendation.
-
-    // Frequency genuinely works: each (goal, exact day count) maps to a
-    // unique catalog program, since every program's minDays/maxDays/
-    // recommendedDays are identical (no overlapping ranges within a goal).
-    func test_I3_frequencyChangesRecommendedSplit() {
-        let threeDay = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 3, sessionMinutes: 60, experience: .new, equipment: .commercialGym, hasJointIssues: false)
-        let sixDay = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 6, sessionMinutes: 60, experience: .advanced, equipment: .commercialGym, hasJointIssues: false)
-
-        let rec3 = ProgramCatalog.recommend(for: threeDay)
-        let rec6 = ProgramCatalog.recommend(for: sixDay)
-
-        XCTAssertNotEqual(rec3.program.id, rec6.program.id)
-        XCTAssertEqual(rec3.program.id, "fullbody_3d_hypertrophy")
-        XCTAssertEqual(rec6.program.id, "ppl_6d_hypertrophy")
-    }
-
-    // BUG CONFIRMED: every program in ProgramCatalog.all requires
-    // .commercialGym equipment (confirmed by reading all six
-    // TrainingProgramDefinition declarations — none use any other
-    // ProgramEquipmentProfile). isEquipmentCompatible makes ANY
-    // non-commercialGym equipment incompatible with EVERY program, so
-    // `candidates` is always empty for those users, which falls back to
-    // scoring the entire unfiltered catalog (`pool = all`) — bypassing the
-    // goal+days filter too, not just equipment. Hand-traced: goal=.fatLoss,
-    // daysPerWeek=3, experience=.new, equipment=.minimal, hasJointIssues=false
-    // ties fullBody3DayFatLoss (correct goal, score 7) against
-    // fullBody3DayHypertrophy (wrong goal, also score 7), and
-    // `scored.max(by:)` keeps the first-seen max — fullBody3DayHypertrophy,
-    // declared earlier in `all`. So a fat-loss-seeking, minimal-equipment
-    // user is recommended a hypertrophy program. Do not fix here, flag for
-    // next task. See OPEN Q13 in TestOpenQuestions.swift.
-    func test_I3_BUG_minimalEquipmentBypassesGoalFilterEntirely() {
-        let profile = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 3, sessionMinutes: 60, experience: .new, equipment: .minimal, hasJointIssues: false)
-        let recommendation = ProgramCatalog.recommend(for: profile)
-        XCTAssertEqual(
-            recommendation.program.goal, .fatLoss,
-            "BUG CONFIRMED: a minimal-equipment user can be recommended a program of the WRONG goal, because equipment incompatibility silently empties the goal+days filter and falls back to scoring the whole catalog"
-        )
-    }
-
-    // BUG CONFIRMED: hasJointIssues only grants a soft +2 scoring bonus to
-    // jointFriendly programs — it never excludes non-joint-friendly programs
-    // outright. When a profile's goal+days combination matches exactly one
-    // program (the common case — every program has a unique day range per
-    // goal) and that program happens to be ppl6DayHypertrophyWarrior (the
-    // ONLY program with jointFriendly == false), hasJointIssues has nothing
-    // else to compete against and is recommended anyway. Do not fix here,
-    // flag for next task. See OPEN Q13.
-    func test_I3_BUG_jointIssuesIsOnlyASoftBonusNotAHardExclusion() {
-        let profile = ProgramCatalog.ProfileInput(goal: .hypertrophy, daysPerWeek: 6, sessionMinutes: 60, experience: .advanced, equipment: .commercialGym, hasJointIssues: true)
-        let recommendation = ProgramCatalog.recommend(for: profile)
-        XCTAssertTrue(
-            recommendation.program.jointFriendly,
-            "BUG CONFIRMED: hasJointIssues=true can still recommend the one program explicitly marked NOT joint-friendly (ppl_6d_hypertrophy) when it's the only goal+days match"
-        )
-    }
-
-    // BUG CONFIRMED (functional, non-crashing): sessionMinutes only ever
-    // contributes a flat +1 scoring bonus, gated by `program.recommendedDays
-    // <= profile.daysPerWeek`. Hand-traced every profile shape capable of
-    // producing a top-two contest in this six-program catalog: within a
-    // fixed goal, candidates is always 0 or 1 before any bonus applies
-    // (no overlapping day ranges), and every fallback-to-all scenario ties
-    // multiple programs that share the same recommendedDays, so they get the
-    // bonus identically and the tie still resolves by declaration order.
-    // Could not construct an input where 30 vs 90 minutes changes the
-    // winning program. Documented with one concrete pinned profile rather
-    // than an exhaustive proof. Do not fix here, flag for next task. See
-    // OPEN Q13.
-    func test_I3_BUG_sessionLengthNeverActuallyChangesTheWinningProgram() {
-        let profile30 = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 6, sessionMinutes: 30, experience: .intermediate, equipment: .commercialGym, hasJointIssues: false)
-        let profile90 = ProgramCatalog.ProfileInput(goal: .fatLoss, daysPerWeek: 6, sessionMinutes: 90, experience: .intermediate, equipment: .commercialGym, hasJointIssues: false)
-
-        let rec30 = ProgramCatalog.recommend(for: profile30)
-        let rec90 = ProgramCatalog.recommend(for: profile90)
-
-        XCTAssertNotEqual(
-            rec30.program.id, rec90.program.id,
-            "BUG CONFIRMED: sessionMinutes (30 vs 90) does not change the recommended program for this profile, despite the scoring function nominally weighing it"
-        )
-    }
-
-    // T-I.5: over-constrained input never crashes and always returns a
-    // best-effort recommendation. Recommendation is a non-Optional struct by
-    // design (recommend(for:) always falls back to defaultProgram if scoring
-    // ever finds nothing), so "does not return nil" is true by type — the
-    // meaningful assertion is that the fallback is a real catalog program.
-    func test_I5_overConstrainedInputStillReturnsABestEffortRecommendation() {
-        let impossible = ProgramCatalog.ProfileInput(
-            goal: .strength, daysPerWeek: 1, sessionMinutes: 20,
-            experience: .new, equipment: .minimal, hasJointIssues: true
-        )
-        let recommendation = ProgramCatalog.recommend(for: impossible)
-        XCTAssertTrue(ProgramCatalog.all.contains { $0.id == recommendation.program.id })
-        XCTAssertFalse(recommendation.reason.isEmpty)
-    }
-}
-
 final class OnboardingSeedingIntegrationTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
@@ -1777,8 +1650,8 @@ final class OnboardingSeedingIntegrationTests: XCTestCase {
     }
 
     // T-I.6: first session gets no progression verdict. Seeded via the real,
-    // live onboarding completion path (ProgramApplicationService.apply), not
-    // the orphaned ProgramCatalog (see OPEN Q13) — every freshly materialized
+    // live onboarding completion path (ProgramApplicationService.apply) —
+    // every freshly materialized
     // SessionItem gets suggestedLoad: 0.0 (DUPSessionMaterializer
     // .makeSessionItems), and CoachingEngine.recommend's guard 2 ("no
     // baseline", suggestedLoad <= 0) withholds a verdict unconditionally.

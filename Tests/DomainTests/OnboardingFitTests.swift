@@ -198,14 +198,26 @@ final class OnboardingFitTests: XCTestCase {
 
     // MARK: Time advice
 
-    func test_sessionMinutesNeeded_isOnTheStepperGrid_andClearsTheOverNote() {
+    func test_sessionMinutesNeeded_roundsUpToFive_notFifteen() {
+        func advice(_ minimum: Int) -> FitAdvice {
+            FitAdvice(days: [FitAdvice.Day(dayNumber: 1, untrimmedMinutes: minimum, minimumMinutes: minimum)])
+        }
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(63)), 65)   // 3 over a 60 budget asks for 65, not 75
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(65)), 65)
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(66)), 70)
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(120)), 120)
+        XCTAssertNil(ProgramApplicationService.sessionMinutesNeeded(for: advice(121)))
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(10)), 30)
+    }
+
+    func test_sessionMinutesNeeded_isOnAFiveMinuteGrid_andClearsTheOverNote() {
         for days in 2...6 {
             let tight = result(days: days, preset: .dumbbellsBench, joints: [.knees], minutes: 45)
             let fit = ProgramApplicationService.fittedProgram(for: tight)
             guard fit.reasons.contains(where: { $0.kind == .overBudget }) else { continue }
             let needed = ProgramApplicationService.sessionMinutesNeeded(for: fit.advice)
             let n = try! XCTUnwrap(needed)
-            XCTAssertEqual(n % 15, 0)
+            XCTAssertEqual(n % 5, 0)
             XCTAssertGreaterThan(n, 45)
             var next = tight
             next.sessionLengthMinutes = n
@@ -223,7 +235,7 @@ final class OnboardingFitTests: XCTestCase {
         XCTAssertEqual(draft.daysPerWeek, 4)
         XCTAssertEqual(draft.preset, .fullGym)
         XCTAssertTrue(draft.checklist.isEmpty)
-        XCTAssertEqual(draft.sessionLengthMinutes, 60)
+        XCTAssertNil(draft.sessionLengthMinutes, "new profiles start with no limit")
         XCTAssertEqual(draft.loadIncrement, 2.5)
         XCTAssertTrue(draft.injuryFlags.isEmpty)
     }
@@ -260,5 +272,232 @@ final class OnboardingFitTests: XCTestCase {
         XCTAssertEqual(again.equipmentPreset, .machinesOnly)
         XCTAssertTrue(again.equipmentChecklist.isEmpty)
         XCTAssertEqual(again.injuryFlags, [.hips])
+    }
+
+    // MARK: Schedule page
+
+    func test_chipCountNotEqualToStepper_blocksNext() {
+        for days in 2...6 {
+            for chips in 0...7 where chips != days {
+                let picked = Set(Array(1...7).prefix(chips))
+                XCTAssertFalse(OnboardingDraft.scheduleIsComplete(weekdays: picked, daysPerWeek: days), "\(chips) chips vs \(days)")
+                XCTAssertEqual(OnboardingDraft.scheduleMessage(weekdays: picked, daysPerWeek: days), "Select \(days) days")
+            }
+            let matching = OnboardingDraft.defaultTrainingDays(for: days)
+            XCTAssertTrue(OnboardingDraft.scheduleIsComplete(weekdays: matching, daysPerWeek: days))
+            XCTAssertNil(OnboardingDraft.scheduleMessage(weekdays: matching, daysPerWeek: days))
+        }
+    }
+
+    func test_defaultPatternForEachStepperValue_hasThatManyDays() {
+        for days in 2...6 { XCTAssertEqual(OnboardingDraft.defaultTrainingDays(for: days).count, days) }
+        // 3 days is Mon/Wed/Fri (Calendar weekdays 2, 4, 6).
+        XCTAssertEqual(OnboardingDraft.defaultTrainingDays(for: 3), [2, 4, 6])
+    }
+
+    // MARK: Seeding failure is visible
+
+    func test_apply_withWrongWeekdayCount_failsWithReason_andWritesNothing() throws {
+        let context = try makeContext()
+        // A good program first, so "nothing changed" means the existing one survives.
+        XCTAssertNoThrow(try ProgramApplicationService.apply(result(days: 4), context: context, startDate: Date()).get())
+        let sessionsBefore = try context.fetchCount(FetchDescriptor<Session>())
+        let blocksBefore = try context.fetch(FetchDescriptor<MesoBlock>()).map(\.status)
+        XCTAssertGreaterThan(sessionsBefore, 0)
+
+        var bad = result(days: 4, joints: [.wrists])
+        bad.trainingDaysOfWeek = [2]   // one chip left selected
+        let outcome = ProgramApplicationService.apply(bad, context: context, startDate: Date())
+
+        guard case .failure(let error) = outcome else { return XCTFail("a 1-day schedule must not seed") }
+        XCTAssertTrue(error.message.contains("4"), error.message)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Session>()), sessionsBefore, "existing sessions untouched")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<MesoBlock>()).map(\.status), blocksBefore, "existing meso not archived")
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertTrue(profile.injuryFlags.isEmpty, "profile must not take the failed answers")
+    }
+
+    func test_apply_onEmptyStore_withWrongWeekdayCount_writesNoProfile() throws {
+        let context = try makeContext()
+        var bad = result(days: 4)
+        bad.trainingDaysOfWeek = [2]
+        guard case .failure = ProgramApplicationService.apply(bad, context: context, startDate: Date()) else { return XCTFail() }
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<UserProfile>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Session>()), 0)
+    }
+
+    // MARK: Reason text names the joints
+
+    private func fitResult(kept: Int) -> FitResult {
+        let template = ProgramApplicationService.selectTemplate(goal: .hypertrophy, daysPerWeek: 4)
+        let reasons = (0..<kept).map { FitReason(kind: .keptStressed, dayNumber: 1, slotIndex: $0, message: "kept") }
+        return FitResult(template: template, reasons: reasons, advice: FitAdvice(days: []))
+    }
+
+    func test_reason_namesFlaggedJoints() {
+        let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                  injuries: [.knees, .lowBack], fit: fitResult(kept: 0))
+        XCTAssertTrue(text.contains("lower back and knees"), text)
+    }
+
+    func test_reason_withFlags_saysWhenSomethingIsTheLowestStressOptionAvailable() {
+        let kept = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                  injuries: [.knees], fit: fitResult(kept: 2))
+        XCTAssertTrue(kept.contains("2 exercises are the lowest-stress option your equipment allows for your knees"), kept)
+        XCTAssertFalse(kept.contains("without joint stress"), kept)
+        let clean = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                   injuries: [.knees], fit: fitResult(kept: 0))
+        XCTAssertTrue(clean.contains("your knees"), clean)
+        XCTAssertFalse(clean.contains("lowest-stress option your equipment allows"), clean)
+    }
+
+    /// No flags: no joint wording at all, for every day count and goal, through the real fit.
+    func test_reason_noFlags_containsNoJointWording() {
+        for goal in Goal.allCases {
+            for days in 2...6 {
+                let r = result(days: days)
+                let fit = ProgramApplicationService.fittedProgram(for: r)
+                let text = ProgramApplicationService.recommendationReason(goal: goal, daysPerWeek: days, injuries: [], fit: fit)
+                XCTAssertFalse(text.lowercased().contains("joint"), "\(goal) \(days)d: \(text)")
+                XCTAssertFalse(ProgramApplicationService.recommendationReason(goal: goal, daysPerWeek: days).lowercased().contains("joint"))
+            }
+        }
+    }
+
+    func test_reason_withoutFlags_isTheBlurbPlusTheGoalSentence() {
+        let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4, injuries: [], fit: fitResult(kept: 0))
+        XCTAssertEqual(text, ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4)
+                       + "\n\n" + ProgramApplicationService.goalSentence(.hypertrophy))
+    }
+
+    // MARK: Welcome sheet and Today routing
+
+    @MainActor
+    func test_appRoute_restoreOpensSettings_andOnboardingRequestsAreCounted() {
+        let route = AppRoute()
+        route.openRestore()
+        XCTAssertEqual(route.selectedTab, AppRoute.Tab.settings.rawValue)
+        XCTAssertTrue(route.restoreRequested)
+        let before = route.onboardingRequests
+        route.openOnboarding()
+        route.openOnboarding()
+        XCTAssertEqual(route.onboardingRequests, before + 2)
+    }
+}
+
+// MARK: - Session length: "No limit" is nil
+
+final class SessionLengthNoLimitTests: XCTestCase {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        return ModelContext(container)
+    }
+
+    func test_newProfile_defaultsToNoLimit() {
+        XCTAssertNil(UserProfile().sessionLengthMinutes)
+    }
+
+    func test_existingStoredValue_isKept_notMigrated() throws {
+        let context = try makeContext()
+        context.insert(UserProfile(sessionLengthMinutes: 45))
+        try context.save()
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertEqual(profile.sessionLengthMinutes, 45)
+        // re-onboarding with a pre-filled draft keeps the number until the lifter changes it
+        XCTAssertEqual(OnboardingDraft(profile: profile).sessionLengthMinutes, 45)
+    }
+
+    func test_onboardingResult_withNoLimit_writesNilToTheProfile() throws {
+        let context = try makeContext()
+        context.insert(UserProfile(sessionLengthMinutes: 45))
+        var result = OnboardingResult(goal: .hypertrophy, experience: .intermediate, daysPerWeek: 4,
+                                      trainingDaysOfWeek: [2, 3, 5, 6], equipmentProfile: .commercial,
+                                      sessionLengthMinutes: nil, injuryFlags: [], minLoadIncrement: 2.5, startDate: Date())
+        result.sessionLengthMinutes = nil
+        XCTAssertNoThrow(try ProgramApplicationService.apply(result, context: context, startDate: Date()).get())
+        XCTAssertNil(try XCTUnwrap(try context.fetch(FetchDescriptor<UserProfile>()).first).sessionLengthMinutes)
+        // and the result survives its own Codable round trip
+        let data = try JSONEncoder().encode(result)
+        XCTAssertNil(try JSONDecoder().decode(OnboardingResult.self, from: data).sessionLengthMinutes)
+    }
+
+    /// No limit: no time trimming of any kind and no over-budget note, for every template, preset and goal.
+    func test_noLimit_neverTrims_andNeverReportsOverBudget() {
+        let timeKinds: Set<FitReason.Kind> = [.trimmedSets, .droppedForTime, .overBudget]
+        for template in ExerciseTraitsCoverageTests.templates {
+            for preset in ExerciseTraitsCoverageTests.presets {
+                for goal in Goal.allCases {
+                    let p = FitProfile(equipment: preset.defaultEquipment, injuries: [], sessionMinutes: nil, experience: .advanced, goal: goal)
+                    let r = ProgramFitter.fit(template, profile: p)
+                    XCTAssertFalse(r.reasons.contains { timeKinds.contains($0.kind) }, "\(template.name) \(preset) \(goal)")
+                    // every slot keeps all its weeks' sets exactly as the (goal-adjusted, equipment-fitted) slot had them
+                    let untimed = FitProfile(equipment: preset.defaultEquipment, injuries: [], sessionMinutes: nil, experience: .advanced, goal: goal)
+                    XCTAssertEqual(r.template.dayTemplates.flatMap(\.exerciseTemplates).map(\.setsByWeek),
+                                   ProgramFitter.fit(template, profile: untimed).template.dayTemplates.flatMap(\.exerciseTemplates).map(\.setsByWeek))
+                }
+            }
+        }
+    }
+
+    func test_aLimit_stillTrims() {
+        let p = FitProfile(equipment: Set(GearTag.allCases), injuries: [], sessionMinutes: 30, experience: .intermediate)
+        let r = ProgramFitter.fit(UpperLower4DayTemplate.template, profile: p)
+        XCTAssertTrue(r.reasons.contains { $0.kind == .droppedForTime || $0.kind == .trimmedSets || $0.kind == .overBudget })
+    }
+
+    // MARK: Backup round trip
+
+    private func roundTrip(minutes: Int?) throws -> UserProfile {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        source.insert(UserProfile(sessionLengthMinutes: minutes))
+        try source.save()
+        let targetContainer = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: targetContainer)
+        return try XCTUnwrap(try ModelContext(targetContainer).fetch(FetchDescriptor<UserProfile>()).first)
+    }
+
+    func test_backupRoundTrip_noLimit() throws {
+        XCTAssertNil(try roundTrip(minutes: nil).sessionLengthMinutes)
+    }
+
+    func test_backupRoundTrip_45() throws {
+        XCTAssertEqual(try roundTrip(minutes: 45).sessionLengthMinutes, 45)
+    }
+
+    func test_exportCarriesTheUnlimitedFlag_onlyWhenThereIsNoLimit() throws {
+        func profileJSON(_ minutes: Int?) throws -> [String: Any] {
+            let ctx = ModelContext(try BackupTestSupport.makeContainer())
+            ctx.insert(UserProfile(sessionLengthMinutes: minutes))
+            try ctx.save()
+            return try XCTUnwrap(try BackupTestSupport.exportJSON(ctx)["userProfile"] as? [String: Any])
+        }
+        let none = try profileJSON(nil)
+        XCTAssertEqual(none["sessionLengthUnlimited"] as? Bool, true)
+        XCTAssertNil(none["sessionLengthMinutes"])
+        let forty = try profileJSON(45)
+        XCTAssertNil(forty["sessionLengthUnlimited"])
+        XCTAssertEqual(forty["sessionLengthMinutes"] as? Int, 45)
+    }
+
+    /// A backup written before the key existed (no minutes, no flag) restores as 60, as it always did.
+    func test_oldBackupWithoutTheKey_restoresAs60() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        source.insert(UserProfile(sessionLengthMinutes: 45))
+        try source.save()
+        let url = try BackupTestSupport.exportFile(source)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var profile = try XCTUnwrap(json["userProfile"] as? [String: Any])
+        profile.removeValue(forKey: "sessionLengthMinutes")
+        profile.removeValue(forKey: "sessionLengthUnlimited")
+        json["userProfile"] = profile
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("old_\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: old)
+        defer { try? FileManager.default.removeItem(at: old) }
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target)
+        XCTAssertEqual(try XCTUnwrap(try ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first).sessionLengthMinutes, 60)
     }
 }

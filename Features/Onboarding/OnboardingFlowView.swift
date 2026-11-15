@@ -36,7 +36,8 @@ struct OnboardingResult: Codable {
     /// 1 = Sunday ... 7 = Saturday (Calendar weekday values)
     var trainingDaysOfWeek: [Int]
     var equipmentProfile: EquipmentProfile
-    var sessionLengthMinutes: Int
+    /// nil = no limit.
+    var sessionLengthMinutes: Int?
     var injuryFlags: [InjuryFlag]
     var minLoadIncrement: Double
     /// User-chosen meso start date from the date picker on the final page.
@@ -64,7 +65,7 @@ extension OnboardingResult {
             daysPerWeek: try c.decode(Int.self, forKey: .daysPerWeek),
             trainingDaysOfWeek: try c.decode([Int].self, forKey: .trainingDaysOfWeek),
             equipmentProfile: try c.decode(EquipmentProfile.self, forKey: .equipmentProfile),
-            sessionLengthMinutes: try c.decode(Int.self, forKey: .sessionLengthMinutes),
+            sessionLengthMinutes: try c.decodeIfPresent(Int.self, forKey: .sessionLengthMinutes),
             injuryFlags: try c.decode([InjuryFlag].self, forKey: .injuryFlags),
             minLoadIncrement: try c.decode(Double.self, forKey: .minLoadIncrement),
             startDate: try c.decode(Date.self, forKey: .startDate),
@@ -182,7 +183,8 @@ struct OnboardingDraft: Equatable {
     var daysPerWeek: Int = 4
     var preset: EquipmentPreset = .fullGym
     var checklist: Set<GearTag> = []
-    var sessionLengthMinutes: Int = 60
+    /// No limit by default.
+    var sessionLengthMinutes: Int? = nil
     var loadIncrement: Double = 2.5
     var unit: LoadUnit = .lb
     var injuryFlags: Set<InjuryFlag> = []
@@ -214,6 +216,17 @@ struct OnboardingDraft: Equatable {
         }
     }
 
+    /// The schedule page is complete only when the chosen weekdays match the stepper: the program is picked by the
+    /// weekday count and the seeder refuses any other number of days.
+    static func scheduleIsComplete(weekdays: Set<Int>, daysPerWeek: Int) -> Bool {
+        weekdays.count == daysPerWeek
+    }
+
+    /// What the schedule page says while the chips and the stepper disagree; nil when they match.
+    static func scheduleMessage(weekdays: Set<Int>, daysPerWeek: Int) -> String? {
+        scheduleIsComplete(weekdays: weekdays, daysPerWeek: daysPerWeek) ? nil : "Select \(daysPerWeek) days"
+    }
+
     /// What tapping straight through produces.
     func result(startDate: Date, weekdays: Set<Int> = []) -> OnboardingResult {
         let days = (weekdays.isEmpty ? Self.defaultTrainingDays(for: daysPerWeek) : weekdays)
@@ -237,10 +250,25 @@ struct OnboardingDraft: Equatable {
 
 // MARK: - Flow
 
+/// How the host answered "Let's go". The flow dismisses only on `.done`.
+enum OnboardingFinish {
+    case done
+    /// Nothing was created; the flow stays on the preview with the reason in an alert.
+    case failed(String)
+    /// The host stopped before creating anything (for example the lifter declined a backup); the flow stays as it was.
+    case cancelled
+}
+
 struct OnboardingFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let onComplete: (OnboardingResult, PreviewOverrides) -> Void
+    /// The host creates the program and reports back through the third argument.
+    let onComplete: (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
+    /// Shown under the goal choices when set (the first-run welcome sheet): leave setup and restore a backup instead.
+    let onRestore: (() -> Void)?
+
+    @State private var isFinishing = false
+    @State private var finishFailure: String?
 
     @State private var pageIndex: Int = 0
 
@@ -257,7 +285,7 @@ struct OnboardingFlowView: View {
     // Page 4 — Equipment + Session length
     @State private var selectedPreset: EquipmentPreset
     @State private var selectedChecklist: Set<GearTag>
-    @State private var sessionLengthMinutes: Int
+    @State private var sessionLengthMinutes: Int?
     @State private var selectedLoadIncrement: Double
     @State private var selectedUnit: LoadUnit
 
@@ -296,9 +324,11 @@ struct OnboardingFlowView: View {
     init(
         initialStartDate: Date = Date(),
         profile: UserProfile? = nil,
-        onComplete: @escaping (OnboardingResult, PreviewOverrides) -> Void
+        onRestore: (() -> Void)? = nil,
+        onComplete: @escaping (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
     ) {
         self.onComplete = onComplete
+        self.onRestore = onRestore
         let draft = OnboardingDraft(profile: profile)
         _selectedGoal = State(initialValue: draft.goal)
         _selectedExperience = State(initialValue: draft.experience)
@@ -347,6 +377,13 @@ struct OnboardingFlowView: View {
             overridesSignature = newValue
         }
         .onAppear { overridesSignature = fitSignature }
+        .alert("Couldn't create your program", isPresented: Binding(
+            get: { finishFailure != nil }, set: { if !$0 { finishFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(finishFailure ?? "")
+        }
     }
 
     // MARK: - Progress bar
@@ -400,6 +437,16 @@ struct OnboardingFlowView: View {
                     )
                 }
                 .buttonStyle(.plain)
+            }
+
+            if let onRestore {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Already use Elite Performance?")
+                        .font(.subheadline.bold())
+                    Button("Restore from a backup", action: onRestore)
+                        .font(.subheadline)
+                }
             }
 
             Spacer()
@@ -472,7 +519,8 @@ struct OnboardingFlowView: View {
                         .font(.headline)
                 }
                 .onChange(of: daysPerWeek) { _, _ in
-                    syncSelectedWeekdaysWithDaysPerWeek()
+                    // A new count starts from the default evenly spaced pattern (3 -> Mon/Wed/Fri); the lifter then adjusts.
+                    selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
                 }
             }
 
@@ -506,9 +554,15 @@ struct OnboardingFlowView: View {
                     }
                 }
 
-                Text("Selected \(selectedWeekdays.count) of \(daysPerWeek) days")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                if let message = OnboardingDraft.scheduleMessage(weekdays: selectedWeekdays, daysPerWeek: daysPerWeek) {
+                    Text("\(message) (\(selectedWeekdays.count) selected)")
+                        .font(.caption.bold())
+                        .foregroundColor(.orange)
+                } else {
+                    Text("Selected \(selectedWeekdays.count) of \(daysPerWeek) days")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
@@ -597,9 +651,21 @@ struct OnboardingFlowView: View {
                 Text("Session length")
                     .font(.subheadline.bold())
 
-                Stepper(value: $sessionLengthMinutes, in: 30...120, step: 15) {
-                    Text("\(sessionLengthMinutes) minutes")
-                        .font(.headline)
+                // "No limit" first: the fit then never trims for time.
+                Picker("Session length", selection: Binding(
+                    get: { sessionLengthMinutes == nil ? 0 : 1 },
+                    set: { sessionLengthMinutes = $0 == 0 ? nil : (sessionLengthMinutes ?? 60) }
+                )) {
+                    Text("No limit").tag(0)
+                    Text("Set a limit").tag(1)
+                }
+                .pickerStyle(.segmented)
+
+                if let minutes = sessionLengthMinutes {
+                    Stepper(value: Binding(get: { minutes }, set: { sessionLengthMinutes = $0 }), in: 30...120, step: 15) {
+                        Text("\(minutes) minutes")
+                            .font(.headline)
+                    }
                 }
             }
 
@@ -692,7 +758,9 @@ struct OnboardingFlowView: View {
             let template = fit.template
             let reason = ProgramApplicationService.recommendationReason(
                         goal: selectedGoal,
-                        daysPerWeek: weekdays.count
+                        daysPerWeek: weekdays.count,
+                        injuries: selectedInjuryFlags,
+                        fit: fit
                     )
 
             return VStack(alignment: .leading, spacing: 24) {
@@ -1193,7 +1261,7 @@ struct OnboardingFlowView: View {
             let template = ProgramApplicationService.selectTemplate(goal: selectedGoal, daysPerWeek: currentWeekdayCount)
             return ProgramFitter.fit(template, profile: ProgramApplicationService.fitProfile(
                 preset: selectedPreset, checklist: resultChecklist, injuries: Array(selectedInjuryFlags),
-                sessionMinutes: sessionLengthMinutes, experience: selectedExperience))
+                sessionMinutes: sessionLengthMinutes, experience: selectedExperience, goal: selectedGoal))
         }
 
         /// Everything the fit depends on. Slot-keyed overrides only mean something against the same fitted template,
@@ -1202,7 +1270,7 @@ struct OnboardingFlowView: View {
             [selectedGoal.rawValue, String(currentWeekdayCount), selectedPreset.rawValue,
              resultChecklist.map(\.rawValue).joined(separator: ","),
              selectedInjuryFlags.map(\.rawValue).sorted().joined(separator: ","),
-             String(sessionLengthMinutes), selectedExperience.rawValue].joined(separator: "|")
+             sessionLengthMinutes.map(String.init) ?? "none", selectedExperience.rawValue].joined(separator: "|")
         }
 
         @ViewBuilder
@@ -1238,10 +1306,12 @@ struct OnboardingFlowView: View {
                 let titles = Dictionary(uniqueKeysWithValues: fit.template.dayTemplates.map { ($0.dayNumber, $0.title) })
                 let groups: [(title: String, lines: [String])] = {
                     var result: [(String, [String])] = []
-                    let general = fit.reasons.filter { $0.dayNumber == nil }.map(\.message)
+                    // The same cue on several exercises of one day reads once.
+                    func unique(_ lines: [String]) -> [String] { var seen = Set<String>(); return lines.filter { seen.insert($0).inserted } }
+                    let general = unique(fit.reasons.filter { $0.dayNumber == nil }.map(\.message))
                     if !general.isEmpty { result.append(("All days", general)) }
                     for day in fit.template.dayTemplates.sorted(by: { $0.dayNumber < $1.dayNumber }) {
-                        let lines = fit.reasons.filter { $0.dayNumber == day.dayNumber }.map(\.message)
+                        let lines = unique(fit.reasons.filter { $0.dayNumber == day.dayNumber }.map(\.message))
                         if !lines.isEmpty { result.append((titles[day.dayNumber] ?? day.title, lines)) }
                     }
                     return result
@@ -1265,22 +1335,6 @@ struct OnboardingFlowView: View {
             }
         }
 
-        private func experienceToProgramLevel(_ exp: TrainingExperience) -> ProgramExperienceLevel {
-            switch exp {
-            case .new:          return .new
-            case .intermediate: return .intermediate
-            case .advanced:     return .advanced
-            }
-        }
-
-        private func equipmentToProgramProfile(_ profile: EquipmentProfile) -> ProgramEquipmentProfile {
-            switch profile {
-            case .commercial:    return .commercialGym
-            case .homeGym:       return .homeGymRack
-            case .dumbbellsOnly: return .dumbbellsAndCables
-            }
-        }   
-    
     // MARK: - Shared page header
 
     private func pageHeader(title: String, subtitle: String) -> some View {
@@ -1295,6 +1349,11 @@ struct OnboardingFlowView: View {
     }
 
     // MARK: - Bottom bar
+
+    /// Next is held on the schedule page until the chips match the stepper.
+    private var canAdvance: Bool {
+        pageIndex != 2 || OnboardingDraft.scheduleIsComplete(weekdays: selectedWeekdays, daysPerWeek: daysPerWeek)
+    }
 
     private var bottomBar: some View {
         HStack {
@@ -1312,12 +1371,14 @@ struct OnboardingFlowView: View {
                                 withAnimation { pageIndex += 1 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(!canAdvance)
                         } else {
                             Button(action: finish) {
                                 Text("Let's go")
                                     .frame(minWidth: 140)
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(isFinishing)
                         }
         }
         .padding(.horizontal)
@@ -1337,23 +1398,6 @@ struct OnboardingFlowView: View {
 
     private func defaultTrainingDays(for days: Int) -> Set<Int> { OnboardingDraft.defaultTrainingDays(for: days) }
 
-    private func syncSelectedWeekdaysWithDaysPerWeek() {
-        let desired = daysPerWeek
-        if selectedWeekdays.isEmpty {
-            selectedWeekdays = defaultTrainingDays(for: desired)
-            return
-        }
-        if selectedWeekdays.count > desired {
-            selectedWeekdays = Set(selectedWeekdays.sorted().prefix(desired))
-        } else if selectedWeekdays.count < desired {
-            var result = selectedWeekdays
-            for w in defaultTrainingDays(for: desired) where result.count < desired {
-                result.insert(w)
-            }
-            selectedWeekdays = result
-        }
-    }
-
     private func toggleWeekday(_ weekday: Int) {
         if selectedWeekdays.contains(weekday) {
             selectedWeekdays.remove(weekday)
@@ -1366,10 +1410,6 @@ struct OnboardingFlowView: View {
     // MARK: - Finish
 
     private func finish() {
-        if selectedWeekdays.isEmpty {
-            selectedWeekdays = defaultTrainingDays(for: daysPerWeek)
-        }
-
         var draft = OnboardingDraft()
         draft.goal = selectedGoal
         draft.experience = selectedExperience
@@ -1382,8 +1422,15 @@ struct OnboardingFlowView: View {
         draft.injuryFlags = selectedInjuryFlags
         let result = draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
 
-        onComplete(result, previewOverrides)
-        dismiss()
+        isFinishing = true
+        onComplete(result, previewOverrides) { finish in
+            isFinishing = false
+            switch finish {
+            case .done:             dismiss()
+            case .failed(let why):  finishFailure = why
+            case .cancelled:        break
+            }
+        }
     }
 }
 

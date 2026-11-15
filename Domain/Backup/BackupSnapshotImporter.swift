@@ -32,7 +32,8 @@ enum BackupSnapshotImporter {
                 experience: TrainingExperience(rawValue: dto.experienceRaw ?? "") ?? .intermediate,
                 primaryGoal: PrimaryGoal(rawValue: dto.primaryGoalRaw ?? "") ?? .hypertrophy,
                 daysPerWeek: dto.daysPerWeek ?? 4,
-                sessionLengthMinutes: dto.sessionLengthMinutes ?? 60,
+                // An old backup without the key restores as 60; the unlimited flag restores "no limit".
+                sessionLengthMinutes: dto.sessionLengthUnlimited == true ? nil : (dto.sessionLengthMinutes ?? 60),
                 equipmentProfile: EquipmentProfile(rawValue: dto.equipmentProfileRaw ?? "") ?? .commercial,
                 injuryFlags: (dto.injuryFlagRaws ?? []).compactMap { InjuryFlag(rawValue: $0) },
                 minLoadIncrement: dto.minLoadIncrement ?? 2.5,

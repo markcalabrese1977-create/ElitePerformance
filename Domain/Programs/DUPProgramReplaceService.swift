@@ -72,6 +72,13 @@ enum DUPProgramReplaceService {
         calendar: Calendar = .current,
         overrides: PreviewOverrides? = nil
     ) throws {
+        // Guard 0: the seeder refuses a weekday count the template does not train. Check before anything is archived or
+        // deleted, so a refusal leaves the store untouched.
+        let weekdayCount = Set(trainingWeekdays).count
+        guard weekdayCount == template.trainingDaysPerWeek else {
+            throw DUPProgramSeederError.invalidWeekdayCount(expected: template.trainingDaysPerWeek, got: weekdayCount)
+        }
+
         // Guard 1: clamp a past startDate to today to prevent over-deletion.
         let startDay = effectiveStartDay(for: startDate, calendar: calendar)
         if startDay != calendar.startOfDay(for: startDate) {

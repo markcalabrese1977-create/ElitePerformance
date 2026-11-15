@@ -530,6 +530,11 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         "bodyweightPhantomLoadMigration.v1.completed", "prescriptionNotesClear.v1.completed",
         "prescribedSetsBackfill.v1.completed", "plannedDateBackfill.v1.completed",
         "week6UpperBCleanupMigration.v1.completed", "custom_exercises_v2",
+        // SessionHistoryExerciseOrderBackfill: it rewrites history exercises' `order` from 0 to their relationship
+        // position. It was missing here, so whether it had already run on the simulator (a leftover key from an earlier
+        // test or run) decided whether these tests saw an extra change to the store. Now it is cleared and restored like
+        // the rest, and its one known change is scoped out of the comparisons with `withoutHistoryOrder`.
+        "sessionHistoryExerciseOrder.v1.completed",
     ]
     private var savedDefaults: [String: Any] = [:]
 
@@ -634,6 +639,26 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         return ctx
     }
 
+    /// `data` (a sorted-keys backup snapshot) with every history exercise's `order` removed: the order backfill's own,
+    /// documented change, which these "nothing else changed" comparisons must not count.
+    private func withoutHistoryOrder(_ data: Data) throws -> Data {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object = try withoutHistoryOrder(object)
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private func withoutHistoryOrder(_ object: [String: Any]) throws -> [String: Any] {
+        var object = object
+        var histories = try XCTUnwrap(object["sessionHistory"] as? [[String: Any]])
+        for h in histories.indices {
+            var exercises = try XCTUnwrap(histories[h]["exercises"] as? [[String: Any]])
+            for e in exercises.indices { exercises[e].removeValue(forKey: "order") }
+            histories[h]["exercises"] = exercises
+        }
+        object["sessionHistory"] = histories
+        return object
+    }
+
     /// The whole store, as the backup exporter sees it, without its export timestamp.
     private func snapshot(_ ctx: ModelContext) throws -> Data {
         let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
@@ -727,7 +752,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
         XCTAssertGreaterThan(plannedSessions, 0)
         XCTAssertGreaterThan(otherSessions, 0)
         let scoped = try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys])
-        XCTAssertEqual(scoped, before, "every other byte is unchanged")
+        XCTAssertEqual(try withoutHistoryOrder(scoped), try withoutHistoryOrder(before), "every other byte is unchanged")
     }
 
     func test_prescribedSetsBackfill_isIdempotent_andWaitsForSessions() throws {
@@ -828,8 +853,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             XCTAssertNil(sessions[s]["plannedDateExact"], "a backfill never marks a date exact")
         }
         after["sessions"] = sessions
-        XCTAssertEqual(try JSONSerialization.data(withJSONObject: after, options: [.sortedKeys]),
-                       try JSONSerialization.data(withJSONObject: before, options: [.sortedKeys]),
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: try withoutHistoryOrder(after), options: [.sortedKeys]),
+                       try JSONSerialization.data(withJSONObject: try withoutHistoryOrder(before), options: [.sortedKeys]),
                        "nothing but ExerciseNote rows was added from the legacy keys")
         XCTAssertTrue(ExerciseNotesStore.legacyEntries().isEmpty)
     }

@@ -113,7 +113,9 @@ final class UserProfile {
     var experienceRaw: String
     var primaryGoalRaw: String
     var daysPerWeek: Int
-    var sessionLengthMinutes: Int
+    /// How long a session may take, in minutes. nil = no limit: the fitter then never trims for time. New profiles
+    /// start with no limit; rows saved before this was optional keep their number (nothing is migrated).
+    var sessionLengthMinutes: Int?
     var equipmentProfileRaw: String
     var injuryFlagRaws: [String]
     var minLoadIncrement: Double
@@ -363,7 +365,7 @@ final class UserProfile {
         experience: TrainingExperience = .intermediate,
         primaryGoal: PrimaryGoal = .hypertrophy,
         daysPerWeek: Int = 4,
-        sessionLengthMinutes: Int = 60,
+        sessionLengthMinutes: Int? = nil,
         equipmentProfile: EquipmentProfile = .commercial,
         injuryFlags: [InjuryFlag] = [],
         minLoadIncrement: Double = 2.5,

@@ -114,19 +114,22 @@ enum MesoSeedingCoordinator {
     /// `effectiveStartDay(for:)` rather than re-derived here, so the anchor can
     /// never disagree with the block's real start — including when a past date
     /// is clamped forward to today.
+    @discardableResult
     static func applyOnboardingResult(
         _ result: OnboardingResult,
         context: ModelContext,
         overrides: PreviewOverrides? = nil
-    ) {
+    ) -> Result<Void, ProgramApplicationService.ApplyError> {
         let startDay = DUPProgramReplaceService.effectiveStartDay(for: result.startDate)
 
-        ProgramApplicationService.apply(
+        let outcome = ProgramApplicationService.apply(
             result,
             context: context,
             startDate: startDay,
             overrides: overrides
         )
+        // A failed seed leaves the lifecycle anchor where it was.
+        guard case .success = outcome else { return outcome }
 
         MesoLifecycle.confirmStartNewMeso(on: startDay)
         // Mirror the anchor into the syncable AppState, matching what both
@@ -134,5 +137,6 @@ enum MesoSeedingCoordinator {
         // restoreUserDefaultsFromAppStateIfAvailable writes the stale AppState
         // value back over the anchor we just set.
         AppStateBridge.setActiveMesoStartDate(startDay, in: context)
+        return outcome
     }
 }
