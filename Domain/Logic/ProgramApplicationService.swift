@@ -106,6 +106,21 @@ enum ProgramApplicationService {
         }
     }
     
+    /// The program blurb plus what the fit did about the flagged joints. It names the joints, and it only promises
+    /// "without joint stress" when no exercise had to be kept because nothing lower-stress existed.
+    static func recommendationReason(goal: Goal, daysPerWeek: Int, injuries: Set<InjuryFlag>, fit: FitResult) -> String {
+        let kept = fit.reasons.filter { $0.kind == .keptStressed }
+        var text = recommendationReason(goal: goal, daysPerWeek: daysPerWeek)
+        if !kept.isEmpty { text = text.replacingOccurrences(of: " without joint stress.", with: " steadily.") }
+        guard !injuries.isEmpty else { return text }
+        let names = ProgramFitter.jointNames(injuries)
+        text += "\n\nYou flagged your \(names), so exercises that load \(injuries.count == 1 ? "it" : "them") hard were swapped for lower-stress options where one exists."
+        if !kept.isEmpty {
+            text += " \(kept.count) exercise\(kept.count == 1 ? " was" : "s were") kept because nothing lower-stress exists for your \(names); go lighter on \(kept.count == 1 ? "it" : "them")."
+        }
+        return text
+    }
+
     static func recommendationReason(goal: Goal, daysPerWeek: Int) -> String {
             switch (goal, daysPerWeek) {
             case (_, 6):

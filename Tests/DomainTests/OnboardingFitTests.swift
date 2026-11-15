@@ -313,4 +313,34 @@ final class OnboardingFitTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<UserProfile>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Session>()), 0)
     }
+
+    // MARK: Reason text names the joints
+
+    private func fitResult(kept: Int) -> FitResult {
+        let template = ProgramApplicationService.selectTemplate(goal: .hypertrophy, daysPerWeek: 4)
+        let reasons = (0..<kept).map { FitReason(kind: .keptStressed, dayNumber: 1, slotIndex: $0, message: "kept") }
+        return FitResult(template: template, reasons: reasons, advice: FitAdvice(days: []))
+    }
+
+    func test_reason_namesFlaggedJoints() {
+        let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                  injuries: [.knees, .lowBack], fit: fitResult(kept: 0))
+        XCTAssertTrue(text.contains("lower back and knees"), text)
+    }
+
+    func test_reason_dropsTheNoJointStressPromise_whenSomethingWasKeptStressed() {
+        let kept = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                  injuries: [.knees], fit: fitResult(kept: 2))
+        XCTAssertFalse(kept.contains("without joint stress"), kept)
+        XCTAssertTrue(kept.contains("2 exercises were kept because nothing lower-stress exists for your knees"), kept)
+
+        let clean = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4,
+                                                                   injuries: [.knees], fit: fitResult(kept: 0))
+        XCTAssertTrue(clean.contains("without joint stress"), clean)
+    }
+
+    func test_reason_withoutFlags_isTheUnchangedBlurb() {
+        let text = ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4, injuries: [], fit: fitResult(kept: 0))
+        XCTAssertEqual(text, ProgramApplicationService.recommendationReason(goal: .hypertrophy, daysPerWeek: 4))
+    }
 }

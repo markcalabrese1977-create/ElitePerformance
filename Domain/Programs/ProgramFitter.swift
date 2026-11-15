@@ -191,20 +191,20 @@ enum ProgramFitter {
         joints.reduce(0) { $0 + traits.stress(for: $1) }
     }
 
-    /// Which stage of the substitution order produced a replacement.
+    /// Which stage of the substitution order produced a replacement. A substitute never stresses a flagged joint above
+    /// 1, and for a stress-2 original it is strictly lower; when no candidate passes there is no replacement at all.
     enum SubstitutionStage: Equatable {
         case pattern    // (a) same pattern, max stress on flagged joints <= 1
-        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1
-        case fallback   // (c) nothing passes the (a)/(b) stress filter: lowest-stress available option
+        case muscle     // (b) same primary muscle, max stress on flagged joints <= 1 
     }
 
     enum SlotOutcome: Equatable {
         case keep
         case notEvaluated
         case replace(exerciseId: String, stage: SubstitutionStage)
-        case keptStressed   // gear fine, a flagged joint at stress 2, nothing lower-stress exists
+        case keptStressed   // anchor: gear fine, a flagged joint at stress 2, nothing lower-stress exists; kept
         case unfit          // anchor with no available substitute: kept
-        case drop           // (d)
+        case drop           // no substitute and the slot is not an anchor
     }
 
     struct SlotPlan: Equatable {
@@ -292,21 +292,15 @@ enum ProgramFitter {
             } else if let c = preferred(safe(sameMuscle)) {
                 found = (c, .muscle)
             } else {
-                // (c) nothing passes the stress filter: take the lowest-stress usable option, same preference order.
-                let u = usable(candidates.filter { $0.traits.pattern == traits.pattern || $0.exercise.primaryMuscle == current.exercise.primaryMuscle })
-                if let m = u.map({ flaggedStress($0.traits, profile.injuries) }).min(),
-                   let c = preferred(u.filter { flaggedStress($0.traits, profile.injuries) == m }) {
-                    found = (c, .fallback)
-                } else {
-                    found = nil
-                }
+                // No candidate is strictly safer than the original: there is no replacement.
+                found = nil
             }
 
             if let (chosen, stage) = found {
                 used.insert(chosen.exercise.id)
                 plan.append(SlotPlan(originalIndex: index, outcome: .replace(exerciseId: chosen.exercise.id, stage: stage)))
             } else if available {
-                plan.append(SlotPlan(originalIndex: index, outcome: .keptStressed))
+                plan.append(SlotPlan(originalIndex: index, outcome: original.priority == .anchor ? .keptStressed : .drop))
             } else if original.priority == .anchor {
                 plan.append(SlotPlan(originalIndex: index, outcome: .unfit))
             } else {
@@ -339,7 +333,7 @@ enum ProgramFitter {
                 let why = cause(traits!, available: available, profile: profile)
                 // An anchor replaced by an isolation exercise is no longer an anchor: it takes isolation rest and can be trimmed.
                 let demote = original.priority == .anchor && !(entry(id)?.exercise.isCompound ?? true)
-                let suffix = (stage == .fallback ? "; no lower-stress option" : "") + (demote ? "; no longer an anchor" : "")
+                let suffix = demote ? "; no longer an anchor" : ""
                 note(.substituted, "\(name) -> \(entry(id)?.exercise.name ?? id) (\(why)\(suffix))")
                 slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
             case .keptStressed:
@@ -349,7 +343,8 @@ enum ProgramFitter {
                 note(.unfit, "\(name) kept (no substitute for \(cause(traits!, available: false, profile: profile)))")
                 slots.append(Slot(originalIndex: index, template: original))
             case .drop:
-                note(.dropped, "Dropped \(name) (\(cause(traits!, available: false, profile: profile)))")
+                // Gear-driven drops name the gear; a stress-2 original with nothing safer to swap to names the joint.
+                note(.dropped, "Dropped \(name) (\(cause(traits!, available: available, profile: profile))" + (available ? "; no lower-stress option)" : ")"))
             }
         }
         return slots
@@ -379,7 +374,7 @@ enum ProgramFitter {
 
     private static let jointOrder: [InjuryFlag] = [.lowBack, .knees, .shoulders, .elbows, .wrists, .hips]
 
-    private static func jointLabel(_ joint: InjuryFlag) -> String {
+    static func jointLabel(_ joint: InjuryFlag) -> String {
         switch joint {
         case .lowBack:   return "lower back"
         case .knees:     return "knees"
@@ -387,6 +382,15 @@ enum ProgramFitter {
         case .elbows:    return "elbows"
         case .wrists:    return "wrists"
         case .hips:      return "hips"
+        }
+    }
+
+    /// "knees", "knees and lower back", "knees, lower back and hips": the flagged joints in the order the fitter uses.
+    static func jointNames(_ joints: Set<InjuryFlag>) -> String {
+        let names = jointOrder.filter { joints.contains($0) }.map(jointLabel)
+        switch names.count {
+        case 0, 1: return names.first ?? ""
+        default:   return names.dropLast().joined(separator: ", ") + " and " + names.last!
         }
     }
 

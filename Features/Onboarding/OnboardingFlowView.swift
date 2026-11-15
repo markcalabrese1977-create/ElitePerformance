@@ -730,7 +730,9 @@ struct OnboardingFlowView: View {
             let template = fit.template
             let reason = ProgramApplicationService.recommendationReason(
                         goal: selectedGoal,
-                        daysPerWeek: weekdays.count
+                        daysPerWeek: weekdays.count,
+                        injuries: selectedInjuryFlags,
+                        fit: fit
                     )
 
             return VStack(alignment: .leading, spacing: 24) {

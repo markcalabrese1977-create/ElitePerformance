@@ -97,7 +97,7 @@ struct ExerciseTraits: Equatable {
         "machine_hip_thrust": ExerciseTraits(equipment: [.machine], pattern: .gluteBridge, stress: [.lowBack: 1, .hips: 1]),
         "cable_glute_kickback": ExerciseTraits(equipment: [.cable], pattern: .gluteBridge, stress: [.lowBack: 1]),
         "seated_leg_curl": ExerciseTraits(equipment: [.machine], pattern: .kneeFlexion),
-        "goblet_squat": ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.hips: 1]),
+        "goblet_squat": ExerciseTraits(equipment: [.dumbbell], pattern: .squat, stress: [.knees: 1, .hips: 1]),
         "front_squat": ExerciseTraits(equipment: [.barbell, .rack], pattern: .squat, stress: [.lowBack: 1, .knees: 2, .wrists: 2, .hips: 1]),
         "smith_machine_squat": ExerciseTraits(equipment: [.smith], pattern: .squat, stress: [.lowBack: 1, .knees: 1]),
         "sumo_deadlift": ExerciseTraits(equipment: [.barbell], pattern: .hipHinge, stress: [.lowBack: 2, .knees: 1, .wrists: 1, .hips: 2]),
