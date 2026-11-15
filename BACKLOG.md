@@ -67,9 +67,9 @@ was BEFORE the backfills.
 
 - `scripts/upgrade_test.sh --seed onboarding` : one template program (as onboarding applies it), shifted so its first two sessions are the only ones in the past and both are completed (nothing missed), no customs, no import.
 - `scripts/upgrade_test.sh --seed fixture:<backup.json>` : a real backup imported through the released build's importer.
-- `--released <commit>` : the build to upgrade from. The default is `26006d5`, which is 1.2.1 (4), the last build uploaded to App Store Connect
-  (Xcode's archive record, Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed with a 403 and was never distributed). After the next upload, set the
-  default in the script to that build's commit (tag it when you archive).
+- `--released <commit>` : the build to upgrade from. The default is `c9b4792`, which is 1.2.2 (4) (tag `v1.2.2-b4`), the release build as of Nov 15 2026.
+  The previous default was `26006d5` (1.2.1 (4), the last build uploaded to App Store Connect as of Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed
+  with a 403 and was never distributed). After the next release build, set the default in the script to that build's commit (tag it when you archive).
 - The script never touches a physical device; it deletes its simulator and worktree unless `--keep` is given.
 - Runs: 1.2.1 (4) -> ec64bd5 with the Nov 14 15:12 fixture (294 sessions) and with onboarding (40 sessions, 2 completed): both PASS.
 

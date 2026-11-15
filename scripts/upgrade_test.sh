@@ -3,7 +3,7 @@
 #
 #   scripts/upgrade_test.sh [--released <commit>] [--seed fixture:<backup.json> | --seed onboarding] [--keep]
 #
-# 1. checks out <commit> (default: the last build uploaded to App Store Connect, see BACKLOG.md "Release check") in a worktree,
+# 1. checks out <commit> (default: the release build, 1.2.2 (4) = tag v1.2.2-b4, see BACKLOG.md "Release check") in a worktree,
 #    patches only what a current Xcode needs to build it and makes it take the DEVICE store path (not the simulator one);
 # 2. seeds the app's real default store with that build's own code (a fixture imported through its importer, or the
 #    onboarding path plus two completed sessions) and launches it once, as a device would;
@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 3
 REPO="$PWD"
-RELEASED="26006d5"; SEED="onboarding"; KEEP=0
+RELEASED="c9b4792"; SEED="onboarding"; KEEP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --released) RELEASED="$2"; shift 2 ;;
