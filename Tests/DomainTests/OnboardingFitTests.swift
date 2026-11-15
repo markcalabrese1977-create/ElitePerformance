@@ -198,14 +198,26 @@ final class OnboardingFitTests: XCTestCase {
 
     // MARK: Time advice
 
-    func test_sessionMinutesNeeded_isOnTheStepperGrid_andClearsTheOverNote() {
+    func test_sessionMinutesNeeded_roundsUpToFive_notFifteen() {
+        func advice(_ minimum: Int) -> FitAdvice {
+            FitAdvice(days: [FitAdvice.Day(dayNumber: 1, untrimmedMinutes: minimum, minimumMinutes: minimum)])
+        }
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(63)), 65)   // 3 over a 60 budget asks for 65, not 75
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(65)), 65)
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(66)), 70)
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(120)), 120)
+        XCTAssertNil(ProgramApplicationService.sessionMinutesNeeded(for: advice(121)))
+        XCTAssertEqual(ProgramApplicationService.sessionMinutesNeeded(for: advice(10)), 30)
+    }
+
+    func test_sessionMinutesNeeded_isOnAFiveMinuteGrid_andClearsTheOverNote() {
         for days in 2...6 {
             let tight = result(days: days, preset: .dumbbellsBench, joints: [.knees], minutes: 45)
             let fit = ProgramApplicationService.fittedProgram(for: tight)
             guard fit.reasons.contains(where: { $0.kind == .overBudget }) else { continue }
             let needed = ProgramApplicationService.sessionMinutesNeeded(for: fit.advice)
             let n = try! XCTUnwrap(needed)
-            XCTAssertEqual(n % 15, 0)
+            XCTAssertEqual(n % 5, 0)
             XCTAssertGreaterThan(n, 45)
             var next = tight
             next.sessionLengthMinutes = n

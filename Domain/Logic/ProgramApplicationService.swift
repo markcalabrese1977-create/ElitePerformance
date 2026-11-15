@@ -67,10 +67,11 @@ enum ProgramApplicationService {
         return ProgramFitter.fit(selectTemplate(goal: result.goal, daysPerWeek: days), profile: fitProfile(for: result))
     }
 
-    /// The session length that makes every day fit: the longest day after all trims, rounded up to the 15 minute
-    /// grid the setup stepper uses. nil when even 120 minutes would not do (fewer training days is the only fix).
+    /// The session length that makes every day fit: the longest day after all trims, rounded up to the next 5 minutes
+    /// (a day that is 3 minutes over asks for 3 more, not 15). nil when even 120 minutes would not do (fewer training
+    /// days is the only fix).
     static func sessionMinutesNeeded(for advice: FitAdvice) -> Int? {
-        let rounded = max((advice.minimumMinutes + 14) / 15 * 15, 30)
+        let rounded = max((advice.minimumMinutes + 4) / 5 * 5, 30)
         return rounded <= 120 ? rounded : nil
     }
 
