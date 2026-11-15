@@ -2613,3 +2613,63 @@ final class LegacyStoreRelocationTests: XCTestCase {
         XCTAssertTrue(line.contains("ElitePerformanceStore.store (sandbox Application Support)"), line)
     }
 }
+
+// MARK: - R1: Change Program never deletes logged work
+
+final class ChangeProgramGuardTests: XCTestCase {
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    private func context() throws -> ModelContext {
+        ModelContext(try BackupTestSupport.makeContainer())
+    }
+    private func session(_ ctx: ModelContext, _ offset: Int, _ status: SessionStatus, logged: Bool = false, meso: MesoBlock? = nil) -> Session {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        if logged { item.actualReps = [8, 8, 0]; item.actualLoads = [100, 100, 0] }
+        let s = Session(date: day(offset), status: status, weekIndex: 1, dayLabel: "Push", items: [item])
+        s.meso = meso
+        ctx.insert(s)
+        return s
+    }
+
+    func test_planListsExactlyThePlannedSessionsItWouldDelete_withCountAndRange() throws {
+        let ctx = try context()
+        _ = session(ctx, -3, .completed); _ = session(ctx, -1, .planned)                // history and the past: untouched
+        for o in [1, 3, 8] { _ = session(ctx, o, .planned) }
+        let maint = MesoBlock(name: "Maintenance", startDate: day(0), totalWeeks: 4, isMaintenance: true); ctx.insert(maint)
+        _ = session(ctx, 2, .planned, meso: maint)                                       // maintenance sessions are never deleted
+        try ctx.save()
+        let plan = DUPProgramReplaceService.plan(startDate: day(0), context: ctx)
+        XCTAssertTrue(plan.isAllowed)
+        XCTAssertEqual(plan.sessionsToDelete.count, 3)
+        XCTAssertEqual(plan.dateRange?.first, day(1)); XCTAssertEqual(plan.dateRange?.last, day(8))
+        XCTAssertTrue(plan.message.hasPrefix("3 planned sessions"), plan.message)
+    }
+
+    func test_anInProgressSession_orAPlannedOneWithLoggedSets_refusesTheReplacement_andNothingIsDeleted() throws {
+        for blocker in [(SessionStatus.inProgress, false), (SessionStatus.planned, true)] {
+            let ctx = try context()
+            _ = session(ctx, 1, .planned); _ = session(ctx, 2, .planned)
+            _ = session(ctx, 3, blocker.0, logged: blocker.1)
+            try ctx.save()
+            let plan = DUPProgramReplaceService.plan(startDate: day(0), context: ctx)
+            XCTAssertFalse(plan.isAllowed)
+            XCTAssertEqual(plan.blockers.count, 1)
+            XCTAssertTrue(plan.message.contains("never deleted"), plan.message)
+            let before = try ctx.fetchCount(FetchDescriptor<Session>())
+            XCTAssertThrowsError(try DUPProgramReplaceService.replacePlannedProgram(startDate: day(0), trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx))
+            XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Session>()), before, "the service itself refuses: no session was deleted")
+        }
+    }
+
+    func test_withNothingInTheWay_theReplacementDeletesThePlannedSessions_andKeepsHistory() throws {
+        let ctx = try context()
+        let done = session(ctx, -5, .completed, logged: true)
+        for o in [1, 2, 9] { _ = session(ctx, o, .planned) }
+        try ctx.save()
+        try DUPProgramReplaceService.replacePlannedProgram(startDate: day(0), trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        XCTAssertTrue(all.contains { $0.persistentModelID == done.persistentModelID }, "completed history is kept")
+        XCTAssertFalse(all.contains { $0.dayLabel == "Push" && $0.date >= day(0) && $0.status == .planned && $0.items.first?.suggestedLoad == 100 }, "the old planned sessions are gone")
+    }
+}
