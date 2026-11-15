@@ -96,29 +96,46 @@ final class GoalModifierTests: XCTestCase {
 
     // MARK: Lose fat
 
-    func test_fatLoss_capsTheRamp_andTrimsIsolationFromTheMidpoint_exactNumbers() {
-        XCTAssertEqual(GoalModifier.midpointWeek(totalWeeks: 10), 5)
-        XCTAssertEqual(GoalModifier.midpointWeek(totalWeeks: 9), 5)
+    func test_fatLoss_holdsSetsSteady_exactArrays() {
+        // PPL: bench (anchor) caps at week 1 + 1 = 4; pushdown (isolation) holds at its week-1 count of 3; deload untouched
         let (out, notes) = GoalModifier.apply(ppl, goal: .fatLoss)
-        // bench: compound, so only the ramp cap (week 1 + 1 = 4); week 10 is the deload
         XCTAssertEqual(slot(out, "ppl_push_bench").setsByWeek, [3, 4, 4, 4, 4, 4, 4, 4, 4, 2])
-        // pushdown: isolation, so weeks 5-9 also lose a set (never below 2)
-        XCTAssertEqual(slot(out, "ppl_push_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 2, 3, 3, 2])
+        XCTAssertEqual(slot(out, "ppl_push_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2])
+        XCTAssertEqual(slot(out, "ppl_push_lateral").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2], "isolation")
+        XCTAssertEqual(slot(out, "ppl_push_incline_db").setsByWeek, slot(ppl, "ppl_push_incline_db").setsByWeek, "a compound that never exceeds week 1 + 1 is unchanged")
+        // 10-week DUP: pushdown 3,3,3,3,3,3,3,4,3,2 -> 3,3,3,3,3,3,3,3,3,2 (week 8's 4 is held at 3)
+        let dup = DUP10WeekTemplate.template
+        let (dupOut, _) = GoalModifier.apply(dup, goal: .fatLoss)
+        XCTAssertEqual(slot(dup, "d1_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 4, 3, 2], "the template's own array")
+        XCTAssertEqual(slot(dupOut, "d1_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2])
+        XCTAssertEqual(slot(dupOut, "d4_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2])
+        // DUP bench (compound): capped at week 1 + 1, so a template ramp above that is cut
+        let dupBench = slot(dup, "d1_bench")
+        XCTAssertEqual(slot(dupOut, "d1_bench").setsByWeek, dupBench.setsByWeek.enumerated().map { i, v in
+            i == dupBench.setsByWeek.count - 1 ? v : min(v, dupBench.setsByWeek[0] + 1)
+        })
         // reps and RIR untouched
         XCTAssertTrue(rx(slot(out, "ppl_push_bench"), .c) == rx(slot(ppl, "ppl_push_bench"), .c))
         XCTAssertEqual(notes.map(\.message).filter { $0.hasPrefix("Lose fat") }.count, notes.count)
-        XCTAssertEqual(notes.count, 2, "one note for the cap, one for the isolation trim")
+        XCTAssertEqual(notes.count, 2, "one note for the main-lift cap, one for isolation")
+        XCTAssertFalse(notes.contains { $0.message.contains("week 5") || $0.message.contains("lose 1 set") }, "the midpoint trim is gone")
     }
 
-    func test_fatLoss_floors_setsNeverBelowTwo_andNeverRaised() {
-        let t = syntheticTemplate(sets: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2], exerciseId: "cable_tricep_rope_pushdown")
-        let (out, notes) = GoalModifier.apply(t, goal: .fatLoss)
-        XCTAssertEqual(out.dayTemplates[0].exerciseTemplates[0].setsByWeek, [2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
+    func test_fatLoss_isolationNeverBelowItsStartingCount_andNothingIsRaised_andDeloadUntouched() {
+        // an isolation slot that never ramps is unchanged and says nothing
+        let flat = syntheticTemplate(sets: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2], exerciseId: "cable_tricep_rope_pushdown")
+        let (flatOut, notes) = GoalModifier.apply(flat, goal: .fatLoss)
+        XCTAssertEqual(flatOut.dayTemplates[0].exerciseTemplates[0].setsByWeek, [2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
         XCTAssertTrue(notes.isEmpty, "nothing changed, nothing to say")
-        let zero = syntheticTemplate(sets: [3, 3, 3, 3, 3, 3, 3, 3, 3, 0], exerciseId: "cable_tricep_rope_pushdown")
-        XCTAssertEqual(GoalModifier.apply(zero, goal: .fatLoss).0.dayTemplates[0].exerciseTemplates[0].setsByWeek.last, 0, "a skipped week stays skipped")
+        // a week below week 1 is left alone (never raised); a skipped week stays skipped
+        let dips = syntheticTemplate(sets: [4, 3, 5, 0, 4, 6, 3, 3, 3, 2], exerciseId: "cable_tricep_rope_pushdown")
+        XCTAssertEqual(GoalModifier.apply(dips, goal: .fatLoss).0.dayTemplates[0].exerciseTemplates[0].setsByWeek, [4, 3, 4, 0, 4, 4, 3, 3, 3, 2])
+        // compounds keep the +1 cap
         let climbing = syntheticTemplate(sets: [3, 4, 5, 6, 3, 3, 3, 3, 3, 2], exerciseId: "bench_press")
         XCTAssertEqual(GoalModifier.apply(climbing, goal: .fatLoss).0.dayTemplates[0].exerciseTemplates[0].setsByWeek, [3, 4, 4, 4, 3, 3, 3, 3, 3, 2])
+        // deload weeks are never touched, even above the cap
+        let deloadHigh = syntheticTemplate(sets: [3, 3, 3, 3, 3, 3, 3, 3, 3, 5], exerciseId: "cable_tricep_rope_pushdown")
+        XCTAssertEqual(GoalModifier.apply(deloadHigh, goal: .fatLoss).0.dayTemplates[0].exerciseTemplates[0].setsByWeek.last, 5)
     }
 
     // MARK: General fitness

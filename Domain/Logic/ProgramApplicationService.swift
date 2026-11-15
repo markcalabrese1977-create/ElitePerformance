@@ -129,7 +129,7 @@ enum ProgramApplicationService {
         case .strength:
             return "Goal: Get stronger. Your main lifts use lower-rep ranges (2 fewer reps, never below 3) while accessories stay as designed."
         case .fatLoss:
-            return "Goal: Lose fat. Weekly sets ramp up by at most 1 and isolation work trims by a set in the second half of the block."
+            return "Goal: Lose fat. Weekly sets hold steady instead of ramping up, so you keep your training volume while recovery is limited."
         case .longevity:
             return "Goal: Maintain / move better. Every exercise has 1 fewer set and 1 more rep in reserve, with a gentler weekly ramp."
         }

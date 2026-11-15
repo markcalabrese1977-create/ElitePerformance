@@ -14,16 +14,13 @@ typealias FitNote = FitReason
 /// - Build muscle: unchanged (the same value back, no notes).
 /// - Get stronger: anchor slots shift each working wave's rep range down one band (repMin and repMax -2, repMin never
 ///   below 3). Accessories are untouched.
-/// - Lose fat: weekly sets are capped at week 1 + 1, and isolation slots lose a set from the meso midpoint on (never
-///   below 2). Reps and RIR are untouched.
+/// - Lose fat: weekly sets stop ramping. Compound and anchor slots are capped at week 1 + 1, isolation slots at their
+///   week-1 count, in every non-deload week. Reps and RIR are untouched; no slot is ever raised.
 /// - General fitness (`Goal.longevity`): the same ramp cap, then -1 set on every slot every week (never below 2), and
 ///   target RIR +1 (capped at 3; a value already at or above 3 is left alone).
 ///
 /// Deload weeks and deload prescriptions are never touched, and zero-set entries ("skip this week") stay zero.
 enum GoalModifier {
-
-    /// How many weeks into the meso the Lose fat isolation trim starts: the midpoint, `ceil(totalWeeks / 2)`.
-    static func midpointWeek(totalWeeks: Int) -> Int { (totalWeeks + 1) / 2 }
 
     static func apply(_ template: ProgramTemplate, goal: Goal) -> (ProgramTemplate, [FitNote]) {
         switch goal {
@@ -66,26 +63,21 @@ enum GoalModifier {
     // MARK: - Lose fat
 
     private static func fatLoss(_ template: ProgramTemplate) -> (ProgramTemplate, [FitNote]) {
-        var capped = false, trimmed = false
-        let midpoint = midpointWeek(totalWeeks: template.totalWeeks)
+        var cappedMain = false, heldIsolation = false
         let out = mapSlots(template) { template, slot in
             guard let first = slot.setsByWeek.first else { return slot }
-            let compound = isCompound(slot.exerciseId)
+            // Isolation holds at its week-1 count; compounds and anchors may ramp by one over week 1.
+            let cap = isCompound(slot.exerciseId) ? first + 1 : first
             var sets = slot.setsByWeek
-            for i in sets.indices where !isDeload(template, week: i + 1) && sets[i] > 0 {
-                let before = sets[i]
-                sets[i] = min(sets[i], first + 1)
-                if sets[i] != before { capped = true }
-                if !compound, i + 1 >= midpoint, sets[i] > 2 {
-                    sets[i] -= 1
-                    trimmed = true
-                }
+            for i in sets.indices where !isDeload(template, week: i + 1) && sets[i] > cap {
+                sets[i] = cap
+                if isCompound(slot.exerciseId) { cappedMain = true } else { heldIsolation = true }
             }
             return sets == slot.setsByWeek ? slot : rebuilt(slot, setsByWeek: sets)
         }
         var notes: [FitNote] = []
-        if capped { notes.append(note("Lose fat: weekly sets ramp up by at most 1 over week 1.")) }
-        if trimmed { notes.append(note("Lose fat: isolation exercises lose 1 set from week \(midpoint) on (never below 2).")) }
+        if cappedMain { notes.append(note("Lose fat: main-lift sets ramp up by at most 1 over week 1.")) }
+        if heldIsolation { notes.append(note("Lose fat: isolation exercises hold at their week-1 set count instead of ramping up.")) }
         return (notes.isEmpty ? template : out, notes)
     }
 
