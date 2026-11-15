@@ -56,6 +56,23 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   O1 collision check). Decide: merge the custom into the built-in (move history,
   canonical id) via the existing dedup path, or rename. Low priority.
 
+## Release check (standing): upgrade test
+
+Before every upload, run `scripts/upgrade_test.sh` from the candidate commit. It checks out the LAST UPLOADED build in a worktree, seeds the
+app's real default store with that build's own code on a throwaway simulator, launches it as a device would, installs the candidate OVER it
+(no uninstall) and launches again. PASS needs: the same store URL opened, identical counts, every registered backfill logged, no blocking
+screen, no crash report, and exactly one automatic backup for the launch. It also prints pre-backfill markers found in that backup
+(history entries all at order 0, planned sessions without plannedDate, padded RIR 0s), which proves the upgrade backup is the data as it
+was BEFORE the backfills.
+
+- `scripts/upgrade_test.sh --seed onboarding` : one template program (as onboarding applies it) and two completed sessions, no customs, no import.
+- `scripts/upgrade_test.sh --seed fixture:<backup.json>` : a real backup imported through the released build's importer.
+- `--released <commit>` : the build to upgrade from. The default is `26006d5`, which is 1.2.1 (4), the last build uploaded to App Store Connect
+  (Xcode's archive record, Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed with a 403 and was never distributed). After the next upload, set the
+  default in the script to that build's commit (tag it when you archive).
+- The script never touches a physical device; it deletes its simulator and worktree unless `--keep` is given.
+- Runs: 1.2.1 (4) -> ec64bd5 with the Nov 14 15:12 fixture (294 sessions) and with onboarding (40 sessions, 2 completed): both PASS.
+
 ## Done (Oct 2026)
 
 - DONE (feat/top-set 70c0f8a, cdb1c76, d7e1706, 8cc18a5, 6f697aa; A1-A4 d491a8c, cdbb1a3, aa0ca81, 440aa87; B7 88a753c; B8 46039ee): Top set + back-off (priority, before TestFlight): set roles (top/back-off) with own

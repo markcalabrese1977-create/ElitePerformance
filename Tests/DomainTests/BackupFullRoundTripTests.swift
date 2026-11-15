@@ -480,7 +480,7 @@ final class ImportSafetyTests: XCTestCase {
         var expected = BackupContentSummary(exportedAt: nil, sessions: 0, completedSessions: 0, lastCompletedDate: nil, sessionHistory: 0, customExercises: 0, mesoBlocks: 0)
         let container = try interruptedStore(restoreTo: &expected)
         var backfillRuns = 0
-        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), runBackfills: { _ in backfillRuns += 1 })
+        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: nil, runBackfills: { _ in backfillRuns += 1 })
         gate.begin(container: container)
         let prompt = try XCTUnwrap(gate.interrupted, "a marker at launch raises the prompt")
         XCTAssertTrue(prompt.message.hasPrefix("A restore was interrupted. Restore your data from"), prompt.message)
@@ -497,7 +497,7 @@ final class ImportSafetyTests: XCTestCase {
         var expected = BackupContentSummary(exportedAt: nil, sessions: 0, completedSessions: 0, lastCompletedDate: nil, sessionHistory: 0, customExercises: 0, mesoBlocks: 0)
         let container = try interruptedStore(restoreTo: &expected)
         var backfillRuns = 0
-        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), runBackfills: { _ in backfillRuns += 1 })
+        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: nil, runBackfills: { _ in backfillRuns += 1 })
         gate.begin(container: container)
         XCTAssertEqual(backfillRuns, 0)
         gate.restore()
@@ -514,11 +514,11 @@ final class ImportSafetyTests: XCTestCase {
     func test_noMarker_backfillsRunImmediately_andAMarkerWithoutItsSnapshotShowsAOneTimeNoticeWithoutBlocking() throws {
         let container = try BackupTestSupport.makeContainer()
         var runs = 0
-        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), runBackfills: { _ in runs += 1 })
+        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: nil, runBackfills: { _ in runs += 1 })
         gate.begin(container: container)
         XCTAssertEqual(runs, 1); XCTAssertNil(gate.interrupted)
         try InterruptedImportMarker.write(snapshot: dir.appendingPathComponent("pre-import-gone.json"), startedAt: Date(), in: dir)
-        let gate2 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), runBackfills: { _ in runs += 1 })
+        let gate2 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: nil, runBackfills: { _ in runs += 1 })
         gate2.begin(container: container)
         XCTAssertEqual(runs, 2); XCTAssertNil(gate2.interrupted)
         XCTAssertFalse(InterruptedImportMarker.exists(in: dir))
@@ -526,7 +526,7 @@ final class ImportSafetyTests: XCTestCase {
         XCTAssertTrue(StartupGate.missingSnapshotMessage.hasPrefix("A restore was interrupted and its safety copy is missing."))
         XCTAssertTrue(StartupGate.missingSnapshotMessage.hasSuffix("import your latest export from Files."))
         gate2.showsMissingSnapshotNotice = false
-        let gate3 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), runBackfills: { _ in runs += 1 })
+        let gate3 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: nil, runBackfills: { _ in runs += 1 })
         gate3.begin(container: container)
         XCTAssertFalse(gate3.showsMissingSnapshotNotice, "the marker is gone, so the next launch does not repeat it")
         XCTAssertEqual(runs, 3)
@@ -1018,18 +1018,20 @@ final class AutoBackupTests: XCTestCase {
     }
 
     @MainActor
-    func test_trigger2_aNewBuildCommit_backsUpOnce() throws {
+    func test_trigger2_aNewBuildCommit_backsUpOnce_andTheCallWaitsForTheVerifiedFile() async throws {
         let (c, _) = try populated()
         let status = freshStatus()
         let svc = service(status, now: t(0), commit: "build-A")
-        XCTAssertTrue(svc.launchBackupIfBuildChanged(container: c))
-        try waitForBackups(1)
-        let deadline = Date().addingTimeInterval(5)
-        while status.lastLaunchCommit != "build-A" && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        let first = try await svc.backUpIfBuildChanged(container: c).get()
+        XCTAssertNotNil(first, "the backup is done (verified and placed) when the call returns, so backfills can follow")
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1)
         XCTAssertEqual(status.lastLaunchCommit, "build-A")
-        XCTAssertFalse(svc.launchBackupIfBuildChanged(container: c), "same commit as the last launch: no backup")
+        XCTAssertEqual(status.lastBuildChangeBackup, first?.url.lastPathComponent)
+        let again = try await svc.backUpIfBuildChanged(container: c).get()
+        XCTAssertNil(again, "same commit as the last launch: no backup")
         let svc2 = service(status, now: t(1), commit: "build-B")
-        XCTAssertTrue(svc2.launchBackupIfBuildChanged(container: c), "a different commit backs up again")
+        let second = try await svc2.backUpIfBuildChanged(container: c).get()
+        XCTAssertNotNil(second, "a different commit backs up again")
     }
 
     @MainActor
@@ -1048,21 +1050,30 @@ final class AutoBackupTests: XCTestCase {
     }
 
     @MainActor
+    private func spin(_ g: StartupGate, timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while g.launching && g.startupGuard.failure == nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    }
+
+    @MainActor
     func test_theBuildChangeBackup_runsAfterTheInterruptedCheck_andBeforeTheBackfills() throws {
         let c = try BackupTestSupport.makeContainer()
         var order: [String] = []
-        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), beforeBackfills: { _ in order.append("backup") }, runBackfills: { _ in order.append("backfills") })
+        let gate = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: { _ in order.append("backup"); return .success(nil) }, runBackfills: { _ in order.append("backfills") })
         gate.begin(container: c)
+        spin(gate)
         XCTAssertEqual(order, ["backup", "backfills"])
         // with an interrupted import pending, neither runs until it is answered, and then in the same order
         order = []
         let (_, srcCtx) = try populated()
         let snap = try XCTUnwrap(PreImportSnapshots.take(from: srcCtx, in: dir, now: t(0)))
         try InterruptedImportMarker.write(snapshot: snap.url, startedAt: t(0), in: dir)
-        let gate2 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), beforeBackfills: { _ in order.append("backup") }, runBackfills: { _ in order.append("backfills") })
+        let gate2 = StartupGate(directory: dir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!), backupFirst: { _ in order.append("backup"); return .success(nil) }, runBackfills: { _ in order.append("backfills") })
         gate2.begin(container: c)
+        spin(gate2)
         XCTAssertEqual(order, [], "held back behind the interrupted-restore prompt")
         gate2.keepCurrentData()
+        spin(gate2)
         XCTAssertEqual(order, ["backup", "backfills"])
     }
 
@@ -1100,13 +1111,14 @@ final class AutoBackupTests: XCTestCase {
     }
 
     @MainActor
-    func test_theBuildChangeTrigger_logsWhyItDidNotFire() throws {
+    func test_theBuildChangeTrigger_logsWhyItDidNotFire() async throws {
         let (c, _) = try populated()
         var lines: [String] = []
         let status = freshStatus()
         status.lastLaunchCommit = "0f94a26"
         let svc = service(status, now: t(0), commit: "0f94a26", log: { lines.append($0) })
-        XCTAssertFalse(svc.launchBackupIfBuildChanged(container: c))
+        let none = try await svc.backUpIfBuildChanged(container: c).get()
+        XCTAssertNil(none)
         XCTAssertEqual(lines.count, 1)
         XCTAssertTrue(lines[0].contains("[buildChanged]") && lines[0].contains("not needed") && lines[0].contains("0f94a26"), lines[0])
     }
@@ -1167,6 +1179,19 @@ final class MissingDataSentinelTests: XCTestCase {
         super.tearDown()
     }
 
+    /// For async tests: yield so the launch work's MainActor task can run.
+    @MainActor
+    private func settleAsync(_ g: StartupGate, timeout: TimeInterval = 10) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while g.launching && g.startupGuard.failure == nil && Date() < deadline { try? await Task.sleep(nanoseconds: 20_000_000) }
+    }
+
+    /// The launch work is asynchronous (the pre-backfill backup is awaited): spin the main loop until it has finished.
+    @MainActor
+    private func settle(_ g: StartupGate, timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while g.launching && g.startupGuard.failure == nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    }
     private func populated() throws -> (ModelContainer, ModelContext) {
         let c = try BackupTestSupport.makeContainer(); let ctx = ModelContext(c)
         try PopulatedStoreBuilder.build(in: ctx)
@@ -1175,7 +1200,7 @@ final class MissingDataSentinelTests: XCTestCase {
     @MainActor
     private func gate(_ counts: Counts2, backups: @escaping @Sendable () -> [AutoBackupFile] = { [] }) -> StartupGate {
         StartupGate(directory: dir, sentinel: sentinel,
-                    beforeBackfills: { _ in counts.before += 1 }, runBackfills: { _ in counts.backfills += 1 }, findBackups: backups)
+                    backupFirst: { _ in counts.before += 1; return .success(nil) }, runBackfills: { _ in counts.backfills += 1 }, findBackups: backups)
     }
     private final class Counts2 { var before = 0, backfills = 0 }
 
@@ -1186,6 +1211,7 @@ final class MissingDataSentinelTests: XCTestCase {
         let counts = Counts2()
         let g = gate(counts)
         g.begin(container: empty)
+        settle(g)
         XCTAssertEqual(g.missingData, StartupGate.MissingData(expectedSessions: 12))
         XCTAssertEqual(StartupGate.missingDataMessage, "Your training data wasn't found. Nothing has been changed.")
         XCTAssertEqual(counts.backfills, 0, "no backfills")
@@ -1200,6 +1226,7 @@ final class MissingDataSentinelTests: XCTestCase {
         let fresh = try BackupTestSupport.makeContainer()
         let g = gate(counts)
         g.begin(container: fresh)
+        settle(g)
         XCTAssertNil(g.missingData, "no sentinel yet: a fresh install is not 'missing data'")
         XCTAssertEqual(counts.backfills, 1)
         XCTAssertEqual(sentinel.completedSessions, 0)
@@ -1207,7 +1234,7 @@ final class MissingDataSentinelTests: XCTestCase {
         let (c, ctx) = try populated()
         let expected = try BackupContentSummary.of(store: ctx).completedSessions
         XCTAssertGreaterThan(expected, 0)
-        let g2 = gate(counts); g2.begin(container: c)
+        let g2 = gate(counts); g2.begin(container: c); settle(g2)
         XCTAssertNil(g2.missingData)
         XCTAssertEqual(sentinel.completedSessions, expected, "persisted after a successful launch")
     }
@@ -1218,9 +1245,10 @@ final class MissingDataSentinelTests: XCTestCase {
         let (c, ctx) = try populated()
         let completed = try BackupContentSummary.of(store: ctx).completedSessions
         sentinel.record(3)
-        let g = StartupGate(directory: dir, sentinel: sentinel, beforeBackfills: { _ in }, runBackfills: { _ in },
+        let g = StartupGate(directory: dir, sentinel: sentinel, backupFirst: nil, runBackfills: { _ in },
                             findBackups: { [] }, log: { lines.append($0) })
         g.begin(container: c)
+        settle(g)
         XCTAssertTrue(lines.contains { $0.contains("read stored=3") && $0.contains("store holds \(completed) completed sessions") }, "\(lines)")
         XCTAssertTrue(lines.contains { $0.contains("wrote \(completed), reads back \(completed)") }, "\(lines)")
         // a fresh handle on the same defaults (the next launch) reads what this launch wrote
@@ -1229,7 +1257,7 @@ final class MissingDataSentinelTests: XCTestCase {
         // a blocking launch says so
         lines = []
         sentinel.record(7)
-        StartupGate(directory: dir, sentinel: sentinel, beforeBackfills: { _ in }, runBackfills: { _ in }, findBackups: { [] },
+        StartupGate(directory: dir, sentinel: sentinel, backupFirst: nil, runBackfills: { _ in }, findBackups: { [] },
                     log: { lines.append($0) }).begin(container: try BackupTestSupport.makeContainer())
         XCTAssertTrue(lines.contains { $0.contains("read stored=7") && $0.contains("0 completed sessions") }, "\(lines)")
         XCTAssertTrue(lines.contains { $0.contains("BLOCKING") }, "\(lines)")
@@ -1248,17 +1276,18 @@ final class MissingDataSentinelTests: XCTestCase {
         let counts = Counts2()
         let g = gate(counts, backups: { [placed] in [placed] })
         g.begin(container: lost)
+        settle(g)
         XCTAssertNotNil(g.missingData)
         await g.loadNewestBackup()
         XCTAssertEqual(g.newestBackup, placed)
         XCTAssertEqual(g.newestBackupSummary?.completedSessions, live.completedSessions)
-        g.restoreNewestBackup()
+        g.restoreNewestBackup(); await settleAsync(g)
         XCTAssertNil(g.missingData); XCTAssertNil(g.missingDataError)
         XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(lost)).verifiedCounts, live.verifiedCounts, "the data is back")
         XCTAssertEqual(counts.backfills, 1)
         XCTAssertEqual(sentinel.completedSessions, live.completedSessions, "the legitimate restore updated the sentinel")
         // next launch: the store has its sessions again
-        let counts2 = Counts2(); let g2 = gate(counts2); g2.begin(container: lost)
+        let counts2 = Counts2(); let g2 = gate(counts2); g2.begin(container: lost); await settleAsync(g2)
         XCTAssertNil(g2.missingData); XCTAssertEqual(counts2.backfills, 1)
     }
 
@@ -1289,7 +1318,7 @@ final class MissingDataSentinelTests: XCTestCase {
         XCTAssertNotNil(g.missingData); XCTAssertEqual(counts.backfills, 0); XCTAssertEqual(sentinel.completedSessions, 5)
         XCTAssertFalse(StartupGate.acceptsContinue(typed: "continue"))
         // the exact word proceeds
-        XCTAssertTrue(g.continueWithEmptyData(typed: "CONTINUE"))
+        XCTAssertTrue(g.continueWithEmptyData(typed: "CONTINUE")); await settleAsync(g)
         XCTAssertNil(g.missingData); XCTAssertEqual(sentinel.completedSessions, 0); XCTAssertEqual(counts.backfills, 1)
     }
 
@@ -2176,5 +2205,378 @@ final class BackupBuildIdentityTests: XCTestCase {
         try BackupTestSupport.restore(from: source, into: fresh)
         XCTAssertEqual((try BackupTestSupport.exportJSON(ModelContext(fresh))["metadata"] as? [String: Any])?["gitCommit"] as? String,
                        BuildInfo.commit)
+    }
+}
+
+// MARK: - KKK / LLL / MMM: the upgrade backup, one backup per launch, iCloud unavailable
+
+@MainActor
+final class UpgradeBackupTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var dir: URL!
+    private var snapDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        DataSentinelStore.overrideDefaults = UserDefaults(suiteName: "ep.sentinel.suite.\(UUID().uuidString)")
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_up_\(UUID().uuidString)", isDirectory: true)
+        snapDir = FileManager.default.temporaryDirectory.appendingPathComponent("ep_upsnap_\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDown() {
+        DataSentinelStore.overrideDefaults = nil
+        try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: snapDir)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private func status() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+    private func populated() throws -> ModelContainer {
+        let c = try BackupTestSupport.makeContainer()
+        try PopulatedStoreBuilder.build(in: ModelContext(c))
+        return c
+    }
+    private func service(_ s: AutoBackupStatusStore, destination: AutoBackupDestination? = nil, commit: String = "new-build",
+                         availability: AutoBackupDestination.ICloudAvailability = .available, now: Date = Date()) -> AutoBackupService {
+        let d = destination ?? .local(dir!)
+        return AutoBackupService(status: s, resolveDestination: { d }, checkAvailability: { availability }, now: { now }, currentCommit: { commit }, log: { _ in })
+    }
+    private func spin(_ g: StartupGate, timeout: TimeInterval = 10) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while g.launching && g.startupGuard.failure == nil && Date() < deadline { try? await Task.sleep(nanoseconds: 20_000_000) }
+    }
+
+    // KKK ------------------------------------------------------------------
+
+    func test_theUpgradeBackup_isTakenAndPlacedBeforeTheBackfillsRun_andHoldsTheOldData() async throws {
+        let container = try populated()
+        let ctx = ModelContext(container)
+        let marker = try XCTUnwrap(try ctx.fetch(FetchDescriptor<SessionHistoryExercise>()).first)
+        marker.order = 7                                                      // the "pre-backfill" state
+        try ctx.save()
+        let svc = service(status())
+        var filesWhenBackfillsStarted = -1
+        var orderInBackup: Int?
+        let gate = StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
+                               backupFirst: { await svc.backUpIfBuildChanged(container: $0) },
+                               runBackfills: { c in
+                                   filesWhenBackfillsStarted = AutoBackupEngine.list(in: self.dir).count
+                                   // what the backup file holds, read at the moment the backfills start
+                                   if let f = AutoBackupEngine.list(in: self.dir).first,
+                                      let json = try? JSONSerialization.jsonObject(with: Data(contentsOf: f.url)) as? [String: Any],
+                                      let history = json["sessionHistory"] as? [[String: Any]] {
+                                       orderInBackup = history.flatMap { ($0["exercises"] as? [[String: Any]]) ?? [] }.compactMap { $0["order"] as? Int }.first { $0 == 7 }
+                                   }
+                                   let m = try? ModelContext(c).fetch(FetchDescriptor<SessionHistoryExercise>()).first { $0.order == 7 }
+                                   m?.order = 0; try? ModelContext(c).save()      // a backfill changing the data afterwards
+                               },
+                               findBackups: { [] })
+        gate.begin(container: container)
+        XCTAssertTrue(gate.launching, "the app waits: no data screen before the backup is done")
+        await spin(gate)
+        XCTAssertEqual(filesWhenBackfillsStarted, 1, "the backup was verified and placed BEFORE the first backfill ran")
+        XCTAssertEqual(orderInBackup, 7, "and it holds the data as it was before the backfills")
+        XCTAssertFalse(gate.launching)
+    }
+
+    func test_aFailedUpgradeBackup_holdsTheBackfills_untilBackUpNowWorks_orCONTINUEIsTyped() async throws {
+        let container = try populated()
+        let s = status()
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("ep_blk_\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker); defer { try? FileManager.default.removeItem(at: blocker) }
+        final class Box: @unchecked Sendable { var url: URL; init(_ u: URL) { url = u } }
+        let destination = Box(blocker)
+        let svc = AutoBackupService(status: s, resolveDestination: { .local(destination.url) }, checkAvailability: { .available },
+                                    currentCommit: { "new-build" }, log: { _ in })
+        var backfills = 0
+        let gate = StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
+                               backupFirst: { await svc.backUpIfBuildChanged(container: $0) },
+                               onContinueWithoutBackup: { svc.recordLaunchWithoutBackup() },
+                               runBackfills: { _ in backfills += 1 }, findBackups: { [] })
+        gate.begin(container: container)
+        await spin(gate)
+        XCTAssertNotNil(gate.startupGuard.failure, "the prompt is up")
+        XCTAssertEqual(backfills, 0, "the backfills are held")
+        XCTAssertTrue(gate.launching)
+        XCTAssertNil(s.lastLaunchCommit, "this build is not recorded as launched")
+
+        destination.url = dir                                  // fixed: Back up now
+        gate.startupGuard.retry()
+        await spin(gate)
+        XCTAssertEqual(backfills, 1)
+        XCTAssertEqual(s.lastLaunchCommit, "new-build")
+
+        // the other way out: CONTINUE without a backup
+        let s2 = status()
+        destination.url = blocker
+        let svc2 = AutoBackupService(status: s2, resolveDestination: { .local(destination.url) }, checkAvailability: { .available },
+                                     currentCommit: { "build-2" }, log: { _ in })
+        var runs2 = 0
+        let gate2 = StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
+                                backupFirst: { await svc2.backUpIfBuildChanged(container: $0) },
+                                onContinueWithoutBackup: { svc2.recordLaunchWithoutBackup() },
+                                runBackfills: { _ in runs2 += 1 }, findBackups: { [] })
+        gate2.begin(container: container)
+        await spin(gate2)
+        XCTAssertFalse(gate2.startupGuard.continueWithoutBackup(typed: "continue"))
+        XCTAssertEqual(runs2, 0)
+        XCTAssertTrue(gate2.startupGuard.continueWithoutBackup(typed: "CONTINUE"))
+        XCTAssertEqual(runs2, 1)
+        XCTAssertEqual(s2.lastLaunchCommit, "build-2", "recorded, so the prompt does not repeat every launch")
+    }
+
+    func test_theBuildChangeBackup_survivesALaterBackupTheSameDay() async throws {
+        let container = try populated()
+        let s = status()
+        let first = try await service(s, now: Date(timeIntervalSince1970: 1_800_000_000)).backUpIfBuildChanged(container: container).get()
+        let kept = try XCTUnwrap(first)
+        // later the same day: a session-completed and a manual backup, each of which prunes
+        for minute in 1...3 {
+            _ = await service(s, now: Date(timeIntervalSince1970: 1_800_000_000 + Double(minute) * 600)).backUpNow(container: container)
+        }
+        let names = AutoBackupEngine.list(in: dir).map { $0.url.lastPathComponent }
+        XCTAssertTrue(names.contains(kept.url.lastPathComponent), "the pre-upgrade snapshot is never rotated away: \(names)")
+        XCTAssertEqual(s.lastBuildChangeBackup, kept.url.lastPathComponent)
+    }
+
+    // LLL ------------------------------------------------------------------
+
+    func test_oneBackupPerLaunch_dailyIsSkippedAfterTheLaunchBackup_andWhileOneIsRunning() async throws {
+        let container = try populated()
+        let s = status()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let svc = service(s, now: t0)
+        _ = try await svc.backUpIfBuildChanged(container: container).get()
+        XCTAssertFalse(svc.foregrounded(container: container), "a verified backup is under 24h old: no daily")
+        XCTAssertEqual(AutoBackupEngine.list(in: dir).count, 1, "one backup for this launch")
+        // 25h later the first foreground of that day does back up
+        let later = service(s, now: t0.addingTimeInterval(25 * 3600))
+        XCTAssertTrue(later.foregrounded(container: container))
+    }
+
+    // MMM ------------------------------------------------------------------
+
+    func test_iCloudAvailability_saysWhy() {
+        typealias A = AutoBackupDestination
+        XCTAssertEqual(A.availability(hasAccount: false, containerAvailable: false), .noAccount)
+        XCTAssertEqual(A.availability(hasAccount: true, containerAvailable: false), .driveOffForApp)
+        XCTAssertEqual(A.availability(hasAccount: true, containerAvailable: true), .available)
+        XCTAssertTrue(A.ICloudAvailability.noAccount.explanation?.contains("No iCloud account") == true)
+        XCTAssertTrue(A.ICloudAvailability.driveOffForApp.explanation?.contains("iCloud Drive is turned off") == true)
+        XCTAssertNil(A.ICloudAvailability.available.explanation)
+    }
+
+    func test_aLocalBackup_recordsWhyICloudIsUnavailable_andLocalOnlySuppressesTheBannerUntilICloudReturns() async throws {
+        let container = try populated()
+        let s = status()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let svc = service(s, availability: .noAccount, now: t0)
+        _ = await svc.backUpNow(container: container)
+        XCTAssertEqual(svc.iCloudAvailability, .noAccount, "the Settings status line reads this")
+
+        XCTAssertTrue(s.shouldShowBanner(now: t0.addingTimeInterval(8 * 86_400), hasData: true), "no off-device backup for over 7 days")
+        s.localOnly = true                                      // "Use local backups only"
+        XCTAssertFalse(s.shouldShowBanner(now: t0.addingTimeInterval(8 * 86_400), hasData: true))
+        XCTAssertFalse(s.shouldShowBanner(now: t0.addingTimeInterval(30 * 86_400), hasData: true), "stays away")
+
+        // iCloud becomes available: a backup reaches it, and the choice is cleared
+        let ic = AutoBackupDestination.iCloud(dir.appendingPathComponent("icloud"))
+        _ = await service(s, destination: ic, now: t0.addingTimeInterval(86_400)).backUpNow(container: container)
+        XCTAssertFalse(s.localOnly)
+        XCTAssertEqual(AutoBackupService(status: s).iCloudAvailability, .available)
+        XCTAssertTrue(s.shouldShowBanner(now: t0.addingTimeInterval(86_400 + 8 * 86_400), hasData: true), "the banner works normally again")
+    }
+}
+
+// MARK: - JJJ: relocation of data left in an older store
+
+@MainActor
+final class LegacyStoreRelocationTests: XCTestCase {
+    private var sandbox: DefaultsSandbox!
+    private var root: URL!
+    private var appGroup: URL!      // where default.store lives (and where a pinned named store would be)
+    private var sandboxDir: URL!    // the app's own Application Support
+    private var snapDir: URL!
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        sandbox = DefaultsSandbox()
+        DataSentinelStore.overrideDefaults = UserDefaults(suiteName: "ep.sentinel.suite.\(UUID().uuidString)")
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("ep_legacy_t_\(UUID().uuidString)", isDirectory: true)
+        appGroup = root.appendingPathComponent("group/Application Support", isDirectory: true)
+        sandboxDir = root.appendingPathComponent("sandbox/Application Support", isDirectory: true)
+        snapDir = root.appendingPathComponent("snapshots", isDirectory: true)
+        for d in [appGroup!, sandboxDir!, snapDir!] { try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+        defaults = UserDefaults(suiteName: "ep.legacy.test.\(UUID().uuidString)")
+    }
+    override func tearDown() {
+        DataSentinelStore.overrideDefaults = nil
+        try? FileManager.default.removeItem(at: root)
+        sandbox.restore()
+        super.tearDown()
+    }
+
+    private var currentURL: URL { appGroup.appendingPathComponent("default.store") }
+
+    /// A store file with `completed` completed sessions and `planned` planned ones.
+    @discardableResult
+    private func makeStore(at url: URL, completed: Int, planned: Int = 0) throws -> ModelContainer {
+        let schema = AppSchema.makeSchema()
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none))
+        let ctx = ModelContext(c)
+        for i in 0..<completed {
+            ctx.insert(Session(date: Date(timeIntervalSince1970: 1_700_000_000 + Double(i) * 86_400), status: .completed, weekIndex: 1, dayLabel: "D\(i)", items: []))
+        }
+        for i in 0..<planned {
+            ctx.insert(Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 86_400), status: .planned, weekIndex: 2, dayLabel: "P\(i)", items: []))
+        }
+        try ctx.save()
+        return c
+    }
+
+    private func find(completed: Int, pin: String? = nil, offered: Set<String> = []) -> LegacyStoreRelocation.Finding? {
+        LegacyStoreRelocation.find(currentStore: currentURL, currentCompleted: completed, sandboxSupport: sandboxDir, pinLabel: pin,
+                                   offered: offered, log: { _ in })
+    }
+
+    func test_noOlderFiles_noOffer() throws {
+        try makeStore(at: currentURL, completed: 2)
+        XCTAssertNil(find(completed: 2))
+    }
+
+    func test_anOlderStoreWithFewerOrEqualCompletedSessions_isNotOffered_evenWithMoreSessionsInTotal() throws {
+        try makeStore(at: currentURL, completed: 4)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 3)              // fewer
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"), completed: 4)           // equal
+        try makeStore(at: sandboxDir.appendingPathComponent("default.store"), completed: 2, planned: 30)             // many sessions, few completed
+        XCTAssertNil(find(completed: 4), "only STRICTLY more completed sessions is offered")
+    }
+
+    func test_strictlyMore_isOffered_fromTheSandboxAndFromTheAppGroupFolder() throws {
+        try makeStore(at: currentURL, completed: 2)
+        let sandboxStore = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: sandboxStore, completed: 5)
+        let a = try XCTUnwrap(find(completed: 2))
+        XCTAssertEqual(a.candidate.location, .sandbox); XCTAssertEqual(a.candidate.completedSessions, 5); XCTAssertEqual(a.currentCompletedSessions, 2)
+        XCTAssertTrue(a.message.contains("5 completed sessions") && a.message.contains("2 in the data"), a.message)
+
+        try FileManager.default.removeItem(at: sandboxStore)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 6)
+        let b = try XCTUnwrap(find(completed: 2, pin: "ElitePerformanceStore"))
+        XCTAssertEqual(b.candidate.location, .appGroup); XCTAssertTrue(b.candidate.wasPinned, "the released build's pin named this file")
+    }
+
+    func test_ofSeveralCandidates_theOneWithTheMostCompletedSessionsIsOffered() throws {
+        try makeStore(at: currentURL, completed: 1)
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore.store"), completed: 3)
+        try makeStore(at: sandboxDir.appendingPathComponent("default.store"), completed: 7)
+        XCTAssertEqual(try XCTUnwrap(find(completed: 1)).candidate.completedSessions, 7)
+    }
+
+    func test_anUnreadableCandidate_isIgnored_andAnAlreadyOfferedOneIsNotOfferedAgain() throws {
+        try makeStore(at: currentURL, completed: 1)
+        try Data("not a database".utf8).write(to: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"))
+        XCTAssertNil(find(completed: 1), "unreadable: ignored, nothing opened for write")
+        let good = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: good, completed: 4)
+        XCTAssertNotNil(find(completed: 1))
+        XCTAssertNil(find(completed: 1, offered: [good.standardizedFileURL.path]))
+    }
+
+    private func gate(finder: @escaping @MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding?, runs: @escaping @MainActor () -> Void,
+                      offered: LegacyStoreRelocation.OfferedStore) -> StartupGate {
+        StartupGate(directory: snapDir, sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "ep.sentinel.test.\(UUID().uuidString)")!),
+                    backupFirst: nil, legacyFinder: finder, offered: offered, runBackfills: { _ in runs() }, findBackups: { [] })
+    }
+
+    func test_bringingTheOlderDataOver_goesThroughTheCoordinator_andNeverTouchesTheOriginal() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 5, planned: 3)
+        let legacyBytes = try Data(contentsOf: legacy)
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        var backfills = 0
+        let g = gate(finder: { c, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: "DEFAULT", offered: offered.paths, log: { _ in })
+        }, runs: { backfills += 1 }, offered: offered)
+
+        g.begin(container: current)
+        XCTAssertNotNil(g.legacyOffer, "asked, not silently moved")
+        XCTAssertEqual(backfills, 0, "nothing runs until it is answered")
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2, "the store is unchanged while the prompt is up")
+
+        g.relocateLegacyStore()
+        XCTAssertNil(g.legacyOffer); XCTAssertNil(g.legacyError)
+        let now = try BackupContentSummary.of(store: ModelContext(current))
+        XCTAssertEqual(now.completedSessions, 5); XCTAssertEqual(now.sessions, 8, "all sessions came over")
+        XCTAssertFalse(PreImportSnapshots.list(in: snapDir).isEmpty, "the coordinator took a verified snapshot of what was there first")
+        XCTAssertEqual(try Data(contentsOf: legacy), legacyBytes, "the original file is byte-for-byte untouched")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path), "and never deleted")
+        XCTAssertEqual(backfills, 1, "the launch carried on")
+        XCTAssertTrue(offered.paths.contains(legacy.standardizedFileURL.path), "the offered marker is set")
+
+        // the next launch: not asked again (the answered file, and the store now holds the same data anyway)
+        let again = gate(finder: { _, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: "DEFAULT", offered: offered.paths, log: { _ in })
+        }, runs: {}, offered: offered)
+        again.begin(container: current)
+        XCTAssertNil(again.legacyOffer)
+    }
+
+    func test_decliningLeavesEverythingAlone_andIsNotAskedAgain() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 9)
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        var backfills = 0
+        let finder: @MainActor (ModelContainer, Int) -> LegacyStoreRelocation.Finding? = { _, completed in
+            LegacyStoreRelocation.find(currentStore: self.currentURL, currentCompleted: completed, sandboxSupport: self.sandboxDir,
+                                       pinLabel: nil, offered: offered.paths, log: { _ in })
+        }
+        let g = gate(finder: finder, runs: { backfills += 1 }, offered: offered)
+        g.begin(container: current)
+        XCTAssertNotNil(g.legacyOffer)
+        g.declineLegacyStore()
+        XCTAssertNil(g.legacyOffer)
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2)
+        XCTAssertEqual(backfills, 1)
+        XCTAssertTrue(PreImportSnapshots.list(in: snapDir).isEmpty, "no import, no snapshot")
+        let again = gate(finder: finder, runs: {}, offered: offered)
+        again.begin(container: current)
+        XCTAssertNil(again.legacyOffer, "asked at most once per file")
+    }
+
+    func test_aFailedRelocation_changesNothing_andKeepsTheOffer() throws {
+        let current = try makeStore(at: currentURL, completed: 2)
+        let legacy = sandboxDir.appendingPathComponent("default.store")
+        try makeStore(at: legacy, completed: 5)
+        let bad = LegacyStoreRelocation.Finding(candidate: .init(url: legacy, location: .sandbox, completedSessions: 99, sessions: 99, lastCompletedDate: nil, wasPinned: false),
+                                                currentCompletedSessions: 2)   // claims more than the file holds
+        let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
+        let g = gate(finder: { _, _ in bad }, runs: {}, offered: offered)
+        g.begin(container: current)
+        g.relocateLegacyStore()
+        XCTAssertNotNil(g.legacyOffer, "still offered")
+        XCTAssertTrue(g.legacyError?.contains("Nothing was changed") == true, g.legacyError ?? "nil")
+        XCTAssertEqual(try BackupContentSummary.of(store: ModelContext(current)).completedSessions, 2)
+        XCTAssertTrue(offered.paths.isEmpty)
+    }
+
+    func test_theOpenerLogsLegacyFilesInTheAppGroupFolderToo() throws {
+        try makeStore(at: appGroup.appendingPathComponent("ElitePerformanceStore_v2.store"), completed: 1)
+        try makeStore(at: sandboxDir.appendingPathComponent("ElitePerformanceStore.store"), completed: 1)
+        var logs: [String] = []
+        let schema = AppSchema.makeSchema()
+        let config = ModelConfiguration(schema: schema, url: currentURL, cloudKitDatabase: .none)
+        let result = AppStoreOpener.open(appSupport: sandboxDir, configuration: config, log: { logs.append($0) })
+        guard case .opened = result else { return XCTFail("opens") }
+        let line = try XCTUnwrap(logs.first { $0.contains("Legacy store files present") })
+        XCTAssertTrue(line.contains("ElitePerformanceStore_v2.store (app-group Application Support)"), line)
+        XCTAssertTrue(line.contains("ElitePerformanceStore.store (sandbox Application Support)"), line)
     }
 }

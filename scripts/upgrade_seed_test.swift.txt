@@ -1,0 +1,46 @@
+
+// ---- appended by scripts/upgrade_test.sh to the RELEASED build's test target (worktree only, never committed) ----
+// Seeds the app's REAL default store (the same URL the app opens) with the released build's own code.
+final class ZZUpgradeSeedTests: XCTestCase {
+    func test_seedRealDefaultStore() throws {
+        let env = ProcessInfo.processInfo.environment
+        let mode = env["EP_UPGRADE_MODE"] ?? "fixture"
+        let schema = Schema([User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+                             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+                             MesoBlock.self, UserProfile.self, CustomExercise.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+        if mode == "onboarding" {
+            // One template program, exactly as onboarding applies it, then two completed sessions. No customs, no import.
+            let result = OnboardingResult(goal: .hypertrophy, experience: .intermediate, daysPerWeek: 4,
+                                          trainingDaysOfWeek: [2, 3, 5, 6], equipmentProfile: .commercial, sessionLengthMinutes: 60,
+                                          injuryFlags: [], minLoadIncrement: 2.5,
+                                          startDate: Calendar.current.date(byAdding: .day, value: -14, to: Date())!)
+            ProgramApplicationService.apply(result, context: ctx, startDate: result.startDate)
+            let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)]))
+            for s in sessions.prefix(2) {
+                for item in s.items {
+                    let n = max(1, item.targetSets)
+                    item.actualReps = Array(repeating: item.targetReps, count: n)
+                    item.actualLoads = Array(repeating: 100, count: n)
+                    item.actualRIRs = Array(repeating: item.targetRIR, count: n)
+                    item.isCompleted = true
+                }
+                s.status = .completed
+                s.completedAt = s.date
+            }
+            try ctx.save()
+        } else {
+            let path = try XCTUnwrap(env["EP_UPGRADE_FIXTURE"], "set TEST_RUNNER_EP_UPGRADE_FIXTURE")
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        }
+        let sessions = try ModelContext(container).fetch(FetchDescriptor<Session>())
+        let c = ModelContext(container)
+        let report = "store url: \(config.url.path)\n" +
+            "counts sessions=\(sessions.count) completed=\(sessions.filter { $0.status == .completed }.count) " +
+            "history=\(try c.fetchCount(FetchDescriptor<SessionHistory>())) custom=\(try c.fetchCount(FetchDescriptor<CustomExercise>())) " +
+            "blocks=\(try c.fetchCount(FetchDescriptor<MesoBlock>())) items=\(sessions.reduce(0) { $0 + $1.items.count })\n"
+        try report.write(toFile: env["EP_UPGRADE_REPORT"] ?? "/tmp/ep_upgrade_report.txt", atomically: true, encoding: .utf8)
+    }
+}

@@ -253,7 +253,7 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 if !backupsAreOffDevice {
-                    Text("iCloud isn't available, so backups are saved on this device only. Sign in to iCloud and turn on iCloud Drive for Elite Performance.")
+                    Text("Backups are saved on this device only. " + (autoBackup.iCloudAvailability.explanation ?? "iCloud isn't available right now.") + (autoBackup.status.localOnly ? " (You chose local backups only.)" : ""))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
