@@ -1113,7 +1113,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1125,6 +1125,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and your date of birth (to set heart-rate zones) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance does not write to Apple Health. It only asks to read your workouts and heart rate; Apple requires this text because the Health permission request covers both reading and writing.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -1165,7 +1166,7 @@
 				CODE_SIGN_ENTITLEMENTS = ElitePerformance/ElitePerformance.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QU96N83NX;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1177,6 +1178,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Elite Performance";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Elite Performance reads your workout metrics (duration, calories, heart rate) and your date of birth (to set heart-rate zones) to attach them to your session recap.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Elite Performance does not write to Apple Health. It only asks to read your workouts and heart rate; Apple requires this text because the Health permission request covers both reading and writing.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
