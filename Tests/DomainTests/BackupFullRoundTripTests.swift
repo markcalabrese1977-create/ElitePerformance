@@ -1533,6 +1533,37 @@ final class MissedSourceSeedingTests: XCTestCase {
         XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
     }
 
+    // PPP: only a target whose same-meso, same-dayLabel, same-wave predecessor is dated before today and was not completed.
+    func test_PPP_onlyAMissedPredecessorSeeds_upcomingCompletedOrMissingPredecessorsLeaveTheTargetToCarryForward() throws {
+        func scenario(predecessor: SessionStatus?, at days: Int, wave: String = "b", dayLabel: String = "Pull", otherMeso: Bool = false) throws -> SessionItem {
+            let ctx = try context()
+            let meso = MesoBlock(name: "M", startDate: day(-40), totalWeeks: 8), other = MesoBlock(name: "O", startDate: day(-40), totalWeeks: 8)
+            ctx.insert(meso); ctx.insert(other)
+            let history = Session(date: day(-20), status: .completed, weekIndex: 4, dayLabel: "Pull", items: [item("a", reps: [10, 10, 10], loads: [100, 100, 100], rirs: [2, 2, 2], planned: false)])
+            history.meso = meso
+            let t = item("b", planned: true)
+            let target = Session(date: day(8), status: .planned, weekIndex: 8, dayLabel: "Pull", items: [t]); target.meso = meso
+            for s in [history, target] { ctx.insert(s); s.meso!.sessions.append(s) }
+            if let predecessor {
+                let p = item(wave, planned: true)
+                let ps = Session(date: day(days), status: predecessor, weekIndex: 5, dayLabel: dayLabel, items: [p])
+                ps.meso = otherMeso ? other : meso
+                ctx.insert(ps); ps.meso!.sessions.append(ps)
+            }
+            _ = MissedSourceSeeding.run(in: ctx)
+            return t
+        }
+        XCTAssertGreaterThan(try scenario(predecessor: .planned, at: -13).suggestedLoad, 0, "predecessor before today, never completed: seeded")
+        XCTAssertGreaterThan(try scenario(predecessor: .inProgress, at: -2).suggestedLoad, 0, "started and abandoned counts as not completed")
+        XCTAssertEqual(try scenario(predecessor: .planned, at: 3).suggestedLoad, 0, "predecessor still upcoming: carry-forward owns it")
+        XCTAssertEqual(try scenario(predecessor: .planned, at: 0).suggestedLoad, 0, "today is not before today")
+        XCTAssertEqual(try scenario(predecessor: .completed, at: -6).suggestedLoad, 0, "predecessor completed: carry-forward owns it")
+        XCTAssertEqual(try scenario(predecessor: nil, at: 0).suggestedLoad, 0, "no predecessor (a first exposure): not seeded")
+        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, wave: "a").suggestedLoad, 0, "a different wave letter is not the predecessor")
+        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, dayLabel: "Push").suggestedLoad, 0, "a different dayLabel is not the predecessor")
+        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, otherMeso: true).suggestedLoad, 0, "another meso is not the predecessor")
+    }
+
     func test_anEditedTarget_aTargetWithALoad_aBodyweightLift_andPastTargets_areLeftAlone() throws {
         let ctx = try context()
         let (t, session) = block(ctx)
@@ -1557,15 +1588,16 @@ final class MissedSourceSeedingTests: XCTestCase {
             done.meso = old
             let tItem = item("a", planned: true)
             let target = Session(date: day(4), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [tItem]); target.meso = cur
-            for s in [done, target] { ctx.insert(s) }
-            old.sessions.append(done); cur.sessions.append(target)
+            let missed = Session(date: day(-2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [item("a", planned: true)]); missed.meso = cur  // its predecessor, never done
+            for s in [done, target, missed] { ctx.insert(s) }
+            old.sessions.append(done); cur.sessions.append(target); cur.sessions.append(missed)
             _ = MissedSourceSeeding.run(in: ctx)
             XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent")
             return tItem
         }
         let recent = try scenario(daysAgo: 60)
         XCTAssertGreaterThan(recent.suggestedLoad, 0, "another block, 60 days ago: still seeds")
-        XCTAssertFalse(recent.prescriptionNotes?.contains("was missed") == true)
+        XCTAssertTrue(recent.prescriptionNotes?.contains("was missed") == true)
 
         let stale = try scenario(daysAgo: 13 * 7)
         XCTAssertEqual(stale.suggestedLoad, 0, "13 weeks old: not used")
@@ -1576,6 +1608,7 @@ final class MissedSourceSeedingTests: XCTestCase {
         let m = MesoBlock(name: "E", startDate: day(-3), totalWeeks: 8); empty.insert(m)
         let lone = item("a", planned: true)
         let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [lone]); s.meso = m; empty.insert(s); m.sessions.append(s)
+        let miss = Session(date: day(-1), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [item("a", planned: true)]); miss.meso = m; empty.insert(miss); m.sessions.append(miss)
         _ = MissedSourceSeeding.run(in: empty)
         XCTAssertEqual(lone.suggestedLoad, 0)
         XCTAssertEqual(lone.prescriptionNotes, "No recent history — set a load.", "no history at all: the same note")
