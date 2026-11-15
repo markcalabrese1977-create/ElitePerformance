@@ -2865,3 +2865,32 @@ final class ProgramDayPageTests: XCTestCase {
         XCTAssertEqual(only.editedSkipped, 0)
     }
 }
+
+// MARK: - R6: Insert deload week takes a verified backup first
+
+final class InsertDeloadBackupFirstTests: XCTestCase {
+    /// Every flow that writes a block runs behind `SeedBackupGuard.run`; the three seeding flows and Insert deload share it.
+    func test_theInsertDeloadFlow_runsBehindTheBackupGuard() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Features/Home/InsertDeloadFlow.swift"), encoding: .utf8)
+        let insert = try XCTUnwrap(text.range(of: "struct InsertDeloadFlow")).lowerBound
+        let remove = try XCTUnwrap(text.range(of: "struct RemoveDeloadModel")).lowerBound
+        let section = String(text[insert..<remove])
+        let guardPos = try XCTUnwrap(section.range(of: "seedGuard.run(container:"), "the apply button goes through the guard").lowerBound
+        let applyPos = try XCTUnwrap(section.range(of: "model.apply(plan)")).lowerBound
+        XCTAssertLessThan(guardPos, applyPos, "the guard wraps the apply")
+        XCTAssertTrue(section.contains(".seedBackupGuard(seedGuard)"), "and its prompt is attached")
+    }
+
+    @MainActor
+    func test_aFailedBackup_blocksTheInsert_untilContinueIsTyped() async throws {
+        let guardian = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        var inserted = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { inserted += 1 }
+        for _ in 0..<100 where guardian.failure == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertNotNil(guardian.failure)
+        XCTAssertEqual(inserted, 0)
+        XCTAssertTrue(guardian.continueWithoutBackup(typed: "CONTINUE"))
+        XCTAssertEqual(inserted, 1)
+    }
+}
