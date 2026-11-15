@@ -110,6 +110,12 @@ struct ProgramPlanView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    // Not only in the menu: it is how goal, equipment, schedule, session length and joints are changed.
+                    if let onChangeProgram {
+                        ChangeProgramRow(action: onChangeProgram)
+                            .padding(.top, 6)
+                    }
+
                     if onViewMesoSummary != nil {
                         Button {
                             onViewMesoSummary?()
@@ -434,6 +440,9 @@ struct ProgramPlanView: View {
                 .foregroundStyle(.secondary)
             if let onChangeProgram {
                 Button("Create program") { onChangeProgram() }
+                Text(ChangeProgramRow.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -572,5 +581,37 @@ private struct InsertedDeloadHeader: View {
             }
             .buttonStyle(.borderless)
         }
+    }
+}
+
+
+/// The visible way into Change Program: it re-opens the setup flow pre-filled from the profile, then asks before it
+/// replaces the current meso (HomeView's confirmation).
+struct ChangeProgramRow: View {
+    static let title = "Change program"
+    static let subtitle = "Update your goal, equipment, schedule or joints and build a new program."
+
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.title).font(.subheadline.bold())
+                    Text(Self.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
     }
 }

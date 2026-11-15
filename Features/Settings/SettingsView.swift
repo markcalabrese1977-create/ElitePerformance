@@ -180,25 +180,6 @@ struct SettingsView: View {
             // MARK: - Profile
                         if let profile = profiles.first {
                             Section("Training") {
-                                Picker("Goal", selection: Binding(
-                                    get: { profile.primaryGoal },
-                                    set: { profile.primaryGoal = $0 }
-                                )) {
-                                    Text("Hypertrophy").tag(PrimaryGoal.hypertrophy)
-                                    Text("Strength").tag(PrimaryGoal.strength)
-                                    Text("Fat Loss").tag(PrimaryGoal.fatLoss)
-                                    Text("Longevity").tag(PrimaryGoal.longevity)
-                                }
-
-                                Picker("Experience", selection: Binding(
-                                    get: { profile.experience },
-                                    set: { profile.experience = $0 }
-                                )) {
-                                    ForEach(TrainingExperience.allCases, id: \.self) {
-                                        Text($0.label).tag($0)
-                                    }
-                                }
-
                                 UnitSection(profile: profile)
 
                                 HStack {
@@ -256,86 +237,13 @@ struct SettingsView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Session Length")
-                                    // "No limit" first: the next program is then never trimmed for time.
-                                    Picker("Session Length", selection: Binding(
-                                        get: { profile.sessionLengthMinutes == nil ? 0 : 1 },
-                                        set: { profile.sessionLengthMinutes = $0 == 0 ? nil : (profile.sessionLengthMinutes ?? 60) }
-                                    )) {
-                                        Text("No limit").tag(0)
-                                        Text("Set a limit").tag(1)
-                                    }
-                                    .pickerStyle(.segmented)
-                                    if profile.sessionLengthMinutes != nil {
-                                        HStack {
-                                            Spacer()
-                                            TextField("min", value: Binding(
-                                                get: { profile.sessionLengthMinutes ?? 60 },
-                                                set: { profile.sessionLengthMinutes = $0 }
-                                            ), format: .number)
-                                            .keyboardType(.numberPad)
-                                            .multilineTextAlignment(.trailing)
-                                            .frame(width: 60)
-                                            Text("min")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Joint Limitations")
-                                        .font(.subheadline)
-                                    FlowLayout(spacing: 8) {
-                                        ForEach(InjuryFlag.allCases, id: \.self) { flag in
-                                            let isSelected = profile.injuryFlags.contains(flag)
-                                            Button {
-                                                var flags = profile.injuryFlags
-                                                if isSelected {
-                                                    flags.removeAll { $0 == flag }
-                                                } else {
-                                                    flags.append(flag)
-                                                }
-                                                profile.injuryFlags = flags
-                                            } label: {
-                                                Text(flag.rawValue.camelCaseToWords())
-                                                    .font(.caption)
-                                                    .padding(.horizontal, 10)
-                                                    .padding(.vertical, 5)
-                                                    .background(isSelected ? Color.blue : Color(.systemGray5))
-                                                    .foregroundColor(isSelected ? .white : .primary)
-                                                    .clipShape(Capsule())
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 4)
                             }
                         }
             
 
 
-            // MARK: - Equipment
-            if let profile = profiles.first {
-                Section {
-                    EquipmentEditor(
-                        preset: Binding(
-                            get: { profile.equipmentPreset },
-                            set: { profile.equipmentPreset = $0 }
-                        ),
-                        checklist: Binding(
-                            get: { profile.equipmentChecklist },
-                            set: { profile.equipmentChecklist = $0 }
-                        )
-                    )
-                } header: {
-                    Text("Training equipment")
-                } footer: {
-                    Text("Changes apply to your next program. Your current meso is unchanged.")
-                }
-            }
+            // Goal, experience, equipment, session length and joints are not edited here: only the program builder reads
+            // them, so they live in Program > Change program, which rebuilds the program from them.
 
             // MARK: - Analytics
             if let profile = profiles.first {

@@ -501,3 +501,42 @@ final class SessionLengthNoLimitTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(try ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first).sessionLengthMinutes, 60)
     }
 }
+
+// MARK: - Settings keeps only rows the live app reads
+
+/// Goal, experience, equipment, session length and joints are read only by the program builder, so they are set in
+/// onboarding / Change program, not in Settings. A source pin, like the other Settings pins in this target.
+final class SettingsHasNoFitterOnlyFieldsTests: XCTestCase {
+
+    private func source(_ path: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+    }
+
+    func test_settings_hasNoFitterOnlyFields() throws {
+        let settings = try source("Features/Settings/SettingsView.swift")
+        for forbidden in ["primaryGoal", "profile.experience", "equipmentPreset", "equipmentChecklist", "EquipmentEditor",
+                          "sessionLengthMinutes", "injuryFlags", "InjuryFlag", "Joint Limitations", "Session Length",
+                          "Training equipment", "Customize equipment", "Changes apply to your next program"] {
+            XCTAssertFalse(settings.contains(forbidden), "Settings must not carry the fitter-only `\(forbidden)`")
+        }
+    }
+
+    func test_settings_keepsTheRowsTheLiveAppReads() throws {
+        let settings = try source("Features/Settings/SettingsView.swift")
+        for kept in ["UnitSection(profile: profile)", "minLoadIncrement", "bodyWeight", "birthDateOverride", "Weekly set ranges",
+                     "Backup & Restore"] {
+            XCTAssertTrue(settings.contains(kept), "Settings lost `\(kept)`")
+        }
+    }
+
+    func test_programTab_showsChangeProgram_withItsSubtitle() throws {
+        XCTAssertEqual(ChangeProgramRow.subtitle, "Update your goal, equipment, schedule or joints and build a new program.")
+        let plan = try source("Features/Home/ProgramPlanView.swift")
+        XCTAssertTrue(plan.contains("ChangeProgramRow(action: onChangeProgram)"), "visible in the block header, not only in the menu")
+        // The flow still opens pre-filled from the profile and still asks before replacing the meso.
+        let home = try source("Features/Home/HomeView.swift")
+        XCTAssertTrue(home.contains("OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first)"))
+        XCTAssertTrue(home.contains("Replace your upcoming sessions?"))
+    }
+}
