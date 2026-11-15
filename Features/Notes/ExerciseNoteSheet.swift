@@ -49,6 +49,7 @@ struct ExerciseNoteSheet: View {
                         onCommitted: { _ = offerClampIfNeeded() },
                         onCleared: { offeredCap = nil; clampPlan = nil; clampError = nil }
                     )
+                    LoadStepRow(profile: profile, exerciseId: exerciseId)
 
                     if let plan = clampPlan {
                         MaxLoadClampPrompt(
@@ -306,5 +307,59 @@ private struct MaxLoadClampPrompt: View {
         .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 12)
         .padding(.top, 8)
+    }
+}
+
+
+/// "Load step": an optional per-exercise step (in the lifter's unit). One earned increase adds this much and the plan rounds
+/// to it for this lift. Empty = the default load step from Settings. Stored on the profile like the max load.
+private struct LoadStepRow: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.loadUnit) private var unit
+    let profile: UserProfile
+    let exerciseId: String
+
+    @State private var text: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Load step")
+                    .font(.subheadline)
+                Spacer()
+                TextField(LoadFormatter(unit: unit).number(profile.minLoadIncrement), text: $text)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 90)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: text) { _, newValue in commit(newValue) }
+                Text(unit.label).foregroundStyle(.secondary)
+                if !text.isEmpty {
+                    Button {
+                        text = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear load step")
+                }
+            }
+            Text("Empty uses your default load step (Settings). A step set here wins for this lift only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .onAppear {
+            if let own = UserProfile.loadStepOverride(for: exerciseId, profile: profile) { text = LoadFormatter(unit: unit).number(own) }
+        }
+    }
+
+    private func commit(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        if trimmed.isEmpty { profile.setLoadStep(nil, exerciseId: exerciseId) }
+        else if let v = Double(trimmed), v > 0 { profile.setLoadStep(v, exerciseId: exerciseId) }
+        else { return }
+        try? modelContext.save()
     }
 }

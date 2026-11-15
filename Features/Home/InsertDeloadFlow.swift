@@ -131,6 +131,7 @@ struct InsertDeloadModel {
 
 /// "Insert deload week": a preview of the deload sessions and the schedule shift, then apply.
 struct InsertDeloadFlow: View {
+    @StateObject private var seedGuard = SeedBackupGuard()
     @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var modelContext
 
@@ -205,6 +206,7 @@ struct InsertDeloadFlow: View {
                 }
             }
             .id(refreshToken)
+            .seedBackupGuard(seedGuard)
             .navigationTitle(InsertDeloadModel.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -212,11 +214,14 @@ struct InsertDeloadFlow: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    switch model.apply(plan) {
-                    case .success: onFinish()
-                    case .failure(let failure):
-                        errorMessage = failure.message
-                        if failure.needsRefresh { refreshToken += 1 }
+                    // A verified backup first; if it fails the week is not inserted (see SeedBackupGuard).
+                    seedGuard.run(container: modelContext.container) {
+                        switch model.apply(plan) {
+                        case .success: onFinish()
+                        case .failure(let failure):
+                            errorMessage = failure.message
+                            if failure.needsRefresh { refreshToken += 1 }
+                        }
                     }
                 } label: {
                     Text(InsertDeloadModel.confirmTitle(plan)).frame(maxWidth: .infinity)

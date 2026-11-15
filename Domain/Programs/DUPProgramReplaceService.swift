@@ -2,6 +2,52 @@ import Foundation
 import SwiftData
 
 enum DUPProgramReplaceService {
+
+    /// What a replacement would delete, and whether it may run at all. Computed without writing anything.
+    struct Plan {
+        let startDay: Date
+        /// Planned sessions on or after the start day, with nothing logged: the ones that are deleted.
+        let sessionsToDelete: [Session]
+        /// Sessions that block the replacement: one in progress, or a planned one that already has logged sets.
+        let blockers: [Session]
+
+        var isAllowed: Bool { blockers.isEmpty }
+        var dateRange: (first: Date, last: Date)? {
+            let dates = sessionsToDelete.map(\.date)
+            guard let a = dates.min(), let b = dates.max() else { return nil }
+            return (a, b)
+        }
+
+        /// What the lifter is told before anything is deleted.
+        var message: String {
+            let f = Date.FormatStyle(date: .abbreviated, time: .omitted)
+            if !blockers.isEmpty {
+                let n = blockers.count
+                return "\(n) session\(n == 1 ? "" : "s") on or after \(startDay.formatted(f)) \(n == 1 ? "is" : "are") in progress or already \(n == 1 ? "has" : "have") logged sets. Finish \(n == 1 ? "it" : "them") first; nothing was changed. Logged work is never deleted."
+            }
+            guard let range = dateRange else { return "No planned sessions will be deleted. The new program starts \(startDay.formatted(f)); your completed history is kept." }
+            let n = sessionsToDelete.count
+            return "\(n) planned session\(n == 1 ? "" : "s") (\(range.first.formatted(f)) – \(range.last.formatted(f))) will be deleted and replaced by the new program. Your completed history is kept, and a backup is taken first."
+        }
+    }
+
+    enum ReplaceError: LocalizedError {
+        case refused(String)
+        var errorDescription: String? { if case .refused(let m) = self { return m } else { return nil } }
+    }
+
+    /// The sessions a replacement from `startDate` deletes, and any that forbid it. Same selection the replacement uses.
+    static func plan(startDate: Date, context: ModelContext, calendar: Calendar = .current) -> Plan {
+        let startDay = effectiveStartDay(for: startDate, calendar: calendar)
+        let all = (try? context.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)]))) ?? []
+        // Guard 2: never hard-delete maintenance sessions: they ride their archived maintenance block.
+        let affected = all.filter {
+            calendar.startOfDay(for: $0.date) >= startDay && $0.status != .completed && $0.meso?.isMaintenance != true
+        }
+        let blockers = affected.filter { $0.status == .inProgress || SessionEditSafety.hasLoggedData($0) }
+        let deletable = affected.filter { $0.status == .planned && !SessionEditSafety.hasLoggedData($0) }
+        return Plan(startDay: startDay, sessionsToDelete: deletable, blockers: blockers)
+    }
     /// The day this service will actually seed from, for a requested start date:
     /// normalized to the start of its day, then clamped forward to today because
     /// a past start would over-delete planned history.
@@ -32,6 +78,10 @@ enum DUPProgramReplaceService {
             print("⚠️ replacePlannedProgram: startDate \(calendar.startOfDay(for: startDate)) is in the past — clamping to today.")
         }
 
+        // Guard 3: logged work is never deleted. An in-progress session, or a planned one with logged sets, stops the replacement.
+        let plan = plan(startDate: startDate, context: context, calendar: calendar)
+        guard plan.isAllowed else { throw ReplaceError.refused(plan.message) }
+
         // 1) Archive any currently active meso blocks
         let mesoDescriptor = FetchDescriptor<MesoBlock>()
         let existingBlocks = try context.fetch(mesoDescriptor)
@@ -41,20 +91,7 @@ enum DUPProgramReplaceService {
         }
 
         // 2) Delete non-completed sessions on or after the chosen start date
-        let sessionDescriptor = FetchDescriptor<Session>(
-            sortBy: [SortDescriptor(\.date, order: .forward)]
-        )
-
-        let allSessions = try context.fetch(sessionDescriptor)
-
-        // Guard 2: never hard-delete maintenance sessions — they ride their archived
-        // maintenance block and must remain visible in the carry-over filter.
-        let sessionsToDelete = allSessions.filter { session in
-            let sessionDay = calendar.startOfDay(for: session.date)
-            return sessionDay >= startDay
-                && session.status != .completed
-                && session.meso?.isMaintenance != true
-        }
+        let sessionsToDelete = plan.sessionsToDelete
 
         for session in sessionsToDelete {
             context.delete(session)

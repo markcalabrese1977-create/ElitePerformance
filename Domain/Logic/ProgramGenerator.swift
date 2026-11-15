@@ -26,7 +26,6 @@ enum ProgramGenerator {
         let profileDescriptor = FetchDescriptor<UserProfile>()
         let profile = try? context.fetch(profileDescriptor).first
         let unit = profile?.loadUnit ?? .lb
-        let loadIncrement: Double = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: unit)
         let bodyWeight = profile?.bodyWeight
 
         let allSessionsDescriptor = FetchDescriptor<Session>(
@@ -83,7 +82,7 @@ enum ProgramGenerator {
 
                 let rawLoad = E1RMCalculator.load(for: decayWeighted, reps: item.targetReps, targetRIR: item.targetRIR)
                 let anchored = UserProfile.clampedLoad(
-                    E1RMCalculator.rounded(rawLoad, increment: loadIncrement, unit: unit),
+                    E1RMCalculator.rounded(rawLoad, increment: UserProfile.loadStep(for: item.exerciseId, profile: profile, unit: unit), unit: unit),
                     exerciseId: item.exerciseId, profile: profile
                 )
                 guard anchored > 0 else { continue }

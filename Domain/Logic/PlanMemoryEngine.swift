@@ -54,7 +54,6 @@ struct PlanMemoryEngine {
 
         let inputs = loadPolicyInputs()
         let profile = inputs.profile
-        let loadIncrement = inputs.loadIncrement
         let unit = inputs.unit
         let bodyWeight = inputs.bodyWeight
         let customExercises = inputs.customExercises
@@ -76,6 +75,8 @@ struct PlanMemoryEngine {
         guard !futureSessions.isEmpty else { return }
 
         for sourceItem in session.items {
+            // The step is per exercise: the lifter's own step for this lift, else the default load step.
+            let loadIncrement = UserProfile.loadStep(for: sourceItem.exerciseId, profile: profile, unit: unit)
             guard hasMeaningfulPlan(sourceItem) else { continue }
 
             // Fixed-load exercise (per-exercise exemption): this source never writes an

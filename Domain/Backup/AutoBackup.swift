@@ -325,6 +325,16 @@ final class AutoBackupService: ObservableObject {
         self.calendar = calendar
     }
 
+    /// Looks up whether iCloud is usable (off the main thread) and publishes why not. Called when Settings or the Today banner
+    /// appears, so the reason and "Use local backups only" show on a fresh launch, before any backup has been placed.
+    func refreshICloudAvailability() async {
+        let check = checkAvailability
+        let latest = await Task.detached(priority: .utility) { check() }.value
+        if latest != iCloudAvailability { iCloudAvailability = latest }
+        // iCloud is back: the "local only" choice has done its job.
+        if latest == .available, status.localOnly { status.localOnly = false; statusRevision += 1 }
+    }
+
     // Triggers ---------------------------------------------------------------
 
     /// (1) A session was marked completed.

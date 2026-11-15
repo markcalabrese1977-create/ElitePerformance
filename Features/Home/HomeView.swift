@@ -24,6 +24,14 @@ struct HomeView: View {
     @State private var pendingExerciseOverrides: PreviewOverrides = .empty
     @StateObject private var seedGuard = SeedBackupGuard()
 
+    /// Change Program, after the wizard: what it would delete, shown before anything is deleted.
+    struct PendingReplace {
+        let result: OnboardingResult
+        let overrides: PreviewOverrides
+        let plan: DUPProgramReplaceService.Plan
+    }
+    @State private var pendingReplace: PendingReplace?
+
     // Start date seeded into the onboarding flow. Set from the meso-summary
     // picker when arriving via "Start new hypertrophy meso"; reset to today
     // when the user opens Change Program directly from the toolbar.
@@ -37,25 +45,12 @@ struct HomeView: View {
         NavigationStack {
             ProgramPlanView(onViewMesoSummary: activeMeso != nil ? {
                             showMesoSummary = true
-                        } : nil)
+                        } : nil,
+                            onChangeProgram: {
+                                pendingMesoStartDate = Date()
+                                showingChangeProgram = true
+                            })
                 .navigationTitle("Program")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            pendingMesoStartDate = Date()
-                            showingChangeProgram = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
-                                Text("Change Program")
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(.systemGray6))
-                            .clipShape(Capsule())
-                        }
-                    }
-                }
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
                         OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides in
@@ -84,6 +79,17 @@ struct HomeView: View {
                     showMesoRolloverGuard = true
                 }
             }
+        }
+        .alert(pendingReplace?.plan.isAllowed == false ? "Can't change the program yet" : "Replace your upcoming sessions?",
+               isPresented: Binding(get: { pendingReplace != nil }, set: { if !$0 { pendingReplace = nil } })) {
+            if pendingReplace?.plan.isAllowed == true {
+                Button("Replace", role: .destructive) { confirmReplace() }
+                Button("Cancel", role: .cancel) { pendingReplace = nil }
+            } else {
+                Button("OK", role: .cancel) { pendingReplace = nil }
+            }
+        } message: {
+            Text(pendingReplace?.plan.message ?? "")
         }
         .sheet(isPresented: $showMesoSummary) {
             if let meso = activeMeso {
@@ -129,7 +135,16 @@ struct HomeView: View {
         pendingOnboardingResult = nil
         let overrides = pendingExerciseOverrides
         pendingExerciseOverrides = .empty
+        // Same guards as Start next meso: list what would be deleted, refuse while logged work is in the way (see
+        // DUPProgramReplaceService.plan), and only then take the backup and replace.
+        let plan = DUPProgramReplaceService.plan(startDate: result.startDate, context: modelContext)
+        pendingReplace = PendingReplace(result: result, overrides: overrides, plan: plan)
+    }
 
+    private func confirmReplace() {
+        guard let pending = pendingReplace, pending.plan.isAllowed else { pendingReplace = nil; return }
+        pendingReplace = nil
+        let result = pending.result, overrides = pending.overrides
         DispatchQueue.main.async {
             // A verified backup first; if it fails the program is not seeded (see SeedBackupGuard).
             seedGuard.run(container: modelContext.container) {

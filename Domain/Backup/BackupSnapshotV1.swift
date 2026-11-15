@@ -81,6 +81,8 @@ struct UserProfileBackupDTO: Codable {
     var exemptExerciseIds: [String]? = nil
     /// Per-exercise max load (canonical id -> load). nil in old backups: no caps.
     var maxLoadByExercise: [String: Double]? = nil
+    /// Per-exercise load step (canonical id -> step). nil in old backups: the default load step applies everywhere.
+    var loadStepByExercise: [String: Double]? = nil
     /// Weekly set-range overrides per muscle ("<muscle>.min"/".max"). nil in old backups: all defaults.
     var muscleSetRanges: [String: Double]? = nil
     // Added (optional birthdate for age-based heart-rate zones). Absent in older backups.

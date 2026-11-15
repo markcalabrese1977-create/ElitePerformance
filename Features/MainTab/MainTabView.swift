@@ -153,6 +153,7 @@ struct TodayTabView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .task { await autoBackup.refreshICloudAvailability() }   // so the iCloud reason shows on a fresh launch
             .navigationTitle("Today")
             .sheet(isPresented: $showRestToday) {
                 if let meso = todaySession?.meso {

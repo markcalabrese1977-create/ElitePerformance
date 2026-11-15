@@ -1432,7 +1432,7 @@ final class SessionScreenViewModel: ObservableObject {
                     let allSessionsForRec = (try? context.fetch(FetchDescriptor<Session>())) ?? []
                     let recProfile = try? context.fetch(FetchDescriptor<UserProfile>()).first
                     let recUnit = recProfile?.loadUnit ?? .lb
-                    let recLoadIncrement = recProfile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: recUnit)
+                    let recLoadIncrement = UserProfile.loadStep(for: matchingItem.exerciseId, profile: recProfile, unit: recUnit)
                     let recCustomExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
                     let cleanCount = LoadProjectionService.consecutiveCleanCount(
                         exerciseId: matchingItem.exerciseId,
@@ -2959,11 +2959,11 @@ struct UISessionSet: Identifiable {
             )
         }
     }
-    /// "EXTRA SET  6-8 reps @ 2 RIR": the line for a row past the planned set count (no load).
+    /// "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR": the line for the spare row past the planned set count (no load).
     static func extraSetLabel(repRange: RepRange, rir: Int?) -> String {
         let reps = repRange.min == repRange.max ? "\(repRange.min)" : "\(repRange.min)-\(repRange.max)"
         let rirText = rir.map { " @ \($0) RIR" } ?? ""
-        return "EXTRA SET  \(reps) reps\(rirText)"
+        return "OPTIONAL EXTRA SET  \(reps) reps\(rirText)"
     }
 
     func plannedDescription(with repRange: RepRange, isBodyweight: Bool = false) -> String {

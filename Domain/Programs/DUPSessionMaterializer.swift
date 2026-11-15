@@ -77,8 +77,9 @@ enum DUPSessionMaterializer {
 
                 waveRaw: materializedDay.wave.rawValue,
                 priorityRaw: exercise.priority.rawValue,
-                setMin: exercise.setMin,
-                setMax: exercise.setMax,
+                // The band covers the week's set ramp (a 4-set ramp week of a 2-3 band reads "2-4", never "2-3" with 4 planned).
+                setMin: defaultSets > 0 ? min(exercise.setMin, defaultSets) : exercise.setMin,
+                setMax: defaultSets > 0 ? max(exercise.setMax, defaultSets) : exercise.setMax,
                 repMin: exercise.repMin,
                 repMax: exercise.repMax,
                 targetRIRMin: exercise.targetRIRMin,

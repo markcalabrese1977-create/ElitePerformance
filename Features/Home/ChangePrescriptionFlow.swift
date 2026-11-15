@@ -9,8 +9,6 @@ import SwiftData
 /// COUNT stepper: a lifter-chosen number of sets is a hand-set target too.
 enum PlanStepperEdits {
 
-    /// Auto / Auto+ put the item back on the defaults, so the engine owns its plan again: carry-forward may write it.
-    static func markReset(_ item: SessionItem) { item.planEdited = false }
 
     /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
     /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
@@ -352,7 +350,7 @@ private struct ChangePrescriptionForm: View {
                     }
                     let skipped = plan.refusals
                     if !skipped.isEmpty {
-                        Section("Skipped") {
+                        Section(plan.editedSkipped > 0 ? "Skipped (\(plan.editedSkipped) edited by you)" : "Skipped") {
                             ForEach(Array(skipped.enumerated()), id: \.offset) { _, r in
                                 HStack {
                                     Text(r.session.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())

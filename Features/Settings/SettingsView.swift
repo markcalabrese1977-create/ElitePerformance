@@ -14,6 +14,110 @@ struct SettingsView: View {
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
 
+    /// Restore: the automatic backups on this device and in iCloud, and the pre-import undo. Every row here replaces the data on
+    /// this device after a confirmation (see `RestoreConfirmSheet`), so they are red and live one screen away from Settings.
+    private var restoreScreen: some View {
+        List {
+            Section {
+                if backupFiles.isEmpty {
+                    Text("No automatic backups yet.").foregroundStyle(.secondary)
+                }
+                ForEach(backupFiles.prefix(10)) { file in
+                    Button {
+                        try? FileManager.default.startDownloadingUbiquitousItem(at: file.url)
+                        pendingRestore = PendingRestore(url: file.url, isTemporaryCopy: false)
+                    } label: {
+                        Text("Restore from \(file.date.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                    .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Automatic backups")
+            } footer: {
+                Text("Restoring replaces the data on this device. A copy of your current data is saved first, and you see both side by side before anything changes.")
+            }
+            Section {
+                if let snapshot = PreImportSnapshots.undoCandidate() {
+                    Button("Restore pre-import state (\(snapshot.date.formatted(date: .abbreviated, time: .shortened)))") {
+                        pendingRestore = PendingRestore(url: snapshot.url, isTemporaryCopy: false)
+                    }
+                    .foregroundStyle(.red)
+                } else {
+                    Text("Nothing to undo.").foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Undo the last restore")
+            } footer: {
+                Text("Your data as it was just before the last import or restore. Available for 30 days.")
+            }
+        }
+        .navigationTitle("Restore")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await refreshBackups() }
+    }
+
+    /// Move data: bring a file in, or take your data out.
+    private var moveDataScreen: some View {
+        List {
+            Section("Import") {
+                Button("Import Full Backup (JSON)") {
+                    showImportBackupPicker = true
+                }
+                .foregroundStyle(.red)
+            }
+            Section("Export") {
+                Button("Export Full Backup (JSON)") {
+                    exportError = nil
+                    do {
+                        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
+                        guard FileManager.default.fileExists(atPath: result.url.path) else {
+                            exportItem = nil
+                            exportError = "Backup file was not created at:\n\(result.url.path)"
+                            return
+                        }
+                        exportItem = ExportShareItem(url: result.url)
+                    } catch {
+                        exportItem = nil
+                        exportError = error.localizedDescription
+                    }
+                }
+
+                Button("Export Completed Sessions (CSV)") {
+                    exportError = nil
+                    do {
+                        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
+                        guard result.rowCount > 0 else {
+                            exportItem = nil
+                            exportError = "No completed sessions found to export."
+                            return
+                        }
+                        guard FileManager.default.fileExists(atPath: result.url.path) else {
+                            exportItem = nil
+                            exportError = "Export file was not created at:\n\(result.url.path)"
+                            return
+                        }
+                        exportItem = ExportShareItem(url: result.url)
+                    } catch {
+                        exportItem = nil
+                        exportError = error.localizedDescription
+                    }
+                }
+
+                if let exportError {
+                    Text(exportError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("The JSON backup holds everything needed to rebuild this app: your profile and settings, training blocks, every session with its plan and logged sets, history, custom exercises and notes. The CSV holds completed sessions only (sets_v1 format), for spreadsheets.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Move data")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
     // MARK: - Automatic backups
     @ObservedObject private var autoBackup = AutoBackupService.shared
     @State private var backupFiles: [AutoBackupFile] = []
@@ -36,13 +140,10 @@ struct SettingsView: View {
     }
 
     // MARK: - Meso generation feedback
-    @State private var mesoGenerationMessage: String = ""
-    @State private var showMesoGenerationAlert = false
 
     // MARK: - About
     @State private var didCopyBuildInfo = false
     @State private var showMuscleRanges = false
-    @State private var pendingRepair: SettingsRepair?
     
 
     var body: some View {
@@ -51,7 +152,7 @@ struct SettingsView: View {
         Form {
             // MARK: - Profile
                         if let profile = profiles.first {
-                            Section("Profile") {
+                            Section("Training") {
                                 Picker("Goal", selection: Binding(
                                     get: { profile.primaryGoal },
                                     set: { profile.primaryGoal = $0 }
@@ -74,7 +175,7 @@ struct SettingsView: View {
                                 UnitSection(profile: profile)
 
                                 HStack {
-                                    Text("Min Load Increment")
+                                    Text("Default load step (all lifts unless overridden per exercise)")
                                     Spacer()
                                     TextField(profile.loadUnit.label, value: Binding(
                                         get: { profile.minLoadIncrement },
@@ -86,6 +187,9 @@ struct SettingsView: View {
                                     Text(profile.loadUnit.label)
                                         .foregroundStyle(.secondary)
                                 }
+                                Text("Set a lift's own step from its note sheet.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
 
                                 HStack {
                                     Text("Body Weight")
@@ -187,25 +291,11 @@ struct SettingsView: View {
                         )
                     )
                 } header: {
-                    Text("Equipment")
+                    Text("Training equipment")
                 } footer: {
                     Text("Changes apply to your next program. Your current meso is unchanged.")
                 }
             }
-
-            // MARK: - Mesocycle
-                        Section("Mesocycle") {
-                            Button(role: .destructive) {
-                                pendingRepair = .resetMeso
-                            } label: {
-                                Text("Reset Mesocycle to Week 1")
-                            }
-
-                            Text("Use this if your program got out of sync. Resets week and day labels to W1D1 from today without deleting your history.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
 
             // MARK: - Analytics
             if let profile = profiles.first {
@@ -216,39 +306,8 @@ struct SettingsView: View {
                 }
             }
 
-            // MARK: - Data Repair
-            Section("Data Repair") {
-                            Button("Repair Exercise Data") {
-                                pendingRepair = .exerciseData
-                            }
-                            Text("Run this if exercise history is showing incorrect exercises. Safe to run at any time.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                Button("Remove Unrecognized Exercises") {
-                                    pendingRepair = .unrecognized
-                                }
-                            Text("Removes logged sets from exercises that can no longer be identified. Does not delete sessions.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                Button("Sync meso start date") {
-                    pendingRepair = .syncMeso
-                }
-                Text("Re-anchors Analytics to the currently active mesocycle block. Use this if Analytics is showing data from a previous block.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button("Repair maintenance loads") {
-                    pendingRepair = .maintenanceLoads
-                }
-                Text("Resets inflated planned loads on upcoming maintenance sessions back to your last completed actuals for that exercise.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                        }
-
-            // MARK: - Backup
-            Section("Backup") {
+            // MARK: - Backup & Restore
+            Section("Backup & Restore") {
                 Text(backupStatusLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -258,88 +317,17 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
                 if let e = autoBackup.lastError {
-                    Text("Last backup attempt failed: \(e)").font(.caption).foregroundStyle(.red)
+                    Text("Last backup attempt failed: \(e)").font(.caption).foregroundStyle(.orange)
                 }
                 Button(backupBusy ? "Backing up…" : "Back up now") { Task { await backUpNow() } }
                     .disabled(backupBusy)
                 Button("Verify latest backup") { verifyLatestBackup() }
                     .disabled(backupBusy || backupFiles.isEmpty)
-                ForEach(backupFiles.prefix(10)) { file in
-                    Button {
-                        try? FileManager.default.startDownloadingUbiquitousItem(at: file.url)
-                        pendingRestore = PendingRestore(url: file.url, isTemporaryCopy: false)
-                    } label: {
-                        Text("Restore from \(file.date.formatted(date: .abbreviated, time: .shortened))")
-                    }
-                    .foregroundStyle(.red)
-                }
+                NavigationLink("Restore from a backup") { restoreScreen }
+                NavigationLink("Move data (import and export)") { moveDataScreen }
             }
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
-
-            // MARK: - Export
-            Section("Export") {
-                Button("Import Full Backup (JSON)") {
-                    showImportBackupPicker = true
-                }
-                .foregroundStyle(.red)
-
-                if let snapshot = PreImportSnapshots.undoCandidate() {
-                    Button("Restore pre-import state (\(snapshot.date.formatted(date: .abbreviated, time: .shortened)))") {
-                        pendingRestore = PendingRestore(url: snapshot.url, isTemporaryCopy: false)
-                    }
-                    .foregroundStyle(.red)
-                    Text("Your data as it was just before the last import. Available for 30 days.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button("Export Full Backup (JSON)") {
-                    exportError = nil
-                    do {
-                        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
-                        guard FileManager.default.fileExists(atPath: result.url.path) else {
-                            exportItem = nil
-                            exportError = "Backup file was not created at:\n\(result.url.path)"
-                            return
-                        }
-                        exportItem = ExportShareItem(url: result.url)
-                    } catch {
-                        exportItem = nil
-                        exportError = error.localizedDescription
-                    }
-                }
-
-                Button("Export Completed Sessions (CSV)") {
-                    exportError = nil
-                    do {
-                        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
-                        guard result.rowCount > 0 else {
-                            exportItem = nil
-                            exportError = "No completed sessions found to export."
-                            return
-                        }
-                        guard FileManager.default.fileExists(atPath: result.url.path) else {
-                            exportItem = nil
-                            exportError = "Export file was not created at:\n\(result.url.path)"
-                            return
-                        }
-                        exportItem = ExportShareItem(url: result.url)
-                    } catch {
-                        exportItem = nil
-                        exportError = error.localizedDescription
-                    }
-                }
-
-                if let exportError {
-                    Text(exportError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                } else {
-                    Text("JSON backup exports app state, meso blocks, sessions, history, and notes. CSV exports completed sessions only in sets_v1 format.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            .task { await autoBackup.refreshICloudAvailability() }
 
             // MARK: - About
             // Tap to copy, so a bug report can carry the exact build without the
@@ -419,22 +407,6 @@ struct SettingsView: View {
                 url: pending.url,
                 onConfirm: { runRestore(pending) },
                 onCancel: { cancelPendingRestore() })
-        }
-        .confirmationDialog(
-            pendingRepair?.title ?? "",
-            isPresented: Binding(get: { pendingRepair != nil }, set: { if !$0 { pendingRepair = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingRepair
-        ) { repair in
-            Button(repair.confirmLabel, role: repair.isDestructive ? .destructive : nil) { runRepair(repair) }
-            Button("Cancel", role: .cancel) { }
-        } message: { repair in
-            Text(repair.message)
-        }
-        .alert("Mesocycle", isPresented: $showMesoGenerationAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(mesoGenerationMessage)
         }
         .alert("Backup", isPresented: $showBackupMessage) {
             Button("OK", role: .cancel) { }
@@ -519,210 +491,6 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private func runRepair(_ repair: SettingsRepair) {
-        switch repair {
-        case .resetMeso:
-            let today = Calendar.current.startOfDay(for: Date())
-            MesoLifecycle.confirmStartNewMeso(on: today)
-            AppStateBridge.setActiveMesoStartDate(today, in: context)
-            AppStateBridge.setScheduledNextMesoStartDate(nil, in: context)
-            AppStateBridge.setMesoPromptSnoozeUntil(nil, in: context)
-            AppStateBridge.setMesoAnchor(date: today, dayNumber: 1, in: context)
-        case .exerciseData: fixExerciseIdMismatches()
-        case .unrecognized:
-            removeOrphanedExerciseItems()
-            removeOrphanedHistoryExercises()
-        case .syncMeso: syncMesoStartDate()
-        case .maintenanceLoads: repairMaintenanceLoads()
-        }
-    }
-
-    private func fixExerciseIdMismatches() {
-        let descriptor = FetchDescriptor<SessionItem>()
-        guard let items = try? context.fetch(descriptor) else {
-            presentMesoGenerationMessage("Failed to fetch session items.")
-            return
-        }
-
-        var fixedCount = 0
-
-        for item in items {
-            guard let snapshot = item.exerciseNameSnapshot,
-                  !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            guard let correctId = ExerciseCatalog.canonicalBuiltInId(forExerciseName: snapshot) else { continue }
-            if item.exerciseId != correctId {
-                print("🔧 Fixing \(snapshot): \(item.exerciseId) → \(correctId)")
-                item.exerciseId = correctId
-                fixedCount += 1
-            }
-        }
-
-        if fixedCount > 0 {
-            try? context.save()
-            presentMesoGenerationMessage("Fixed \(fixedCount) exercise ID mismatch\(fixedCount == 1 ? "" : "es").")
-        } else {
-            presentMesoGenerationMessage("No mismatches found.")
-        }
-    }
-    
-    private func removeOrphanedExerciseItems() {
-            let descriptor = FetchDescriptor<SessionItem>()
-            guard let items = try? context.fetch(descriptor) else {
-                presentMesoGenerationMessage("Failed to fetch session items.")
-                return
-            }
-
-            var removedCount = 0
-
-            for item in items {
-                let id = item.exerciseId.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !id.isEmpty else { continue }
-
-                let canonical = ExerciseCatalog.canonicalExerciseId(for: id)
-                let isKnown = ExerciseCatalog.builtIn.contains { $0.id == canonical }
-                let isCustomId = canonical.hasPrefix("custom_")
-
-                if !isKnown && !isCustomId {
-                    context.delete(item)
-                    removedCount += 1
-                }
-            }
-
-            if removedCount > 0 {
-                try? context.save()
-                presentMesoGenerationMessage("Removed \(removedCount) unrecognized exercise\(removedCount == 1 ? "" : "s").")
-            } else {
-                presentMesoGenerationMessage("No unrecognized exercises found.")
-            }
-        }
-
-    private func removeOrphanedHistoryExercises() {
-            let descriptor = FetchDescriptor<SessionHistory>()
-            guard let histories = try? context.fetch(descriptor) else { return }
-
-            var removedCount = 0
-
-            for history in histories {
-                let before = history.exercises.count
-                history.exercises = history.exercises.filter { exercise in
-                    let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let words = name.components(separatedBy: .whitespaces)
-                                        let hexChars = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
-                                        let isUUID = words.count >= 2 && words.allSatisfy { word in
-                                            !word.isEmpty && word.unicodeScalars.allSatisfy { hexChars.contains($0) }
-                                        }
-                    return !isUUID
-                }
-                removedCount += before - history.exercises.count
-            }
-
-            if removedCount > 0 {
-                try? context.save()
-                presentMesoGenerationMessage("Removed \(removedCount) unrecognized exercise record\(removedCount == 1 ? "" : "s") from history.")
-            } else {
-                presentMesoGenerationMessage("No unrecognized records found.")
-            }
-        }
-    
-    private func presentMesoGenerationMessage(_ message: String) {
-        mesoGenerationMessage = message
-        showMesoGenerationAlert = true
-    }
-
-    private func syncMesoStartDate() {
-        let descriptor = FetchDescriptor<MesoBlock>()
-        guard let blocks = try? context.fetch(descriptor) else {
-            presentMesoGenerationMessage("Failed to fetch meso blocks.")
-            return
-        }
-        guard let activeMeso = blocks.first(where: { $0.status == .active }) else {
-            presentMesoGenerationMessage("No active mesocycle found.")
-            return
-        }
-
-        MesoLifecycle.confirmStartNewMeso(on: activeMeso.startDate)
-        AppStateBridge.setActiveMesoStartDate(activeMeso.startDate, in: context)
-        let formatted = activeMeso.startDate.formatted(date: .abbreviated, time: .omitted)
-        presentMesoGenerationMessage("Synced meso start date to \(formatted).")
-    }
-
-    /// One-time repair for loads that were inflated by progressive overload
-    /// before LoadProjectionService/PlanMemoryEngine learned to hold
-    /// maintenance/deload items. Resets each upcoming maintenance item's
-    /// suggestedLoad/plannedLoadsBySet back to the most recently completed
-    /// session's actual loads for that exercise, scoped to the active meso.
-    private func repairMaintenanceLoads() {
-        let descriptor = FetchDescriptor<MesoBlock>()
-        guard let blocks = try? context.fetch(descriptor) else {
-            presentMesoGenerationMessage("Failed to fetch meso blocks.")
-            return
-        }
-        guard let activeMeso = blocks.first(where: { $0.status == .active }) else {
-            presentMesoGenerationMessage("No active mesocycle found.")
-            return
-        }
-
-        let blockSessions = activeMeso.sessions
-        let completedSessionsByDateDesc = blockSessions
-            .filter { $0.status == .completed }
-            .sorted { $0.date > $1.date }
-        let upcomingSessions = blockSessions.filter {
-            $0.status == .planned || $0.status == .inProgress
-        }
-
-        var repairedDetails: [String] = []
-        let repairUnit = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
-
-        for upcoming in upcomingSessions {
-            for item in upcoming.items {
-                guard item.waveRaw?.lowercased() == "deload", item.suggestedLoad > 0 else { continue }
-
-                guard let mostRecentCompletedItem = completedSessionsByDateDesc
-                    .compactMap({ $0.items.first { $0.exerciseId == item.exerciseId } })
-                    .first
-                else { continue } // no completed session for this exercise yet — leave seeded value
-
-                let oldLoad = item.suggestedLoad
-                let actualLoad = mostRecentCompletedItem.actualLoads.first(where: { $0 > 0 }) ?? 0
-
-                item.suggestedLoad = actualLoad
-                item.plannedLoadsBySet = mostRecentCompletedItem.actualLoads
-
-                let name = item.exerciseNameSnapshot ?? item.exerciseId
-                repairedDetails.append("\(name): \(LoadFormatter(unit: repairUnit).oneDecimal(oldLoad)) → \(LoadFormatter(unit: repairUnit).oneDecimal(actualLoad))")
-            }
-        }
-
-        if !repairedDetails.isEmpty {
-            try? context.save()
-            presentMesoGenerationMessage(
-                "Repaired \(repairedDetails.count) maintenance load\(repairedDetails.count == 1 ? "" : "s"):\n"
-                + repairedDetails.joined(separator: "\n")
-            )
-        } else {
-            presentMesoGenerationMessage("No inflated maintenance loads found.")
-        }
-    }
-
-    private func inferredTrainingWeekdays() -> [Int] {
-        let cal = Calendar.current
-        let candidateSessions = sessions
-            .filter { $0.items.isEmpty == false }
-            .sorted { $0.date < $1.date }
-        let weekdays = Array(
-            Set(candidateSessions.map { cal.component(.weekday, from: $0.date) })
-        ).sorted()
-        return weekdays
-    }
-
-    private func hasSessionsOnOrAfter(_ startDate: Date) -> Bool {
-        let cal = Calendar.current
-        let startDay = cal.startOfDay(for: startDate)
-        return sessions.contains { session in
-            cal.startOfDay(for: session.date) >= startDay
-        }
-    }
-
     /// The Profile section (including Body Weight) only renders when a UserProfile
     /// exists. Onboarding normally creates one, but accounts that skipped that path
     /// would otherwise see no Profile section and no way to create one.
@@ -801,48 +569,6 @@ struct MuscleRangesEditor: View {
         .navigationTitle("Weekly set ranges")
         .navigationBarTitleDisplayMode(.inline)
     }
-}
-
-
-/// The Settings actions that rewrite stored data. Each is confirmed first, saying what it scans and what it can change.
-enum SettingsRepair: Identifiable {
-    case resetMeso, exerciseData, unrecognized, syncMeso, maintenanceLoads
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .resetMeso: return "Reset mesocycle to Week 1?"
-        case .exerciseData: return "Repair exercise data?"
-        case .unrecognized: return "Remove unrecognized exercises?"
-        case .syncMeso: return "Sync meso start date?"
-        case .maintenanceLoads: return "Repair maintenance loads?"
-        }
-    }
-
-    var message: String {
-        switch self {
-        case .resetMeso:
-            return "Relabels this block as Week 1, Day 1 starting today and clears the scheduled next-meso date. Your logged history is not deleted, but week and day labels change and cannot be restored automatically."
-        case .exerciseData:
-            return "Scans every session and history entry and re-links exercise ids that no longer match the catalog. It changes only the ids stored on logged exercises, never sets, reps or loads. Cannot be undone."
-        case .unrecognized:
-            return "Scans all sessions and history for exercises that can no longer be identified and permanently deletes their logged sets. Sessions themselves are kept. Export a backup first if unsure."
-        case .syncMeso:
-            return "Moves the analytics start date to the currently active mesocycle block. Only the start date changes; no sessions are edited."
-        case .maintenanceLoads:
-            return "Scans upcoming maintenance sessions and resets planned loads that are above your last completed load for that exercise back to that load. Completed sessions are not changed. Cannot be undone."
-        }
-    }
-
-    var confirmLabel: String {
-        switch self {
-        case .resetMeso: return "Reset to Week 1"
-        case .unrecognized: return "Delete sets"
-        default: return "Run repair"
-        }
-    }
-
-    var isDestructive: Bool { self == .resetMeso || self == .unrecognized }
 }
 
 

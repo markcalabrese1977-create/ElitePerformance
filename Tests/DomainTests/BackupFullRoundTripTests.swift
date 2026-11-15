@@ -2613,3 +2613,405 @@ final class LegacyStoreRelocationTests: XCTestCase {
         XCTAssertTrue(line.contains("ElitePerformanceStore.store (sandbox Application Support)"), line)
     }
 }
+
+// MARK: - R1: Change Program never deletes logged work
+
+final class ChangeProgramGuardTests: XCTestCase {
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    private func context() throws -> ModelContext {
+        ModelContext(try BackupTestSupport.makeContainer())
+    }
+    private func session(_ ctx: ModelContext, _ offset: Int, _ status: SessionStatus, logged: Bool = false, meso: MesoBlock? = nil) -> Session {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        if logged { item.actualReps = [8, 8, 0]; item.actualLoads = [100, 100, 0] }
+        let s = Session(date: day(offset), status: status, weekIndex: 1, dayLabel: "Push", items: [item])
+        s.meso = meso
+        ctx.insert(s)
+        return s
+    }
+
+    func test_planListsExactlyThePlannedSessionsItWouldDelete_withCountAndRange() throws {
+        let ctx = try context()
+        _ = session(ctx, -3, .completed); _ = session(ctx, -1, .planned)                // history and the past: untouched
+        for o in [1, 3, 8] { _ = session(ctx, o, .planned) }
+        let maint = MesoBlock(name: "Maintenance", startDate: day(0), totalWeeks: 4, isMaintenance: true); ctx.insert(maint)
+        _ = session(ctx, 2, .planned, meso: maint)                                       // maintenance sessions are never deleted
+        try ctx.save()
+        let plan = DUPProgramReplaceService.plan(startDate: day(0), context: ctx)
+        XCTAssertTrue(plan.isAllowed)
+        XCTAssertEqual(plan.sessionsToDelete.count, 3)
+        XCTAssertEqual(plan.dateRange?.first, day(1)); XCTAssertEqual(plan.dateRange?.last, day(8))
+        XCTAssertTrue(plan.message.hasPrefix("3 planned sessions"), plan.message)
+    }
+
+    func test_anInProgressSession_orAPlannedOneWithLoggedSets_refusesTheReplacement_andNothingIsDeleted() throws {
+        for blocker in [(SessionStatus.inProgress, false), (SessionStatus.planned, true)] {
+            let ctx = try context()
+            _ = session(ctx, 1, .planned); _ = session(ctx, 2, .planned)
+            _ = session(ctx, 3, blocker.0, logged: blocker.1)
+            try ctx.save()
+            let plan = DUPProgramReplaceService.plan(startDate: day(0), context: ctx)
+            XCTAssertFalse(plan.isAllowed)
+            XCTAssertEqual(plan.blockers.count, 1)
+            XCTAssertTrue(plan.message.contains("never deleted"), plan.message)
+            let before = try ctx.fetchCount(FetchDescriptor<Session>())
+            XCTAssertThrowsError(try DUPProgramReplaceService.replacePlannedProgram(startDate: day(0), trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx))
+            XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Session>()), before, "the service itself refuses: no session was deleted")
+        }
+    }
+
+    func test_withNothingInTheWay_theReplacementDeletesThePlannedSessions_andKeepsHistory() throws {
+        let ctx = try context()
+        let done = session(ctx, -5, .completed, logged: true)
+        for o in [1, 2, 9] { _ = session(ctx, o, .planned) }
+        try ctx.save()
+        try DUPProgramReplaceService.replacePlannedProgram(startDate: day(0), trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        XCTAssertTrue(all.contains { $0.persistentModelID == done.persistentModelID }, "completed history is kept")
+        XCTAssertFalse(all.contains { $0.dayLabel == "Push" && $0.date >= day(0) && $0.status == .planned && $0.items.first?.suggestedLoad == 100 }, "the old planned sessions are gone")
+    }
+}
+
+// MARK: - R2: per-exercise load step
+
+final class PerExerciseLoadStepTests: XCTestCase {
+
+    private func bench(_ id: String = "bench_press") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        i.actualReps = [8, 8, 8]; i.actualLoads = [100, 100, 100]; i.actualRIRs = [2, 2, 2]
+        i.plannedRepsBySet = [8, 8, 8]; i.repMin = 6; i.repMax = 8
+        return i
+    }
+    private func profile(default step: Double = 5, own: [String: Double] = [:]) -> UserProfile {
+        let p = UserProfile()
+        p.minLoadIncrement = step
+        p.loadStepByExercise = own
+        return p
+    }
+
+    func test_resolutionOrder_perExerciseOverride_thenDefaultStep_thenClusterDefault() {
+        let p = profile(default: 5, own: ["bench_press": 2.5])
+        XCTAssertEqual(UserProfile.loadStep(for: "bench_press", profile: p), 2.5, "the lift's own step wins")
+        XCTAssertEqual(UserProfile.loadStep(for: "machine_chest_press", profile: p), 5, "another lift: the default step")
+        XCTAssertEqual(UserProfile.loadStep(for: "bench_press", profile: nil), UnitAwareRounding.defaultIncrement(unit: .lb), "no profile: the unit's default")
+        // CoachingEngine.loadIncrement: own > default > cluster
+        let item = bench()
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: 5, perExerciseStep: 2.5), 2.5)
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: 5), 5)
+        XCTAssertEqual(CoachingEngine.loadIncrement(for: item, base: 100, minLoadIncrement: nil),
+                       ChestArmsLowBackMesoProfile.config(for: .primaryChestPress).primaryLoadIncrement, "the cluster default only when nothing else is set")
+        // aliases resolve to the same lift
+        XCTAssertEqual(UserProfile.loadStepOverride(for: "bench_press", profile: p), 2.5)
+        p.setLoadStep(nil, exerciseId: "bench_press")
+        XCTAssertNil(UserProfile.loadStepOverride(for: "bench_press", profile: p), "cleared")
+    }
+
+    func test_benchEarnsATwoPointFiveIncrease_whileAMachineStaysAtFive() throws {
+        let p = profile(default: 5, own: ["bench_press": 2.5])
+        let b = try XCTUnwrap(CoachingEngine.recommend(for: bench("bench_press"), profile: p))
+        let m = try XCTUnwrap(CoachingEngine.recommend(for: bench("machine_chest_press"), profile: p))
+        XCTAssertEqual(b.nextSuggestedLoad, 102.5, "bench steps by its own 2.5")
+        XCTAssertEqual(m.nextSuggestedLoad, 105, "the machine steps by the default 5")
+        // and with no override, both follow the default
+        let plain = profile(default: 5)
+        XCTAssertEqual(try XCTUnwrap(CoachingEngine.recommend(for: bench(), profile: plain)).nextSuggestedLoad, 105)
+    }
+
+    func test_carryForwardWritesTheLiftsOwnStep() throws {
+        let ctx = ModelContext(try ModelContainer(
+            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+        let p = profile(default: 5, own: ["bench_press": 2.5]); ctx.insert(p)
+        let cal = Calendar.current
+        func target(_ id: String) -> SessionItem {
+            let t = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+            t.plannedLoadsBySet = [100, 100, 100]; t.plannedRepsBySet = [8, 8, 8]; return t
+        }
+        let benchSrc = bench("bench_press"), machSrc = bench("machine_chest_press")
+        benchSrc.plannedLoadsBySet = [100, 100, 100]; machSrc.plannedLoadsBySet = [100, 100, 100]
+        let done = Session(date: cal.date(byAdding: .day, value: -1, to: Date())!, status: .completed, weekIndex: 1, dayLabel: "Push", items: [benchSrc, machSrc])
+        let tb = target("bench_press"), tm = target("machine_chest_press")
+        let next = Session(date: cal.date(byAdding: .day, value: 6, to: Date())!, status: .planned, weekIndex: 2, dayLabel: "Push", items: [tb, tm])
+        ctx.insert(done); ctx.insert(next)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: done)
+        XCTAssertEqual(tb.suggestedLoad, 102.5, "bench carried forward by 2.5")
+        XCTAssertEqual(tm.suggestedLoad, 105, "the machine by the default 5")
+    }
+
+    func test_theStepSurvivesABackupRoundTrip_andOldBackupsHaveNone() throws {
+        let src = ModelContext(try BackupTestSupport.makeContainer())
+        try PopulatedStoreBuilder.build(in: src)
+        let fresh = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: src, into: fresh)
+        let restored = try XCTUnwrap(ModelContext(fresh).fetch(FetchDescriptor<UserProfile>()).first)
+        XCTAssertEqual(restored.loadStepByExercise, ["bench_press": 2.5, "machine_chest_press": 5.0])
+        // an old file without the key: no overrides, the default step everywhere
+        let exported = try BackupTestSupport.exportFile(src)
+        defer { try? FileManager.default.removeItem(at: exported) }
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: exported)) as? [String: Any])
+        XCTAssertNotNil((json["userProfile"] as? [String: Any])?["loadStepByExercise"], "the exporter writes it")
+        var profile = try XCTUnwrap(json["userProfile"] as? [String: Any]); profile.removeValue(forKey: "loadStepByExercise"); json["userProfile"] = profile
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("oldstep_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: old) }
+        try JSONSerialization.data(withJSONObject: json).write(to: old)
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target)
+        XCTAssertTrue(try XCTUnwrap(ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first).loadStepByExercise.isEmpty)
+    }
+}
+
+// MARK: - R4: the silent meso start date re-sync
+
+final class MesoStartDateResyncTests: XCTestCase {
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    func test_aDifferingStartDateIsResynced_withOneLogLine_andNothingElseChanges() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(name: "A", startDate: day(-20), status: .active, totalWeeks: 8); ctx.insert(meso)
+        let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Push", items: []); s.meso = meso; ctx.insert(s)
+        let state = AppState(); state.activeMesoStartDate = day(-3); state.scheduledNextMesoStartDate = day(30); ctx.insert(state)
+        try ctx.save()
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        let notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(notes.count, 1, "one line")
+        XCTAssertTrue(notes[0].contains("re-synced"), notes[0])
+        XCTAssertEqual(state.activeMesoStartDate, day(-20))
+        XCTAssertEqual(state.scheduledNextMesoStartDate, day(30), "a scheduled next meso is left alone")
+        XCTAssertEqual(s.date, day(2))
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed", "idempotent")
+        BackfillLog.collector = nil
+    }
+
+    func test_nothingToDo_withNoActiveBlock_orWithNoStoredDate() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed")
+        let meso = MesoBlock(name: "A", startDate: day(-5), status: .active, totalWeeks: 8); ctx.insert(meso); try ctx.save()
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed", "no AppState row: none is created")
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<AppState>()), 0)
+        BackfillLog.collector = nil
+    }
+}
+
+// MARK: - R5: Program day page
+
+final class ProgramDayPageTests: XCTestCase {
+
+    func test_headerReps_comeFromThePerSetPlan_notTheFlattenedDefault() {
+        let i = SessionItem(order: 1, exerciseId: "t_bar_row", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 340)
+        i.plannedRepsBySet = [8, 8, 8, 0]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "8 reps", "targetReps says 6; the plan says 8")
+        i.plannedRepsBySet = [8, 7, 6, 0]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "6–8 reps")
+        i.plannedRepsBySet = []
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: i), "6 reps", "empty plan: the default")
+        // the spare 4th row is not a planned set
+        let j = SessionItem(order: 1, exerciseId: "t_bar_row", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        j.plannedRepsBySet = [8, 8, 8, 12]
+        XCTAssertEqual(ProgramDayDetailView.planRepsText(for: j), "8 reps")
+    }
+
+    func test_theTodayRowPastThePlannedSets_isLabelledOptionalExtraSet() {
+        XCTAssertTrue(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 10), rir: 2).hasPrefix("OPTIONAL EXTRA SET"))
+    }
+
+    func test_seedingWidensTheSetBandToCoverTheWeeksRamp() {
+        // DUP10: Pull-Up style slot, 2-3 band, ramp [.., 4 in week 8]
+        let ex = ResolvedExercisePlan(order: 2, exerciseId: "pull_up", priority: .standard, notes: nil, wave: .b, setMin: 2, setMax: 3,
+                                      repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2, intensifier: .none, intensifierNotes: nil,
+                                      defaultSets: 4, defaultTargetReps: 8, defaultTargetRIR: 2)
+        let day = MaterializedProgramDay(templateId: "t", weekNumber: 8, wave: .b, dayNumber: 1, title: "Pull A", role: "pull", exercises: [ex])
+        let item = DUPSessionMaterializer.makeSessionItems(from: day)[0]
+        XCTAssertEqual(item.targetSets, 4)
+        XCTAssertEqual([item.setMin, item.setMax], [2, 4], "the band covers the 4-set week")
+        let ordinary = ResolvedExercisePlan(order: 2, exerciseId: "pull_up", priority: .standard, notes: nil, wave: .a, setMin: 2, setMax: 3,
+                                            repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2, intensifier: .none, intensifierNotes: nil,
+                                            defaultSets: 3, defaultTargetReps: 8, defaultTargetRIR: 2)
+        let i2 = DUPSessionMaterializer.makeSessionItems(from: MaterializedProgramDay(templateId: "t", weekNumber: 1, wave: .a, dayNumber: 1, title: "x", role: "pull", exercises: [ordinary]))[0]
+        XCTAssertEqual([i2.setMin, i2.setMax], [2, 3], "a week inside the band keeps it")
+    }
+
+    func test_changeForRemainingSessions_skipsHandEditedItems_andReportsTheCount_thisSessionStaysExplicit() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(name: "M", startDate: Date(), status: .active, totalWeeks: 8); ctx.insert(meso)
+        func item(edited: Bool) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: "a", repMin: 6, repMax: 8)
+            i.plannedRepsBySet = [8, 8, 8]; i.plannedRIRsBySet = [2, 2, 2]; i.plannedLoadsBySet = [100, 100, 100]; i.planEdited = edited
+            return i
+        }
+        var sessions: [Session] = []
+        for (n, edited) in [(1, false), (8, true), (15, false)] {
+            let s = Session(date: Calendar.current.date(byAdding: .day, value: n, to: Calendar.current.startOfDay(for: Date()))!, status: .planned, weekIndex: n, dayLabel: "Push", items: [item(edited: edited)])
+            s.meso = meso; ctx.insert(s); meso.sessions.append(s); sessions.append(s)
+        }
+        try ctx.save()
+        let change = PrescriptionChange(setDelta: nil, repRange: 8...10, rirRange: nil, note: nil, topSet: nil)
+        let all = SessionItemEditService.planChangePrescription(meso: meso, dayLabel: "Push", exerciseId: "bench_press", scope: .allRemaining, change: change)
+        XCTAssertEqual(all.targets.count, 2, "the two unedited sessions change")
+        XCTAssertEqual(all.editedSkipped, 1, "the hand-edited one is skipped and counted")
+        XCTAssertEqual(ReplaceExerciseModel.reasonText(.planEdited), "edited by you, left as it is")
+        let only = SessionItemEditService.planChangePrescription(meso: meso, dayLabel: "Push", exerciseId: "bench_press", scope: .thisSession(sessions[1]), change: change)
+        XCTAssertEqual(only.targets.count, 1, "an explicit this-session edit of the edited item is allowed")
+        XCTAssertEqual(only.editedSkipped, 0)
+    }
+}
+
+// MARK: - R6: Insert deload week takes a verified backup first
+
+final class InsertDeloadBackupFirstTests: XCTestCase {
+    /// Every flow that writes a block runs behind `SeedBackupGuard.run`; the three seeding flows and Insert deload share it.
+    func test_theInsertDeloadFlow_runsBehindTheBackupGuard() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Features/Home/InsertDeloadFlow.swift"), encoding: .utf8)
+        let insert = try XCTUnwrap(text.range(of: "struct InsertDeloadFlow")).lowerBound
+        let remove = try XCTUnwrap(text.range(of: "struct RemoveDeloadModel")).lowerBound
+        let section = String(text[insert..<remove])
+        let guardPos = try XCTUnwrap(section.range(of: "seedGuard.run(container:"), "the apply button goes through the guard").lowerBound
+        let applyPos = try XCTUnwrap(section.range(of: "model.apply(plan)")).lowerBound
+        XCTAssertLessThan(guardPos, applyPos, "the guard wraps the apply")
+        XCTAssertTrue(section.contains(".seedBackupGuard(seedGuard)"), "and its prompt is attached")
+    }
+
+    @MainActor
+    func test_aFailedBackup_blocksTheInsert_untilContinueIsTyped() async throws {
+        let guardian = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        var inserted = 0
+        guardian.run(container: try BackupTestSupport.makeContainer()) { inserted += 1 }
+        for _ in 0..<100 where guardian.failure == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertNotNil(guardian.failure)
+        XCTAssertEqual(inserted, 0)
+        XCTAssertTrue(guardian.continueWithoutBackup(typed: "CONTINUE"))
+        XCTAssertEqual(inserted, 1)
+    }
+}
+
+// MARK: - R7: the meso card's menu
+
+final class MesoCardMenuTests: XCTestCase {
+    private func source(_ rel: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)
+    }
+
+    func test_viewMesoSummaryStaysVisible_theThreeBlockActionsLiveInOneMenu() throws {
+        let plan = try source("Features/Home/ProgramPlanView.swift")
+        let header = try XCTUnwrap(plan.range(of: "private var activeBlockHeaderSection"))
+        let content = try XCTUnwrap(plan.range(of: "private var content: some View"))
+        let card = String(plan[header.lowerBound..<content.lowerBound])
+        let menuStart = try XCTUnwrap(card.range(of: "Menu {")).lowerBound
+        let menuEnd = try XCTUnwrap(card.range(of: "} label: {\n                            Image(systemName: \"ellipsis.circle\")")).lowerBound
+        let menu = String(card[menuStart..<menuEnd])
+        for action in ["Change program…", "Start next meso from this one", "Insert deload week"] {
+            XCTAssertTrue(menu.contains(action), "\(action) is in the menu")
+            XCTAssertEqual(card.components(separatedBy: action).count - 1, 1, "and only there: \(action)")
+        }
+        let outside = String(card[menuEnd...])
+        XCTAssertTrue(outside.contains("View Meso Summary"), "View Meso Summary stays visible on the card")
+        XCTAssertFalse(menu.contains("View Meso Summary"))
+    }
+
+    func test_changeProgramIsNoLongerAToolbarCapsule() throws {
+        let home = try source("Features/Home/HomeView.swift")
+        XCTAssertFalse(home.contains("Image(systemName: \"line.3.horizontal.decrease.circle\")"), "the toolbar capsule is gone")
+        XCTAssertTrue(home.contains("onChangeProgram:"), "the card's menu opens the same wizard")
+    }
+}
+
+// MARK: - R8: the Settings structure
+
+final class SettingsStructureTests: XCTestCase {
+    private func settings() throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+    }
+
+    /// The main screen: from `Form {` to the end of its sections (before the helper screens).
+    private func mainScreen(_ text: String) throws -> String {
+        let start = try XCTUnwrap(text.range(of: "        Form {")).lowerBound
+        let end = try XCTUnwrap(text.range(of: "        .navigationTitle(\"Settings\")")).lowerBound
+        return String(text[start..<end])
+    }
+
+    func test_theMainScreenHasTheFourGroups_andNoRedRows() throws {
+        let main = try mainScreen(try settings())
+        for header in ["Section(\"Training\")", "Section(\"Analytics\")", "Section(\"Backup & Restore\")", "Section(\"About\")"] {
+            XCTAssertTrue(main.contains(header), header)
+        }
+        XCTAssertFalse(main.contains(".foregroundStyle(.red)"), "no red rows on the main Settings screen: they live one screen away")
+        XCTAssertFalse(main.contains("role: .destructive"))
+        for gone in ["Data Repair", "Reset Mesocycle", "Remove Unrecognized", "Repair Exercise Data", "Repair maintenance loads", "Sync meso start date", "Import Full Backup", "Export Full Backup", "Restore from \\("] {
+            XCTAssertFalse(main.contains(gone), "\(gone) is not on the main screen")
+        }
+    }
+
+    func test_restoreAndMoveDataScreens_holdTheRestoreAndImportExportRows() throws {
+        let text = try settings()
+        let restoreAt = try XCTUnwrap(text.range(of: "private var restoreScreen")).lowerBound
+        let restore = String(text[restoreAt...].prefix(2600))
+        XCTAssertTrue(restore.contains("Restore from \\(") && restore.contains("Restore pre-import state"))
+        let moveAt = try XCTUnwrap(text.range(of: "private var moveDataScreen")).lowerBound
+        let move = String(text[moveAt...].prefix(3500))
+        for row in ["Import Full Backup (JSON)", "Export Full Backup (JSON)", "Export Completed Sessions (CSV)"] { XCTAssertTrue(move.contains(row), row) }
+        XCTAssertFalse(move.contains("app state, meso blocks, sessions, history, and notes"), "the stale export footer is replaced")
+        XCTAssertTrue(move.contains("custom exercises"))
+    }
+
+    func test_theDefaultLoadStepLabel() throws {
+        XCTAssertTrue(try settings().contains("Default load step (all lifts unless overridden per exercise)"))
+    }
+}
+
+// MARK: - R9: the iCloud reason is known when the screen appears
+
+@MainActor
+final class ICloudReasonOnAppearTests: XCTestCase {
+    private func status() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+
+    func test_afterRefreshing_theReasonIsKnown_withoutAnyBackupHavingRun() async {
+        for (reason, expected) in [(AutoBackupDestination.ICloudAvailability.noAccount, "No iCloud account"),
+                                   (.driveOffForApp, "iCloud Drive is turned off")] {
+            let svc = AutoBackupService(status: status(), checkAvailability: { reason })
+            XCTAssertEqual(svc.iCloudAvailability, .available, "before the check nothing is known")
+            await svc.refreshICloudAvailability()
+            XCTAssertEqual(svc.iCloudAvailability, reason)
+            XCTAssertTrue(svc.iCloudAvailability.explanation?.contains(expected) == true)
+        }
+    }
+
+    func test_theLocalOnlyChoice_suppressesTheBanner_untilICloudIsAvailableAgain() async {
+        let s = status()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let unavailable = AutoBackupService(status: s, checkAvailability: { .noAccount })
+        await unavailable.refreshICloudAvailability()
+        XCTAssertTrue(s.shouldShowBanner(now: now, hasData: true))
+        s.localOnly = true
+        XCTAssertFalse(s.shouldShowBanner(now: now, hasData: true), "'Use local backups only' hides it")
+        await unavailable.refreshICloudAvailability()
+        XCTAssertTrue(s.localOnly, "still unavailable: the choice stands")
+        let back = AutoBackupService(status: s, checkAvailability: { .available })
+        await back.refreshICloudAvailability()
+        XCTAssertFalse(s.localOnly, "iCloud is available again: the choice is cleared")
+        XCTAssertEqual(back.iCloudAvailability, .available)
+        XCTAssertTrue(s.shouldShowBanner(now: now, hasData: true), "the banner works normally again")
+    }
+
+    func test_bothScreensAskOnAppear() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for file in ["Features/Settings/SettingsView.swift", "Features/MainTab/MainTabView.swift"] {
+            let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            XCTAssertTrue(text.contains("refreshICloudAvailability()"), file)
+        }
+    }
+}

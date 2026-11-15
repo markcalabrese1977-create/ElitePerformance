@@ -36,6 +36,8 @@ enum SessionItemEditService {
         case deload
         /// Prescription change: the change would leave this session as it is (already at the bound).
         case noChange
+        /// Prescription change for all remaining sessions: the lifter edited this plan by hand, so it is left as it is.
+        case planEdited
     }
 
     struct Refusal {
@@ -137,7 +139,6 @@ enum SessionItemEditService {
         let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
         let unit = profile?.loadUnit ?? .lb
 
         var targets: [Target] = []
@@ -151,7 +152,7 @@ enum SessionItemEditService {
             // The seed never exceeds the lifter's max for the replacement (no max / fixed-load / bodyweight: unchanged).
             let seed = HistorySeedLoad.load(
                 for: to, goalReps: item.targetReps, targetRIR: item.targetRIR, in: allSessions,
-                loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
+                loadIncrement: UserProfile.loadStep(for: to, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now
             ).map { UserProfile.clampedLoad($0, exerciseId: to, profile: profile, customExercises: custom) }
             targets.append(Target(
                 session: session, item: item, date: session.date, weekIndex: session.weekIndex,
@@ -640,6 +641,8 @@ extension SessionItemEditService {
         let refusals: [Refusal]
 
         var isApplicable: Bool { !targets.isEmpty }
+        /// Sessions skipped because the lifter edited their plan by hand.
+        var editedSkipped: Int { refusals.filter { $0.reason == .planEdited }.count }
     }
 
     // MARK: Plan (no writes)
@@ -671,6 +674,10 @@ extension SessionItemEditService {
             if let normalizedLetters, !normalizedLetters.contains(key) { continue }
             if key == "deload", !includeDeload, !meso.isMaintenance {
                 refusals.append(Refusal(session: session, reason: .deload)); continue
+            }
+            // A hand-edited plan is the lifter's: "all remaining" leaves it and says so (this-session is an explicit edit).
+            if case .allRemaining = scope, item.planEdited {
+                refusals.append(Refusal(session: session, reason: .planEdited)); continue
             }
             if let reason = safetyRefusal(meso: meso, session: session) {
                 refusals.append(Refusal(session: session, reason: reason)); continue
@@ -1142,7 +1149,7 @@ extension SessionItemEditService {
                 } else {
                     load = UserProfile.clampedLoad(HistorySeedLoad.load(
                         for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
-                        loadIncrement: increment, unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
+                        loadIncrement: UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
                         referenceDate: now
                     ) ?? 0, exerciseId: i.exerciseId, profile: profile, customExercises: custom)
                 }

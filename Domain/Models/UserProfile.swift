@@ -180,6 +180,11 @@ final class UserProfile {
     /// "no caps". Use `maxLoadByExercise` / `maxLoad(for:)`, never this raw column.
     var maxLoadByExerciseStored: [String: Double]? = nil
 
+    /// Per-exercise load step (canonical exerciseId -> step, in the lifter's unit): how much one earned increase adds and what the
+    /// plan rounds to for that lift. No entry means the default load step (`minLoadIncrement`). Stored OPTIONAL for the additive
+    /// migration; use `loadStepByExercise` / `loadStep(for:)`, never this raw column.
+    var loadStepByExerciseStored: [String: Double]? = nil
+
     /// Weekly hard-set range overrides per fine muscle for analytics ("<muscle>.min" / "<muscle>.max" -> weighted sets
     /// per week). Only numbers that differ from `MuscleVolumeRanges.defaults` are stored; nil = all defaults. Stored
     /// OPTIONAL for the additive migration. Use `muscleSetRanges`, never this raw column.
@@ -214,6 +219,35 @@ final class UserProfile {
         var map = maxLoadByExercise.filter { ExerciseCatalog.canonicalExerciseId(for: $0.key) != canonical }
         if let value, value > 0 { map[canonical] = value }
         maxLoadByExercise = map
+    }
+
+    var loadStepByExercise: [String: Double] {
+        get { loadStepByExerciseStored ?? [:] }
+        set { loadStepByExerciseStored = newValue }
+    }
+
+    /// The lifter's own step for `exerciseId` (any legacy alias spelling), or nil when none is set.
+    static func loadStepOverride(for exerciseId: String, profile: UserProfile?) -> Double? {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        for (key, value) in profile?.loadStepByExercise ?? [:] where value > 0 && ExerciseCatalog.canonicalExerciseId(for: key) == canonical { return value }
+        return nil
+    }
+
+    /// The step every reader uses for `exerciseId`: the per-exercise override, else the default load step
+    /// (`minLoadIncrement`), else (no profile yet) the unit's default. The cluster default applies below all of these, and
+    /// only where no step is passed (`CoachingEngine.loadIncrement`).
+    static func loadStep(for exerciseId: String, profile: UserProfile?, unit: LoadUnit? = nil) -> Double {
+        if let o = loadStepOverride(for: exerciseId, profile: profile) { return o }
+        if let m = profile?.minLoadIncrement, m > 0 { return m }
+        return UnitAwareRounding.defaultIncrement(unit: unit ?? profile?.loadUnit ?? .lb)
+    }
+
+    /// Set (or, with nil / a non-positive value, clear) the step for one exercise (canonical-id aware).
+    func setLoadStep(_ value: Double?, exerciseId: String) {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        var map = loadStepByExercise.filter { ExerciseCatalog.canonicalExerciseId(for: $0.key) != canonical }
+        if let value, value > 0 { map[canonical] = value }
+        loadStepByExercise = map
     }
 
     /// The cap that applies to PLAN-WRITTEN loads of `exerciseId`: nil when there is no cap, and nil for a

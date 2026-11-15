@@ -113,6 +113,8 @@ was BEFORE the backfills.
 
 ## Open (found Nov 14)
 
+- Reset to coached plan via CoachingEngine (Cut 4): the Program day's Auto and Auto+ buttons were removed (Auto+ took loads from the e1RM projection and bypassed the coach; both wrote the bottom of the rep band). A replacement should rebuild a day's plan through `CoachingEngine` / carry-forward and keep the top-of-band goal.
+
 - Maintenance and deload carry-forward use a flat 60% factor (PlanMemoryEngine.swift:22, applied at :159-163); derive it from RIR when deload RIR targets are reliable.
 - Maintenance is still detected by name in places: ProgramDayDetailView.swift:90, :352, :432, :659, SessionView.swift:1829, MaintenanceProgramSeeder.swift:533, :566, DUPWaveModels.swift:29. `MesoBlock.isMaintenance` exists; switch these to it.
 - Bodyweight "BW" display: StartNextMesoFlow, InsertDeloadFlow, ExerciseSessionDetailView, HistoryView, ExerciseHistorySheet and the session row handle it; the other screens are not audited.

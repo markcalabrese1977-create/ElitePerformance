@@ -116,6 +116,7 @@ struct ReplaceExerciseModel {
         case .notApplicable: return "doesn't have this exercise"
         case .deload: return "deload week"
         case .noChange: return "already at the limit"
+        case .planEdited: return "edited by you, left as it is"
         }
     }
 
