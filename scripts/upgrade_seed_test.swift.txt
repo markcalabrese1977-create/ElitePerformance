@@ -19,6 +19,14 @@ final class ZZUpgradeSeedTests: XCTestCase {
                                           startDate: Calendar.current.date(byAdding: .day, value: -14, to: Date())!)
             ProgramApplicationService.apply(result, context: ctx, startDate: result.startDate)
             let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)]))
+            // Shift the whole program so its second session is YESTERDAY: exactly two sessions are in the past and both are
+            // done, so nothing was missed (a program that started two weeks ago with two sessions done HAS missed sessions).
+            if sessions.count > 1 {
+                let cal = Calendar.current
+                let delta = cal.dateComponents([.day], from: cal.startOfDay(for: sessions[1].date),
+                                               to: cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: Date()))!).day ?? 0
+                for s in sessions { s.date = cal.date(byAdding: .day, value: delta, to: s.date) ?? s.date }
+            }
             for s in sessions.prefix(2) {
                 for item in s.items {
                     let n = max(1, item.targetSets)
