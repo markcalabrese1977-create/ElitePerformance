@@ -1319,22 +1319,6 @@ struct OnboardingFlowView: View {
             }
         }
 
-        private func experienceToProgramLevel(_ exp: TrainingExperience) -> ProgramExperienceLevel {
-            switch exp {
-            case .new:          return .new
-            case .intermediate: return .intermediate
-            case .advanced:     return .advanced
-            }
-        }
-
-        private func equipmentToProgramProfile(_ profile: EquipmentProfile) -> ProgramEquipmentProfile {
-            switch profile {
-            case .commercial:    return .commercialGym
-            case .homeGym:       return .homeGymRack
-            case .dumbbellsOnly: return .dumbbellsAndCables
-            }
-        }   
-    
     // MARK: - Shared page header
 
     private func pageHeader(title: String, subtitle: String) -> some View {
