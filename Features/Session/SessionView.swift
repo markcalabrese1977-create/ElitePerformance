@@ -195,6 +195,12 @@ struct SessionView: View {
                                 context: modelContext
                             )
                         },
+                        onEditSaved: { setIndex in
+                            viewModel.saveEditedSet(exerciseID: exercise.id, setIndex: setIndex, context: modelContext)
+                        },
+                        onEditCancelled: { setIndex in
+                            viewModel.cancelEditSet(exerciseID: exercise.id, setIndex: setIndex)
+                        },
                         onSwapTapped: { [exerciseIndex = index] in
                             activeSheet = .swap(SwapTarget(exerciseIndex: exerciseIndex))
                         },
@@ -551,6 +557,8 @@ private struct SessionExerciseCardView: View {
     let onSkipTapped: (_ setIndex: Int, _ reason: SetFeedback) -> Void
     let onPumpRated: (_ setIndex: Int, _ rating: PumpRating) -> Void
     let onEditTapped: (_ setIndex: Int) -> Void
+    let onEditSaved: (_ setIndex: Int) -> Void
+    let onEditCancelled: (_ setIndex: Int) -> Void
 
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
@@ -796,6 +804,12 @@ private struct SessionExerciseCardView: View {
                                                         },
                                                         onEdit: {
                                                             onEditTapped(set.index)
+                                                        },
+                                                        onEditSave: {
+                                                            onEditSaved(set.index)
+                                                        },
+                                                        onEditCancel: {
+                                                            onEditCancelled(set.index)
                                                         }
                         )
                     }
@@ -850,13 +864,239 @@ private struct SessionSetRowView: View {
     let onSkip: (_ reason: SetFeedback) -> Void
     let onPumpRated: (_ rating: PumpRating) -> Void
     let onEdit: () -> Void
-    
+    let onEditSave: () -> Void
+    let onEditCancel: () -> Void
+
     private var isLocked: Bool {
-            uiSet.status == .completed || uiSet.status.isAnySkip
+            (uiSet.status == .completed || uiSet.status.isAnySkip) && !uiSet.isEditing
         }
 
     private func formattedWeight(_ value: Double) -> String {
         LoadFormatter(unit: unit).compact(value)
+    }
+
+    @ScaledMetric(relativeTo: .callout) private var chipSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var loadFieldWidth: CGFloat = 72
+    @ScaledMetric(relativeTo: .body) private var repsFieldWidth: CGFloat = 52
+
+    private var loadField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text("Load")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if isBodyweightExercise {
+                        if let bodyWeight, bodyWeight > 0 {
+                            Text("BW (\(formattedWeight(bodyWeight)) \(unit.label))")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        } else {
+                            Button(action: onBodyweightSettingsTapped) {
+                                Text("BW — set in Settings")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        TextField("0", text: Binding(
+                            get: { uiSet.actualLoadText },
+                            set: { onLoadChanged($0) }
+                        ))
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: loadFieldWidth)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                }
+    }
+
+    private var repsField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text("Reps")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField("0", text: Binding(
+                        get: { uiSet.actualRepsText },
+                        set: { onRepsChanged($0) }
+                    ))
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 52)
+                    .disabled(isLocked)
+                    .opacity(isLocked ? 0.6 : 1.0)
+                }
+    }
+
+    private var rirField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+                    Text(isCompoundLift ? "RIR (tap one)" : "RIR")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if isCompoundLift {
+                        HStack(spacing: 4) {
+                            ForEach(RIREntry.chipValues, id: \.self) { value in
+                                let selected = uiSet.actualRIR == value
+                                Button {
+                                    guard !isLocked else { return }
+                                    onRIRChanged(selected ? "" : "\(value)")
+                                } label: {
+                                    Text("\(value)")
+                                        .font(.callout.weight(.semibold))
+                                        .frame(width: chipSize, height: chipSize)
+                                        .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
+                                        .foregroundStyle(selected ? Color.white : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("RIR \(value)")
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                            }
+                        }
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    } else {
+                        TextField("0", text: Binding(
+                            get: {
+                                if let actual = uiSet.actualRIR { return "\(actual)" }
+                                if let planned = uiSet.plannedRIR { return "\(planned)" }
+                                return ""
+                            },
+                            set: { onRIRChanged($0) }
+                        ))
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 40)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                }
+    }
+
+    @ViewBuilder private var actionBar: some View {
+                if uiSet.isEditing {
+                    HStack(spacing: 16) {
+                        Button("Save") { onEditSave() }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.blue)
+                            .buttonStyle(.plain)
+                        Button("Cancel") { onEditCancel() }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                    }
+                } else {
+                HStack(spacing: 16) {
+                    Button(action: {
+                        guard !isLocked else { return }
+                        onLog()
+                    }) {
+                        switch uiSet.status {
+                                                case .completed:
+                                                    Text("Done")
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.green.opacity(0.2))
+                                                        .foregroundStyle(.green)
+                                                        .clipShape(Capsule())
+                                                case _ where uiSet.status.isAnySkip:
+                                                    Text(uiSet.status.displayLabel)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(uiSet.status.displayColor.opacity(0.2))
+                                                        .foregroundStyle(uiSet.status.displayColor)
+                                                        .clipShape(Capsule())
+                                                default:
+                                                    Text("Log")
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .fixedSize()
+                                                        .fontWeight(.semibold)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.blue.opacity(0.2))
+                                                        .foregroundStyle(.blue)
+                                                        .clipShape(Capsule())
+                                                }
+                    }
+                    .buttonStyle(.plain)
+                                        .contextMenu {
+                                            if isLocked {
+                                                Button("Edit set") { onEdit() }
+                                            } else {
+                                                Button("Skip") { onSkip(.none) }
+                                                Button("Pain") { onSkip(.pain) }
+                                                Button("Soreness") { onSkip(.soreness) }
+                                                Button("Disruption") { onSkip(.disruption) }
+                                                Button("Fatigue") { onSkip(.fatigue) }
+                                            }
+                                        }
+
+                                        if uiSet.status == .completed {
+                                            Menu {
+                                                Button("Not rated") { onPumpRated(.none) }
+                                                Divider()
+                                                ForEach(PumpRating.allCases.filter { $0 != .none }, id: \.self) { rating in
+                                                    Button(rating.label) { onPumpRated(rating) }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 3) {
+                                                    Image(systemName: "drop.fill")
+                                                        .font(.caption)
+                                                    Text(uiSet.pumpRating == .none ? "Pump" : uiSet.pumpRating.label)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                }
+                                                .fixedSize()
+                                                .padding(.vertical, 6)
+                                                .foregroundStyle(uiSet.pumpRating == .none ? Color.secondary : Color.blue)
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+
+                                        Menu {
+                                            Button("Skip") { onSkip(.none) }
+                                            Divider()
+                                            Button {
+                                                onSkip(.pain)
+                                            } label: {
+                                                Label("Pain", systemImage: "exclamationmark.triangle.fill")
+                                            }
+                                            Button {
+                                                onSkip(.soreness)
+                                            } label: {
+                                                Label("Soreness", systemImage: "flame.fill")
+                                            }
+                                            Button {
+                                                onSkip(.disruption)
+                                            } label: {
+                                                Label("Disruption", systemImage: "bolt.slash.fill")
+                                            }
+                                            Button {
+                                                onSkip(.fatigue)
+                                            } label: {
+                                                Label("Fatigue", systemImage: "zzz")
+                                            }
+                                        } label: {
+                                            Text("Skip")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .fixedSize()
+                                                .padding(.vertical, 6)
+                                        }
+                                        .buttonStyle(.borderless)
+                }
+                }
     }
 
 
@@ -871,7 +1111,12 @@ private struct SessionSetRowView: View {
                     .fontWeight(uiSet.isTop ? .semibold : .regular)
                     .foregroundStyle(uiSet.isTop ? Color.orange : Color.secondary)
                 Spacer()
-                if isLocked {
+                if uiSet.isEditing {
+                    Text("Editing")
+                        .font(.caption2).fontWeight(.semibold)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.2)).foregroundStyle(.blue).clipShape(Capsule())
+                } else if isLocked {
                                     if uiSet.status.isAnySkip {
                                         Text(uiSet.status.displayLabel)
                                             .font(.caption2)
@@ -909,197 +1154,20 @@ private struct SessionSetRowView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
-            // ACTUAL inputs row
-            HStack(alignment: .bottom, spacing: 8) {
-                // Load
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Load")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if isBodyweightExercise {
-                        if let bodyWeight, bodyWeight > 0 {
-                            Text("BW (\(formattedWeight(bodyWeight)) \(unit.label))")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        } else {
-                            Button(action: onBodyweightSettingsTapped) {
-                                Text("BW — set in Settings")
-                                    .font(.caption2)
-                                    .foregroundStyle(.blue)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } else {
-                        TextField("0", text: Binding(
-                            get: { uiSet.actualLoadText },
-                            set: { onLoadChanged($0) }
-                        ))
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 72)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    }
+            // ACTUAL inputs row: the three inputs get the whole width; at the largest text sizes RIR drops under Load/Reps.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .bottom, spacing: 8) { loadField; repsField; Spacer(minLength: 0) }
+                    rirField
                 }
+            }
 
-                // Reps
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Reps")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    TextField("0", text: Binding(
-                        get: { uiSet.actualRepsText },
-                        set: { onRepsChanged($0) }
-                    ))
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 52)
-                    .disabled(isLocked)
-                    .opacity(isLocked ? 0.6 : 1.0)
-                }
-
-                // RIR
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isCompoundLift ? "RIR (tap one)" : "RIR")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if isCompoundLift {
-                        HStack(spacing: 4) {
-                            ForEach(RIREntry.chipValues, id: \.self) { value in
-                                let selected = uiSet.actualRIR == value
-                                Button {
-                                    guard !isLocked else { return }
-                                    onRIRChanged(selected ? "" : "\(value)")
-                                } label: {
-                                    Text("\(value)")
-                                        .font(.callout.weight(.semibold))
-                                        .frame(width: 30, height: 30)
-                                        .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
-                                        .foregroundStyle(selected ? Color.white : Color.primary)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("RIR \(value)")
-                                .accessibilityAddTraits(selected ? .isSelected : [])
-                            }
-                        }
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    } else {
-                        TextField("0", text: Binding(
-                            get: {
-                                if let actual = uiSet.actualRIR { return "\(actual)" }
-                                if let planned = uiSet.plannedRIR { return "\(planned)" }
-                                return ""
-                            },
-                            set: { onRIRChanged($0) }
-                        ))
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 40)
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.6 : 1.0)
-                    }
-                }
-
-                Spacer()
-
-                // Log / Skip / Edit
-                VStack(spacing: 4) {
-                    Button(action: {
-                        guard !isLocked else { return }
-                        onLog()
-                    }) {
-                        switch uiSet.status {
-                                                case .completed:
-                                                    Text("Done")
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(Color.green.opacity(0.2))
-                                                        .foregroundStyle(.green)
-                                                        .clipShape(Capsule())
-                                                case _ where uiSet.status.isAnySkip:
-                                                    Text(uiSet.status.displayLabel)
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(uiSet.status.displayColor.opacity(0.2))
-                                                        .foregroundStyle(uiSet.status.displayColor)
-                                                        .clipShape(Capsule())
-                                                default:
-                                                    Text("Log")
-                                                        .font(.caption)
-                                                        .fontWeight(.semibold)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 6)
-                                                        .background(Color.blue.opacity(0.2))
-                                                        .foregroundStyle(.blue)
-                                                        .clipShape(Capsule())
-                                                }
-                    }
-                    .buttonStyle(.plain)
-                                        .contextMenu {
-                                            if isLocked {
-                                                Button("Edit set") { onEdit() }
-                                            } else {
-                                                Button("Skip") { onSkip(.none) }
-                                                Button("Pain") { onSkip(.pain) }
-                                                Button("Soreness") { onSkip(.soreness) }
-                                                Button("Disruption") { onSkip(.disruption) }
-                                                Button("Fatigue") { onSkip(.fatigue) }
-                                            }
-                                        }
-
-                                        if uiSet.status == .completed {
-                                            Menu {
-                                                Button("Not rated") { onPumpRated(.none) }
-                                                Divider()
-                                                ForEach(PumpRating.allCases.filter { $0 != .none }, id: \.self) { rating in
-                                                    Button(rating.label) { onPumpRated(rating) }
-                                                }
-                                            } label: {
-                                                HStack(spacing: 3) {
-                                                    Image(systemName: "drop.fill")
-                                                        .font(.caption2)
-                                                    Text(uiSet.pumpRating == .none ? "Pump" : uiSet.pumpRating.label)
-                                                        .font(.caption2)
-                                                }
-                                                .foregroundStyle(uiSet.pumpRating == .none ? Color.secondary : Color.blue)
-                                            }
-                                            .buttonStyle(.borderless)
-                                        }
-
-                                        Menu {
-                                            Button("Skip") { onSkip(.none) }
-                                            Divider()
-                                            Button {
-                                                onSkip(.pain)
-                                            } label: {
-                                                Label("Pain", systemImage: "exclamationmark.triangle.fill")
-                                            }
-                                            Button {
-                                                onSkip(.soreness)
-                                            } label: {
-                                                Label("Soreness", systemImage: "flame.fill")
-                                            }
-                                            Button {
-                                                onSkip(.disruption)
-                                            } label: {
-                                                Label("Disruption", systemImage: "bolt.slash.fill")
-                                            }
-                                            Button {
-                                                onSkip(.fatigue)
-                                            } label: {
-                                                Label("Fatigue", systemImage: "zzz")
-                                            }
-                                        } label: {
-                                            Text("Skip")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .buttonStyle(.borderless)
-                }
+            // Log / Skip / Pump / Edit live on their own line UNDER the inputs, so no label is squeezed into a narrow column.
+            // Labels never wrap mid-word (fixedSize); if the line cannot fit, the actions stack vertically instead.
+            ViewThatFits(in: .horizontal) {
+                actionBar
+                VStack(alignment: .leading, spacing: 8) { actionBar }
             }
 
             // Intensifier toggles row (hidden when locked)
@@ -1381,6 +1449,7 @@ final class SessionScreenViewModel: ObservableObject {
             set.actualReps = reps
             set.actualLoad = loadToStore
             set.status = .completed
+            set.editSnapshot = nil          // an edit in progress ends here: this IS the save
             exercise.sets[setIdx] = set
 
             // 2) Sync fresh data into matching SessionItem before coaching
@@ -1639,30 +1708,25 @@ final class SessionScreenViewModel: ObservableObject {
         persist(using: context)
     }
 
+    /// "Edit set" on a logged or skipped set: unlocks the inputs and changes NOTHING. The values as logged stay in the fields
+    /// (load, reps, RIR, rest-pause, drops) until the user changes them; the set keeps its status and persisted data until
+    /// Save (the normal log path), and Cancel puts every field back exactly as logged. A snapshot held in the row, not in the
+    /// store, is what makes cancel exact; `persist` writes the snapshot while an edit is open, so no other save can leak it.
     func editSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        exercises[exerciseIdx].sets[setIdx].beginEdit()
+    }
 
-        exercises[exerciseIdx].sets[setIdx].status = .notStarted
-        exercises[exerciseIdx].sets[setIdx].actualLoad = nil
-        exercises[exerciseIdx].sets[setIdx].actualReps = nil
-        exercises[exerciseIdx].sets[setIdx].actualRIR = nil
-        exercises[exerciseIdx].sets[setIdx].usedRestPause = false
-        exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
-        exercises[exerciseIdx].sets[setIdx].usedDropSet = false
-        exercises[exerciseIdx].sets[setIdx].dropSets = []
-        // FIX B — pre-fill the actual-load field from the plan when re-editing a set.
-        // The existing plannedLoad == 0 branch already yields "0" for a clean BW plan,
-        // but that's incidental. Key on isBodyweight so a stray nonzero plannedLoad can
-        // never pre-fill (and, if confirmed, re-pollute actuals) on a BW exercise —
-        // mirrors the Cut 0 init logic. Loaded exercises keep the plan-copy behavior.
-        let isBodyweight = ExerciseCatalog.isBodyweight(exerciseId: exercises[exerciseIdx].exerciseId)
-        exercises[exerciseIdx].sets[setIdx].actualLoadText = (isBodyweight || exercises[exerciseIdx].sets[setIdx].plannedLoad == 0)
-            ? "0"
-            : LoadFormatter(unit: loadUnit).oneDecimal(exercises[exerciseIdx].sets[setIdx].plannedLoad)
-        exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
+    func cancelEditSet(exerciseID: UUID, setIndex: Int) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        exercises[exerciseIdx].sets[setIdx].cancelEdit()
+    }
 
-        persist(using: context)
+    /// Save = log again: the same path as the Log button, so the plan memory, coaching and persistence stay one code path.
+    func saveEditedSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
+        handleSetLogged(exerciseID: exerciseID, setIndex: setIndex, context: context)
     }
 
     private func onSetCompleted(exercise: UISessionExercise, set: UISessionSet) {
@@ -2080,7 +2144,8 @@ final class SessionScreenViewModel: ObservableObject {
                 item.setRolesBySet = roles
             }
 
-            for uiSet in uiExercise.sets {
+            for liveSet in uiExercise.sets {
+                let uiSet = liveSet.persistedView          // an open edit is not persisted until Save
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
 
@@ -2878,7 +2943,49 @@ struct UISessionSet: Identifiable {
     var plannedRepsText: String
     var actualLoadText: String
     var actualRepsText: String
-    
+
+    /// The set as logged, held while "Edit set" is open (nil otherwise). See `SessionViewModel.editSet`.
+    struct EditSnapshot {
+        var status: SetStatus
+        var actualLoad: Double?
+        var actualReps: Int?
+        var actualRIR: Int?
+        var actualLoadText: String
+        var actualRepsText: String
+        var usedRestPause: Bool
+        var restPausePattern: String
+        var usedDropSet: Bool
+        var dropSets: [DropSetEntry]
+    }
+    var editSnapshot: EditSnapshot?
+    var isEditing: Bool { editSnapshot != nil }
+
+    mutating func beginEdit() {
+        guard editSnapshot == nil else { return }
+        editSnapshot = EditSnapshot(status: status, actualLoad: actualLoad, actualReps: actualReps, actualRIR: actualRIR,
+                                    actualLoadText: actualLoadText, actualRepsText: actualRepsText,
+                                    usedRestPause: usedRestPause, restPausePattern: restPausePattern,
+                                    usedDropSet: usedDropSet, dropSets: dropSets)
+    }
+
+    mutating func cancelEdit() {
+        guard let snap = editSnapshot else { return }
+        status = snap.status
+        actualLoad = snap.actualLoad; actualReps = snap.actualReps; actualRIR = snap.actualRIR
+        actualLoadText = snap.actualLoadText; actualRepsText = snap.actualRepsText
+        usedRestPause = snap.usedRestPause; restPausePattern = snap.restPausePattern
+        usedDropSet = snap.usedDropSet; dropSets = snap.dropSets
+        editSnapshot = nil
+    }
+
+    /// What the store should hold: the set as logged while an edit is open, the live values otherwise.
+    var persistedView: UISessionSet {
+        guard isEditing else { return self }
+        var copy = self
+        copy.cancelEdit()
+        return copy
+    }
+
     init(
         index: Int,
         exerciseId: String,
