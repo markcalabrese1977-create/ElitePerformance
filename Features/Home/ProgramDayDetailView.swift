@@ -17,7 +17,6 @@ struct ProgramDayDetailView: View {
     @State private var swapTarget: SwapTarget?
     @State private var changeTarget: ChangeTarget?
     @State private var propagateAddToFutureSessions: Bool = true
-    @State private var propagateChangesToFutureSessions: Bool = true
     @State private var showDayLabelEditor: Bool = false
     @State private var dayLabelDraft: String = ""
     /// Items waiting for the lifter to confirm their removal from this session's plan.
@@ -45,14 +44,9 @@ struct ProgramDayDetailView: View {
         WavePrescriptionGuard.isWaveBasedBlock(session)
     }
 
-    /// The propagation toggle's effective value.
-    ///
-    /// Reads `false` on a wave-based block regardless of the stored `@State`, so a
-    /// value left over from a previously-viewed non-wave session can never leak a
-    /// propagating write into a DUP block.
-    private var propagatesToFutureSessions: Bool {
-        !isWaveBasedBlock && propagateChangesToFutureSessions
-    }
+    /// Whether a structural edit here is offered to the later sessions of this day type (always asked first, with the count).
+    /// Never on a wave-based block: copying the prescription would flatten its B and C weeks into this week's.
+    private var propagatesToFutureSessions: Bool { !isWaveBasedBlock }
 
     // MARK: - Body
 
@@ -69,8 +63,6 @@ struct ProgramDayDetailView: View {
                     ForEach(orderedItems) { item in
                         ProgramExercisePlanRow(
                             item: item,
-                            onMoveUp:  { move(item, direction: -1) },
-                            onMoveDown:{ move(item, direction: 1) },
                             onDelete:  { requestDelete([item], propagate: true) },
                             onSwapTapped: { swapTarget = SwapTarget(item: item) },
                             onChangePrescriptionTapped: { scope in changeTarget = ChangeTarget(item: item, scope: scope) },
@@ -103,6 +95,7 @@ struct ProgramDayDetailView: View {
         }
         .navigationTitle(session.date.formatted(date: .abbreviated, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { EditButton() } }   // drag to reorder
         .confirmationDialog(
             "Remove exercise?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -251,24 +244,6 @@ struct ProgramDayDetailView: View {
                 Text("Adjust plan defaults here. Logging happens on the Today tab.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-
-                                Toggle(isOn: $propagateChangesToFutureSessions) {
-                                    Text("Apply changes to future sessions")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .toggleStyle(.switch)
-                                .padding(.top, 4)
-                                .disabled(isWaveBasedBlock)
-                                .onAppear {
-                                    // Render the switch in the state that actually
-                                    // applies. `propagatesToFutureSessions` already
-                                    // forces the behaviour off; this keeps the control
-                                    // from showing ON-but-greyed and implying otherwise.
-                                    if isWaveBasedBlock {
-                                        propagateChangesToFutureSessions = false
-                                    }
-                                }
 
                                 if isWaveBasedBlock {
                                     Text("Changes apply to this session only for wave-based programs.")
@@ -500,31 +475,6 @@ struct ProgramDayDetailView: View {
         undoDelete = nil
     }
 
-    private func move(_ item: SessionItem, direction: Int) {
-        // direction: -1 = up, +1 = down
-        var items = orderedItems
-        guard let currentIndex = items.firstIndex(where: { $0.id == item.id }) else { return }
-        let newIndex = currentIndex + direction
-        guard items.indices.contains(newIndex) else { return }
-
-        items.swapAt(currentIndex, newIndex)
-
-        // Re-write orders to be 1...N based on the sorted-array position
-        for (idx, sessionItem) in items.enumerated() {
-            sessionItem.order = idx + 1
-        }
-
-        if propagatesToFutureSessions {
-            requestPropagation()
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("⚠️ Failed to move exercise: \(error)")
-        }
-    }
-
     private func moveItems(from offsets: IndexSet, to destination: Int) {
         var items = orderedItems
         items.move(fromOffsets: offsets, toOffset: destination)
@@ -683,8 +633,6 @@ private struct ProgramExercisePlanRow: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var item: SessionItem
 
-    let onMoveUp: () -> Void
-    let onMoveDown: () -> Void
     let onDelete: () -> Void
     let onSwapTapped: () -> Void
     let onChangePrescriptionTapped: (_ scope: ReplaceScopeChoice) -> Void
@@ -792,16 +740,6 @@ private struct ProgramExercisePlanRow: View {
                 .clipShape(Circle())
                 .accessibilityLabel("Exercise note")
                 
-                Button(action: onMoveUp) {
-                    Image(systemName: "chevron.up")
-                }
-                .buttonStyle(.borderless)
-
-                Button(action: onMoveDown) {
-                    Image(systemName: "chevron.down")
-                }
-                .buttonStyle(.borderless)
-
                 Button(action: onSwapTapped) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }

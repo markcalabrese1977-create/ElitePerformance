@@ -149,6 +149,7 @@ enum StartupBackfills {
         (String(describing: SessionHistoryExerciseOrderBackfill.self), { SessionHistoryExerciseOrderBackfill.runIfNeeded(in: $0) }),
         (String(describing: CustomExerciseCompoundBackfill.self), { CustomExerciseCompoundBackfill.runIfNeeded(in: $0) }),
         (String(describing: RIRUnsetBackfill.self), { RIRUnsetBackfill.runIfNeeded(in: $0) }),
+        (String(describing: MesoStartDateResync.self), { MesoStartDateResync.runIfNeeded(in: $0) }),
         (String(describing: MissedSourceSeedBackfill.self), { MissedSourceSeedBackfill.runIfNeeded(in: $0) }),
     ]
 

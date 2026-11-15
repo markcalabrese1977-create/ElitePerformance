@@ -2762,3 +2762,43 @@ final class PerExerciseLoadStepTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first).loadStepByExercise.isEmpty)
     }
 }
+
+// MARK: - R4: the silent meso start date re-sync
+
+final class MesoStartDateResyncTests: XCTestCase {
+    private let cal = Calendar.current
+    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+
+    func test_aDifferingStartDateIsResynced_withOneLogLine_andNothingElseChanges() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(name: "A", startDate: day(-20), status: .active, totalWeeks: 8); ctx.insert(meso)
+        let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Push", items: []); s.meso = meso; ctx.insert(s)
+        let state = AppState(); state.activeMesoStartDate = day(-3); state.scheduledNextMesoStartDate = day(30); ctx.insert(state)
+        try ctx.save()
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        let notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(notes.count, 1, "one line")
+        XCTAssertTrue(notes[0].contains("re-synced"), notes[0])
+        XCTAssertEqual(state.activeMesoStartDate, day(-20))
+        XCTAssertEqual(state.scheduledNextMesoStartDate, day(30), "a scheduled next meso is left alone")
+        XCTAssertEqual(s.date, day(2))
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed", "idempotent")
+        BackfillLog.collector = nil
+    }
+
+    func test_nothingToDo_withNoActiveBlock_orWithNoStoredDate() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed")
+        let meso = MesoBlock(name: "A", startDate: day(-5), status: .active, totalWeeks: 8); ctx.insert(meso); try ctx.save()
+        BackfillLog.collector = []
+        MesoStartDateResync.runIfNeeded(in: ctx)
+        XCTAssertEqual(BackfillLog.result(from: BackfillLog.collector ?? []), "not needed", "no AppState row: none is created")
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<AppState>()), 0)
+        BackfillLog.collector = nil
+    }
+}
