@@ -14,6 +14,110 @@ struct SettingsView: View {
     @State private var exportItem: ExportShareItem? = nil
     @State private var exportError: String? = nil
 
+    /// Restore: the automatic backups on this device and in iCloud, and the pre-import undo. Every row here replaces the data on
+    /// this device after a confirmation (see `RestoreConfirmSheet`), so they are red and live one screen away from Settings.
+    private var restoreScreen: some View {
+        List {
+            Section {
+                if backupFiles.isEmpty {
+                    Text("No automatic backups yet.").foregroundStyle(.secondary)
+                }
+                ForEach(backupFiles.prefix(10)) { file in
+                    Button {
+                        try? FileManager.default.startDownloadingUbiquitousItem(at: file.url)
+                        pendingRestore = PendingRestore(url: file.url, isTemporaryCopy: false)
+                    } label: {
+                        Text("Restore from \(file.date.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                    .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Automatic backups")
+            } footer: {
+                Text("Restoring replaces the data on this device. A copy of your current data is saved first, and you see both side by side before anything changes.")
+            }
+            Section {
+                if let snapshot = PreImportSnapshots.undoCandidate() {
+                    Button("Restore pre-import state (\(snapshot.date.formatted(date: .abbreviated, time: .shortened)))") {
+                        pendingRestore = PendingRestore(url: snapshot.url, isTemporaryCopy: false)
+                    }
+                    .foregroundStyle(.red)
+                } else {
+                    Text("Nothing to undo.").foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Undo the last restore")
+            } footer: {
+                Text("Your data as it was just before the last import or restore. Available for 30 days.")
+            }
+        }
+        .navigationTitle("Restore")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await refreshBackups() }
+    }
+
+    /// Move data: bring a file in, or take your data out.
+    private var moveDataScreen: some View {
+        List {
+            Section("Import") {
+                Button("Import Full Backup (JSON)") {
+                    showImportBackupPicker = true
+                }
+                .foregroundStyle(.red)
+            }
+            Section("Export") {
+                Button("Export Full Backup (JSON)") {
+                    exportError = nil
+                    do {
+                        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
+                        guard FileManager.default.fileExists(atPath: result.url.path) else {
+                            exportItem = nil
+                            exportError = "Backup file was not created at:\n\(result.url.path)"
+                            return
+                        }
+                        exportItem = ExportShareItem(url: result.url)
+                    } catch {
+                        exportItem = nil
+                        exportError = error.localizedDescription
+                    }
+                }
+
+                Button("Export Completed Sessions (CSV)") {
+                    exportError = nil
+                    do {
+                        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
+                        guard result.rowCount > 0 else {
+                            exportItem = nil
+                            exportError = "No completed sessions found to export."
+                            return
+                        }
+                        guard FileManager.default.fileExists(atPath: result.url.path) else {
+                            exportItem = nil
+                            exportError = "Export file was not created at:\n\(result.url.path)"
+                            return
+                        }
+                        exportItem = ExportShareItem(url: result.url)
+                    } catch {
+                        exportItem = nil
+                        exportError = error.localizedDescription
+                    }
+                }
+
+                if let exportError {
+                    Text(exportError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("The JSON backup holds everything needed to rebuild this app: your profile and settings, training blocks, every session with its plan and logged sets, history, custom exercises and notes. The CSV holds completed sessions only (sets_v1 format), for spreadsheets.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Move data")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
     // MARK: - Automatic backups
     @ObservedObject private var autoBackup = AutoBackupService.shared
     @State private var backupFiles: [AutoBackupFile] = []
@@ -48,7 +152,7 @@ struct SettingsView: View {
         Form {
             // MARK: - Profile
                         if let profile = profiles.first {
-                            Section("Profile") {
+                            Section("Training") {
                                 Picker("Goal", selection: Binding(
                                     get: { profile.primaryGoal },
                                     set: { profile.primaryGoal = $0 }
@@ -187,7 +291,7 @@ struct SettingsView: View {
                         )
                     )
                 } header: {
-                    Text("Equipment")
+                    Text("Training equipment")
                 } footer: {
                     Text("Changes apply to your next program. Your current meso is unchanged.")
                 }
@@ -202,8 +306,8 @@ struct SettingsView: View {
                 }
             }
 
-            // MARK: - Backup
-            Section("Backup") {
+            // MARK: - Backup & Restore
+            Section("Backup & Restore") {
                 Text(backupStatusLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -213,88 +317,16 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
                 if let e = autoBackup.lastError {
-                    Text("Last backup attempt failed: \(e)").font(.caption).foregroundStyle(.red)
+                    Text("Last backup attempt failed: \(e)").font(.caption).foregroundStyle(.orange)
                 }
                 Button(backupBusy ? "Backing up…" : "Back up now") { Task { await backUpNow() } }
                     .disabled(backupBusy)
                 Button("Verify latest backup") { verifyLatestBackup() }
                     .disabled(backupBusy || backupFiles.isEmpty)
-                ForEach(backupFiles.prefix(10)) { file in
-                    Button {
-                        try? FileManager.default.startDownloadingUbiquitousItem(at: file.url)
-                        pendingRestore = PendingRestore(url: file.url, isTemporaryCopy: false)
-                    } label: {
-                        Text("Restore from \(file.date.formatted(date: .abbreviated, time: .shortened))")
-                    }
-                    .foregroundStyle(.red)
-                }
+                NavigationLink("Restore from a backup") { restoreScreen }
+                NavigationLink("Move data (import and export)") { moveDataScreen }
             }
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
-
-            // MARK: - Export
-            Section("Export") {
-                Button("Import Full Backup (JSON)") {
-                    showImportBackupPicker = true
-                }
-                .foregroundStyle(.red)
-
-                if let snapshot = PreImportSnapshots.undoCandidate() {
-                    Button("Restore pre-import state (\(snapshot.date.formatted(date: .abbreviated, time: .shortened)))") {
-                        pendingRestore = PendingRestore(url: snapshot.url, isTemporaryCopy: false)
-                    }
-                    .foregroundStyle(.red)
-                    Text("Your data as it was just before the last import. Available for 30 days.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button("Export Full Backup (JSON)") {
-                    exportError = nil
-                    do {
-                        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: context)
-                        guard FileManager.default.fileExists(atPath: result.url.path) else {
-                            exportItem = nil
-                            exportError = "Backup file was not created at:\n\(result.url.path)"
-                            return
-                        }
-                        exportItem = ExportShareItem(url: result.url)
-                    } catch {
-                        exportItem = nil
-                        exportError = error.localizedDescription
-                    }
-                }
-
-                Button("Export Completed Sessions (CSV)") {
-                    exportError = nil
-                    do {
-                        let result = try SetsV1CSVExporter.exportCompletedSessionsCSV(modelContext: context)
-                        guard result.rowCount > 0 else {
-                            exportItem = nil
-                            exportError = "No completed sessions found to export."
-                            return
-                        }
-                        guard FileManager.default.fileExists(atPath: result.url.path) else {
-                            exportItem = nil
-                            exportError = "Export file was not created at:\n\(result.url.path)"
-                            return
-                        }
-                        exportItem = ExportShareItem(url: result.url)
-                    } catch {
-                        exportItem = nil
-                        exportError = error.localizedDescription
-                    }
-                }
-
-                if let exportError {
-                    Text(exportError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                } else {
-                    Text("JSON backup exports app state, meso blocks, sessions, history, and notes. CSV exports completed sessions only in sets_v1 format.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
 
             // MARK: - About
             // Tap to copy, so a bug report can carry the exact build without the

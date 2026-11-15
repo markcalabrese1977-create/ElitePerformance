@@ -2926,3 +2926,47 @@ final class MesoCardMenuTests: XCTestCase {
         XCTAssertTrue(home.contains("onChangeProgram:"), "the card's menu opens the same wizard")
     }
 }
+
+// MARK: - R8: the Settings structure
+
+final class SettingsStructureTests: XCTestCase {
+    private func settings() throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+    }
+
+    /// The main screen: from `Form {` to the end of its sections (before the helper screens).
+    private func mainScreen(_ text: String) throws -> String {
+        let start = try XCTUnwrap(text.range(of: "        Form {")).lowerBound
+        let end = try XCTUnwrap(text.range(of: "        .navigationTitle(\"Settings\")")).lowerBound
+        return String(text[start..<end])
+    }
+
+    func test_theMainScreenHasTheFourGroups_andNoRedRows() throws {
+        let main = try mainScreen(try settings())
+        for header in ["Section(\"Training\")", "Section(\"Analytics\")", "Section(\"Backup & Restore\")", "Section(\"About\")"] {
+            XCTAssertTrue(main.contains(header), header)
+        }
+        XCTAssertFalse(main.contains(".foregroundStyle(.red)"), "no red rows on the main Settings screen: they live one screen away")
+        XCTAssertFalse(main.contains("role: .destructive"))
+        for gone in ["Data Repair", "Reset Mesocycle", "Remove Unrecognized", "Repair Exercise Data", "Repair maintenance loads", "Sync meso start date", "Import Full Backup", "Export Full Backup", "Restore from \\("] {
+            XCTAssertFalse(main.contains(gone), "\(gone) is not on the main screen")
+        }
+    }
+
+    func test_restoreAndMoveDataScreens_holdTheRestoreAndImportExportRows() throws {
+        let text = try settings()
+        let restoreAt = try XCTUnwrap(text.range(of: "private var restoreScreen")).lowerBound
+        let restore = String(text[restoreAt...].prefix(2600))
+        XCTAssertTrue(restore.contains("Restore from \\(") && restore.contains("Restore pre-import state"))
+        let moveAt = try XCTUnwrap(text.range(of: "private var moveDataScreen")).lowerBound
+        let move = String(text[moveAt...].prefix(3500))
+        for row in ["Import Full Backup (JSON)", "Export Full Backup (JSON)", "Export Completed Sessions (CSV)"] { XCTAssertTrue(move.contains(row), row) }
+        XCTAssertFalse(move.contains("app state, meso blocks, sessions, history, and notes"), "the stale export footer is replaced")
+        XCTAssertTrue(move.contains("custom exercises"))
+    }
+
+    func test_theDefaultLoadStepLabel() throws {
+        XCTAssertTrue(try settings().contains("Default load step (all lifts unless overridden per exercise)"))
+    }
+}
