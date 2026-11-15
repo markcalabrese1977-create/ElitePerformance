@@ -3248,3 +3248,90 @@ final class PrivacyDeclarationsTests: XCTestCase {
         }
     }
 }
+
+// MARK: - T1: "Edit set" keeps the logged values (it used to reset a 135 x 8 set to 0 x 8)
+
+@MainActor
+final class EditLoggedSetTests: XCTestCase {
+    private func makeLoggedSession() throws -> (SessionScreenViewModel, ModelContext, Session, UUID) {
+        let container = try BackupTestSupport.makeContainer()
+        let ctx = ModelContext(container)
+        let item = BackupTestSupport.item(1, "bench_press", name: "Bench Press")
+        ctx.insert(item)
+        let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000), status: .planned, weekIndex: 1, dayLabel: "Upper A", items: [])
+        ctx.insert(s)
+        s.items.append(item)
+        try ctx.save()
+        let vm = SessionScreenViewModel(session: s)
+        let id = vm.exercises[0].id
+        // log set 1 at 135 x 8, RIR 2
+        vm.updateActualLoad(exerciseID: id, setIndex: 1, text: "135")
+        vm.updateActualReps(exerciseID: id, setIndex: 1, text: "8")
+        vm.updateActualRIR(exerciseID: id, setIndex: 1, text: "2")
+        vm.handleSetLogged(exerciseID: id, setIndex: 1, context: ctx)
+        return (vm, ctx, s, id)
+    }
+
+    private func set1(_ vm: SessionScreenViewModel) -> UISessionSet { vm.exercises[0].sets.first { $0.index == 1 }! }
+
+    func test_unlock_keepsLoadRepsAndRIR_andChangesNothingPersisted() throws {
+        let (vm, ctx, s, id) = try makeLoggedSession()
+        XCTAssertEqual(set1(vm).status, .completed)
+        XCTAssertEqual(s.items[0].actualLoads.first, 135)
+
+        vm.editSet(exerciseID: id, setIndex: 1, context: ctx)
+
+        let e = set1(vm)
+        XCTAssertTrue(e.isEditing)
+        XCTAssertEqual(e.actualLoad, 135); XCTAssertEqual(e.actualReps, 8); XCTAssertEqual(e.actualRIR, 2)
+        XCTAssertEqual(e.actualLoadText, "135"); XCTAssertEqual(e.actualRepsText, "8")
+        // the store is untouched, even after an unrelated save while the edit is open
+        vm.persist(using: ctx)
+        XCTAssertEqual(s.items[0].actualLoads.first, 135)
+        XCTAssertEqual(s.items[0].actualReps.first, 8)
+        XCTAssertEqual(RIREntry.recorded(s.items[0], at: 0), 2)
+    }
+
+    func test_editRepsOnly_keepsTheLoad_andSaveWritesIt() throws {
+        let (vm, ctx, s, id) = try makeLoggedSession()
+        vm.editSet(exerciseID: id, setIndex: 1, context: ctx)
+        vm.updateActualReps(exerciseID: id, setIndex: 1, text: "9")
+        // before Save the store still holds the logged reps
+        vm.persist(using: ctx)
+        XCTAssertEqual(s.items[0].actualReps.first, 8)
+
+        vm.saveEditedSet(exerciseID: id, setIndex: 1, context: ctx)
+        XCTAssertFalse(set1(vm).isEditing)
+        XCTAssertEqual(set1(vm).status, .completed)
+        XCTAssertEqual(s.items[0].actualReps.first, 9)
+        XCTAssertEqual(s.items[0].actualLoads.first, 135, "load unchanged when only reps were edited")
+        XCTAssertEqual(RIREntry.recorded(s.items[0], at: 0), 2, "RIR unchanged")
+    }
+
+    func test_cancel_leavesTheSetExactlyAsLogged() throws {
+        let (vm, ctx, s, id) = try makeLoggedSession()
+        let before = set1(vm)
+        vm.editSet(exerciseID: id, setIndex: 1, context: ctx)
+        vm.updateActualLoad(exerciseID: id, setIndex: 1, text: "999")
+        vm.updateActualReps(exerciseID: id, setIndex: 1, text: "1")
+        vm.updateActualRIR(exerciseID: id, setIndex: 1, text: "4")
+        vm.cancelEditSet(exerciseID: id, setIndex: 1)
+
+        let after = set1(vm)
+        XCTAssertFalse(after.isEditing)
+        XCTAssertEqual(after.status, before.status)
+        XCTAssertEqual(after.actualLoad, before.actualLoad); XCTAssertEqual(after.actualReps, before.actualReps)
+        XCTAssertEqual(after.actualRIR, before.actualRIR)
+        XCTAssertEqual(after.actualLoadText, before.actualLoadText); XCTAssertEqual(after.actualRepsText, before.actualRepsText)
+        vm.persist(using: ctx)
+        XCTAssertEqual(s.items[0].actualLoads.first, 135); XCTAssertEqual(s.items[0].actualReps.first, 8)
+    }
+
+    func test_editingAPlanless_loggedSet_doesNotFallBackToThePlanLoad() throws {
+        // The plan load is 0 for this item: the old code re-seeded the field from the plan (0). The logged 135 must stay.
+        let (vm, ctx, _, id) = try makeLoggedSession()
+        XCTAssertEqual(set1(vm).plannedLoad, 0)
+        vm.editSet(exerciseID: id, setIndex: 1, context: ctx)
+        XCTAssertEqual(set1(vm).actualLoadText, "135")
+    }
+}

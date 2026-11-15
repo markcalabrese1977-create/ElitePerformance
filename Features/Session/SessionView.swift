@@ -195,6 +195,12 @@ struct SessionView: View {
                                 context: modelContext
                             )
                         },
+                        onEditSaved: { setIndex in
+                            viewModel.saveEditedSet(exerciseID: exercise.id, setIndex: setIndex, context: modelContext)
+                        },
+                        onEditCancelled: { setIndex in
+                            viewModel.cancelEditSet(exerciseID: exercise.id, setIndex: setIndex)
+                        },
                         onSwapTapped: { [exerciseIndex = index] in
                             activeSheet = .swap(SwapTarget(exerciseIndex: exerciseIndex))
                         },
@@ -551,6 +557,8 @@ private struct SessionExerciseCardView: View {
     let onSkipTapped: (_ setIndex: Int, _ reason: SetFeedback) -> Void
     let onPumpRated: (_ setIndex: Int, _ rating: PumpRating) -> Void
     let onEditTapped: (_ setIndex: Int) -> Void
+    let onEditSaved: (_ setIndex: Int) -> Void
+    let onEditCancelled: (_ setIndex: Int) -> Void
 
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
@@ -796,6 +804,12 @@ private struct SessionExerciseCardView: View {
                                                         },
                                                         onEdit: {
                                                             onEditTapped(set.index)
+                                                        },
+                                                        onEditSave: {
+                                                            onEditSaved(set.index)
+                                                        },
+                                                        onEditCancel: {
+                                                            onEditCancelled(set.index)
                                                         }
                         )
                     }
@@ -850,9 +864,11 @@ private struct SessionSetRowView: View {
     let onSkip: (_ reason: SetFeedback) -> Void
     let onPumpRated: (_ rating: PumpRating) -> Void
     let onEdit: () -> Void
-    
+    let onEditSave: () -> Void
+    let onEditCancel: () -> Void
+
     private var isLocked: Bool {
-            uiSet.status == .completed || uiSet.status.isAnySkip
+            (uiSet.status == .completed || uiSet.status.isAnySkip) && !uiSet.isEditing
         }
 
     private func formattedWeight(_ value: Double) -> String {
@@ -871,7 +887,12 @@ private struct SessionSetRowView: View {
                     .fontWeight(uiSet.isTop ? .semibold : .regular)
                     .foregroundStyle(uiSet.isTop ? Color.orange : Color.secondary)
                 Spacer()
-                if isLocked {
+                if uiSet.isEditing {
+                    Text("Editing")
+                        .font(.caption2).fontWeight(.semibold)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.2)).foregroundStyle(.blue).clipShape(Capsule())
+                } else if isLocked {
                                     if uiSet.status.isAnySkip {
                                         Text(uiSet.status.displayLabel)
                                             .font(.caption2)
@@ -1003,6 +1024,20 @@ private struct SessionSetRowView: View {
                 Spacer()
 
                 // Log / Skip / Edit
+                if uiSet.isEditing {
+                    VStack(spacing: 6) {
+                        Button("Save") { onEditSave() }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.blue)
+                            .buttonStyle(.plain)
+                        Button("Cancel") { onEditCancel() }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                    }
+                } else {
                 VStack(spacing: 4) {
                     Button(action: {
                         guard !isLocked else { return }
@@ -1099,6 +1134,7 @@ private struct SessionSetRowView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                         .buttonStyle(.borderless)
+                }
                 }
             }
 
@@ -1381,6 +1417,7 @@ final class SessionScreenViewModel: ObservableObject {
             set.actualReps = reps
             set.actualLoad = loadToStore
             set.status = .completed
+            set.editSnapshot = nil          // an edit in progress ends here: this IS the save
             exercise.sets[setIdx] = set
 
             // 2) Sync fresh data into matching SessionItem before coaching
@@ -1639,30 +1676,25 @@ final class SessionScreenViewModel: ObservableObject {
         persist(using: context)
     }
 
+    /// "Edit set" on a logged or skipped set: unlocks the inputs and changes NOTHING. The values as logged stay in the fields
+    /// (load, reps, RIR, rest-pause, drops) until the user changes them; the set keeps its status and persisted data until
+    /// Save (the normal log path), and Cancel puts every field back exactly as logged. A snapshot held in the row, not in the
+    /// store, is what makes cancel exact; `persist` writes the snapshot while an edit is open, so no other save can leak it.
     func editSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        exercises[exerciseIdx].sets[setIdx].beginEdit()
+    }
 
-        exercises[exerciseIdx].sets[setIdx].status = .notStarted
-        exercises[exerciseIdx].sets[setIdx].actualLoad = nil
-        exercises[exerciseIdx].sets[setIdx].actualReps = nil
-        exercises[exerciseIdx].sets[setIdx].actualRIR = nil
-        exercises[exerciseIdx].sets[setIdx].usedRestPause = false
-        exercises[exerciseIdx].sets[setIdx].restPausePattern = ""
-        exercises[exerciseIdx].sets[setIdx].usedDropSet = false
-        exercises[exerciseIdx].sets[setIdx].dropSets = []
-        // FIX B — pre-fill the actual-load field from the plan when re-editing a set.
-        // The existing plannedLoad == 0 branch already yields "0" for a clean BW plan,
-        // but that's incidental. Key on isBodyweight so a stray nonzero plannedLoad can
-        // never pre-fill (and, if confirmed, re-pollute actuals) on a BW exercise —
-        // mirrors the Cut 0 init logic. Loaded exercises keep the plan-copy behavior.
-        let isBodyweight = ExerciseCatalog.isBodyweight(exerciseId: exercises[exerciseIdx].exerciseId)
-        exercises[exerciseIdx].sets[setIdx].actualLoadText = (isBodyweight || exercises[exerciseIdx].sets[setIdx].plannedLoad == 0)
-            ? "0"
-            : LoadFormatter(unit: loadUnit).oneDecimal(exercises[exerciseIdx].sets[setIdx].plannedLoad)
-        exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
+    func cancelEditSet(exerciseID: UUID, setIndex: Int) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
+        exercises[exerciseIdx].sets[setIdx].cancelEdit()
+    }
 
-        persist(using: context)
+    /// Save = log again: the same path as the Log button, so the plan memory, coaching and persistence stay one code path.
+    func saveEditedSet(exerciseID: UUID, setIndex: Int, context: ModelContext) {
+        handleSetLogged(exerciseID: exerciseID, setIndex: setIndex, context: context)
     }
 
     private func onSetCompleted(exercise: UISessionExercise, set: UISessionSet) {
@@ -2080,7 +2112,8 @@ final class SessionScreenViewModel: ObservableObject {
                 item.setRolesBySet = roles
             }
 
-            for uiSet in uiExercise.sets {
+            for liveSet in uiExercise.sets {
+                let uiSet = liveSet.persistedView          // an open edit is not persisted until Save
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
 
@@ -2878,7 +2911,49 @@ struct UISessionSet: Identifiable {
     var plannedRepsText: String
     var actualLoadText: String
     var actualRepsText: String
-    
+
+    /// The set as logged, held while "Edit set" is open (nil otherwise). See `SessionViewModel.editSet`.
+    struct EditSnapshot {
+        var status: SetStatus
+        var actualLoad: Double?
+        var actualReps: Int?
+        var actualRIR: Int?
+        var actualLoadText: String
+        var actualRepsText: String
+        var usedRestPause: Bool
+        var restPausePattern: String
+        var usedDropSet: Bool
+        var dropSets: [DropSetEntry]
+    }
+    var editSnapshot: EditSnapshot?
+    var isEditing: Bool { editSnapshot != nil }
+
+    mutating func beginEdit() {
+        guard editSnapshot == nil else { return }
+        editSnapshot = EditSnapshot(status: status, actualLoad: actualLoad, actualReps: actualReps, actualRIR: actualRIR,
+                                    actualLoadText: actualLoadText, actualRepsText: actualRepsText,
+                                    usedRestPause: usedRestPause, restPausePattern: restPausePattern,
+                                    usedDropSet: usedDropSet, dropSets: dropSets)
+    }
+
+    mutating func cancelEdit() {
+        guard let snap = editSnapshot else { return }
+        status = snap.status
+        actualLoad = snap.actualLoad; actualReps = snap.actualReps; actualRIR = snap.actualRIR
+        actualLoadText = snap.actualLoadText; actualRepsText = snap.actualRepsText
+        usedRestPause = snap.usedRestPause; restPausePattern = snap.restPausePattern
+        usedDropSet = snap.usedDropSet; dropSets = snap.dropSets
+        editSnapshot = nil
+    }
+
+    /// What the store should hold: the set as logged while an edit is open, the live values otherwise.
+    var persistedView: UISessionSet {
+        guard isEditing else { return self }
+        var copy = self
+        copy.cancelEdit()
+        return copy
+    }
+
     init(
         index: Int,
         exerciseId: String,
