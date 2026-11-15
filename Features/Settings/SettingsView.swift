@@ -327,6 +327,7 @@ struct SettingsView: View {
                 NavigationLink("Move data (import and export)") { moveDataScreen }
             }
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
+            .task { await autoBackup.refreshICloudAvailability() }
 
             // MARK: - About
             // Tap to copy, so a bug report can carry the exact build without the

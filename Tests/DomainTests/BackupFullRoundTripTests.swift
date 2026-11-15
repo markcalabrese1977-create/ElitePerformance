@@ -2970,3 +2970,48 @@ final class SettingsStructureTests: XCTestCase {
         XCTAssertTrue(try settings().contains("Default load step (all lifts unless overridden per exercise)"))
     }
 }
+
+// MARK: - R9: the iCloud reason is known when the screen appears
+
+@MainActor
+final class ICloudReasonOnAppearTests: XCTestCase {
+    private func status() -> AutoBackupStatusStore {
+        AutoBackupStatusStore(defaults: UserDefaults(suiteName: "ep.autobackup.test.\(UUID().uuidString)")!)
+    }
+
+    func test_afterRefreshing_theReasonIsKnown_withoutAnyBackupHavingRun() async {
+        for (reason, expected) in [(AutoBackupDestination.ICloudAvailability.noAccount, "No iCloud account"),
+                                   (.driveOffForApp, "iCloud Drive is turned off")] {
+            let svc = AutoBackupService(status: status(), checkAvailability: { reason })
+            XCTAssertEqual(svc.iCloudAvailability, .available, "before the check nothing is known")
+            await svc.refreshICloudAvailability()
+            XCTAssertEqual(svc.iCloudAvailability, reason)
+            XCTAssertTrue(svc.iCloudAvailability.explanation?.contains(expected) == true)
+        }
+    }
+
+    func test_theLocalOnlyChoice_suppressesTheBanner_untilICloudIsAvailableAgain() async {
+        let s = status()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let unavailable = AutoBackupService(status: s, checkAvailability: { .noAccount })
+        await unavailable.refreshICloudAvailability()
+        XCTAssertTrue(s.shouldShowBanner(now: now, hasData: true))
+        s.localOnly = true
+        XCTAssertFalse(s.shouldShowBanner(now: now, hasData: true), "'Use local backups only' hides it")
+        await unavailable.refreshICloudAvailability()
+        XCTAssertTrue(s.localOnly, "still unavailable: the choice stands")
+        let back = AutoBackupService(status: s, checkAvailability: { .available })
+        await back.refreshICloudAvailability()
+        XCTAssertFalse(s.localOnly, "iCloud is available again: the choice is cleared")
+        XCTAssertEqual(back.iCloudAvailability, .available)
+        XCTAssertTrue(s.shouldShowBanner(now: now, hasData: true), "the banner works normally again")
+    }
+
+    func test_bothScreensAskOnAppear() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for file in ["Features/Settings/SettingsView.swift", "Features/MainTab/MainTabView.swift"] {
+            let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            XCTAssertTrue(text.contains("refreshICloudAvailability()"), file)
+        }
+    }
+}
