@@ -3108,4 +3108,15 @@ final class FreshDeviceRestoreTests: XCTestCase {
         let settings = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
         XCTAssertTrue(settings.contains("RestoreActivity.inProgress = true") && settings.contains("RestoreActivity.inProgress = false"))
     }
+
+    /// Every user-facing pointer to the undo names the real path (Settings → Backup & Restore → Restore), never the old one.
+    func test_undoPointersNameTheRealPath() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let settings = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        XCTAssertTrue(settings.contains("A copy of your current data is saved first; Settings → Backup & Restore → Restore can undo this."))
+        for file in ["Features/Settings/SettingsView.swift", "Domain/Backup/ImportSafety.swift", "Domain/Backup/LegacyStoreRelocation.swift"] {
+            let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            XCTAssertFalse(text.contains("Settings → Restore pre-import state"), "\(file) still points at the old path")
+        }
+    }
 }

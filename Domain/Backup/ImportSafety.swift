@@ -233,7 +233,7 @@ enum BackupRestoreCoordinator {
                 _ = try importer(snapshot.url, container)
             } catch let recoveryError {
                 throw NSError(domain: "BackupRestore", code: 2, userInfo: [NSLocalizedDescriptionKey:
-                    "\(error.localizedDescription) Putting your previous data back also failed (\(recoveryError.localizedDescription)). It is saved: restore it from Settings → Restore pre-import state."])
+                    "\(error.localizedDescription) Putting your previous data back also failed (\(recoveryError.localizedDescription)). It is saved: restore it from Settings → Backup & Restore → Restore → Restore pre-import state."])
             }
             // recovered in-process (not when this restore is itself the answer to an older interrupted import: that marker
             // points at the good snapshot, and the store was only put back to the half-imported state)

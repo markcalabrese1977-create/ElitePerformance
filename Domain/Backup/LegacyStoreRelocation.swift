@@ -133,7 +133,7 @@ enum LegacyStoreRelocation {
         let now = try BackupContentSummary.of(store: ModelContext(container))
         guard now.completedSessions == exported.completedSessions, now.verifiedCounts == exported.verifiedCounts else {
             throw NSError(domain: "LegacyStoreRelocation", code: 2, userInfo: [NSLocalizedDescriptionKey:
-                "After bringing the older data over, the counts do not match. Your previous data is saved: restore it from Settings → Restore pre-import state."])
+                "After bringing the older data over, the counts do not match. Your previous data is saved: restore it from Settings → Backup & Restore → Restore → Restore pre-import state."])
         }
         return now
     }
