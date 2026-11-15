@@ -32,7 +32,7 @@ struct FitProfile: Equatable {
 struct FitReason: Equatable {
     enum Kind: String {
         case substituted, dropped, droppedForTime, trimmedSets, volume   // changes
-        case keptStressed, notEvaluated, overBudget                      // notes: nothing was changed
+        case keptStressed, jointNote, notEvaluated, overBudget           // notes: nothing was changed
     }
 
     let kind: Kind
@@ -43,7 +43,7 @@ struct FitReason: Equatable {
     var isChange: Bool {
         switch kind {
         case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume: return true
-        case .keptStressed, .notEvaluated, .overBudget: return false
+        case .keptStressed, .jointNote, .notEvaluated, .overBudget: return false
         }
     }
 }
@@ -355,17 +355,22 @@ enum ProgramFitter {
                 if stage == .fallback, let t = ExerciseTraits.traits(for: id) {
                     // Nothing doable is gentler: the lowest-stress option still loads the joint, so say which and how to train it.
                     let joints = stressedJoints(t, profile)
-                    note(.keptStressed, "\(newName) is the lowest-stress option your equipment allows for your \(jointNames(Set(joints))). \(cueSentences(joints))")
+                    note(.keptStressed, "\(newName) is the lowest-stress option your equipment allows for your \(jointNames(Set(joints)))." + cueSuffix(joints))
                 }
                 slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
             case .keptStressed:
                 let joints = stressedJoints(traits!, profile)
-                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile))). \(cueSentences(joints))")
+                note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))." + cueSuffix(joints))
                 slots.append(Slot(originalIndex: index, template: original))
             case .drop:
                 note(.dropped, "Dropped \(name) (\(cause(traits!, available: false, profile: profile)))")
             case .noVerticalPull:
                 note(.dropped, "No vertical pull is possible with your equipment (it needs a pull-up bar, a cable machine or an assisted pull-up machine), so \(name) was removed rather than replaced by a different movement")
+            }
+            // Knees flagged: every substitute or kept exercise that loads the knees says how to train it.
+            if profile.injuries.contains(.knees), let kept = slots.last, kept.originalIndex == index,
+               let t = ExerciseTraits.traits(for: kept.template.exerciseId), t.stress(for: .knees) >= 1 {
+                note(.jointNote, kneeNote)
             }
         }
         return slots
@@ -413,13 +418,21 @@ enum ProgramFitter {
         jointOrder.filter { profile.injuries.contains($0) && traits.stress(for: $0) >= 1 }
     }
 
-    /// "Elbows flagged: neutral grip, stop short of pain." for each joint.
+    /// "Elbows flagged: neutral grip, stop short of pain." for each joint. Knees are left out: every exercise that loads
+    /// them already carries the separate knee note.
     private static func cueSentences(_ joints: [InjuryFlag]) -> String {
-        joints.map { joint in
+        joints.filter { $0 != .knees }.map { joint in
             let label = jointLabel(joint)
             return "\(label.prefix(1).uppercased() + label.dropFirst()) flagged: \(painCue(joint))."
         }.joined(separator: " ")
     }
+
+    private static func cueSuffix(_ joints: [InjuryFlag]) -> String {
+        let cues = cueSentences(joints)
+        return cues.isEmpty ? "" : " " + cues
+    }
+
+    static let kneeNote = "Knees flagged: use a pain-free depth."
 
     static func jointLabel(_ joint: InjuryFlag) -> String {
         switch joint {
@@ -465,7 +478,7 @@ enum ProgramFitter {
         func drop(at position: Int) {
             let slot = slots.remove(at: position)
             reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex
-                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed) }
+                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed || $0.kind == .jointNote) }
             reasons.append(FitReason(kind: .droppedForTime, dayNumber: day.dayNumber, slotIndex: slot.originalIndex,
                                      message: "Dropped \(name(slot)) (session length)"))
         }

@@ -720,4 +720,48 @@ final class ProgramFitterTests: XCTestCase {
             XCTAssertFalse(r.reasons.contains { $0.message.hasPrefix("No vertical pull is possible") }, template.name)
         }
     }
+
+    // MARK: - Knee cue
+
+    /// Knees flagged: every exercise left in the program that loads the knees (substitutes and kept originals alike)
+    /// carries "Knees flagged: use a pain-free depth." on its own slot. Stress ratings are not touched by this.
+    func test_kneeFlag_everyKneeLoadingExerciseCarriesTheCue() {
+        var cued = 0
+        for template in Self.templates {
+            for preset in Self.presets {
+                for minutes in [45, 120] {
+                    let p = profile(preset, [.knees], minutes)
+                    let r = ProgramFitter.fit(template, profile: p)
+                    for (di, day) in r.template.dayTemplates.enumerated() {
+                        let origDay = template.dayTemplates[di]
+                        for ex in day.exerciseTemplates {
+                            let slot = origDay.exerciseTemplates.firstIndex { $0.id == ex.id }!
+                            let loadsKnees = (ExerciseTraits.traits(for: ex.exerciseId)?.stress(for: .knees) ?? 0) >= 1
+                            let noted = r.reasons.contains { $0.dayNumber == day.dayNumber && $0.slotIndex == slot
+                                && $0.kind == .jointNote && $0.message == "Knees flagged: use a pain-free depth." }
+                            XCTAssertEqual(noted, loadsKnees, "\(template.name) \(preset) \(day.title): \(ex.exerciseId)")
+                            if noted { cued += 1 }
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(cued, 100)
+    }
+
+    func test_noKneeFlag_noKneeNotes() {
+        for template in Self.templates {
+            for preset in Self.presets {
+                let r = ProgramFitter.fit(template, profile: profile(preset, [.lowBack, .elbows], 60))
+                XCTAssertFalse(r.reasons.contains { $0.message.contains("Knees flagged") || $0.kind == .jointNote }, template.name)
+            }
+        }
+    }
+
+    func test_kneeStressRatings_areUnchanged() {
+        XCTAssertEqual(ExerciseTraits.table["leg_press"]?.stress(for: .knees), 1)
+        XCTAssertEqual(ExerciseTraits.table["smith_machine_squat"]?.stress(for: .knees), 1)
+        XCTAssertEqual(ExerciseTraits.table["hack_squat"]?.stress(for: .knees), 2)
+        XCTAssertEqual(ExerciseTraits.table["leg_extension"]?.stress(for: .knees), 2)
+    }
 }

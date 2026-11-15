@@ -1292,10 +1292,12 @@ struct OnboardingFlowView: View {
                 let titles = Dictionary(uniqueKeysWithValues: fit.template.dayTemplates.map { ($0.dayNumber, $0.title) })
                 let groups: [(title: String, lines: [String])] = {
                     var result: [(String, [String])] = []
-                    let general = fit.reasons.filter { $0.dayNumber == nil }.map(\.message)
+                    // The same cue on several exercises of one day reads once.
+                    func unique(_ lines: [String]) -> [String] { var seen = Set<String>(); return lines.filter { seen.insert($0).inserted } }
+                    let general = unique(fit.reasons.filter { $0.dayNumber == nil }.map(\.message))
                     if !general.isEmpty { result.append(("All days", general)) }
                     for day in fit.template.dayTemplates.sorted(by: { $0.dayNumber < $1.dayNumber }) {
-                        let lines = fit.reasons.filter { $0.dayNumber == day.dayNumber }.map(\.message)
+                        let lines = unique(fit.reasons.filter { $0.dayNumber == day.dayNumber }.map(\.message))
                         if !lines.isEmpty { result.append((titles[day.dayNumber] ?? day.title, lines)) }
                     }
                     return result
