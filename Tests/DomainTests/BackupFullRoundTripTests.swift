@@ -3370,3 +3370,78 @@ final class SetRowLayoutTests: XCTestCase {
         XCTAssertTrue(s.contains("@ScaledMetric(relativeTo: .callout) private var chipSize"), "RIR chips scale with Dynamic Type")
     }
 }
+
+// MARK: - App Store sample: coach notes from the REAL completion path (generator, skipped unless the env vars are set)
+
+/// Replays every completed session of the invented App Store sample (scripts/make_appstore_sample.py) through the app's own
+/// set-logging path (`SessionScreenViewModel.handleSetLogged` -> `CoachingEngine`, then `persist` -> `PlanMemoryEngine`), oldest
+/// first, so every coach note and every carried-forward plan is what the engine writes. The sample's reps and RIR are the
+/// lifter's inputs; the load logged is the load the engine suggested for that set.
+///   TEST_RUNNER_EP_SAMPLE_IN=<sample.json> TEST_RUNNER_EP_SAMPLE_OUT=<out.json> scripts/run_bounded.sh -- -only-testing:ElitePerformanceTests/AppStoreSampleReplayTests
+@MainActor
+final class AppStoreSampleReplayTests: XCTestCase {
+    func test_replaySampleThroughTheRealCompletionPath() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let input = env["EP_SAMPLE_IN"], let output = env["EP_SAMPLE_OUT"], !input.isEmpty, !output.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_SAMPLE_IN and TEST_RUNNER_EP_SAMPLE_OUT to run the App Store sample generator")
+        }
+        let container = try BackupTestSupport.makeContainer()
+        try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: input), modelContainer: container, applyingDeviceSideEffects: false)
+        let ctx = ModelContext(container)
+
+        struct Intent { var reps: [Int]; var rirs: [Int]; var loads: [Double] }
+        let completed = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }.sorted { $0.date < $1.date }
+        XCTAssertGreaterThan(completed.count, 50)
+        var noteCount = 0, exerciseCount = 0
+
+        for session in completed {
+            let originalDate = session.date, originalCompleted = session.completedAt ?? session.date
+            var intents: [UUID: Intent] = [:]
+            for item in session.items {
+                if let id = item.id { intents[id] = Intent(reps: item.actualReps, rirs: item.actualRIRs, loads: item.actualLoads) }
+                let n = item.targetSets
+                item.actualReps = Array(repeating: 0, count: n); item.actualLoads = Array(repeating: 0, count: n)
+                item.actualRIRs = RIREntry.unsetArray(count: n)
+                item.pumpRatingsBySet = Array(repeating: 0, count: n)
+                item.isCompleted = false; item.coachNote = nil
+            }
+            session.status = .inProgress
+            session.completedAt = originalCompleted     // persist() only stamps "now" when this is nil; the sample's dates stay
+            try ctx.save()
+
+            let vm = SessionScreenViewModel(session: session)
+            for ex in vm.exercises {
+                guard let itemID = ex.itemID, let intent = intents[itemID] else { continue }
+                for set in ex.sets {
+                    let i = set.index - 1
+                    guard i < intent.reps.count, intent.reps[i] > 0 else { continue }
+                    let suggested = vm.exercises.first(where: { $0.id == ex.id })?.sets.first(where: { $0.index == set.index })?.plannedLoad ?? 0
+                    let load = suggested > 0 ? suggested : intent.loads[i]
+                    vm.updateActualLoad(exerciseID: ex.id, setIndex: set.index, text: load.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(load))" : "\(load)")
+                    vm.updateActualReps(exerciseID: ex.id, setIndex: set.index, text: "\(intent.reps[i])")
+                    if i < intent.rirs.count, intent.rirs[i] >= 0 { vm.updateActualRIR(exerciseID: ex.id, setIndex: set.index, text: "\(intent.rirs[i])") }
+                    vm.handleSetLogged(exerciseID: ex.id, setIndex: set.index, context: ctx)
+                    vm.setPumpRating(exerciseID: ex.id, setIndex: set.index, rating: .good, context: ctx)
+                }
+            }
+            XCTAssertEqual(session.status, .completed, "\(session.dayLabel ?? "?") W\(session.weekIndex): every planned set was replayed")
+            session.date = originalDate; session.completedAt = originalCompleted
+            exerciseCount += session.items.count
+            noteCount += session.items.filter { ($0.coachNote ?? "").isEmpty == false }.count
+            try ctx.save()
+        }
+
+        // PR flags: the engine does not write isPR here (the Meso Summary computes PR chips from history); the sample sets none.
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        try? FileManager.default.removeItem(atPath: output)
+        try FileManager.default.copyItem(at: result.url, to: URL(fileURLWithPath: output))
+
+        var lines: [String] = []
+        for s in completed.filter({ $0.dayLabel == "Push A" }).suffix(3) {
+            for item in s.items.sorted(by: { $0.order < $1.order }) { lines.append("W\(s.weekIndex) \(s.dayLabel ?? "") | \(item.exerciseNameSnapshot ?? item.exerciseId) | \(item.coachNote ?? "(none)")") }
+        }
+        try lines.joined(separator: "\n").write(toFile: output + ".notes.txt", atomically: true, encoding: .utf8)
+        print("APPSTORE_SAMPLE: replayed \(completed.count) sessions, \(noteCount)/\(exerciseCount) exercises have an engine-written coach note")
+        XCTAssertGreaterThan(noteCount, exerciseCount / 2, "most exercises carry an engine-written note")
+    }
+}
