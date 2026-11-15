@@ -764,4 +764,66 @@ final class ProgramFitterTests: XCTestCase {
         XCTAssertEqual(ExerciseTraits.table["hack_squat"]?.stress(for: .knees), 2)
         XCTAssertEqual(ExerciseTraits.table["leg_extension"]?.stress(for: .knees), 2)
     }
+
+    // MARK: - Bodyweight substitutes
+
+    /// Home gym (no cable machine): the pulldown slots become pull-ups with a bodyweight range in every wave, never the
+    /// pulldown's 10-12, and the slot says what to do when the range is out of reach.
+    func test_homeGym_pulldownBecomesPullUp_withABodyweightRange_neverTenToTwelve() {
+        var checked = 0
+        for template in Self.templates {
+            let p = profile(.homeBarbell)
+            let r = ProgramFitter.fit(template, profile: p)
+            for (di, day) in r.template.dayTemplates.enumerated() {
+                for (si, ex) in template.dayTemplates[di].exerciseTemplates.enumerated() where Self.canon(ex.exerciseId).contains("pulldown") {
+                    let fitted = r.template.dayTemplates[di].exerciseTemplates.first { $0.id == ex.id }
+                    guard let fitted else { continue }   // trimmed away by time: nothing to check
+                    XCTAssertEqual(Self.canon(fitted.exerciseId), "pull_up", "\(template.name) \(day.title)")
+                    for pr in fitted.prescriptions {
+                        XCTAssertEqual([pr.repMin, pr.repMax], [5, 8], "\(template.name) \(day.title) wave \(pr.wave)")
+                        XCTAssertFalse(pr.repMin == 10 && pr.repMax == 12)
+                        XCTAssertEqual([pr.targetRIRMin, pr.targetRIRMax], [ex.prescriptions.first { $0.wave == pr.wave }!.targetRIRMin,
+                                                                           ex.prescriptions.first { $0.wave == pr.wave }!.targetRIRMax], "RIR is the slot's")
+                    }
+                    XCTAssertTrue(r.reasons.contains { $0.dayNumber == day.dayNumber && $0.slotIndex == si && $0.kind == .bodyweightNote
+                        && $0.message.contains("If you can't reach the range, use band assistance or slow negatives.") },
+                                  "\(template.name) \(day.title): no bodyweight note")
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(checked, 0)
+    }
+
+    /// Whichever bodyweight exercise replaces a loaded one, pull-ups and chin-ups get 5-8 and dips and push-ups 8-12;
+    /// a loaded substitute keeps the slot's range.
+    func test_bodyweightRanges_followTheExercise() {
+        XCTAssertEqual(ProgramFitter.bodyweightRepRange(for: "pull_up"), 5...8)
+        XCTAssertEqual(ProgramFitter.bodyweightRepRange(for: "chin_up"), 5...8)
+        XCTAssertEqual(ProgramFitter.bodyweightRepRange(for: "dip"), 8...12)
+        XCTAssertEqual(ProgramFitter.bodyweightRepRange(for: "push_up"), 8...12)
+        XCTAssertNil(ProgramFitter.bodyweightRepRange(for: "dumbbell_pullover"))
+        for template in Self.templates {
+            for preset in Self.presets {
+                let r = ProgramFitter.fit(template, profile: profile(preset))
+                for (di, day) in template.dayTemplates.enumerated() {
+                    for ex in day.exerciseTemplates {
+                        guard let fitted = r.template.dayTemplates[di].exerciseTemplates.first(where: { $0.id == ex.id }),
+                              Self.canon(fitted.exerciseId) != Self.canon(ex.exerciseId),
+                              let range = ProgramFitter.bodyweightRepRange(for: fitted.exerciseId),
+                              let ot = ExerciseTraits.traits(for: ex.exerciseId), ProgramFitter.isLoadable(ot) else {
+                            // an unchanged or loaded-for-loaded slot keeps its prescriptions exactly
+                            if let fitted = r.template.dayTemplates[di].exerciseTemplates.first(where: { $0.id == ex.id }),
+                               Self.canon(fitted.exerciseId) == Self.canon(ex.exerciseId) || ProgramFitter.bodyweightRepRange(for: fitted.exerciseId) == nil {
+                                XCTAssertEqual(fitted.prescriptions.map { [$0.repMin, $0.repMax] }, ex.prescriptions.map { [$0.repMin, $0.repMax] },
+                                               "\(template.name) \(preset) \(ex.id)")
+                            }
+                            continue
+                        }
+                        XCTAssertTrue(fitted.prescriptions.allSatisfy { $0.repMin == range.lowerBound && $0.repMax == range.upperBound })
+                    }
+                }
+            }
+        }
+    }
 }

@@ -37,7 +37,7 @@ struct FitProfile: Equatable {
 struct FitReason: Equatable {
     enum Kind: String {
         case substituted, dropped, droppedForTime, trimmedSets, volume, goal   // changes
-        case keptStressed, jointNote, notEvaluated, overBudget           // notes: nothing was changed
+        case keptStressed, jointNote, bodyweightNote, notEvaluated, overBudget   // notes: nothing was changed
     }
 
     let kind: Kind
@@ -48,7 +48,7 @@ struct FitReason: Equatable {
     var isChange: Bool {
         switch kind {
         case .substituted, .dropped, .droppedForTime, .trimmedSets, .volume, .goal: return true
-        case .keptStressed, .jointNote, .notEvaluated, .overBudget: return false
+        case .keptStressed, .jointNote, .bodyweightNote, .notEvaluated, .overBudget: return false
         }
     }
 }
@@ -368,7 +368,19 @@ enum ProgramFitter {
                     let joints = stressedJoints(t, profile)
                     note(.keptStressed, "\(newName) is the lowest-stress option your equipment allows for your \(jointNames(Set(joints)))." + cueSuffix(joints))
                 }
-                slots.append(Slot(originalIndex: index, template: rebuild(original, exerciseId: id, priority: demote ? .standard : nil)))
+                var replacement = rebuild(original, exerciseId: id, priority: demote ? .standard : nil)
+                // A loaded exercise replaced by a bodyweight one: the slot's loaded rep range (10-12) is not a bodyweight
+                // range, so the substitute gets its own.
+                if let ot = traits, isLoadable(ot), let nt = ExerciseTraits.traits(for: id), !isLoadable(nt),
+                   let range = bodyweightRepRange(for: id) {
+                    replacement = rebuild(replacement, prescriptions: replacement.prescriptions.map {
+                        WavePrescription(wave: $0.wave, setMin: $0.setMin, setMax: $0.setMax, repMin: range.lowerBound, repMax: range.upperBound,
+                                         targetRIRMin: $0.targetRIRMin, targetRIRMax: $0.targetRIRMax,
+                                         intensifier: $0.intensifier, intensifierNotes: $0.intensifierNotes)
+                    })
+                    note(.bodyweightNote, "\(newName): \(range.lowerBound)-\(range.upperBound) reps (bodyweight). If you can't reach the range, use band assistance or slow negatives.")
+                }
+                slots.append(Slot(originalIndex: index, template: replacement))
             case .keptStressed:
                 let joints = stressedJoints(traits!, profile)
                 note(.keptStressed, "\(name) kept (no lower-stress option for \(jointList(traits!, profile)))." + cueSuffix(joints))
@@ -489,7 +501,8 @@ enum ProgramFitter {
         func drop(at position: Int) {
             let slot = slots.remove(at: position)
             reasons.removeAll { $0.dayNumber == day.dayNumber && $0.slotIndex == slot.originalIndex
-                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed || $0.kind == .jointNote) }
+                && ($0.kind == .trimmedSets || $0.kind == .substituted || $0.kind == .keptStressed || $0.kind == .jointNote
+                    || $0.kind == .bodyweightNote) }
             reasons.append(FitReason(kind: .droppedForTime, dayNumber: day.dayNumber, slotIndex: slot.originalIndex,
                                      message: "Dropped \(name(slot)) (session length)"))
         }
@@ -535,9 +548,21 @@ enum ProgramFitter {
     // MARK: - Rebuild
 
     private static func rebuild(_ ex: ProgramExerciseTemplate, exerciseId: String? = nil, order: Int? = nil,
-                                setsByWeek: [Int]? = nil, priority: ExercisePriority? = nil) -> ProgramExerciseTemplate {
+                                setsByWeek: [Int]? = nil, priority: ExercisePriority? = nil,
+                                prescriptions: [WavePrescription]? = nil) -> ProgramExerciseTemplate {
         ProgramExerciseTemplate(id: ex.id, order: order ?? ex.order, exerciseId: exerciseId ?? ex.exerciseId,
-                                priority: priority ?? ex.priority, notes: ex.notes, prescriptions: ex.prescriptions,
+                                priority: priority ?? ex.priority, notes: ex.notes, prescriptions: prescriptions ?? ex.prescriptions,
                                 setsByWeek: setsByWeek ?? ex.setsByWeek)
+    }
+
+    /// Rep range for a bodyweight exercise that replaced a loaded one. The catalog carries no per-exercise bodyweight
+    /// default, so these are the fitter's own: 5-8 for pull-ups and chin-ups, 8-12 for dips and push-ups. Other
+    /// bodyweight substitutes (glute bridge, lunges, ...) keep the slot's range.
+    static func bodyweightRepRange(for exerciseId: String) -> ClosedRange<Int>? {
+        switch ExerciseCatalog.canonicalExerciseId(for: exerciseId) {
+        case "pull_up", "chin_up": return 5...8
+        case "dip", "push_up":     return 8...12
+        default:                   return nil
+        }
     }
 }
