@@ -9,6 +9,8 @@ struct ProgramPlanView: View {
     private var sessions: [Session]
     
     var onViewMesoSummary: (() -> Void)? = nil
+    /// Opens the Change Program wizard (owned by `HomeView`).
+    var onChangeProgram: (() -> Void)? = nil
     
 
     // Swipe delete (surgical)
@@ -78,8 +80,25 @@ struct ProgramPlanView: View {
     private var activeBlockHeaderSection: some View {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(activeBlockName ?? "Program")
-                        .font(.headline)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(activeBlockName ?? "Program")
+                            .font(.headline)
+                        Spacer()
+                        // The block-changing actions live behind one menu; each is previewed and confirmed on its own screen.
+                        Menu {
+                            if let onChangeProgram {
+                                Button { onChangeProgram() } label: { Label("Change program…", systemImage: "line.3.horizontal.decrease.circle") }
+                            }
+                            if activeMesoBlock != nil {
+                                Button { showStartNextMeso = true } label: { Label("Start next meso from this one", systemImage: "arrow.triangle.branch") }
+                                Button { showInsertDeload = true } label: { Label("Insert deload week", systemImage: "arrow.down.to.line") }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title3)
+                        }
+                        .accessibilityLabel("Block actions")
+                    }
 
                     if let startDate = activeBlockStartDate {
                         Text("Active since \(startDate.formatted(date: .abbreviated, time: .omitted))")
@@ -96,25 +115,6 @@ struct ProgramPlanView: View {
                             onViewMesoSummary?()
                         } label: {
                             Label("View Meso Summary", systemImage: "chart.bar.xaxis")
-                                .font(.caption)
-                        }
-                        .padding(.top, 2)
-                    }
-
-                    if activeMesoBlock != nil {
-                        Button {
-                            showInsertDeload = true
-                        } label: {
-                            Label("Insert deload week", systemImage: "arrow.down.to.line")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.borderless)
-                        .padding(.top, 2)
-
-                        Button {
-                            showStartNextMeso = true
-                        } label: {
-                            Label("Start next meso from this one", systemImage: "arrow.triangle.branch")
                                 .font(.caption)
                         }
                         .buttonStyle(.borderless)
@@ -429,9 +429,12 @@ struct ProgramPlanView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text("Use “Change Program” to create your first training block.")
+            Text("Create your first training block.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let onChangeProgram {
+                Button("Create program") { onChangeProgram() }
+            }
         }
     }
 

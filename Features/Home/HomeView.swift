@@ -45,25 +45,12 @@ struct HomeView: View {
         NavigationStack {
             ProgramPlanView(onViewMesoSummary: activeMeso != nil ? {
                             showMesoSummary = true
-                        } : nil)
+                        } : nil,
+                            onChangeProgram: {
+                                pendingMesoStartDate = Date()
+                                showingChangeProgram = true
+                            })
                 .navigationTitle("Program")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            pendingMesoStartDate = Date()
-                            showingChangeProgram = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
-                                Text("Change Program")
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(.systemGray6))
-                            .clipShape(Capsule())
-                        }
-                    }
-                }
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
                         OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides in

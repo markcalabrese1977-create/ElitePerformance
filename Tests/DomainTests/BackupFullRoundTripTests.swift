@@ -2894,3 +2894,35 @@ final class InsertDeloadBackupFirstTests: XCTestCase {
         XCTAssertEqual(inserted, 1)
     }
 }
+
+// MARK: - R7: the meso card's menu
+
+final class MesoCardMenuTests: XCTestCase {
+    private func source(_ rel: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)
+    }
+
+    func test_viewMesoSummaryStaysVisible_theThreeBlockActionsLiveInOneMenu() throws {
+        let plan = try source("Features/Home/ProgramPlanView.swift")
+        let header = try XCTUnwrap(plan.range(of: "private var activeBlockHeaderSection"))
+        let content = try XCTUnwrap(plan.range(of: "private var content: some View"))
+        let card = String(plan[header.lowerBound..<content.lowerBound])
+        let menuStart = try XCTUnwrap(card.range(of: "Menu {")).lowerBound
+        let menuEnd = try XCTUnwrap(card.range(of: "} label: {\n                            Image(systemName: \"ellipsis.circle\")")).lowerBound
+        let menu = String(card[menuStart..<menuEnd])
+        for action in ["Change program…", "Start next meso from this one", "Insert deload week"] {
+            XCTAssertTrue(menu.contains(action), "\(action) is in the menu")
+            XCTAssertEqual(card.components(separatedBy: action).count - 1, 1, "and only there: \(action)")
+        }
+        let outside = String(card[menuEnd...])
+        XCTAssertTrue(outside.contains("View Meso Summary"), "View Meso Summary stays visible on the card")
+        XCTAssertFalse(menu.contains("View Meso Summary"))
+    }
+
+    func test_changeProgramIsNoLongerAToolbarCapsule() throws {
+        let home = try source("Features/Home/HomeView.swift")
+        XCTAssertFalse(home.contains("Image(systemName: \"line.3.horizontal.decrease.circle\")"), "the toolbar capsule is gone")
+        XCTAssertTrue(home.contains("onChangeProgram:"), "the card's menu opens the same wizard")
+    }
+}
