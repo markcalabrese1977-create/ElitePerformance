@@ -157,13 +157,16 @@ struct SettingsView: View {
     @State private var showRestoreScreen = false
 
     var body: some View {
-        NavigationStack {
-            settingsForm
-                .navigationDestination(isPresented: $showRestoreScreen) { restoreScreen }
-        }
-        // "Restore from a backup" on the welcome sheet lands here, on the same Restore screen as the row below.
-        .onAppear { openRestoreIfRequested() }
-        .onChange(of: route.restoreRequested) { _, _ in openRestoreIfRequested() }
+        NavigationStack { settingsForm }
+    }
+
+    /// The form plus the programmatic route to the Restore screen: "Restore from a backup" on the welcome sheet lands
+    /// here, on the same screen as the row in Backup & Restore.
+    private var settingsForm: some View {
+        settingsFormBody
+            .navigationDestination(isPresented: $showRestoreScreen) { restoreScreen }
+            .onAppear { openRestoreIfRequested() }
+            .onChange(of: route.restoreRequested) { _, _ in openRestoreIfRequested() }
     }
 
     private func openRestoreIfRequested() {
@@ -172,7 +175,7 @@ struct SettingsView: View {
         showRestoreScreen = true
     }
 
-    @ViewBuilder private var settingsForm: some View {
+    @ViewBuilder private var settingsFormBody: some View {
         Form {
             // MARK: - Profile
                         if let profile = profiles.first {
