@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
-/// A planned target at zero load, because the session that would have carried a load into it (the same-letter predecessor)
-/// was never completed, is seeded from history instead of staying at 0.
+/// A planned target at zero load, because the session that would have carried a load into it (its same-meso, same-dayLabel,
+/// same-wave predecessor, dated before today) was never completed, is seeded from history instead of staying at 0. Every other
+/// zero-load target is left to carry-forward.
 ///
 /// Source: the most recent COMPLETED session of the same meso and the same dayLabel (any letter) before the target; when
 /// the block has none, the most recent completed session of that exercise anywhere within the last 12 weeks; older or none
@@ -71,6 +72,19 @@ enum MissedSourceSeeding {
                 if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId, customExercises: ctx.customExercises) { continue }
                 if UserProfile.isProgressionExempt(exerciseId: item.exerciseId, profile: ctx.profile) { continue }
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+                let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+
+                // Scope: only a target whose same-meso, same-dayLabel, same-wave PREDECESSOR (the nearest earlier session with
+                // this lift in this letter) exists, is dated before today and was NOT completed. A predecessor that is still
+                // upcoming or was completed means carry-forward owns this target; no predecessor means a first exposure.
+                guard let missed = all.last(where: {
+                    $0.date < target.date && $0.meso?.persistentModelID == tm.persistentModelID
+                        && SessionDayLabelMatcher.matches($0.dayLabel, target.dayLabel)
+                        && $0.items.contains {
+                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
+                                && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == letter
+                        }
+                }), missed.date < today, missed.status != .completed else { continue }
 
                 // 1) latest completed session of this day type in this block, any letter; 2) latest anywhere.
                 let sameDay = completed.filter {
@@ -87,7 +101,7 @@ enum MissedSourceSeeding {
                     // Older than 12 weeks, or none: leave the load at 0 and say so (once).
                     if item.prescriptionNotes?.contains(noRecentHistoryNote) != true {
                         seeds.append(Seed(session: target, item: item, loads: item.plannedLoadsBySet.map { _ in 0 }, suggestedLoad: 0,
-                                          note: noRecentHistoryNote + ".", fromDate: target.date, missedDate: nil))
+                                          note: noRecentHistoryNote + ".", fromDate: target.date, missedDate: missed.date))
                     }
                     continue
                 }
@@ -105,20 +119,9 @@ enum MissedSourceSeeding {
                 guard loads.contains(where: { $0 > 0 }) else { continue }
                 let firstBackOff = (0..<rowCount).first { !item.isTopRow($0) && loads[$0] > 0 } ?? loads.firstIndex { $0 > 0 } ?? 0
 
-                // The same-letter predecessor whose day has passed without being completed (a later one is simply not done yet).
-                let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-                let missed = all.last {
-                    $0.status != .completed && $0.date < today && $0.meso?.persistentModelID == tm.persistentModelID
-                        && SessionDayLabelMatcher.matches($0.dayLabel, target.dayLabel)
-                        && $0.items.contains {
-                            ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
-                                && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == letter
-                        }
-                }
-                let note = missed.map { "Seeded from \(dayText(source.session.date)) — \(dayText($0.date)) was missed." }
-                    ?? "Seeded from \(dayText(source.session.date))."
+                let note = "Seeded from \(dayText(source.session.date)) — \(dayText(missed.date)) was missed."
                 seeds.append(Seed(session: target, item: item, loads: loads, suggestedLoad: loads[firstBackOff], note: note,
-                                  fromDate: source.session.date, missedDate: missed?.date))
+                                  fromDate: source.session.date, missedDate: missed.date))
             }
         }
         return seeds

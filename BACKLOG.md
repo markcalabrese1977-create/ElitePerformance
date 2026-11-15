@@ -65,7 +65,7 @@ screen, no crash report, and exactly one automatic backup for the launch. It als
 (history entries all at order 0, planned sessions without plannedDate, padded RIR 0s), which proves the upgrade backup is the data as it
 was BEFORE the backfills.
 
-- `scripts/upgrade_test.sh --seed onboarding` : one template program (as onboarding applies it) and two completed sessions, no customs, no import.
+- `scripts/upgrade_test.sh --seed onboarding` : one template program (as onboarding applies it), shifted so its first two sessions are the only ones in the past and both are completed (nothing missed), no customs, no import.
 - `scripts/upgrade_test.sh --seed fixture:<backup.json>` : a real backup imported through the released build's importer.
 - `--released <commit>` : the build to upgrade from. The default is `26006d5`, which is 1.2.1 (4), the last build uploaded to App Store Connect
   (Xcode's archive record, Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed with a 403 and was never distributed). After the next upload, set the
