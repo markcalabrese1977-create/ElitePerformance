@@ -55,7 +55,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Custom "Concentration Curl" duplicates the built-in concentration_curl (found by the
   O1 collision check). Decide: merge the custom into the built-in (move history,
   canonical id) via the existing dedup path, or rename. Low priority.
-- In-app guide: when the Claude guide doc changes, re-export and replace Resources/Guide.
+- In-app guide: the styling lives in the <head> of Resources/Guide/Guide.html. When the Claude guide doc changes, re-export its body and keep this file's <head>.
 
 ## Release check (standing): upgrade test
 
