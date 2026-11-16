@@ -15,6 +15,12 @@ table{width:100%;table-layout:fixed;border-collapse:collapse;margin:.8em 0;font:
 th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;-webkit-hyphens:auto;hyphens:auto}
 th{background:var(--head)}
 nav{margin:4px 0 8px} nav a{display:block;padding:4px 0;text-decoration:none}
+.stack table,.stack tbody,.stack tr,.stack td{display:block;width:auto}
+.stack thead{display:none}
+.stack table{border:0}
+.stack tr{border:1px solid var(--line);border-radius:10px;margin:0 0 10px;padding:4px 0}
+.stack td{border:0;padding:4px 10px;word-break:normal;-webkit-hyphens:manual;hyphens:manual}
+.stack td::before{content:attr(data-label);display:block;font-weight:600;color:var(--muted)}
 </style></head><body>
 <nav id="contents"></nav>
 <h2 id="welcome">Welcome</h2>
@@ -114,10 +120,13 @@ nav{margin:4px 0 8px} nav a{display:block;padding:4px 0;text-decoration:none}
 <table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody><tr><td>Block / meso (mesocycle)</td><td>A run of training weeks with the same days and exercises, typically 8–12 weeks</td></tr><tr><td>Compound lift</td><td>A multi-joint lift such as a press, row, pulldown, squat, leg press or hinge</td></tr><tr><td>Deload</td><td>A lighter week to recover</td></tr><tr><td>e1RM</td><td>Estimated one-rep max, worked out from a set&#39;s load and reps (sets of 12 reps or fewer)</td></tr><tr><td>Hard set</td><td>A working set taken close to failure; what the muscle-volume figures count</td></tr><tr><td>Load step</td><td>The smallest change the coach makes to a load</td></tr><tr><td>Rep range / goal</td><td>The reps you aim for on an exercise; the goal is the top of the range</td></tr><tr><td>RIR (reps in reserve)</td><td>How many more good reps you could have done when you stopped</td></tr><tr><td>Wave week (A/B/C)</td><td>A week type in a rotating program; the coach compares sessions of the same type</td></tr><tr><td>Working set</td><td>A set that counts toward progress, as opposed to a warm-up</td></tr></tbody></table>
 
 <h2 id="help">Need help?</h2>
-<p>Email <a href="mailto:eliteperformanceapp@gmail.com">eliteperformanceapp@gmail.com</a>. Include your app version from Settings → About.</p>
+<p>Email <a href="mailto:eliteperformanceapp@gmail.com">eliteperformanceapp<wbr>@gmail.com</a>. Include your app version from Settings → About.</p>
 
 <script>
 var n=document.getElementById('contents');
 document.querySelectorAll('h2').forEach(function(h){var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;n.appendChild(a);});
+document.querySelectorAll('table').forEach(function(t){var hs=[...t.querySelectorAll('thead th')].map(function(th){return th.textContent});t.querySelectorAll('tbody tr').forEach(function(r){[...r.children].forEach(function(td,i){if(hs[i])td.setAttribute('data-label',hs[i]);});});});
+function fit(){var fs=parseFloat(getComputedStyle(document.body).fontSize);document.documentElement.classList.toggle('stack',fs>=24);}
+fit();window.addEventListener('resize',fit);
 </script>
 </body></html>
