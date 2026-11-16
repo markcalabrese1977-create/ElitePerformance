@@ -540,3 +540,70 @@ final class SettingsHasNoFitterOnlyFieldsTests: XCTestCase {
         XCTAssertTrue(home.contains("Replace your upcoming sessions?"))
     }
 }
+
+// MARK: - In-app user guide
+
+final class UserGuideTests: XCTestCase {
+
+    private func guideURL() throws -> URL {
+        if let url = UserGuide.guideURL() { return url }
+        for bundle in Bundle.allBundles { if let url = UserGuide.guideURL(in: bundle) { return url } }
+        throw XCTSkip("Guide.html is not in any loaded bundle")
+    }
+
+    private func html() throws -> String { try String(contentsOf: try guideURL(), encoding: .utf8) }
+
+    func test_theBundleContainsTheGuide_andEveryImageResolvesToABundledFile() throws {
+        let url = try guideURL()
+        XCTAssertEqual(url.lastPathComponent, "Guide.html")
+        let page = try html()
+        let sources = page.components(separatedBy: "<img ").dropFirst().compactMap { chunk -> String? in
+            guard let r = chunk.range(of: "src=\"") else { return nil }
+            return String(chunk[r.upperBound...].prefix { $0 != "\"" })
+        }
+        XCTAssertEqual(sources.count, 9, "the guide carries nine screenshots")
+        XCTAssertEqual(Set(sources).count, sources.count)
+        for src in sources {
+            XCTAssertFalse(src.contains("/") || src.contains(":"), "\(src): a bare file name beside the page")
+            let file = url.deletingLastPathComponent().appendingPathComponent(src)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "\(src) is not bundled beside Guide.html")
+            XCTAssertGreaterThan((try? Data(contentsOf: file))?.count ?? 0, 1000, "\(src) is empty")
+        }
+    }
+
+    func test_theGuideLoadsNothingFromTheNetwork() throws {
+        let page = try html()
+        XCTAssertFalse(page.contains("http://"))
+        XCTAssertFalse(page.contains("https://"))
+    }
+
+    func test_navigationPolicy_allowsTheGuideAndItsAnchors_opensMail_cancelsTheRest() throws {
+        let guide = try guideURL()
+        XCTAssertEqual(UserGuide.navigationDecision(for: guide, guideURL: guide), .allow)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: guide.absoluteString + "#welcome")!, guideURL: guide), .allow)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "mailto:eliteperformanceapp@gmail.com")!, guideURL: guide), .openExternally)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "https://example.com")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "http://example.com/Guide.html")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "tel:5551234")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(fileURLWithPath: "/etc/hosts"), guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: guide.deletingLastPathComponent().appendingPathComponent("Info.plist"), guideURL: guide), .cancel)
+    }
+
+    func test_supportMail_carriesTheVersionAndBuild() throws {
+        let url = try XCTUnwrap(UserGuide.supportMailURL(version: "1.2.2", build: "5"))
+        XCTAssertEqual(url.absoluteString, "mailto:eliteperformanceapp@gmail.com?subject=Elite%20Performance%201.2.2%20(5)")
+        let live = try XCTUnwrap(UserGuide.supportMailURLForThisBuild).absoluteString
+        XCTAssertTrue(live.contains(BuildInfo.version.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!), live)
+    }
+
+    func test_settingsShowsTheHelpSection_aboveAbout() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let settings = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        let help = try XCTUnwrap(settings.range(of: "Section(\"Help\")"))
+        let about = try XCTUnwrap(settings.range(of: "Section(\"About\")"))
+        XCTAssertLessThan(help.lowerBound, about.lowerBound, "Help sits above About")
+        let section = String(settings[help.lowerBound..<about.lowerBound])
+        XCTAssertTrue(section.contains("User Guide") && section.contains("UserGuideView()"))
+        XCTAssertTrue(section.contains("Contact support") && section.contains("supportMailURLForThisBuild"))
+    }
+}
