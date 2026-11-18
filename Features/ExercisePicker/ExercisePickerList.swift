@@ -13,6 +13,15 @@ struct ExercisePickerList: View {
         case swap(currentExerciseId: String, currentName: String, footer: String? = nil)
     }
 
+    /// What a row can do besides being picked. The same in every context (session, day page, meso-setup preview; add or swap):
+    /// a custom exercise swipes right to edit its muscles and its Compound lift setting (`CustomMuscleMappingSheet`), left to
+    /// delete; a built-in exercise has no row actions.
+    enum RowAction: Equatable { case editMusclesAndLiftType, delete }
+
+    static func rowActions(isCustom: Bool, mode: Mode) -> [RowAction] {
+        isCustom ? [.editMusclesAndLiftType, .delete] : []
+    }
+
     let mode: Mode
     let onSelect: (CatalogExercise) -> Void
     let onCancel: () -> Void
@@ -129,6 +138,7 @@ struct ExercisePickerList: View {
     @ViewBuilder
     private func row(_ ex: CatalogExercise) -> some View {
         let isCustom = customIds.contains(ex.id)
+        let actions = Self.rowActions(isCustom: isCustom, mode: mode)
         Button { pick(ex) } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -146,15 +156,15 @@ struct ExercisePickerList: View {
         }
         .buttonStyle(.plain)                     // names read as text, not as links
         .swipeActions(edge: .leading) {
-            if isCustom {
+            if actions.contains(.editMusclesAndLiftType) {
                 Button { mappingTarget = MappingTarget(id: ex.id) } label: {
-                    Label("Muscles", systemImage: "figure.strengthtraining.traditional")
+                    Label("Muscles & lift type", systemImage: "figure.strengthtraining.traditional")
                 }
                 .tint(.indigo)
             }
         }
         .swipeActions(edge: .trailing) {
-            if isCustom {
+            if actions.contains(.delete) {
                 Button(role: .destructive) { pendingCustomDelete = [ex] } label: { Label("Delete", systemImage: "trash") }
             }
         }

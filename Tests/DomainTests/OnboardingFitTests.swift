@@ -816,4 +816,45 @@ final class ExercisePickerTests: XCTestCase {
         XCTAssertTrue(list.contains("ExercisePickerModel.sections("), "the pure model builds the sections")
         XCTAssertTrue(list.contains("SectionIndex"), "side index")
     }
+
+    // MARK: Row actions are the same in every picker
+
+    /// The mode each call site passes, by context.
+    private func modes() -> [(context: String, mode: ExercisePickerList.Mode)] {
+        let swap = ExercisePickerList.Mode.swap(currentExerciseId: "bench_press", currentName: "Bench Press", footer: nil)
+        return [("session add", .add), ("session swap", swap), ("day page add", .add),
+                ("day page swap", swap), ("meso-setup preview swap", swap), ("meso-setup preview add", .add)]
+    }
+
+    func test_everyPickerContext_offersEditMusclesAndLiftTypeOnACustomExercise_andNothingOnABuiltIn() {
+        for (context, mode) in modes() {
+            XCTAssertEqual(ExercisePickerList.rowActions(isCustom: true, mode: mode), [.editMusclesAndLiftType, .delete], context)
+            XCTAssertTrue(ExercisePickerList.rowActions(isCustom: false, mode: mode).isEmpty, context)
+        }
+    }
+
+    func test_theSixCallSitesPassTheModesAbove_andTheActionOpensTheMuscleAndCompoundEditor() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+        // Each context really is ExercisePickerList in the mode this test exercises.
+        let expectations: [(String, [String])] = [
+            ("Features/Session/SessionView.swift", ["ExercisePickerList(\n                mode: .add", "mode: .swap(currentExerciseId"]),
+            ("Features/Home/ProgramDayDetailView.swift", ["ExercisePickerList(\n                mode: .add"]),
+            ("Features/Home/ReplaceExerciseFlow.swift", ["ExercisePickerList(\n                mode: .swap(currentExerciseId"]),
+            ("Features/Onboarding/OnboardingFlowView.swift", ["mode: .swap(currentExerciseId: displayId", "ExercisePickerList(\n                        mode: .add"]),
+        ]
+        for (path, needles) in expectations {
+            let source = try text(path)
+            for needle in needles { XCTAssertTrue(source.contains(needle), "\(path): \(needle)") }
+        }
+        // The one view builds its swipe actions from rowActions, and the action opens the editor with the Compound toggle.
+        let list = try text("Features/ExercisePicker/ExercisePickerList.swift")
+        XCTAssertTrue(list.contains("Self.rowActions(isCustom:"))
+        XCTAssertTrue(list.contains("actions.contains(.editMusclesAndLiftType)"))
+        XCTAssertTrue(list.contains(".swipeActions(edge: .leading)"))
+        XCTAssertTrue(list.contains("CustomMuscleMappingSheet(exerciseId:"))
+        let editor = try text("Features/ExercisePicker/AddExerciseSheet.swift")
+        XCTAssertTrue(editor.contains("Toggle(\"Compound lift\""), "the editor edits the Compound lift setting")
+        XCTAssertTrue(editor.contains("c.isCompound = compound"))
+    }
 }
