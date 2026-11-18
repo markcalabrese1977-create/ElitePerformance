@@ -2218,3 +2218,67 @@ extension SessionItemEditService {
         return ApplyResult(sessionsChanged: live.targets.count, summary: summary)
     }
 }
+
+// MARK: - Undo for a multi-session prescription change
+
+extension SessionItemEditService {
+
+    /// Exactly the fields `applyChange` can write, as they were on exactly the items it changes, captured BEFORE the
+    /// apply. Undo puts these back; it is not a backup restore, so logged data, loads the lifter has typed since and
+    /// every other item are never touched.
+    struct PrescriptionUndo {
+        struct Point {
+            let item: SessionItem
+            let session: Session
+            let targetSets: Int, targetReps: Int, targetRIR: Int
+            let setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?
+            let plannedLoads: [Double], plannedReps: [Int], plannedRIRs: [Int]
+            let roles: [String]?, topRepMin: Int?, topRepMax: Int?, topRIR: Int?
+            let prescribedSets: Int?
+            let notes: NoteFields
+
+            init(_ target: PrescriptionTarget) {
+                let i = target.item
+                item = i; session = target.session
+                targetSets = i.targetSets; targetReps = i.targetReps; targetRIR = i.targetRIR
+                setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
+                rirMin = i.targetRIRMin; rirMax = i.targetRIRMax
+                plannedLoads = i.plannedLoadsBySet; plannedReps = i.plannedRepsBySet; plannedRIRs = i.plannedRIRsBySet
+                roles = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
+                prescribedSets = i.prescribedSets
+                notes = NoteFields(i)
+            }
+
+            func restore() {
+                item.targetSets = targetSets; item.targetReps = targetReps; item.targetRIR = targetRIR
+                item.setMin = setMin; item.setMax = setMax; item.repMin = repMin; item.repMax = repMax
+                item.targetRIRMin = rirMin; item.targetRIRMax = rirMax
+                item.plannedLoadsBySet = plannedLoads; item.plannedRepsBySet = plannedReps; item.plannedRIRsBySet = plannedRIRs
+                item.setRolesBySet = roles; item.topRepMin = topRepMin; item.topRepMax = topRepMax; item.topRIR = topRIR
+                item.prescribedSets = prescribedSets
+                notes.write(to: item)
+            }
+        }
+
+        let points: [Point]
+        var sessionCount: Int { points.count }
+    }
+
+    /// Call before `applyChange(plan)`.
+    static func capturePrescriptionUndo(for plan: ChangePlan) -> PrescriptionUndo {
+        PrescriptionUndo(points: plan.targets.map(PrescriptionUndo.Point.init))
+    }
+
+    /// Puts the captured fields back on the captured items and saves. An item that is gone, or whose session is no
+    /// longer planned (started or logged since), is left alone. Returns how many sessions were restored.
+    @discardableResult
+    static func undoPrescriptionChange(_ undo: PrescriptionUndo, in context: ModelContext) throws -> Int {
+        let usable = undo.points.filter { $0.item.modelContext != nil && !$0.item.isDeleted && $0.session.status == .planned }
+        for point in usable { point.restore() }
+        do { try context.save() } catch {
+            context.rollback()
+            throw ReplaceError.saveFailed("\(error)")
+        }
+        return usable.count
+    }
+}

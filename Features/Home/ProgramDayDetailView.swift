@@ -26,6 +26,8 @@ struct ProgramDayDetailView: View {
     @State private var pendingRename: DayLabelRename.Plan?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
+    /// The last multi-session prescription change, restorable for 10 seconds.
+    @State private var undoChange: UndoChange?
 
     // MARK: - Derived ordered items
 
@@ -127,6 +129,26 @@ struct ProgramDayDetailView: View {
             }
         }
         .animation(.default, value: undoDelete?.id)
+        .overlay(alignment: .bottom) {
+            if let u = undoChange {
+                HStack {
+                    Text(u.label).font(.subheadline)
+                    Spacer()
+                    Button("Undo") { undoPrescriptionChange(u) }.fontWeight(.semibold)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: u.id) {
+                    try? await Task.sleep(nanoseconds: UndoChange.visibleNanoseconds)
+                    if undoChange?.id == u.id { undoChange = nil }
+                }
+            }
+        }
+        .animation(.default, value: undoChange?.id)
         
         
         .alert("Apply to this block?", isPresented: Binding(get: { pendingBlockApply != nil }, set: { if !$0 { pendingBlockApply = nil } })) {
@@ -195,7 +217,7 @@ struct ProgramDayDetailView: View {
             ChangePrescriptionFlow(
                 session: session,
                 item: target.item,
-                initialScope: target.scope,
+                onApplied: { undo, summary in undoChange = UndoChange(undo: undo, label: summary) },
                 onFinish: { changeTarget = nil }
             )
         }
@@ -411,6 +433,22 @@ struct ProgramDayDetailView: View {
         let id = UUID()
         let items: [SessionItem]
         let propagate: Bool
+    }
+
+    struct UndoChange: Identifiable {
+        let id = UUID()
+        let undo: SessionItemEditService.PrescriptionUndo
+        let label: String
+        static let visibleNanoseconds: UInt64 = 10_000_000_000
+    }
+
+    /// Puts back exactly the fields the change wrote, on exactly the items it changed.
+    private func undoPrescriptionChange(_ u: UndoChange) {
+        undoChange = nil
+        switch Result(catching: { try SessionItemEditService.undoPrescriptionChange(u.undo, in: modelContext) }) {
+        case .success(let n): presentFeedback("Undone: \(n) session\(n == 1 ? "" : "s") back as they were.")
+        case .failure: presentFeedback("The change couldn't be undone, so nothing was written.")
+        }
     }
 
     struct UndoDelete: Identifiable {
