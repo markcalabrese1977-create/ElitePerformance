@@ -1486,166 +1486,6 @@ final class TotalRepProgressionTests: XCTestCase {
     }
 }
 
-// MARK: - XX: missed-source seeding
-
-final class MissedSourceSeedingTests: XCTestCase {
-
-    private let cal = Calendar.current
-    private func day(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
-
-    private func context() throws -> ModelContext {
-        ModelContext(try ModelContainer(
-            for: Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self]),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
-    }
-
-    private func item(_ wave: String, reps: [Int] = [], loads: [Double] = [], rirs: [Int] = [], planned: Bool) -> SessionItem {
-        let i = SessionItem(order: 1, exerciseId: "barbell_row", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0, waveRaw: wave)
-        i.plannedRepsBySet = [10, 10, 10]; i.plannedRIRsBySet = [2, 2, 2]
-        i.plannedLoadsBySet = [0, 0, 0]
-        if !planned { i.actualReps = reps; i.actualLoads = loads; i.actualRIRs = rirs; i.suggestedLoad = loads.first ?? 0; i.plannedLoadsBySet = loads }
-        return i
-    }
-
-    /// Pull A (wk4, done) -> Pull B (wk5, MISSED) -> Pull C (wk6, done) -> Pull B again wk8 target at 0 load.
-    private func block(_ ctx: ModelContext, otherMeso: Bool = false) -> (target: SessionItem, targetSession: Session) {
-        let meso = MesoBlock(name: "M", startDate: day(-40), totalWeeks: 8)
-        ctx.insert(meso)
-        let a = Session(date: day(-20), status: .completed, weekIndex: 4, dayLabel: "Pull", items: [item("a", reps: [10, 10, 9], loads: [100, 100, 100], rirs: [2, 2, 2], planned: false)])
-        let missed = Session(date: day(-13), status: .planned, weekIndex: 5, dayLabel: "Pull", items: [item("b", planned: true)])
-        let c = Session(date: day(-6), status: .completed, weekIndex: 6, dayLabel: "Pull", items: [item("c", reps: [10, 10, 10], loads: [110, 110, 110], rirs: [2, 2, 2], planned: false)])
-        let tItem = item("b", planned: true)
-        let target = Session(date: day(8), status: .planned, weekIndex: 8, dayLabel: "Pull", items: [tItem])
-        for s in [a, missed, c, target] { s.meso = meso; ctx.insert(s); meso.sessions.append(s) }
-        return (tItem, target)
-    }
-
-    func test_aZeroLoadTarget_isSeededFromTheLatestCompletedSameDaySession_converted_minus2_5Percent_andNoted() throws {
-        let ctx = try context()
-        let (t, _) = block(ctx)
-        let seeds = MissedSourceSeeding.run(in: ctx)
-        XCTAssertEqual(seeds.count, 1)
-        // reps-only e1RM of 110 x 10 = 146.67; at 10 reps RIR 2: 146.67/(1+10/30)*0.95 = 104.5; x 0.975 = 101.9 -> down to 2.5: 100
-        XCTAssertEqual(t.plannedLoadsBySet, [100, 100, 100])
-        XCTAssertEqual(t.suggestedLoad, 100)
-        XCTAssertTrue(t.prescriptionNotes?.contains("Seeded from") == true && t.prescriptionNotes?.contains("was missed") == true, t.prescriptionNotes ?? "nil")
-        XCTAssertFalse(t.planEdited)
-        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent: a seeded target is no longer a candidate")
-    }
-
-    // PPP: only a target whose same-meso, same-dayLabel, same-wave predecessor is dated before today and was not completed.
-    func test_PPP_onlyAMissedPredecessorSeeds_upcomingCompletedOrMissingPredecessorsLeaveTheTargetToCarryForward() throws {
-        func scenario(predecessor: SessionStatus?, at days: Int, wave: String = "b", dayLabel: String = "Pull", otherMeso: Bool = false) throws -> SessionItem {
-            let ctx = try context()
-            let meso = MesoBlock(name: "M", startDate: day(-40), totalWeeks: 8), other = MesoBlock(name: "O", startDate: day(-40), totalWeeks: 8)
-            ctx.insert(meso); ctx.insert(other)
-            let history = Session(date: day(-20), status: .completed, weekIndex: 4, dayLabel: "Pull", items: [item("a", reps: [10, 10, 10], loads: [100, 100, 100], rirs: [2, 2, 2], planned: false)])
-            history.meso = meso
-            let t = item("b", planned: true)
-            let target = Session(date: day(8), status: .planned, weekIndex: 8, dayLabel: "Pull", items: [t]); target.meso = meso
-            for s in [history, target] { ctx.insert(s); s.meso!.sessions.append(s) }
-            if let predecessor {
-                let p = item(wave, planned: true)
-                let ps = Session(date: day(days), status: predecessor, weekIndex: 5, dayLabel: dayLabel, items: [p])
-                ps.meso = otherMeso ? other : meso
-                ctx.insert(ps); ps.meso!.sessions.append(ps)
-            }
-            _ = MissedSourceSeeding.run(in: ctx)
-            return t
-        }
-        XCTAssertGreaterThan(try scenario(predecessor: .planned, at: -13).suggestedLoad, 0, "predecessor before today, never completed: seeded")
-        XCTAssertGreaterThan(try scenario(predecessor: .inProgress, at: -2).suggestedLoad, 0, "started and abandoned counts as not completed")
-        XCTAssertEqual(try scenario(predecessor: .planned, at: 3).suggestedLoad, 0, "predecessor still upcoming: carry-forward owns it")
-        XCTAssertEqual(try scenario(predecessor: .planned, at: 0).suggestedLoad, 0, "today is not before today")
-        XCTAssertEqual(try scenario(predecessor: .completed, at: -6).suggestedLoad, 0, "predecessor completed: carry-forward owns it")
-        XCTAssertEqual(try scenario(predecessor: nil, at: 0).suggestedLoad, 0, "no predecessor (a first exposure): not seeded")
-        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, wave: "a").suggestedLoad, 0, "a different wave letter is not the predecessor")
-        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, dayLabel: "Push").suggestedLoad, 0, "a different dayLabel is not the predecessor")
-        XCTAssertEqual(try scenario(predecessor: .planned, at: -13, otherMeso: true).suggestedLoad, 0, "another meso is not the predecessor")
-    }
-
-    func test_anEditedTarget_aTargetWithALoad_aBodyweightLift_andPastTargets_areLeftAlone() throws {
-        let ctx = try context()
-        let (t, session) = block(ctx)
-        t.planEdited = true
-        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty)
-        XCTAssertEqual(t.plannedLoadsBySet, [0, 0, 0])
-        t.planEdited = false
-        session.date = day(-1)
-        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a session already in the past is not seeded")
-        session.date = day(8)
-        t.plannedLoadsBySet = [95, 95, 95]; t.suggestedLoad = 95
-        XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "a target with a load is never overwritten")
-    }
-
-    func test_anyBlockFallback_usesOnlyTheLast12Weeks_olderOrNoneLeavesZeroWithTheNote() throws {
-        func scenario(daysAgo: Int) throws -> SessionItem {
-            let ctx = try context()
-            let old = MesoBlock(name: "Old", startDate: day(-daysAgo - 60), totalWeeks: 8)
-            let cur = MesoBlock(name: "Cur", startDate: day(-3), totalWeeks: 8)
-            ctx.insert(old); ctx.insert(cur)
-            let done = Session(date: day(-daysAgo), status: .completed, weekIndex: 3, dayLabel: "Pull", items: [item("a", reps: [10, 10, 10], loads: [90, 90, 90], rirs: [2, 2, 2], planned: false)])
-            done.meso = old
-            let tItem = item("a", planned: true)
-            let target = Session(date: day(4), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [tItem]); target.meso = cur
-            let missed = Session(date: day(-2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [item("a", planned: true)]); missed.meso = cur  // its predecessor, never done
-            for s in [done, target, missed] { ctx.insert(s) }
-            old.sessions.append(done); cur.sessions.append(target); cur.sessions.append(missed)
-            _ = MissedSourceSeeding.run(in: ctx)
-            XCTAssertTrue(MissedSourceSeeding.run(in: ctx).isEmpty, "idempotent")
-            return tItem
-        }
-        let recent = try scenario(daysAgo: 60)
-        XCTAssertGreaterThan(recent.suggestedLoad, 0, "another block, 60 days ago: still seeds")
-        XCTAssertTrue(recent.prescriptionNotes?.contains("was missed") == true)
-
-        let stale = try scenario(daysAgo: 13 * 7)
-        XCTAssertEqual(stale.suggestedLoad, 0, "13 weeks old: not used")
-        XCTAssertEqual(stale.plannedLoadsBySet, [0, 0, 0])
-        XCTAssertEqual(stale.prescriptionNotes, "No recent history — set a load.")
-
-        let empty = try context()
-        let m = MesoBlock(name: "E", startDate: day(-3), totalWeeks: 8); empty.insert(m)
-        let lone = item("a", planned: true)
-        let s = Session(date: day(2), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [lone]); s.meso = m; empty.insert(s); m.sessions.append(s)
-        let miss = Session(date: day(-1), status: .planned, weekIndex: 1, dayLabel: "Pull", items: [item("a", planned: true)]); miss.meso = m; empty.insert(miss); m.sessions.append(miss)
-        _ = MissedSourceSeeding.run(in: empty)
-        XCTAssertEqual(lone.suggestedLoad, 0)
-        XCTAssertEqual(lone.prescriptionNotes, "No recent history — set a load.", "no history at all: the same note")
-    }
-
-    // LOCAL ONLY, READ-ONLY: what the seeding would write on a real backup.
-    func test_audit_whatTheSeedingWouldWriteOnTheLatestBackup() throws {
-        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
-            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
-        }
-        let container = try ModelContainer(
-            for: AppSchema.makeSchema(),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
-        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
-        let ctx = ModelContext(container)
-        ctx.autosaveEnabled = false
-        let profile = try? ctx.fetch(FetchDescriptor<UserProfile>()).first
-        let custom = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
-        let seeds = MissedSourceSeeding.plan(in: ctx, ctx: .init(profile: profile, customExercises: custom))
-        let fmt = DateFormatter(); fmt.dateFormat = "EEE MMM d"
-        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
-        var lines = ["MISSED-SOURCE SEEDING DRY RUN — \(seeds.filter { !$0.isNoRecentHistory }.count) planned exercises would be seeded, \(seeds.filter { $0.isNoRecentHistory }.count) would get the no-recent-history note (nothing was saved)"]
-        for s in seeds.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
-            lines.append("\(fmt.string(from: s.session.date)) wk\(s.session.weekIndex) \(s.session.dayLabel ?? "-") · \(s.item.exerciseId) (\(s.item.waveRaw ?? "-")): " + (s.isNoRecentHistory ? "stays 0 · \(s.note)" : "0 -> \(s.loads.map(n).joined(separator: "/")) · \(s.note)"))
-        }
-        let zeroLeft = try ctx.fetch(FetchDescriptor<Session>()).filter { $0.status == .planned && $0.date >= Calendar.current.startOfDay(for: Date()) }
-            .flatMap { s in s.items.filter { $0.suggestedLoad <= 0 && $0.plannedLoadsBySet.allSatisfy { $0 <= 0 } }.map { (s, $0) } }
-        let seededIds = Set(seeds.filter { !$0.isNoRecentHistory }.map { ObjectIdentifier($0.item) })
-        let staying = zeroLeft.filter { !seededIds.contains(ObjectIdentifier($0.1)) }
-        lines.append("planned future exercises at 0 load that would STAY at 0: \(staying.count) (bodyweight, deload, edited, exempt or no history)")
-        for (sess, it) in staying { lines.append("  stays 0: \(fmt.string(from: sess.date)) wk\(sess.weekIndex) \(sess.dayLabel ?? "-") · \(it.exerciseId) (\(it.waveRaw ?? "-")) edited=\(it.planEdited)") }
-        let text = lines.joined(separator: "\n")
-        print(text)
-        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
-    }
-}
-
 // MARK: - YY: RIRUnsetBackfill
 
 final class RIRUnsetBackfillTests: XCTestCase {
@@ -3874,7 +3714,7 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertTrue(changes[0].noteOnly)
         XCTAssertEqual(target.suggestedLoad, 330)
         XCTAssertEqual(target.plannedLoadsBySet, [330, 330, 330])
-        XCTAssertEqual(target.coachNote, "Placeholder from block setup — set 1 calibrates.")
+        XCTAssertEqual(target.coachNote, "No recent data for this week type — set 1 calibrates.")
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "one-time")
     }
 
@@ -3909,15 +3749,15 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertEqual(meso.sessions.flatMap(\.items).map { "\($0.suggestedLoad)|\($0.plannedLoadsBySet)|\($0.coachNote ?? "-")" }, snapshot)
     }
 
-    func test_theAutomaticEntryPointsAreOffUntilTheBackfillIsReviewed() throws {
-        XCTAssertFalse(PlaceholderRefresh.isEnabled)
+    func test_theAutomaticEntryPointsAreOnByDefault_andOffWhenTheGateIsClosed() throws {
+        XCTAssertTrue(PlaceholderRefresh.isEnabled)
         let (ctx, meso) = try context()
         let (_, target) = tBar(ctx, meso)
+        PlaceholderRefresh.isEnabled = false
         PlaceholderRefresh.afterCompletion(in: ctx, now: now)
         PlaceholderRefreshBackfill.runIfNeeded(in: ctx)
-        XCTAssertEqual(target.suggestedLoad, 255, "gated")
+        XCTAssertEqual(target.suggestedLoad, 255, "gate closed: nothing is written")
         PlaceholderRefresh.isEnabled = true
-        defer { PlaceholderRefresh.isEnabled = false }
         PlaceholderRefresh.afterCompletion(in: ctx, now: now)
         XCTAssertEqual(target.suggestedLoad, 330)
     }

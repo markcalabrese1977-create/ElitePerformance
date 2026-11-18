@@ -28,7 +28,7 @@ import SwiftData
 ///    and clamped to its max load. The note reads "Estimated from your recent B-week sets — set 1 calibrates." Sources
 ///    come from the same block, or from the last 12 weeks.
 ///    (iii) Otherwise the load is left alone. A target not written since its block was created gets the one-time note
-///    "Placeholder from block setup — set 1 calibrates."; a target at 0 gets "No recent history — set a load.".
+///    "No recent data for this week type — set 1 calibrates."; a target at 0 gets "No recent history — set a load.".
 /// 3. **Lowering** is blocked only when, since the target was last written, the lifter performed a working set of that
 ///    exercise at a load at or above the target's load with reps at or above the target's `repMin`: the target was
 ///    shown to be doable. Otherwise it is lowered to the estimate. Never touches an edited item or a fixed-load one. A
@@ -41,20 +41,21 @@ import SwiftData
 ///
 /// Idempotent: a target that already holds the computed load is not a change.
 ///
-/// This replaces `MissedSourceSeeding`, which was the second rule for targets at 0 load only (see its header).
+/// This replaced `MissedSourceSeeding` (the older rule for targets at 0 load only), which is gone: its trigger, its
+/// estimator (now Epley from reps + RIR, 0.95) and its "No recent history — set a load." note live here.
 ///
-/// Called from session completion (after the carry-forward write-back) and from a startup backfill. Both are gated by
-/// `isEnabled`, which stays false until the backfill has been reviewed against the lifter's own data.
+/// Called from session completion (after the carry-forward write-back) and from the registered startup backfill
+/// (`PlaceholderRefreshBackfill`). Both check `isEnabled`, the switch for turning the rule off.
 enum PlaceholderRefresh {
 
     /// The gate for the two automatic entry points. `plan` / `apply` / `run` are not gated.
-    static var isEnabled = false
+    static var isEnabled = true
 
     static let estimateFactor = 0.95
     static let maxSourceReps = 12
     static let sourceWindowWeeks = 12
     static let noRecentHistoryNote = "No recent history — set a load."
-    static let placeholderNote = "Placeholder from block setup — set 1 calibrates."
+    static let placeholderNote = "No recent data for this week type — set 1 calibrates."
     /// The estimate converts a set to the target's rep range; a high-rep target (repMin above this) is never estimated.
     static let maxEstimatedTargetRepMin = 12
 
@@ -377,8 +378,8 @@ enum PlaceholderRefresh {
 }
 
 /// Startup backfill for `PlaceholderRefresh`: refreshes the stale planned loads of the active block once at launch, and
-/// logs one line. Idempotent (a refreshed target is no longer a change). NOT REGISTERED in `StartupBackfills` until the
-/// list of what it would change on the lifter's real data has been reviewed; gated by `PlaceholderRefresh.isEnabled`.
+/// logs one line. Idempotent (a refreshed target is no longer a change). Registered in `StartupBackfills` (where
+/// `MissedSourceSeedBackfill` was); gated by `PlaceholderRefresh.isEnabled`.
 enum PlaceholderRefreshBackfill {
     static func runIfNeeded(in context: ModelContext) {
         guard PlaceholderRefresh.isEnabled else {

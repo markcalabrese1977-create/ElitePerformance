@@ -150,7 +150,7 @@ enum StartupBackfills {
         (String(describing: CustomExerciseCompoundBackfill.self), { CustomExerciseCompoundBackfill.runIfNeeded(in: $0) }),
         (String(describing: RIRUnsetBackfill.self), { RIRUnsetBackfill.runIfNeeded(in: $0) }),
         (String(describing: MesoStartDateResync.self), { MesoStartDateResync.runIfNeeded(in: $0) }),
-        (String(describing: MissedSourceSeedBackfill.self), { MissedSourceSeedBackfill.runIfNeeded(in: $0) }),
+        (String(describing: PlaceholderRefreshBackfill.self), { PlaceholderRefreshBackfill.runIfNeeded(in: $0) }),
     ]
 
     /// Runs every registered backfill and logs exactly one line for each: "<TypeName>: <result>".
