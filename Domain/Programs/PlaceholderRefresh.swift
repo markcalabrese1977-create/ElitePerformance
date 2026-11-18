@@ -22,11 +22,17 @@ import SwiftData
 ///    Epley max from its reps plus its logged RIR (a missing RIR counts as the item's target RIR); the best of them is
 ///    converted to the target's top rep plus its target RIR (the midpoint of a range), taken 5% lower, rounded DOWN to the
 ///    exercise's step and clamped to its max load. The note reads "Estimated from your recent B-week sets — set 1
-///    calibrates." No qualifying source: the target is left alone. Sources come from the same block, or from the last
+///    calibrates." No qualifying source: the target is left alone (a target at 0 gets the no-history note, below). Sources come from the same block, or from the last
 ///    12 weeks.
-/// 3. **Never** lowers a target the lifter has performed against since it was last written (a completed working set of
-///    that exercise at or above its load), and never touches an edited item. A previous session with a pain flag is left
-///    alone: pain holds. A performed set counts, a failed attempt (load > 0, no reps, no "SKIP") included.
+/// 3. **Lowering** is blocked only when, since the target was last written, the lifter performed a working set of that
+///    exercise at a load at or above the target's load with reps at or above the target's `repMin`: the target was
+///    shown to be doable. Otherwise it is lowered to the estimate. Never touches an edited item or a fixed-load one. A
+///    previous session or source with a pain flag is left alone: pain holds.
+///
+/// A target at 0 load with no qualifying source gets the note "No recent history — set a load." (once) and stays at 0.
+///
+/// A performed set counts, a failed attempt (load > 0, no reps, no "SKIP") included; a performed WORKING set for rule 3
+/// has reps (a failed attempt shows nothing doable).
 ///
 /// Idempotent: a target that already holds the computed load is not a change.
 ///
@@ -42,18 +48,23 @@ enum PlaceholderRefresh {
     static let estimateFactor = 0.95
     static let maxSourceReps = 12
     static let sourceWindowWeeks = 12
+    static let noRecentHistoryNote = "No recent history — set a load."
 
     enum Reason: Equatable {
         /// The previous session's last performed primary set; `performed` of `planned` sets were logged.
         case heldLoad(from: Date, performed: Int, planned: Int)
         /// Estimated from `from`; `why` says what the previous same-letter session did.
         case estimated(from: Date, letter: String?, e1RM: Double, why: String)
+        /// A target at 0 with nothing to estimate from.
+        case noRecentHistory(why: String)
 
         var text: String {
             func day(_ d: Date) -> String { d.formatted(.dateTime.month(.abbreviated).day()) }
             switch self {
             case .heldLoad(let d, let performed, let planned):
                 return "held load of the \(day(d)) session (\(performed) of \(planned) planned sets performed)"
+            case .noRecentHistory(let why):
+                return "no recent history to estimate from; \(why); stays 0 with a note"
             case .estimated(let d, let letter, let e1rm, let why):
                 return "estimated from the \(day(d))\(letter.map { " \($0.uppercased())-week" } ?? "") session (e1RM \(Int(e1rm.rounded()))); \(why)"
             }
@@ -67,6 +78,8 @@ enum PlaceholderRefresh {
         let newLoad: Double
         let reason: Reason
         let note: String?
+        /// True for the no-history note on a target at 0: nothing about its load changes.
+        var noteOnly = false
     }
 
     struct Context {
@@ -103,14 +116,17 @@ enum PlaceholderRefresh {
                 }
                 let predItem = predecessor?.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) == letter }
 
-                let decision: (load: Double, reason: Reason, note: String?)?
+                typealias Decision = (load: Double, reason: Reason, note: String?)
+                let decision: Decision?
+                var noSourceWhy: String?
                 if let predecessor, let predItem {
                     if hasPain(predItem) { continue }                       // pain holds
                     if predecessor.status == .completed {
                         let performed = CoachingEngine.workingSetIndices(for: predItem)
                         if performed.isEmpty {
-                            decision = estimate(for: item, target: target, why: "the \(dayText(predecessor.date)) session had no performed sets",
-                                                completed: completed, now: now, ctx: ctx)
+                            let why = "the \(dayText(predecessor.date)) session had no performed sets"
+                            let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
+                            decision = r.decision; if r.noSource { noSourceWhy = why }
                         } else if CoachingEngine.hasSufficientPrimaryEvidence(predItem) {
                             continue                                       // carry-forward owns it
                         } else if let held = CoachingEngine.heldLoad(for: predItem), held > 0 {
@@ -119,18 +135,29 @@ enum PlaceholderRefresh {
                                         "Held at \(compact(held, ctx)) from \(dayText(predecessor.date)): \(CoachingEngine.plannedWorkingSetIndices(for: predItem).count) of \(planned) planned sets were performed.")
                         } else { continue }
                     } else if predecessor.date < today && predecessor.status != .inProgress {
-                        decision = estimate(for: item, target: target, why: "the \(dayText(predecessor.date)) session was missed",
-                                            completed: completed, now: now, ctx: ctx)
+                        let why = "the \(dayText(predecessor.date)) session was missed"
+                        let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
+                        decision = r.decision; if r.noSource { noSourceWhy = why }
                     } else { continue }                                     // upcoming or in progress: not yet decided
                 } else {
-                    decision = estimate(for: item, target: target, why: "no earlier session of this letter", completed: completed, now: now, ctx: ctx)
+                    let why = "no earlier session of this letter"
+                    let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
+                    decision = r.decision; if r.noSource { noSourceWhy = why }
+                }
+                // A target at 0 with nothing to estimate from: say so once, leave the load.
+                if decision == nil, let why = noSourceWhy, isZeroTarget(item),
+                   item.prescriptionNotes?.contains(noRecentHistoryNote) != true {
+                    changes.append(Change(session: target, item: item, oldLoad: 0, newLoad: 0, reason: .noRecentHistory(why: why),
+                                          note: noRecentHistoryNote, noteOnly: true))
+                    continue
                 }
                 guard let decision, decision.load > 0 else { continue }
 
                 let value = UserProfile.clampedLoad(decision.load, exerciseId: item.exerciseId, profile: ctx.profile, customExercises: ctx.customExercises)
                 let current = currentLoad(item)
                 if holdsLoad(item, value) { continue }                      // idempotent
-                if value < current - 0.001, performedAgainst(load: current, canonical: canonical, since: item.updatedAt, in: completed) { continue }
+                if value < current - 0.001,
+                   performedAgainst(load: current, minReps: item.repMin ?? item.targetReps, canonical: canonical, since: item.updatedAt, in: completed) { continue }
                 changes.append(Change(session: target, item: item, oldLoad: current, newLoad: value, reason: decision.reason, note: decision.note))
             }
         }
@@ -141,6 +168,11 @@ enum PlaceholderRefresh {
 
     static func apply(_ changes: [Change], ctx: Context) {
         for c in changes {
+            if c.noteOnly {
+                let existing = c.item.prescriptionNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                c.item.prescriptionNotes = existing.isEmpty ? noRecentHistoryNote : existing + " " + noRecentHistoryNote
+                continue
+            }
             PlanMemoryEngine.applyPropagatedLoad(c.newLoad, to: c.item)
             PlanMemoryEngine.enforceMax(on: c.item, profile: ctx.profile, customExercises: ctx.customExercises)
             if let note = c.note { c.item.coachNote = note }
@@ -178,6 +210,10 @@ enum PlaceholderRefresh {
         item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
     }
 
+    private static func isZeroTarget(_ item: SessionItem) -> Bool {
+        item.suggestedLoad <= 0 && !item.plannedLoadsBySet.isEmpty && item.plannedLoadsBySet.allSatisfy { $0 <= 0 }
+    }
+
     private static func hasPain(_ item: SessionItem) -> Bool {
         item.setFeedbackBySet.contains(SetFeedback.pain.rawValue)
     }
@@ -199,12 +235,13 @@ enum PlaceholderRefresh {
         return !slots.isEmpty && slots.allSatisfy { abs($0 - value) < 0.001 }
     }
 
-    /// A completed working set of this exercise, dated after `since`, at or above `load`.
-    private static func performedAgainst(load: Double, canonical: String, since: Date?, in completed: [Session]) -> Bool {
+    /// A completed working set of this exercise, dated after `since`, at `load` or above with at least `minReps` reps: the
+    /// target's load was shown to be doable in its own rep range.
+    private static func performedAgainst(load: Double, minReps: Int, canonical: String, since: Date?, in completed: [Session]) -> Bool {
         let floor = since ?? .distantPast
         for s in completed where s.date > floor {
             for i in s.items where ExerciseCatalog.canonicalExerciseId(for: i.exerciseId) == canonical && letterKey(i) != "deload" {
-                if WorkingSetFilter.workingRows(of: i).contains(where: { $0.load >= load - 0.001 }) { return true }
+                if WorkingSetFilter.workingRows(of: i).contains(where: { $0.load >= load - 0.001 && $0.reps >= minReps }) { return true }
             }
         }
         return false
@@ -212,8 +249,9 @@ enum PlaceholderRefresh {
 
     // MARK: Rule 2
 
+    /// `noSource` is true only when no session qualified (a pain flag or a degenerate e1RM is neither).
     private static func estimate(for item: SessionItem, target: Session, why: String, completed: [Session], now: Date, ctx: Context)
-        -> (load: Double, reason: Reason, note: String?)? {
+        -> (decision: (load: Double, reason: Reason, note: String?)?, noSource: Bool) {
         let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
         let cutoff = Calendar.current.date(byAdding: .weekOfYear, value: -sourceWindowWeeks, to: now) ?? .distantPast
         let candidates = completed.filter {
@@ -225,12 +263,12 @@ enum PlaceholderRefresh {
             guard let src = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) != "deload" }) else { continue }
             let rows = WorkingSetFilter.workingRows(of: src).filter { $0.reps <= maxSourceReps }
             guard !rows.isEmpty else { continue }
-            if hasPain(src) { return nil }                                  // pain holds
+            if hasPain(src) { return (nil, false) }                         // pain holds
             let e1rm = rows.map { r -> Double in
                 let rir = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
                 return r.load * (1.0 + Double(r.reps + rir) / 30.0)
             }.max() ?? 0
-            guard e1rm > 0 else { return nil }
+            guard e1rm > 0 else { return (nil, false) }
 
             let topReps = item.repMax ?? item.targetReps
             let rir: Double = {
@@ -244,9 +282,9 @@ enum PlaceholderRefresh {
             let rounded = UnitAwareRounding.round(raw, increment: step, unit: ctx.unit, mode: .down)
             let letter = letterKey(src).isEmpty ? nil : letterKey(src)
             let note = "Estimated from your recent \(letter.map { "\($0.uppercased())-week " } ?? "")sets — set 1 calibrates."
-            return (rounded, .estimated(from: s.date, letter: letter, e1RM: e1rm, why: why), note)
+            return ((rounded, .estimated(from: s.date, letter: letter, e1RM: e1rm, why: why), note), false)
         }
-        return nil
+        return (nil, true)
     }
 }
 

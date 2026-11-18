@@ -3469,7 +3469,8 @@ final class PlaceholderRefreshDryRunTests: XCTestCase {
         func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
         var lines = ["PLACEHOLDER REFRESH DRY RUN (as of \(now)) — \(changes.count) planned exercises would change (nothing was saved), unit \(unit)"]
         for c in changes.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
-            lines.append("\(fmt.string(from: c.session.date)) wk\(c.session.weekIndex) \(c.session.dayLabel ?? "-") · \(ExerciseCatalog.displayName(for: c.item.exerciseId)) (\(c.item.waveRaw ?? "-")): \(n(c.oldLoad)) -> \(n(c.newLoad)) · \(c.reason.text)")
+            let what = c.noteOnly ? "stays 0 (note: \(c.note ?? ""))" : "\(n(c.oldLoad)) -> \(n(c.newLoad))"
+            lines.append("\(fmt.string(from: c.session.date)) wk\(c.session.weekIndex) \(c.session.dayLabel ?? "-") · \(ExerciseCatalog.displayName(for: c.item.exerciseId)) (\(c.item.waveRaw ?? "-")): \(what) · \(c.reason.text)")
         }
         // Idempotence: apply, then plan again.
         PlaceholderRefresh.apply(changes, ctx: .init(profile: profile, customExercises: (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []))
@@ -3717,6 +3718,58 @@ final class PlaceholderRefreshTests: XCTestCase {
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(changes.count, 1)
         XCTAssertLessThan(target.suggestedLoad, 175)
+    }
+
+    /// Calf raise, Legs B Dec 1 (a): target 330 (10-12 reps). The lifter performed 301 x 12, 12, 11 on Nov 17 - under the target's
+    /// load - so nothing shows 330 was doable and it lowers to the estimate.
+    func test_calfDec1_lowersToTheEstimate_whenNothingPerformedShowsTheTargetWasDoable() throws {
+        let (ctx, meso) = try context()
+        let missed = item("smith_machine_calves", wave: "a", repMin: 10, repMax: 12, suggested: 330)
+        let done = item("smith_machine_calves", wave: "b", repMin: 12, repMax: 15, suggested: 301, actual: [301, 301, 301], reps: [12, 12, 11], rirs: [1, 1, 1])
+        let target = item("smith_machine_calves", wave: "a", repMin: 10, repMax: 12, suggested: 330, updated: day(10, 10))
+        session(ctx, meso, day(11, 10), .planned, week: 7, label: "Legs B", [missed])
+        session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        // 301 x 12 at RIR 1 -> e1RM 301 * (1 + 13/30) = 431.5; target 12 reps + RIR 2 -> 431.5 / (1 + 14/30) = 294.1; x 0.95 = 279.4;
+        // down to the 2.5 step -> 277.5.
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(target.suggestedLoad, 277.5)
+        XCTAssertEqual(target.plannedLoadsBySet, [277.5, 277.5, 277.5])
+    }
+
+    func test_aLoadAtOrAboveTheTargetStillLowersWhenTheRepsWereBelowTheTargetsRepMin() throws {
+        // Leg curl, Dec 1 (a, 8-10): 175 x 12 x 3 blocks the lowering (load >= 175, reps >= 8). 175 x 6 does not: it was not done in range.
+        func run(reps: [Int]) throws -> Double {
+            let (ctx, meso) = try context()
+            let missed = item("seated_leg_curl", wave: "a", repMin: 8, repMax: 10, suggested: 175)
+            let done = item("seated_leg_curl", wave: "b", repMin: 10, repMax: 12, suggested: 175, actual: [175, 175, 175], reps: reps, rirs: [2, 2, 2])
+            let target = item("seated_leg_curl", wave: "a", repMin: 8, repMax: 10, suggested: 175, updated: day(10, 10))
+            session(ctx, meso, day(11, 10), .planned, week: 7, label: "Legs B", [missed])
+            session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
+            session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+            _ = PlaceholderRefresh.run(in: ctx, now: now)
+            return target.suggestedLoad
+        }
+        XCTAssertEqual(try run(reps: [12, 12, 12]), 175, "doable in range: it stays")
+        XCTAssertLessThan(try run(reps: [6, 6, 6]), 175, "175 was not done in the 8-10 range: it lowers")
+    }
+
+    // MARK: No recent history
+
+    func test_aTargetAtZeroWithNothingToEstimateFrom_keepsTheNoHistoryNote_once() throws {
+        let (ctx, meso) = try context()
+        let zero = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 0, planned: [0, 0, 0])
+        let sized = item("seated_leg_curl", wave: "a", repMin: 8, repMax: 10, suggested: 175)
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [zero, sized])
+        let first = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(first.count, 1)
+        XCTAssertTrue(first[0].noteOnly)
+        XCTAssertEqual(zero.suggestedLoad, 0)
+        XCTAssertEqual(zero.prescriptionNotes, "No recent history — set a load.")
+        XCTAssertNil(sized.prescriptionNotes, "a target with a load is not told it has no history")
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "once")
+        XCTAssertEqual(zero.prescriptionNotes, "No recent history — set a load.")
     }
 
     func test_bodyweightAndFixedLoadExercisesAreLeftAlone() throws {
