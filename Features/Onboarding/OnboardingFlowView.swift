@@ -188,8 +188,27 @@ struct OnboardingDraft: Equatable {
     var loadIncrement: Double = 2.5
     var unit: LoadUnit = .lb
     var injuryFlags: Set<InjuryFlag> = []
+    /// Training weekdays (1 = Sunday ... 7 = Saturday) to pre-select; empty means "use the default pattern".
+    var weekdays: Set<Int> = []
 
     init() {}
+
+    /// The profile's answers plus the weekdays of the active block. When `activeWeekdays` holds 2...6 days they are
+    /// pre-selected and set the day count; otherwise (no active block, or an unusable set) nothing changes.
+    init(profile: UserProfile?, activeWeekdays: Set<Int>) {
+        self.init(profile: profile)
+        let valid = activeWeekdays.filter { (1...7).contains($0) }
+        if (2...6).contains(valid.count) {
+            weekdays = valid
+            daysPerWeek = valid.count
+        }
+    }
+
+    /// The distinct weekdays of every session (planned and completed) in a block.
+    static func weekdays(of meso: MesoBlock?, calendar: Calendar = .current) -> Set<Int> {
+        guard let meso else { return [] }
+        return Set(meso.sessions.map { calendar.component(.weekday, from: $0.date) })
+    }
 
     init(profile: UserProfile?) {
         guard let profile else { return }
@@ -324,12 +343,14 @@ struct OnboardingFlowView: View {
     init(
         initialStartDate: Date = Date(),
         profile: UserProfile? = nil,
+        activeWeekdays: Set<Int> = [],
         onRestore: (() -> Void)? = nil,
         onComplete: @escaping (OnboardingResult, PreviewOverrides, @escaping (OnboardingFinish) -> Void) -> Void
     ) {
         self.onComplete = onComplete
         self.onRestore = onRestore
-        let draft = OnboardingDraft(profile: profile)
+        let draft = OnboardingDraft(profile: profile, activeWeekdays: activeWeekdays)
+        _selectedWeekdays = State(initialValue: draft.weekdays)
         _selectedGoal = State(initialValue: draft.goal)
         _selectedExperience = State(initialValue: draft.experience)
         _daysPerWeek = State(initialValue: draft.daysPerWeek)

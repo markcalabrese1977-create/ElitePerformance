@@ -536,7 +536,7 @@ final class SettingsHasNoFitterOnlyFieldsTests: XCTestCase {
         XCTAssertTrue(plan.contains("ChangeProgramRow(action: onChangeProgram)"), "visible in the block header, not only in the menu")
         // The flow still opens pre-filled from the profile and still asks before replacing the meso.
         let home = try source("Features/Home/HomeView.swift")
-        XCTAssertTrue(home.contains("OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first)"))
+        XCTAssertTrue(home.contains("OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first, activeWeekdays: OnboardingDraft.weekdays(of: activeMeso))"))
         XCTAssertTrue(home.contains("Replace your upcoming sessions?"))
     }
 }
@@ -605,5 +605,53 @@ final class UserGuideTests: XCTestCase {
         let section = String(settings[help.lowerBound..<about.lowerBound])
         XCTAssertTrue(section.contains("User Guide") && section.contains("UserGuideView()"))
         XCTAssertTrue(section.contains("Contact support") && section.contains("supportMailURLForThisBuild"))
+    }
+}
+
+// MARK: - Change program pre-selects the active block's training days
+
+final class ChangeProgramWeekdaysTests: XCTestCase {
+
+    private func block(weekdays: [Int]) throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let ctx = ModelContext(container)
+        let meso = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: 2)
+        ctx.insert(meso)
+        let cal = Calendar.current
+        // 2026-11-01 is a Sunday (weekday 1); 2026-11-01 + (w - 1) days has weekday w.
+        let sunday = cal.date(from: DateComponents(year: 2026, month: 11, day: 1))!
+        for week in 0..<2 {
+            for w in weekdays {
+                let date = cal.date(byAdding: .day, value: week * 7 + (w - 1), to: sunday)!
+                let s = Session(date: date, status: week == 0 ? .completed : .planned, weekIndex: week + 1, dayLabel: "D", items: [])
+                s.meso = meso
+                ctx.insert(s)
+            }
+        }
+        try ctx.save()
+        return (ctx, meso)
+    }
+
+    func test_fridayToWednesdayBlock_preselectsExactlyThoseSix_andNextIsEnabled() throws {
+        let (_, meso) = try block(weekdays: [6, 7, 1, 2, 3, 4])
+        let days = OnboardingDraft.weekdays(of: meso)
+        XCTAssertEqual(days, [6, 7, 1, 2, 3, 4], "planned and completed sessions both count")
+        let draft = OnboardingDraft(profile: UserProfile(), activeWeekdays: days)
+        XCTAssertEqual(draft.weekdays, [1, 2, 3, 4, 6, 7])
+        XCTAssertEqual(draft.daysPerWeek, 6, "the day count follows the chips")
+        XCTAssertTrue(OnboardingDraft.scheduleIsComplete(weekdays: draft.weekdays, daysPerWeek: draft.daysPerWeek))
+    }
+
+    func test_noActiveBlock_isUnchanged() {
+        XCTAssertTrue(OnboardingDraft.weekdays(of: nil).isEmpty)
+        let profile = UserProfile()
+        XCTAssertEqual(OnboardingDraft(profile: profile, activeWeekdays: []), OnboardingDraft(profile: profile))
+        XCTAssertEqual(OnboardingDraft(profile: nil, activeWeekdays: []), OnboardingDraft())
+    }
+
+    func test_anUnusableWeekdaySet_fallsBackToTheDefaultPattern() {
+        XCTAssertTrue(OnboardingDraft(profile: nil, activeWeekdays: [2]).weekdays.isEmpty)
+        XCTAssertTrue(OnboardingDraft(profile: nil, activeWeekdays: Set(1...7)).weekdays.isEmpty)
     }
 }
