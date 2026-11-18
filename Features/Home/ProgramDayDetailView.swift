@@ -282,14 +282,18 @@ struct ProgramDayDetailView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
     
-    /// e.g. "Dec 9, 2025 · Week 1"
+    /// e.g. "Dec 9, 2025 · Week 1 · Moderate (B)"
     private var sessionLabel: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
 
         let dateString = formatter.string(from: session.date)
-        return "\(dateString) · Week \(session.weekIndex)"
+        let week = "\(dateString) · Week \(session.weekIndex)"
+        // "· Moderate (B)" after the week; nothing on a block without waves.
+        let labels = WaveLabels.labels(meso: session.meso)
+        let shown = Array(NSOrderedSet(array: session.items.compactMap { WaveLabels.display(forRaw: $0.waveRaw, labels: labels, mesoName: session.meso?.name) })) as? [String] ?? []
+        return shown.isEmpty ? week : week + " · " + shown.joined(separator: ", ")
     }
 
     /// e.g. "5 exercises · 16 working sets"

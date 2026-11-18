@@ -935,3 +935,129 @@ final class MultiSessionSafetyTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Wave labels (one path for every screen)
+final class WaveLabelsTests: XCTestCase {
+
+    private typealias S = WaveLabels.Sample
+    private func anchors(_ a: Int, _ b: Int, _ c: Int) -> [S] {
+        [S(letter: "a", repMax: a, isAnchor: true), S(letter: "b", repMax: b, isAnchor: true), S(letter: "c", repMax: c, isAnchor: true)]
+    }
+
+    // MARK: Ordering
+
+    func test_threeLetters_areOrderedByRepMax_lowestHeaviest() {
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X"), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+        // Not tied to the alphabet: the letters follow the numbers.
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(10, 6, 8), mesoName: "X"), ["a": "Light", "b": "Heavy", "c": "Moderate"])
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(8, 10, 6), mesoName: "X"), ["a": "Moderate", "b": "Light", "c": "Heavy"])
+    }
+
+    func test_twoLetters_areHeavyAndLight() {
+        let two = [S(letter: "a", repMax: 5, isAnchor: true), S(letter: "c", repMax: 12, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: two, mesoName: "X"), ["a": "Heavy", "c": "Light"])
+    }
+
+    func test_theMeanOfAnchorsDecides_notAccessories() {
+        var s = anchors(6, 8, 10)
+        // Accessories say the opposite; they are ignored while every letter has an anchor.
+        s += [S(letter: "a", repMax: 30, isAnchor: false), S(letter: "c", repMax: 3, isAnchor: false)]
+        XCTAssertEqual(WaveLabels.labels(samples: s, mesoName: "X")["a"], "Heavy")
+        // Means, not single values: a=(6+10)/2=8, b=(6+6)/2=6 -> b is the heavier.
+        let mixed = [S(letter: "a", repMax: 6, isAnchor: true), S(letter: "a", repMax: 10, isAnchor: true),
+                     S(letter: "b", repMax: 6, isAnchor: true), S(letter: "b", repMax: 6, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: mixed, mesoName: "X"), ["b": "Heavy", "a": "Light"])
+    }
+
+    func test_withNoAnchorsEveryPrescriptionCounts() {
+        let s = [S(letter: "a", repMax: 6, isAnchor: false), S(letter: "b", repMax: 12, isAnchor: false)]
+        XCTAssertEqual(WaveLabels.labels(samples: s, mesoName: "X"), ["a": "Heavy", "b": "Light"])
+    }
+
+    // MARK: Fallback
+
+    func test_lettersInTheSameRepZone_fallBackToTheExistingNames() {
+        let same = anchors(8, 8, 9)           // span 1 -> the same zone
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "12-Week DUP Meso"),
+                       ["a": "Strength", "b": "Hypertrophy", "c": "Intensification"])
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "4-Day Upper / Lower"),
+                       ["a": "Baseline", "b": "Volume", "c": "Intensity"])
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "3-Day Push / Pull / Legs"),
+                       ["a": "Accumulation", "b": "Development", "c": "Intensification"])
+        // Two reps apart is a difference.
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(8, 8, 10), mesoName: "X")["c"], "Light")
+    }
+
+    func test_aSingleLetter_usesTheExistingName() {
+        XCTAssertEqual(WaveLabels.labels(samples: [S(letter: "a", repMax: 8, isAnchor: true)], mesoName: "12-Week DUP Meso"), ["a": "Strength"])
+    }
+
+    // MARK: Deload, maintenance, no waves
+
+    func test_deloadAndMaintenanceKeepTheirLabels_andCarryNoLetter() {
+        let labels = WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "12-Week DUP Meso")
+        XCTAssertNil(labels["deload"], "deload is not ranked")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "12-Week DUP Meso"), "Deload")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "Maintenance Block"), "Maintenance")
+        // A deload prescription never moves the means.
+        let withDeload = anchors(6, 8, 10) + [S(letter: "deload", repMax: 20, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: withDeload, mesoName: "X"), WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X"))
+    }
+
+    func test_noWaves_showsNothing() {
+        XCTAssertTrue(WaveLabels.labels(samples: [], mesoName: "X").isEmpty)
+        XCTAssertTrue(WaveLabels.labels(sessions: [], mesoName: "X").isEmpty)
+        XCTAssertNil(WaveLabels.display(forRaw: nil, labels: [:], mesoName: "X"))
+        XCTAssertNil(WaveLabels.display(forRaw: "  ", labels: [:], mesoName: "X"))
+    }
+
+    func test_displayReadsNameThenLetter() {
+        let labels = WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X")
+        XCTAssertEqual(WaveLabels.display(forRaw: "b", labels: labels, mesoName: "X"), "Moderate (B)")
+        XCTAssertEqual(WaveLabels.display(forRaw: "A", labels: labels, mesoName: "X"), "Heavy (A)")
+    }
+
+    // MARK: A renamed block still gets labels
+
+    private func block(name: String, reps: [String: Int]) throws -> MesoBlock {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        keep.append(c)
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: name, startDate: Date(), status: .active, totalWeeks: 3)
+        ctx.insert(meso)
+        for (i, letter) in reps.keys.sorted().enumerated() {
+            let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: reps[letter]!, targetSets: 3, targetRIR: 2, suggestedLoad: 0,
+                                   waveRaw: letter, priorityRaw: "anchor", repMin: reps[letter]! - 2, repMax: reps[letter]!)
+            let s = Session(date: Date().addingTimeInterval(Double(i) * 86400), status: .planned, weekIndex: i + 1, dayLabel: "D", items: [item])
+            s.meso = meso; ctx.insert(s)
+        }
+        try ctx.save()
+        return meso
+    }
+    private var keep: [ModelContainer] = []
+
+    func test_aRenamedBlock_stillGetsLabels() throws {
+        let original = try block(name: "12-Week DUP Meso", reps: ["a": 6, "b": 8, "c": 10])
+        let renamed = try block(name: "My summer block", reps: ["a": 6, "b": 8, "c": 10])
+        XCTAssertEqual(WaveLabels.labels(meso: original), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+        XCTAssertEqual(WaveLabels.labels(meso: renamed), WaveLabels.labels(meso: original))
+        XCTAssertEqual(WaveLabels.display(forRaw: "b", meso: renamed), "Moderate (B)")
+        // Same zone + renamed: the generic fallback names, never nothing.
+        let flat = try block(name: "My summer block", reps: ["a": 8, "b": 8, "c": 8])
+        XCTAssertEqual(WaveLabels.labels(meso: flat), ["a": "Baseline", "b": "Volume", "c": "Intensity"])
+    }
+
+    // MARK: Every built-in template (the report)
+
+    func test_everyBuiltInTemplate_labels() {
+        let templates: [ProgramTemplate] = [DUP10WeekTemplate.template, PPL3WeekTemplate.template, UpperLower4DayTemplate.template,
+                                            Hybrid5DayTemplate.template, FullBody2DayTemplate.template, PPL6DayTemplate.template]
+        for t in templates {
+            let labels = WaveLabels.labels(template: t)
+            print("WAVELABELS \(t.name): \(labels.sorted { $0.key < $1.key }.map { "\($0.key.uppercased())=\($0.value)" }.joined(separator: " "))")
+            XCTAssertFalse(labels.isEmpty, t.name)
+        }
+        XCTAssertEqual(WaveLabels.labels(template: DUP10WeekTemplate.template), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+    }
+}

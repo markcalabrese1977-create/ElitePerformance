@@ -143,7 +143,7 @@ struct ProgramPlanView: View {
                 ForEach(weekGroups) { weekGroup in
                     Section(
                         header: VStack(alignment: .leading, spacing: 2) {
-                            Text("Week \(weekGroup.weekIndex)")
+                            Text(weekTitle(for: weekGroup))
                                 .font(.headline)
 
                             InsertedDeloadHeader(
@@ -468,6 +468,17 @@ struct ProgramPlanView: View {
                 sessions: daySessions
             )
         }
+    }
+
+    /// "Week 8 · Moderate (B)"; a deload week reads "Week 10 · Deload"; a block without waves reads "Week 8".
+    private func weekTitle(for group: WeekGroup) -> String {
+        let meso = group.sessions.first?.meso ?? activeMesoBlock
+        let labels = WaveLabels.labels(meso: meso)
+        var shown: [String] = []
+        for raw in group.sessions.flatMap({ $0.items.compactMap(\.waveRaw) }) {
+            if let text = WaveLabels.display(forRaw: raw, labels: labels, mesoName: meso?.name), !shown.contains(text) { shown.append(text) }
+        }
+        return shown.isEmpty ? "Week \(group.weekIndex)" : "Week \(group.weekIndex) · " + shown.joined(separator: ", ")
     }
 
     private struct WeekGroup: Identifiable {

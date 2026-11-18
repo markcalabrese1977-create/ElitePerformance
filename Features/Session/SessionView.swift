@@ -1353,7 +1353,7 @@ final class SessionScreenViewModel: ObservableObject {
 
     var currentWaveLabel: String? {
             let wave = session.items.compactMap({ $0.waveRaw }).first
-            return WaveType.label(forRaw: wave, mesoName: session.meso?.name)
+            return WaveLabels.display(forRaw: wave, meso: session.meso)
         }
     
     var sessionDate: Date {

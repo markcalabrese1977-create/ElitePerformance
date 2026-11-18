@@ -233,7 +233,7 @@ private struct HistoryDayDetailView: View {
     }
 
     private func waveDisplayName(from raw: String?) -> String? {
-        WaveType.label(forRaw: raw, mesoName: sourceSession?.meso?.name)
+        WaveLabels.display(forRaw: raw, meso: sourceSession?.meso)
     }
 
     private func prescriptionLabel(
