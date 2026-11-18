@@ -67,7 +67,7 @@ struct ProgramDayDetailView: View {
                             item: item,
                             onDelete:  { requestDelete([item], propagate: true) },
                             onSwapTapped: { swapTarget = SwapTarget(item: item) },
-                            onChangePrescriptionTapped: { scope in changeTarget = ChangeTarget(item: item, scope: scope) },
+                            onChangePrescriptionTapped: { changeTarget = ChangeTarget(item: item) },
                             onHistoryTapped: { exerciseId, exerciseName in
                                                             let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
                                                             historyTarget = HistoryTarget(
@@ -575,7 +575,6 @@ private struct NoteTarget: Identifiable {
 private struct ChangeTarget: Identifiable {
     let id = UUID()
     let item: SessionItem
-    let scope: ReplaceScopeChoice
 }
 private struct SwapTarget: Identifiable {
     let id = UUID()
@@ -673,7 +672,7 @@ private struct ProgramExercisePlanRow: View {
 
     let onDelete: () -> Void
     let onSwapTapped: () -> Void
-    let onChangePrescriptionTapped: (_ scope: ReplaceScopeChoice) -> Void
+    let onChangePrescriptionTapped: () -> Void
     let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
         var isMaintenance: Bool = false
@@ -687,9 +686,9 @@ private struct ProgramExercisePlanRow: View {
             prescriptionSummaryRow
             planRow
             Button {
-                onChangePrescriptionTapped(.allRemaining)
+                onChangePrescriptionTapped()
             } label: {
-                Label("Change for remaining sessions", systemImage: "slider.horizontal.3")
+                Label("Change prescription…", systemImage: "slider.horizontal.3")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
@@ -873,7 +872,7 @@ private struct ProgramExercisePlanRow: View {
                     .foregroundStyle(.secondary)
 
                 Button {
-                    onChangePrescriptionTapped(.thisSession)
+                    onChangePrescriptionTapped()
                 } label: {
                     HStack(spacing: 4) {
                         Text(repsRangeText)

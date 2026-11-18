@@ -701,6 +701,30 @@ extension SessionItemEditService {
                           targets: targets, refusals: refusals)
     }
 
+    /// The number of sessions a prescription change in this scope would reach, independent of any particular change:
+    /// same selection, letter filter, deload rule, hand-edit refusal and safety refusal as `planChangePrescription`.
+    static func sessionsInScope(
+        meso: MesoBlock, dayLabel: String?, exerciseId: String, letters: Set<String>? = nil,
+        includeDeload: Bool = false, scope: ReplaceScope = .allRemaining, now: Date = Date()
+    ) -> Int {
+        let exercise = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
+        let normalizedLetters = letters.map { Set($0.map { $0.lowercased() }) }
+        let selected = selectCandidates(
+            meso: meso, dayLabel: dayLabel, exercise: exercise, scope: scope,
+            startOfToday: Calendar.current.startOfDay(for: now)
+        )
+        var count = 0
+        for (session, item) in selected.candidates {
+            let key = letterKey(item)
+            if let normalizedLetters, !normalizedLetters.contains(key) { continue }
+            if key == "deload", !includeDeload, !meso.isMaintenance { continue }
+            if case .allRemaining = scope, item.planEdited { continue }
+            if safetyRefusal(meso: meso, session: session) != nil { continue }
+            count += 1
+        }
+        return count
+    }
+
     private static func letterKey(_ item: SessionItem) -> String {
         item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
     }

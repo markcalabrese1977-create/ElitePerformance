@@ -50,7 +50,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
 - Program selection ignores equipment/injury flags (6-day dumbbell-only user gets machines/cables). Part of Phase 3.1 onboarding; pre-launch.
 - Notes UX (pre-launch): two note types look alike. Label them in the UI: "Exercise
   note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"
-  (executionNoteLine, editable via Change for remaining sessions). From the exercise
+  (executionNoteLine, editable via Change prescription…). From the exercise
   card, offer a link to edit the session cue for remaining sessions.
 - Custom "Concentration Curl" duplicates the built-in concentration_curl (found by the
   O1 collision check). Decide: merge the custom into the built-in (move history,

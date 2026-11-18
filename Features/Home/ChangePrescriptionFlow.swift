@@ -217,8 +217,19 @@ struct ChangePrescriptionModel {
 
     func title(for choice: PrescriptionScope) -> String {
         guard choice != .thisSession else { return choice.title }
-        let n = plan(scope: choice)?.targets.count ?? 0
-        return "\(choice.title) (\(n))"
+        return "\(choice.title) (\(sessionsInScope(choice)))"
+    }
+
+    /// How many sessions the scope reaches, whether or not a value has been changed yet. (The confirmation alert counts
+    /// the sessions that would actually change; this is the row's own number.)
+    func sessionsInScope(_ choice: PrescriptionScope) -> Int {
+        guard let meso = session.meso else { return 0 }
+        if choice == .thisSession { return 1 }
+        let letters: Set<String>? = (showsLetters && choice == .weekType) ? Set(letter.map { [$0] } ?? []) : nil
+        return SessionItemEditService.sessionsInScope(
+            meso: meso, dayLabel: session.dayLabel, exerciseId: item.exerciseId, letters: letters,
+            includeDeload: false, scope: .allRemaining, now: now
+        )
     }
 
     // MARK: Confirmation (more than one session)
@@ -313,7 +324,7 @@ struct ChangePrescriptionModel {
 
 // MARK: - Views
 
-/// "Change for remaining sessions": letters, sets, rep range, RIR range, a preview from the plan, then apply.
+/// "Change prescription…": scope, letters, sets, rep range, RIR range, a preview from the plan, then apply.
 struct ChangePrescriptionFlow: View {
     @Environment(\.modelContext) private var modelContext
 

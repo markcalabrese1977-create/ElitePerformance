@@ -724,6 +724,49 @@ final class MultiSessionSafetyTests: XCTestCase {
         "\(i.targetSets)|\(i.targetReps)|\(i.repMin ?? -1)|\(i.repMax ?? -1)|\(i.plannedRepsBySet)|\(i.plannedLoadsBySet)|\(i.planEdited)"
     }
 
+    // MARK: Entry point and scope counts
+
+    func test_scopeRowsCountTheSessionsInScope_beforeAnyValueChanges() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .thisSession)
+        XCTAssertFalse(m.change.isValid)
+        let every = m.sessionsInScope(.everyRemaining), type = m.sessionsInScope(.weekType)
+        XCTAssertGreaterThan(every, 1)
+        XCTAssertGreaterThan(type, 1)
+        XCTAssertLessThan(type, every, "one letter is a subset of every letter")
+        XCTAssertEqual(m.title(for: .everyRemaining), "Every remaining session (\(every))")
+        XCTAssertEqual(m.title(for: .weekType), "This week type, rest of block (\(type))")
+        XCTAssertEqual(try XCTUnwrap(m.plan(scope: .everyRemaining)).targets.count, 0, "nothing to change yet")
+
+        // A change that touches only some of those sessions: the row keeps the scope's size, the alert counts the changed ones.
+        m.scope = .everyRemaining
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        XCTAssertEqual(m.sessionsInScope(.everyRemaining), every, "the row does not move with the value")
+        XCTAssertTrue(Model.confirmationMessage(plan).contains("in \(plan.targets.count) sessions"))
+    }
+
+    func test_planEditedSessionsAreNotInTheEveryRemainingCount() throws {
+        let (ctx, block) = try makeBlock()
+        let m = try model(ctx, block, scope: .everyRemaining)
+        let before = m.sessionsInScope(.everyRemaining)
+        let (day, id) = try lift(block)
+        let items = block.sessions.sorted { $0.date < $1.date }.filter { SessionDayLabelMatcher.matches($0.dayLabel, day) }
+            .compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id } }
+        items.first { $0.waveRaw?.lowercased() != "deload" }?.planEdited = true
+        XCTAssertEqual(m.sessionsInScope(.everyRemaining), before - 1)
+    }
+
+    func test_theEntryPointIsCalledChangePrescription() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let day = try String(contentsOf: dir.appendingPathComponent("Features/Home/ProgramDayDetailView.swift"), encoding: .utf8)
+        XCTAssertTrue(day.contains("Change prescription…"))
+        XCTAssertFalse(day.contains("Change for remaining sessions"))
+        let guide = try String(contentsOf: dir.appendingPathComponent("ElitePerformance/Resources/Guide/Guide.html"), encoding: .utf8)
+        XCTAssertTrue(guide.contains("Change prescription…"))
+        XCTAssertFalse(guide.contains("Change for remaining sessions"))
+    }
+
     // MARK: Confirmation text
 
     func test_scopeSummary_wordsLettersAndWeeks() {
