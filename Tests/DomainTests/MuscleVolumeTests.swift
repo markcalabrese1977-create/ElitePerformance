@@ -469,3 +469,234 @@ final class MuscleVolumeTests: XCTestCase {
         XCTAssertFalse(base.isEmpty)
     }
 }
+
+// MARK: - Planned weekly volume (previews before seeding)
+
+final class PlannedVolumeTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: 9))! }
+    private let template = DUP10WeekTemplate.template
+
+    private func makeContext() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        return ModelContext(c)
+    }
+
+    /// Seeds `template` from a Monday (Mon-Sat training) and, when `completeWeeks` is given, performs every planned set of the
+    /// first that many weeks (all of them for nil).
+    @discardableResult
+    private func seed(_ ctx: ModelContext, start: Date, name: String, status: MesoStatus, template: ProgramTemplate? = nil,
+                      completeWeeks: Int? = nil) throws -> MesoBlock {
+        let t = template ?? self.template
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx, template: t, calendar: cal,
+                                  mesoName: name, mesoStatus: status)
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == name })
+        for s in block.sessions where completeWeeks == nil || s.weekIndex <= completeWeeks! {
+            for i in s.items {
+                i.actualReps = Array(repeating: max(1, i.targetReps), count: i.targetSets)
+                i.actualLoads = Array(repeating: 100, count: i.targetSets)
+                i.actualRIRs = Array(repeating: 2, count: i.targetSets)
+                i.isCompleted = true
+            }
+            s.status = .completed
+            s.completedAt = s.date
+        }
+        try ctx.save()
+        return block
+    }
+
+    private func actualRows(_ ctx: ModelContext, _ block: MesoBlock) throws -> [MuscleVolumeSummary.Row] {
+        let sessions = try ctx.fetch(FetchDescriptor<Session>())
+        let engine = AnalyticsEngine(sessions: sessions)
+        return MuscleVolume.summary(snapshot: engine.snapshot, customs: [], profile: nil, asOf: date(2027, 6, 1),
+                                    mesoKey: LastBlockComparison.key(for: block), wholeBlock: true).rows
+    }
+
+    // MARK: Equivalence
+
+    func test_everyPlannedSetPerformed_plannedEqualsMesoSummarysActual_forEveryMuscle() throws {
+        let ctx = try makeContext()
+        let block = try seed(ctx, start: date(2026, 1, 5), name: "Block", status: .active)      // a Monday
+        let actual = try actualRows(ctx, block)
+        let planned = PlannedVolume.weeklyHardSets(template: template, overrides: nil).rows
+        XCTAssertEqual(actual.map(\.muscle), planned.map(\.muscle))
+        for (a, p) in zip(actual, planned) {
+            XCTAssertEqual(a.average, p.average, accuracy: 1e-9, "\(a.muscle)")
+            XCTAssertEqual(a.directAverage, p.directAverage, accuracy: 1e-9, "\(a.muscle) direct")
+            XCTAssertEqual(a.status, p.status, "\(a.muscle)")
+        }
+        XCTAssertGreaterThan(planned.map(\.average).reduce(0, +), 0)
+    }
+
+    // MARK: Deload, modifiers, overrides, swap
+
+    func test_deloadWeeksAreExcluded() {
+        let bench = PlannedVolume.Week.Slot(exerciseId: "bench_press", sets: 10)
+        let result = PlannedVolume.weeklyHardSets(weeks: [
+            .init(isDeload: false, slots: [bench]),
+            .init(isDeload: true, slots: [.init(exerciseId: "bench_press", sets: 100)]),
+            .init(isDeload: false, slots: [bench]),
+        ])
+        XCTAssertEqual(result.averagedWeeks, 2)
+        XCTAssertEqual(result.rows.first { $0.muscle == .chest }?.average, 10, "the 100-set deload week is not averaged")
+        XCTAssertEqual(result.rows.first { $0.muscle == .triceps }?.average, 5, "synergist share 0.5")
+        // The seeded template's deload week is skipped too: fewer averaged weeks than template weeks.
+        let t = PlannedVolume.weeklyHardSets(template: template, overrides: nil)
+        XCTAssertLessThan(t.averagedWeeks, template.totalWeeks)
+    }
+
+    private func total(_ r: PlannedVolume.Result) -> Double { r.rows.map(\.average).reduce(0, +) }
+
+    func test_goalModifiersChangeThePlannedNumbers() {
+        let base = PlannedVolume.weeklyHardSets(template: GoalModifier.apply(template, goal: .hypertrophy).0, overrides: nil)
+        let general = PlannedVolume.weeklyHardSets(template: GoalModifier.apply(template, goal: .longevity).0, overrides: nil)
+        let fat = PlannedVolume.weeklyHardSets(template: GoalModifier.apply(template, goal: .fatLoss).0, overrides: nil)
+        XCTAssertLessThan(total(general), total(base), "general fitness: -1 set on every slot")
+        XCTAssertLessThanOrEqual(total(fat), total(base), "lose fat caps the ramp")
+        XCTAssertNotEqual(total(general), total(fat))
+    }
+
+    private func slot(containing needle: String) -> (SlotKey, ProgramExerciseTemplate)? {
+        for day in template.dayTemplates { for (i, e) in day.exerciseTemplates.enumerated() where e.exerciseId.contains(needle) { return (SlotKey(dayId: day.id, slotIndex: i), e) } }
+        return nil
+    }
+
+    func test_previewOverridesChangeThePlannedNumbers() throws {
+        let base = PlannedVolume.weeklyHardSets(template: template, overrides: nil)
+        let (key, e) = try XCTUnwrap(slot(containing: "lateral_raise"))
+        // Removing the lateral raises lowers side delts.
+        var removal = PreviewOverrides.empty
+        for day in template.dayTemplates { for (i, ex) in day.exerciseTemplates.enumerated() where ex.exerciseId.contains("lateral_raise") {
+            removal.slotKeyed[SlotKey(dayId: day.id, slotIndex: i)] = ExerciseWaveOverride(isDeleted: true)
+        } }
+        let removed = PlannedVolume.weeklyHardSets(template: template, overrides: removal)
+        let side = { (r: PlannedVolume.Result) in r.rows.first { $0.muscle == .sideDelts }!.average }
+        XCTAssertLessThan(side(removed), side(base))
+        // More sets on one slot raises it.
+        var more = PreviewOverrides.empty
+        more.slotKeyed[key] = ExerciseWaveOverride(setsByWeek: Array(repeating: 6, count: template.totalWeeks))
+        XCTAssertGreaterThanOrEqual(side(PlannedVolume.weeklyHardSets(template: template, overrides: more)), side(base))
+        XCTAssertNotEqual(side(PlannedVolume.weeklyHardSets(template: template, overrides: more)), side(base), "\(e.exerciseId)")
+    }
+
+    func test_swappingAnExerciseMovesVolumeBetweenMuscles() throws {
+        let (key, e) = try XCTUnwrap(slot(containing: "bench_press"))
+        let base = PlannedVolume.weeklyHardSets(template: template, overrides: nil)
+        var swap = PreviewOverrides.empty
+        swap.slotKeyed[key] = ExerciseWaveOverride(substituteExerciseId: "leg_extension")
+        let swapped = PlannedVolume.weeklyHardSets(template: template, overrides: swap)
+        func avg(_ r: PlannedVolume.Result, _ m: FineMuscle) -> Double { r.rows.first { $0.muscle == m }!.average }
+        XCTAssertLessThan(avg(swapped, .chest), avg(base, .chest), e.exerciseId)
+        XCTAssertGreaterThan(avg(swapped, .quads), avg(base, .quads))
+        XCTAssertEqual(avg(swapped, .hamstrings), avg(base, .hamstrings), accuracy: 1e-9, "unrelated muscles do not move")
+    }
+
+    // MARK: Unmapped
+
+    func test_unmappedCustomSetsAreCounted_andMappingThemCreditsAMuscle() throws {
+        let custom = CustomExercise(id: "custom_unmapped", name: "Odd Machine", primaryMuscleRaw: "chest", isCompound: false)
+        let day = try XCTUnwrap(template.dayTemplates.first)
+        var overrides = PreviewOverrides.empty
+        overrides.addExercise(AddedExercise(id: "add1", exerciseId: custom.id, priority: .standard,
+                                            wavePrescriptions: AddedExercise.defaultWavePrescriptions, setsByWeek: Array(repeating: 3, count: template.totalWeeks)),
+                              toDay: day.id)
+        let result = PlannedVolume.weeklyHardSets(template: template, overrides: overrides, customs: [custom])
+        let nonDeloadWeeks = result.averagedWeeks
+        XCTAssertEqual(result.unmappedSets, 3 * nonDeloadWeeks, "3 sets in each non-deload week, in no muscle")
+        XCTAssertEqual(result.unmapped.first?.name, "Odd Machine")
+        XCTAssertTrue(result.unmapped.first?.isEditable == true)
+        let before = PlannedVolume.weeklyHardSets(template: template, overrides: nil).rows.first { $0.muscle == .chest }!.average
+
+        custom.fineMuscleRaw = "chest"
+        let mapped = PlannedVolume.weeklyHardSets(template: template, overrides: overrides, customs: [custom])
+        XCTAssertEqual(mapped.unmappedSets, 0)
+        XCTAssertEqual(mapped.rows.first { $0.muscle == .chest }!.average, before + 3, accuracy: 1e-9)
+    }
+
+    // MARK: Last block
+
+    func test_noPreviousBlock_meansNoComparisonColumn() throws {
+        let planned = PlannedVolume.weeklyHardSets(template: template, overrides: nil)
+        let engine = AnalyticsEngine(sessions: [])
+        XCTAssertNil(LastBlockComparison.source(snapshot: engine.snapshot, customs: [], profile: nil, asOf: date(2027, 1, 1), activeMesoKey: nil))
+        let model = PlannedVolumeCardModel(planned: planned, last: nil)
+        XCTAssertFalse(model.hasComparison)
+        XCTAssertTrue(model.rows.allSatisfy { $0.lastBlock == nil })
+    }
+
+    func test_theActiveBlockIsTheComparison_onceItHasTwoCompleteWeeks_elseTheLatestCompletedBlock() throws {
+        let ctx = try makeContext()
+        let old = try seed(ctx, start: date(2025, 9, 1), name: "Old", status: .archived)
+        // Active block: one complete week so far.
+        let active = try seed(ctx, start: date(2026, 1, 5), name: "Active", status: .active, completeWeeks: 1)
+        func source() throws -> LastBlockComparison.Source? {
+            let engine = AnalyticsEngine(sessions: try ctx.fetch(FetchDescriptor<Session>()))
+            return LastBlockComparison.source(snapshot: engine.snapshot, customs: [], profile: nil, asOf: date(2026, 1, 14),
+                                              activeMesoKey: LastBlockComparison.key(for: active))
+        }
+        let fallback = try XCTUnwrap(try source())
+        XCTAssertFalse(fallback.isActive, "one complete week is not enough: the latest completed block")
+        XCTAssertEqual(fallback.blockName, "Old")
+        XCTAssertEqual(LastBlockComparison.key(for: old), try XCTUnwrap(fallback.summary.rows.first).muscle == .chest ? LastBlockComparison.key(for: old) : "")
+
+        // Three complete weeks of the active block, counted by Meso Summary's exclusions.
+        for s in active.sessions where s.weekIndex <= 3 {
+            for i in s.items { i.actualReps = Array(repeating: max(1, i.targetReps), count: i.targetSets); i.actualLoads = Array(repeating: 100, count: i.targetSets); i.actualRIRs = Array(repeating: 2, count: i.targetSets) }
+            s.status = .completed; s.completedAt = s.date
+        }
+        try ctx.save()
+        let engine = AnalyticsEngine(sessions: try ctx.fetch(FetchDescriptor<Session>()))
+        let chosen = try XCTUnwrap(LastBlockComparison.source(snapshot: engine.snapshot, customs: [], profile: nil, asOf: date(2026, 2, 1),
+                                                              activeMesoKey: LastBlockComparison.key(for: active)))
+        XCTAssertTrue(chosen.isActive)
+        XCTAssertEqual(chosen.blockName, "Active")
+        // Exactly Meso Summary's numbers.
+        let direct = MuscleVolume.summary(snapshot: engine.snapshot, customs: [], profile: nil, asOf: date(2026, 2, 1),
+                                          mesoKey: LastBlockComparison.key(for: active), wholeBlock: true)
+        XCTAssertEqual(chosen.summary.rows.map(\.average), direct.rows.map(\.average))
+        XCTAssertGreaterThanOrEqual(chosen.summary.averagedWeeks, 2)
+    }
+
+    // MARK: Card
+
+    func test_cardModel_ordersBelowAndAboveFirst_andWritesTheSummaryLine() {
+        // 10 sets of bench each week: chest 10 (within 10-20), triceps 5 (below 6), front delts 5 (within 0-10); the rest 0.
+        var profile = UserProfile()
+        let result = PlannedVolume.weeklyHardSets(weeks: [.init(isDeload: false, slots: [.init(exerciseId: "bench_press", sets: 10)])], profile: profile)
+        let model = PlannedVolumeCardModel(planned: result, last: nil)
+        XCTAssertEqual(model.rows.prefix(model.below.count).map(\.status), Array(repeating: .below, count: model.below.count))
+        XCTAssertTrue(model.below.contains { $0.muscle == .triceps })
+        XCTAssertTrue(model.summaryLine.hasPrefix("\(model.below.count) muscles below range: "), model.summaryLine)
+        XCTAssertTrue(model.summaryLine.contains("Triceps"))
+        XCTAssertEqual(PlannedVolumeCardModel.footer, "Planned assumes every set is done. Last block shows what was actually done.")
+
+        // Everything within the (widened) ranges: one calm line.
+        var wide: [FineMuscle: MuscleSetRange] = [:]
+        for m in FineMuscle.allCases { wide[m] = MuscleSetRange(min: 0, max: 100) }
+        profile.muscleSetRanges = wide
+        let calm = PlannedVolumeCardModel(planned: PlannedVolume.weeklyHardSets(weeks: [.init(isDeload: false, slots: [.init(exerciseId: "bench_press", sets: 10)])], profile: profile), last: nil)
+        XCTAssertEqual(calm.summaryLine, "All muscles within range")
+        XCTAssertEqual(PlannedVolumeCardModel(planned: PlannedVolume.weeklyHardSets(weeks: [.init(isDeload: false, slots: [.init(exerciseId: "bench_press", sets: 10)])]), last: nil).below.count > 0, true)
+    }
+
+    // MARK: Universality
+
+    func test_noUserSpecificValues_inTheCalculationOrTheCard() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let files = ["Domain/Analytics/PlannedVolume.swift", "Features/Programs/PlannedVolumeCard.swift"]
+        for f in files {
+            let text = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)
+            XCTAssertFalse(text.contains("markcalabrese"), f)
+            for id in ExerciseMuscleShares.table.keys { XCTAssertFalse(text.contains("\"\(id)\""), "\(f) names the exercise \(id)") }
+            for m in FineMuscle.allCases { XCTAssertFalse(text.contains(".\(m.rawValue)"), "\(f) names the muscle \(m)") }
+        }
+        // The numbers come from the inputs alone: a different lifter's profile fields change nothing.
+        let a = UserProfile(), b = UserProfile()
+        b.bodyWeight = 123; b.experience = .new
+        XCTAssertEqual(PlannedVolume.weeklyHardSets(template: template, overrides: nil, profile: a).rows.map(\.average),
+                       PlannedVolume.weeklyHardSets(template: template, overrides: nil, profile: b).rows.map(\.average))
+    }
+}
