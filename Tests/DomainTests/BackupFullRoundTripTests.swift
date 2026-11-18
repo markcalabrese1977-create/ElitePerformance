@@ -3469,7 +3469,7 @@ final class PlaceholderRefreshDryRunTests: XCTestCase {
         func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
         var lines = ["PLACEHOLDER REFRESH DRY RUN (as of \(now)) — \(changes.count) planned exercises would change (nothing was saved), unit \(unit)"]
         for c in changes.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
-            let what = c.noteOnly ? "stays 0 (note: \(c.note ?? ""))" : "\(n(c.oldLoad)) -> \(n(c.newLoad))"
+            let what = c.noteOnly ? "stays \(n(c.oldLoad)) (note: \(c.note ?? ""))" : "\(n(c.oldLoad)) -> \(n(c.newLoad))"
             lines.append("\(fmt.string(from: c.session.date)) wk\(c.session.weekIndex) \(c.session.dayLabel ?? "-") · \(ExerciseCatalog.displayName(for: c.item.exerciseId)) (\(c.item.waveRaw ?? "-")): \(what) · \(c.reason.text)")
         }
         // Idempotence: apply, then plan again.
@@ -3500,6 +3500,7 @@ final class PlaceholderRefreshTests: XCTestCase {
         parked.append(c)
         let ctx = ModelContext(c)
         let meso = MesoBlock(name: "12-Week DUP Meso", startDate: day(9, 25), status: .active, totalWeeks: 12)
+        meso.createdAt = day(8, 1)          // fixtures' items (written Sep 22) have been written since the block was created
         ctx.insert(meso)
         if let profile { ctx.insert(profile) }
         return (ctx, meso)
@@ -3770,6 +3771,120 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertNil(sized.prescriptionNotes, "a target with a load is not told it has no history")
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "once")
         XCTAssertEqual(zero.prescriptionNotes, "No recent history — set a load.")
+    }
+
+    // MARK: Rule 2, in order: (i) the same letter's held load, (ii) the estimate for a repMin <= 12, (iii) leave + placeholder note
+
+    /// Pull B lateral raise, Nov 25 (c, 15-20 reps, target 30): the Nov 4 c session was missed; Oct 14 (c) performed 30 x 20 x 3,
+    /// and Nov 11 (a) performed 35 x 12 x 3. Oct 14 is exactly two 3-week rotations before Nov 25.
+    private func lateralRaise(_ ctx: ModelContext, _ meso: MesoBlock) -> SessionItem {
+        let oct14 = item("dumbbell_lateral_raise", wave: "c", repMin: 15, repMax: 20, suggested: 30, actual: [30, 30, 30], reps: [20, 20, 20], rirs: [1, 1, 1])
+        let oct21 = item("dumbbell_lateral_raise", wave: "a", repMin: 10, repMax: 12, suggested: 40)
+        let oct28 = item("dumbbell_lateral_raise", wave: "b", repMin: 12, repMax: 15, suggested: 32.5)
+        let nov4 = item("dumbbell_lateral_raise", wave: "c", repMin: 15, repMax: 20, suggested: 35)
+        let nov11 = item("dumbbell_lateral_raise", wave: "a", repMin: 10, repMax: 12, suggested: 35, actual: [35, 35, 35], reps: [12, 12, 12], rirs: [1, 1, 1])
+        let target = item("dumbbell_lateral_raise", wave: "c", repMin: 15, repMax: 20, suggested: 30, updated: day(10, 15))
+        session(ctx, meso, day(10, 14), .completed, week: 3, label: "Pull B", [oct14])
+        session(ctx, meso, day(10, 21), .planned, week: 4, label: "Pull B", [oct21])
+        session(ctx, meso, day(10, 28), .planned, week: 5, label: "Pull B", [oct28])
+        session(ctx, meso, day(11, 4), .planned, week: 6, label: "Pull B", [nov4])
+        session(ctx, meso, day(11, 11), .completed, week: 7, label: "Pull B", [nov11])
+        session(ctx, meso, day(11, 25), .planned, week: 9, label: "Pull B", [target])
+        return target
+    }
+
+    func test_lateralRaiseNov25_staysAt30_viaTheSameLettersHeldLoad_fromOct14() throws {
+        let (ctx, meso) = try context()
+        let target = lateralRaise(ctx, meso)
+        // Without (i) the Nov 11 35 x 12 sets would estimate about 25 for this 20-rep target.
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 30)
+        XCTAssertEqual(target.plannedLoadsBySet, [30, 30, 30])
+        XCTAssertNil(target.coachNote, "a held load that already stands writes nothing")
+
+        // The held load from Oct 14 also RAISES a stale target: the same letter's own evidence.
+        target.suggestedLoad = 20; target.plannedLoadsBySet = [20, 20, 20]
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.first?.newLoad, 30)
+        guard case .earlierSameLetter(_, let weeks)? = changes.first?.reason else { return XCTFail("rule 2 (i)") }
+        XCTAssertEqual(weeks, 3, "A/B/C: a 3-week rotation, a 6-week window")
+    }
+
+    func test_theSameLetterSessionOutsideTwoRotations_isNotUsed() throws {
+        let (ctx, meso) = try context()
+        let target = lateralRaise(ctx, meso)
+        // One day past six weeks: Oct 13 is 43 days before Nov 25.
+        for s in meso.sessions where s.date == day(10, 14) { s.date = day(10, 13) }
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "the 20-rep target is not estimated either: it stays 30")
+        XCTAssertEqual(target.suggestedLoad, 30)
+        // Its coach note: it was written since the block was created (Oct 15), so no placeholder note.
+        XCTAssertNil(target.coachNote)
+    }
+
+    func test_hipThrustAndRDLDec1_stayEstimated_becauseSep29IsOutsideTwoRotations() throws {
+        let (ctx, meso) = try context()
+        let target = legsB(ctx, meso)
+        // The last a-week performance is Sep 29: 63 days before Dec 1, outside the 42-day window. Block letters: a, b, c.
+        let sep29 = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 300, actual: [300, 300, 300], reps: [8, 8, 8], rirs: [2, 2, 2])
+        let nov3c = item("romanian_deadlift", wave: "c", repMin: 10, repMax: 12, suggested: 250)
+        session(ctx, meso, day(9, 29), .completed, week: 1, label: "Legs B", [sep29])
+        session(ctx, meso, day(11, 3), .planned, week: 6, label: "Legs B", [nov3c])
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(target.suggestedLoad, 322.5, "the Nov 17 cross-letter estimate, not Sep 29's 300")
+        guard case .estimated? = changes.first?.reason else { return XCTFail("rule 2 (ii)") }
+    }
+
+    func test_aHighRepTargetIsNeverEstimated() throws {
+        let (ctx, meso) = try context()
+        // A 15-20 rep target, a missed predecessor, and a fine 10-rep cross-letter source: still not estimated.
+        let done = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 300, actual: [300, 300, 300], reps: [8, 8, 8], rirs: [2, 2, 2])
+        let target = item("romanian_deadlift", wave: "c", repMin: 15, repMax: 20, suggested: 200)
+        session(ctx, meso, day(11, 10), .completed, week: 7, label: "Legs B", [done])
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 200)
+        // A repMin of exactly 12 still estimates.
+        let (ctx2, meso2) = try context()
+        let t12 = item("romanian_deadlift", wave: "c", repMin: 12, repMax: 15, suggested: 100)
+        let done2 = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 300, actual: [300, 300, 300], reps: [8, 8, 8], rirs: [2, 2, 2])
+        session(ctx2, meso2, day(11, 10), .completed, week: 7, label: "Legs B", [done2])
+        session(ctx2, meso2, day(12, 1), .planned, week: 10, label: "Legs B", [t12])
+        XCTAssertEqual(PlaceholderRefresh.run(in: ctx2, now: now).count, 1)
+    }
+
+    /// Calf raise, Legs B Dec 1 (a, 10-12 reps, 330): every calf set the lifter logged was 13-15 reps, so (ii) has no source and
+    /// the load is left; a target still at its block-setup value gets the one-time note.
+    private func calf(_ ctx: ModelContext, _ meso: MesoBlock, updated: Date?) -> SessionItem {
+        let missed = item("smith_machine_calves", wave: "a", repMin: 10, repMax: 12, suggested: 330)
+        let done = item("smith_machine_calves", wave: "b", repMin: 12, repMax: 15, suggested: 301, actual: [301, 301, 301], reps: [15, 15, 15], rirs: [1, 1, 1])
+        let target = item("smith_machine_calves", wave: "a", repMin: 10, repMax: 12, suggested: 330, updated: updated)
+        session(ctx, meso, day(11, 10), .planned, week: 7, label: "Legs B", [missed])
+        session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        return target
+    }
+
+    func test_calfDec1_staysAt330_andGetsThePlaceholderNote_whenItWasNeverWrittenSinceTheBlockWasCreated() throws {
+        let (ctx, meso) = try context()
+        meso.createdAt = sep22
+        let target = calf(ctx, meso, updated: sep22)
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertTrue(changes[0].noteOnly)
+        XCTAssertEqual(target.suggestedLoad, 330)
+        XCTAssertEqual(target.plannedLoadsBySet, [330, 330, 330])
+        XCTAssertEqual(target.coachNote, "Placeholder from block setup — set 1 calibrates.")
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "one-time")
+    }
+
+    func test_aTargetWrittenSinceTheBlockWasCreated_getsNoPlaceholderNote() throws {
+        let (ctx, meso) = try context()
+        meso.createdAt = sep22
+        let target = calf(ctx, meso, updated: day(10, 10))
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 330)
+        XCTAssertNil(target.coachNote)
     }
 
     func test_bodyweightAndFixedLoadExercisesAreLeftAlone() throws {

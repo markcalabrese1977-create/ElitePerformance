@@ -17,13 +17,18 @@ import SwiftData
 ///    could not write for incomplete evidence (fewer than min(planned sets, 3) primary sets): the target gets the HELD load,
 ///    the last performed primary set's load (`CoachingEngine.heldLoad`). A skipped or unlogged set never lowers it and
 ///    never raises it.
-/// 2. **Estimate.** It performed nothing (missed, all sets skipped, or no such session exists): take the most recent
-///    completed session of the same day label (any letter) with working sets of 12 reps or fewer. Each set gives an
-///    Epley max from its reps plus its logged RIR (a missing RIR counts as the item's target RIR); the best of them is
-///    converted to the target's top rep plus its target RIR (the midpoint of a range), taken 5% lower, rounded DOWN to the
-///    exercise's step and clamped to its max load. The note reads "Estimated from your recent B-week sets — set 1
-///    calibrates." No qualifying source: the target is left alone (a target at 0 gets the no-history note, below). Sources come from the same block, or from the last
-///    12 weeks.
+/// 2. **No usable previous session** (missed, all sets skipped, or no such session exists), in this order:
+///    (i) The most recent completed session of the same day label and the same letter with performed working sets,
+///    within two rotations (a rotation is the number of distinct non-deload letters in the block, in weeks: 6 weeks for
+///    A/B/C). Its held load, no estimate.
+///    (ii) Otherwise the cross-letter estimate, and only for a target whose repMin is 12 or less: the most recent
+///    completed session of the same day label (any letter) with working sets of 12 reps or fewer. Each set gives an Epley
+///    max from its reps plus its logged RIR (a missing RIR counts as the item's target RIR); the best is converted to the
+///    target's top rep plus its target RIR (the midpoint of a range), taken 5% lower, rounded DOWN to the exercise's step
+///    and clamped to its max load. The note reads "Estimated from your recent B-week sets — set 1 calibrates." Sources
+///    come from the same block, or from the last 12 weeks.
+///    (iii) Otherwise the load is left alone. A target not written since its block was created gets the one-time note
+///    "Placeholder from block setup — set 1 calibrates."; a target at 0 gets "No recent history — set a load.".
 /// 3. **Lowering** is blocked only when, since the target was last written, the lifter performed a working set of that
 ///    exercise at a load at or above the target's load with reps at or above the target's `repMin`: the target was
 ///    shown to be doable. Otherwise it is lowered to the estimate. Never touches an edited item or a fixed-load one. A
@@ -49,20 +54,31 @@ enum PlaceholderRefresh {
     static let maxSourceReps = 12
     static let sourceWindowWeeks = 12
     static let noRecentHistoryNote = "No recent history — set a load."
+    static let placeholderNote = "Placeholder from block setup — set 1 calibrates."
+    /// The estimate converts a set to the target's rep range; a high-rep target (repMin above this) is never estimated.
+    static let maxEstimatedTargetRepMin = 12
 
     enum Reason: Equatable {
         /// The previous session's last performed primary set; `performed` of `planned` sets were logged.
         case heldLoad(from: Date, performed: Int, planned: Int)
         /// Estimated from `from`; `why` says what the previous same-letter session did.
         case estimated(from: Date, letter: String?, e1RM: Double, why: String)
+        /// The most recent same-letter session with performed sets within two rotations: its held load.
+        case earlierSameLetter(from: Date, rotationWeeks: Int)
         /// A target at 0 with nothing to estimate from.
         case noRecentHistory(why: String)
+        /// A target still at its block-setup value with nothing to estimate from.
+        case placeholder(why: String)
 
         var text: String {
             func day(_ d: Date) -> String { d.formatted(.dateTime.month(.abbreviated).day()) }
             switch self {
             case .heldLoad(let d, let performed, let planned):
                 return "held load of the \(day(d)) session (\(performed) of \(planned) planned sets performed)"
+            case .earlierSameLetter(let d, let weeks):
+                return "held load of the last \(day(d)) session of this letter (within two \(weeks)-week rotations)"
+            case .placeholder(let why):
+                return "no source to estimate from; \(why); keeps its block-setup load with a note"
             case .noRecentHistory(let why):
                 return "no recent history to estimate from; \(why); stays 0 with a note"
             case .estimated(let d, let letter, let e1rm, let why):
@@ -78,8 +94,21 @@ enum PlaceholderRefresh {
         let newLoad: Double
         let reason: Reason
         let note: String?
-        /// True for the no-history note on a target at 0: nothing about its load changes.
+        /// True for a note-only change (no-history, placeholder): nothing about the load changes.
         var noteOnly = false
+        var noteField: NoteField = .coach
+    }
+
+    enum NoteField { case coach, prescription }
+
+    typealias Decision = (load: Double, reason: Reason, note: String?)
+
+    /// What rule 2 decides for one target.
+    enum Outcome {
+        case write(Decision)
+        case noHistoryNote(String)
+        case placeholderNote(String)
+        case leave
     }
 
     struct Context {
@@ -116,42 +145,44 @@ enum PlaceholderRefresh {
                 }
                 let predItem = predecessor?.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) == letter }
 
-                typealias Decision = (load: Double, reason: Reason, note: String?)
-                let decision: Decision?
-                var noSourceWhy: String?
+                var outcome: Outcome = .leave
                 if let predecessor, let predItem {
                     if hasPain(predItem) { continue }                       // pain holds
                     if predecessor.status == .completed {
                         let performed = CoachingEngine.workingSetIndices(for: predItem)
                         if performed.isEmpty {
-                            let why = "the \(dayText(predecessor.date)) session had no performed sets"
-                            let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
-                            decision = r.decision; if r.noSource { noSourceWhy = why }
+                            outcome = rule2(for: item, target: target, meso: meso, why: "the \(dayText(predecessor.date)) session had no performed sets",
+                                            completed: completed, now: now, ctx: ctx)
                         } else if CoachingEngine.hasSufficientPrimaryEvidence(predItem) {
                             continue                                       // carry-forward owns it
                         } else if let held = CoachingEngine.heldLoad(for: predItem), held > 0 {
                             let planned = max(1, predItem.targetSets)
-                            decision = (held, .heldLoad(from: predecessor.date, performed: CoachingEngine.plannedWorkingSetIndices(for: predItem).count, planned: planned),
-                                        "Held at \(compact(held, ctx)) from \(dayText(predecessor.date)): \(CoachingEngine.plannedWorkingSetIndices(for: predItem).count) of \(planned) planned sets were performed.")
+                            let count = CoachingEngine.plannedWorkingSetIndices(for: predItem).count
+                            outcome = .write((held, .heldLoad(from: predecessor.date, performed: count, planned: planned),
+                                              "Held at \(compact(held, ctx)) from \(dayText(predecessor.date)): \(count) of \(planned) planned sets were performed."))
                         } else { continue }
                     } else if predecessor.date < today && predecessor.status != .inProgress {
-                        let why = "the \(dayText(predecessor.date)) session was missed"
-                        let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
-                        decision = r.decision; if r.noSource { noSourceWhy = why }
+                        outcome = rule2(for: item, target: target, meso: meso, why: "the \(dayText(predecessor.date)) session was missed",
+                                        completed: completed, now: now, ctx: ctx)
                     } else { continue }                                     // upcoming or in progress: not yet decided
                 } else {
-                    let why = "no earlier session of this letter"
-                    let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
-                    decision = r.decision; if r.noSource { noSourceWhy = why }
+                    outcome = rule2(for: item, target: target, meso: meso, why: "no earlier session of this letter",
+                                    completed: completed, now: now, ctx: ctx)
                 }
-                // A target at 0 with nothing to estimate from: say so once, leave the load.
-                if decision == nil, let why = noSourceWhy, isZeroTarget(item),
-                   item.prescriptionNotes?.contains(noRecentHistoryNote) != true {
+                let decision: Decision
+                switch outcome {
+                case .leave: continue
+                case .noHistoryNote(let why):
                     changes.append(Change(session: target, item: item, oldLoad: 0, newLoad: 0, reason: .noRecentHistory(why: why),
-                                          note: noRecentHistoryNote, noteOnly: true))
+                                          note: noRecentHistoryNote, noteOnly: true, noteField: .prescription))
                     continue
+                case .placeholderNote(let why):
+                    changes.append(Change(session: target, item: item, oldLoad: currentLoad(item), newLoad: currentLoad(item), reason: .placeholder(why: why),
+                                          note: placeholderNote, noteOnly: true, noteField: .coach))
+                    continue
+                case .write(let d): decision = d
                 }
-                guard let decision, decision.load > 0 else { continue }
+                guard decision.load > 0 else { continue }
 
                 let value = UserProfile.clampedLoad(decision.load, exerciseId: item.exerciseId, profile: ctx.profile, customExercises: ctx.customExercises)
                 let current = currentLoad(item)
@@ -169,8 +200,13 @@ enum PlaceholderRefresh {
     static func apply(_ changes: [Change], ctx: Context) {
         for c in changes {
             if c.noteOnly {
-                let existing = c.item.prescriptionNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                c.item.prescriptionNotes = existing.isEmpty ? noRecentHistoryNote : existing + " " + noRecentHistoryNote
+                switch c.noteField {
+                case .prescription:
+                    let existing = c.item.prescriptionNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    c.item.prescriptionNotes = existing.isEmpty ? noRecentHistoryNote : existing + " " + noRecentHistoryNote
+                case .coach:
+                    c.item.coachNote = c.note
+                }
                 continue
             }
             PlanMemoryEngine.applyPropagatedLoad(c.newLoad, to: c.item)
@@ -248,6 +284,58 @@ enum PlaceholderRefresh {
     }
 
     // MARK: Rule 2
+
+    /// (i) the most recent same-day, same-letter session with performed sets, within two rotations: its held load, no
+    /// estimate. (ii) else the cross-letter estimate, only for a target whose repMin is 12 or less. (iii) else leave the
+    /// load; a target not written since the block was created gets a one-time placeholder note (a target at 0 gets the
+    /// no-history note).
+    private static func rule2(for item: SessionItem, target: Session, meso: MesoBlock, why: String, completed: [Session], now: Date, ctx: Context) -> Outcome {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let letter = letterKey(item)
+        let calendar = Calendar.current
+
+        // (i)
+        let letters = Set(meso.sessions.flatMap { $0.items.map(letterKey) }.filter { !$0.isEmpty && $0 != "deload" })
+        let rotationWeeks = max(1, letters.count)
+        let windowDays = 2 * rotationWeeks * 7
+        let targetDay = calendar.startOfDay(for: target.date)
+        let earlier = completed.filter { s in
+            s.date < target.date && s.meso?.persistentModelID == meso.persistentModelID
+                && SessionDayLabelMatcher.matches(s.dayLabel, target.dayLabel)
+                && (calendar.dateComponents([.day], from: calendar.startOfDay(for: s.date), to: targetDay).day ?? Int.max) <= windowDays
+        }.sorted { $0.date > $1.date }
+        for s in earlier {
+            guard let src = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) == letter }),
+                  !CoachingEngine.workingSetIndices(for: src).isEmpty else { continue }
+            if hasPain(src) { return .leave }                               // pain holds
+            guard let held = CoachingEngine.heldLoad(for: src), held > 0 else { continue }
+            return .write((held, .earlierSameLetter(from: s.date, rotationWeeks: rotationWeeks),
+                           "Held at \(compact(held, ctx)) from \(dayText(s.date)): your last \(letter.isEmpty ? "" : letter.uppercased() + "-week ")session."))
+        }
+
+        // (ii)
+        if (item.repMin ?? item.targetReps) <= maxEstimatedTargetRepMin {
+            let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
+            if let d = r.decision { return .write(d) }
+            if !r.noSource { return .leave }                                // pain / degenerate: leave it
+        }
+
+        // (iii)
+        if isZeroTarget(item) {
+            return item.prescriptionNotes?.contains(noRecentHistoryNote) == true ? .leave : .noHistoryNote(why)
+        }
+        if writtenSinceCreation(item, meso) == false, item.coachNote?.contains(placeholderNote) != true {
+            return .placeholderNote(why)
+        }
+        return .leave
+    }
+
+    /// Whether the item was written after its block was created (a minute's grace for the block's own creation).
+    /// nil when either date is unknown.
+    private static func writtenSinceCreation(_ item: SessionItem, _ meso: MesoBlock) -> Bool? {
+        guard let created = meso.createdAt, let updated = item.updatedAt else { return nil }
+        return updated > created.addingTimeInterval(60)
+    }
 
     /// `noSource` is true only when no session qualified (a pain flag or a degenerate e1RM is neither).
     private static func estimate(for item: SessionItem, target: Session, why: String, completed: [Session], now: Date, ctx: Context)
