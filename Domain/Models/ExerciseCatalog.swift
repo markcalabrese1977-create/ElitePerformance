@@ -132,6 +132,24 @@ struct ExerciseCatalog {
         return catalogExercise
     }
 
+    /// Makes sure a custom exercise that the catalog lists has its store record, so the muscle / Compound editor never opens on
+    /// nothing. SwiftData is the source of truth and `custom_exercises_v2` only a mirror of it, but the mirror can outlive a
+    /// record (a store that was reset, a save that failed after the mirror was written). The record is rebuilt from the mirror
+    /// entry, with every field it carries; an existing record is left as it is. Returns false for an id that is not a custom
+    /// exercise of the catalog (a built-in, or unknown): there is nothing to edit.
+    @discardableResult
+    static func ensureCustomRecord(id: String, in context: ModelContext) -> Bool {
+        let records = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        if records.contains(where: { $0.id == id }) { return true }
+        guard !builtIn.contains(where: { $0.id == id }),
+              let entry = all.first(where: { $0.id == id }) else { return false }
+        context.insert(CustomExercise(id: entry.id, name: entry.name, primaryMuscleRaw: entry.primaryMuscle.rawValue,
+                                      isCompound: entry.isCompound, isBodyweight: entry.isBodyweight))
+        guard (try? context.save()) != nil else { context.rollback(); return false }
+        saveCustom(customExercises(in: context))       // the mirror and the store agree again
+        return true
+    }
+
     static func deleteCustomExercises(ids: [String], in context: ModelContext) {
         let descriptor = FetchDescriptor<CustomExercise>()
         let allCustom = (try? context.fetch(descriptor)) ?? []

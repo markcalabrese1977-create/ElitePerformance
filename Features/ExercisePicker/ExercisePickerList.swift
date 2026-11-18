@@ -157,7 +157,10 @@ struct ExercisePickerList: View {
         .buttonStyle(.plain)                     // names read as text, not as links
         .swipeActions(edge: .leading) {
             if actions.contains(.editMusclesAndLiftType) {
-                Button { mappingTarget = MappingTarget(id: ex.id) } label: {
+                Button {
+                    // A catalog entry with no store record (a stale mirror) gets its record first; the editor never opens on nothing.
+                    if ExerciseCatalog.ensureCustomRecord(id: ex.id, in: modelContext) { mappingTarget = MappingTarget(id: ex.id) }
+                } label: {
                     Label("Muscles & lift type", systemImage: "figure.strengthtraining.traditional")
                 }
                 .tint(.indigo)

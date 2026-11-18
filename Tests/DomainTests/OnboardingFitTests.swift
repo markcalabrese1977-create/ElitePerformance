@@ -857,4 +857,65 @@ final class ExercisePickerTests: XCTestCase {
         XCTAssertTrue(editor.contains("Toggle(\"Compound lift\""), "the editor edits the Compound lift setting")
         XCTAssertTrue(editor.contains("c.isCompound = compound"))
     }
+
+    // MARK: A custom exercise that only the UserDefaults mirror knows
+
+    private func withMirror(_ entries: [CatalogExercise], _ body: () throws -> Void) rethrows {
+        let key = "custom_exercises_v2"
+        let before = UserDefaults.standard.data(forKey: key)
+        defer { if let before { UserDefaults.standard.set(before, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        UserDefaults.standard.set(try? JSONEncoder().encode(entries), forKey: key)
+        try body()
+    }
+
+    private func store() throws -> ModelContext {
+        let c = try ModelContainer(for: Schema([CustomExercise.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parkedContainers.append(c)
+        return ModelContext(c)
+    }
+    private var parkedContainers: [ModelContainer] { get { Self.parked } set { Self.parked = newValue } }
+    private static var parked: [ModelContainer] = []
+
+    func test_mirrorOnlyCustomExercise_getsItsRecordBeforeTheEditorOpens() throws {
+        let stale = CatalogExercise(id: "custom_stale_probe", name: "Stale Probe Press", primaryMuscle: .chest, isCompound: false, isBodyweight: true)
+        try withMirror([stale]) {
+            let ctx = try store()
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<CustomExercise>()).isEmpty, "no record: only the mirror lists it")
+            XCTAssertTrue(ExerciseCatalog.all.contains(stale), "so the picker shows it")
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: stale.id, in: ctx))
+            let record = try XCTUnwrap(try ctx.fetch(FetchDescriptor<CustomExercise>()).first { $0.id == stale.id })
+            XCTAssertEqual(record.name, "Stale Probe Press")
+            XCTAssertEqual(record.primaryMuscleRaw, "chest")
+            XCTAssertEqual(record.isCompound, false)
+            XCTAssertEqual(record.isBodyweight, true, "every field of the mirror entry")
+            // Idempotent, and the editor's change then sticks.
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: stale.id, in: ctx))
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).filter { $0.id == stale.id }.count, 1)
+            record.isCompound = true
+            try ctx.save()
+            ExerciseCatalog.rebuildCustomMirror(from: ctx)
+            XCTAssertEqual(ExerciseCatalog.all.first { $0.id == stale.id }?.isCompound, true)
+        }
+    }
+
+    func test_ensureCustomRecord_refusesWhatIsNotACustomExercise() throws {
+        try withMirror([]) {
+            let ctx = try store()
+            XCTAssertFalse(ExerciseCatalog.ensureCustomRecord(id: "bench_press", in: ctx), "a built-in has nothing to edit")
+            XCTAssertFalse(ExerciseCatalog.ensureCustomRecord(id: "custom_nobody", in: ctx))
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<CustomExercise>()).isEmpty)
+            // An existing record is left untouched.
+            ctx.insert(CustomExercise(id: "custom_real", name: "Real", primaryMuscleRaw: "back", isCompound: true))
+            try ctx.save()
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: "custom_real", in: ctx))
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 1)
+        }
+    }
+
+    func test_theEditorOnlyOpensThroughTheRecordCheck() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let list = try String(contentsOf: root.appendingPathComponent("Features/ExercisePicker/ExercisePickerList.swift"), encoding: .utf8)
+        XCTAssertTrue(list.contains("if ExerciseCatalog.ensureCustomRecord(id: ex.id, in: modelContext) { mappingTarget = MappingTarget(id: ex.id) }"))
+        XCTAssertEqual(list.components(separatedBy: "mappingTarget = MappingTarget(").count - 1, 1, "no other way to open the editor from a picker")
+    }
 }

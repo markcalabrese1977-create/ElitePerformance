@@ -97,6 +97,10 @@ struct CustomMuscleMappingSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if custom == nil {
+                    // Unreachable from the pickers (they create the record first); never a blank editor if it is reached.
+                    Section { Text("This exercise has no saved record, so it can't be edited.").foregroundStyle(.secondary) }
+                }
                 Section("Primary muscle") {
                     Picker("Primary", selection: $primary) {
                         Text("Not mapped").tag(FineMuscle?.none)
