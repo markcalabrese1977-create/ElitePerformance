@@ -823,6 +823,9 @@ struct OnboardingFlowView: View {
 
                 adjustedForYouSection(fit)
 
+                // Planned weekly hard sets per muscle; it follows every swap, delete, add and set change made below.
+                PlannedVolumeCard(input: .template(template, previewOverrides))
+
                 // Week 1 structure
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Week 1 structure")

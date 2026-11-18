@@ -239,6 +239,15 @@ struct StartNextMesoFlow: View {
                         Text(StartNextMesoModel.unchangedFooter)
                     }
 
+                    // Planned weekly hard sets per muscle against the block being copied. Advisory; a maintenance copy has no hard sets.
+                    if !plan.isMaintenance {
+                        Section {
+                            PlannedVolumeCard(input: .nextMeso(plan))
+                                .listRowInsets(EdgeInsets())
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+
                     ForEach(Array(StartNextMesoModel.firstWeekRows(plan).enumerated()), id: \.offset) { _, row in
                         Section {
                             ForEach(Array(row.items.enumerated()), id: \.offset) { _, item in
