@@ -171,7 +171,7 @@ struct ReplaceExerciseModel {
 
 // MARK: - Views
 
-/// Pick a replacement (reusing `ProgramExerciseSwapSheet`), then choose the scope and review the preview.
+/// Pick a replacement (the shared `ExercisePickerList`), then choose the scope and review the preview.
 struct ReplaceExerciseFlow: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -194,9 +194,9 @@ struct ReplaceExerciseFlow: View {
                 onFinish: onFinish
             )
         } else {
-            ProgramExerciseSwapSheet(
-                currentExerciseId: item.exerciseId,
-                currentExerciseName: ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)),
+            ExercisePickerList(
+                mode: .swap(currentExerciseId: item.exerciseId,
+                            currentName: ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId))),
                 onSelect: { chosen = $0 },
                 onCancel: onFinish
             )

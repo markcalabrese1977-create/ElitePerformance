@@ -141,6 +141,8 @@
 		F46F5A1658B5ACC82E75CF9C /* UnitSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9AF13869B278F9B8C36D75 /* UnitSection.swift */; };
 		F4CDE0214473F70FA93E5735 /* SessionItemEditServiceNextMesoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48FFCD76DC9DB72368413DF0 /* SessionItemEditServiceNextMesoTests.swift */; };
 		F4E84E23ED9206233A1DB18C /* UnitSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D447E5337D1D77F70746CC /* UnitSwitchTests.swift */; };
+		A1B2C3D4E5F60718293A4C02 /* ExercisePickerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C01 /* ExercisePickerModel.swift */; };
+		A1B2C3D4E5F60718293A4C04 /* ExercisePickerList.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C03 /* ExercisePickerList.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -290,6 +292,8 @@
 		EA1107000000000000000000 /* MesoComparisonTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MesoComparisonTests.swift; sourceTree = "<group>"; };
 		EA1108000000000000000000 /* CoachNoteHygieneTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CoachNoteHygieneTests.swift; sourceTree = "<group>"; };
 		F8709825B1F3BE48A26E2A20 /* CrossBlockContinuityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrossBlockContinuityTests.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C01 /* ExercisePickerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExercisePickerModel.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C03 /* ExercisePickerList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExercisePickerList.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -392,6 +396,7 @@
 			isa = PBXGroup;
 			children = (
 				D503127E2F12BE7600980F64 /* AddExerciseSheet.swift */,
+				A1B2C3D4E5F60718293A4C03 /* ExercisePickerList.swift */,
 			);
 			path = ExercisePicker;
 			sourceTree = "<group>";
@@ -506,6 +511,7 @@
 				D5B8A4FE2ECA3F8D00B2A8E8 /* ProgramStyle.swift */,
 				D5E2939F2EC7C4E900034D78 /* Goal.swift */,
 				D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */,
+				A1B2C3D4E5F60718293A4C01 /* ExercisePickerModel.swift */,
 				D5E293912EC7BBC000034D78 /* UserProfile.swift */,
 				D5E293852EC6BD8200034D78 /* PRIndex.swift */,
 				D5E293502EC410DD00034D78 /* Session.swift */,
@@ -845,6 +851,7 @@
 				D5BEBEFA2ED207BE0035FE70 /* ContentView.swift in Sources */,
 				D5839A4B2FDF0B640074635A /* MechanicalLoadHealthKitService.swift in Sources */,
 				D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */,
+				A1B2C3D4E5F60718293A4C02 /* ExercisePickerModel.swift in Sources */,
 				D5E2936D2EC410DD00034D78 /* Session.swift in Sources */,
 				D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */,
 				D51A8C0A2FAE614A00127E79 /* E1RMCalculator.swift in Sources */,
@@ -882,6 +889,7 @@
 				D5E269243B57B99A01AB5E07 /* HealthKitAuthorizationCoordinator.swift in Sources */,
 				D5C446522ED7CC0700D7BE41 /* SessionHistory.swift in Sources */,
 				D503127F2F12BE7800980F64 /* AddExerciseSheet.swift in Sources */,
+				A1B2C3D4E5F60718293A4C04 /* ExercisePickerList.swift in Sources */,
 				D5E293882EC6BDB600034D78 /* PRService.swift in Sources */,
 				D5BB57D22FA95CBC004083DE /* DropSetEntry.swift in Sources */,
 				D5E85F062ED12EC400D115D0 /* NumericTextFields.swift in Sources */,

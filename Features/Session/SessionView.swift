@@ -310,7 +310,8 @@ struct SessionView: View {
     private func sheetView(for sheet: ActiveSheet) -> some View {
         switch sheet {
         case .addExercise:
-            AddExerciseSheet(
+            ExercisePickerList(
+                mode: .add,
                 onSelect: { catalogExercise in
                     viewModel.addExercise(catalogExercise, context: modelContext)
                     activeSheet = nil
@@ -327,8 +328,10 @@ struct SessionView: View {
             )
 
         case .swap(let target):
-            ExerciseSwapSheet(
-                current: viewModel.exercises[target.exerciseIndex],
+            ExercisePickerList(
+                mode: .swap(currentExerciseId: viewModel.exercises[target.exerciseIndex].exerciseId,
+                            currentName: viewModel.exercises[target.exerciseIndex].name,
+                            footer: ReplaceExerciseModel.todayInSessionNote),
                 onSelect: { catalogExercise in
                     viewModel.swapExercise(at: target.exerciseIndex, with: catalogExercise, context: modelContext)
                     viewModel.persist(using: modelContext)
@@ -1281,63 +1284,6 @@ private struct SessionSetRowView: View {
 
 /// Sheet to pick a replacement exercise from the catalog.
 /// Shows "recommended" (same primary muscle group) first, then all others.
-private struct ExerciseSwapSheet: View {
-    let current: UISessionExercise
-    let onSelect: (CatalogExercise) -> Void
-    let onCancel: () -> Void
-
-    private var options: [CatalogExercise] {
-        let all = ExerciseCatalog.all
-
-        guard let currentCatalog = all.first(where: { $0.id == current.exerciseId }) else {
-            return all
-        }
-
-        let same = all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
-        let others = all.filter {
-            $0.id != currentCatalog.id && $0.primaryMuscle != currentCatalog.primaryMuscle
-        }
-
-        return same + others
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(options) { exercise in
-                        Button {
-                            onSelect(exercise)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(exercise.name)
-                                    .font(.body)
-
-                                Text(exercise.primaryMuscle.rawValue.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Choose a replacement for \(current.name)")
-                } footer: {
-                    Text(ReplaceExerciseModel.todayInSessionNote)
-                }
-            }
-            .navigationTitle("Swap Exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                    }
-                }
-            }
-        }
-    }
-}
-
 // MARK: - View Model
 
 final class SessionScreenViewModel: ObservableObject {

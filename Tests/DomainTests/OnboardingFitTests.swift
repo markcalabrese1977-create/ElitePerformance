@@ -655,3 +655,165 @@ final class ChangeProgramWeekdaysTests: XCTestCase {
         XCTAssertTrue(OnboardingDraft(profile: nil, activeWeekdays: Set(1...7)).weekdays.isEmpty)
     }
 }
+
+// MARK: - The shared exercise picker
+
+final class ExercisePickerTests: XCTestCase {
+
+    private let catalog = ExerciseCatalog.builtIn
+    private func names(_ exercises: [CatalogExercise]) -> [String] { exercises.map(\.name) }
+    private func results(_ query: String, in pool: [CatalogExercise]? = nil) -> [CatalogExercise] {
+        ExercisePickerModel.sections(exercises: pool ?? catalog, query: query).flatMap(\.exercises)
+    }
+    private let custom = CatalogExercise(id: "custom_ecarte", name: "Écarté Poulie Vis-à-vis", primaryMuscle: .chest, isCompound: false)
+    private let customLower = CatalogExercise(id: "custom_zottman", name: "zottman curl", primaryMuscle: .biceps, isCompound: false)
+
+    // MARK: Search
+
+    func test_searchIgnoresCaseAndDiacritics() {
+        XCTAssertEqual(results("BENCH PRESS").first?.id, "bench_press")
+        XCTAssertEqual(results("bench press").map(\.id), results("Bench  Press").map(\.id))
+        let pool = catalog + [custom]
+        XCTAssertEqual(results("ecarte poulie", in: pool).map(\.id), ["custom_ecarte"], "accents folded both ways")
+        XCTAssertEqual(results("ÉCARTÉ", in: pool).first?.id, "custom_ecarte")
+        XCTAssertEqual(results("vis a vis", in: pool).map(\.id), ["custom_ecarte"], "punctuation and spacing do not matter")
+        XCTAssertEqual(results("push up").first?.id, "push_up")
+        XCTAssertEqual(results("pushup").first?.id, "push_up", "an alias for the same exercise")
+    }
+
+    func test_searchMatchesCommonAliasesAndAbbreviations() {
+        XCTAssertEqual(results("rdl").first?.id, "romanian_deadlift")
+        XCTAssertTrue(results("rdl").map(\.id).contains("dumbbell_romanian_deadlift"))
+        XCTAssertTrue(results("lat pulldown").map(\.id).contains("wide_grip_pulldown"))
+        XCTAssertTrue(results("skullcrusher").map(\.id).contains("ez_bar_skull_crusher"))
+        XCTAssertTrue(results("ohp").map(\.id).contains("barbell_overhead_press"))
+        XCTAssertTrue(results("side raise").map(\.id).contains("dumbbell_lateral_raise"))
+        let db = results("db")
+        XCTAssertFalse(db.isEmpty)
+        XCTAssertTrue(db.allSatisfy { let n = ExerciseSearch.normalize($0.name); return n.contains("dumbbell") || n.split(separator: " ").contains("db") || ExerciseSearch.aliases(for: $0).contains { $0.contains("db") } }, "an abbreviation finds what it stands for")
+        XCTAssertTrue(results("curls").map(\.id).contains("hammer_curl"), "a plural finds the singular")
+    }
+
+    func test_everyWordMustMatch_inAnyOrder_andNothingMatchesGibberish() {
+        XCTAssertTrue(results("press bench").map(\.id).contains("bench_press"))
+        XCTAssertFalse(results("bench zzzz").map(\.id).contains("bench_press"))
+        XCTAssertTrue(results("qqqqxx").isEmpty)
+        XCTAssertTrue(ExercisePickerModel.sections(exercises: catalog, query: "qqqqxx").isEmpty)
+    }
+
+    func test_betterMatchesRankFirst() {
+        let r = results("curl")
+        // A name that starts with the query beats one that merely contains it.
+        let firstStarting = r.firstIndex { ExerciseSearch.normalize($0.name).hasPrefix("curl") } ?? -1
+        let firstContaining = r.firstIndex { !ExerciseSearch.normalize($0.name).hasPrefix("curl") && ExerciseSearch.normalize($0.name).contains("curl") } ?? Int.max
+        XCTAssertLessThanOrEqual(firstStarting, firstContaining)
+        // An alias-only match comes after name matches.
+        let rdl = results("deadlift")
+        XCTAssertLessThanOrEqual(ExerciseSearch.rank(rdl.first { $0.id == "conventional_deadlift" }!, query: "deadlift") ?? 9, 3)
+    }
+
+    // MARK: Sorting and sections
+
+    func test_emptySearch_isAToZ_withSectionsInOrder_andASideIndex() {
+        let sections = ExercisePickerModel.sections(exercises: catalog + [custom, customLower], query: "")
+        let letters = ExercisePickerModel.indexLetters(sections)
+        XCTAssertEqual(letters.filter { $0 != "#" }, letters.filter { $0 != "#" }.sorted(), "the side index is in order (# last)")
+        XCTAssertEqual(Set(letters).count, letters.count)
+        XCTAssertTrue(letters.contains("A") && letters.contains("B") && letters.contains("E"))
+        for section in sections {
+            guard case .letter(let l) = section.kind else { continue }
+            XCTAssertTrue(section.exercises.allSatisfy { ExercisePickerModel.letter(for: $0) == l }, "section \(l)")
+            let keys = section.exercises.map { ExerciseSearch.normalize($0.name) }
+            XCTAssertEqual(keys, keys.sorted(), "section \(l) is sorted")
+        }
+        // Every exercise appears exactly once in A-Z.
+        let az = sections.filter { if case .letter = $0.kind { return true } else { return false } }.flatMap(\.exercises)
+        XCTAssertEqual(az.count, Set(az.map(\.id)).count)
+        XCTAssertEqual(Set(az.map(\.id)), Set((catalog + [custom, customLower]).map(\.id)))
+    }
+
+    func test_aNameThatDoesNotStartWithALetterGoesUnderHash_lastInTheIndex() {
+        let odd = CatalogExercise(id: "custom_45", name: "45° Plate Pinch", primaryMuscle: .biceps, isCompound: false)
+        let letters = ExercisePickerModel.indexLetters(ExercisePickerModel.sections(exercises: catalog + [odd], query: ""))
+        XCTAssertEqual(letters.last, "#")
+        XCTAssertEqual(ExercisePickerModel.letter(for: odd), "#")
+    }
+
+    func test_customExercisesAreIncluded_inAToZ_andInSearch() {
+        let sections = ExercisePickerModel.sections(exercises: catalog + [custom, customLower], query: "")
+        let e = sections.first { $0.kind == .letter("E") }
+        XCTAssertTrue(e?.exercises.contains(custom) == true, "a custom 'Écarté' sorts under E")
+        let z = sections.first { $0.kind == .letter("Z") }
+        XCTAssertTrue(z?.exercises.contains(customLower) == true, "a lower-case custom name is sorted by its folded name")
+        XCTAssertTrue(results("zottman", in: catalog + [customLower]).contains(customLower))
+    }
+
+    // MARK: Recents and suggestions
+
+    func test_recentsLeadWhenTheSearchIsEmpty_neverWhileSearching() {
+        let sections = ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: ["leg_press", "bench_press", "not_an_exercise"])
+        XCTAssertEqual(sections.first?.kind, .recent)
+        XCTAssertEqual(sections.first?.exercises.map(\.id), ["leg_press", "bench_press"], "newest first, unknown ids dropped")
+        XCTAssertTrue(sections.contains { $0.kind == .letter("B") }, "recents are also in A-Z")
+        let searching = ExercisePickerModel.sections(exercises: catalog, query: "press", recentIds: ["leg_press"])
+        XCTAssertEqual(searching.map(\.kind), [.results])
+        XCTAssertEqual(ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: []).first?.kind, .letter("A"))
+    }
+
+    func test_recentsStoreIsNewestFirst_deduplicated_andCapped() {
+        let suite = UserDefaults(suiteName: "ExercisePickerTests.\(UUID().uuidString)")!
+        let store = ExercisePickerRecents(defaults: suite)
+        for id in ["a", "b", "c", "bench_press", "d", "e", "f", "g"] { store.record(id) }
+        store.record("c")
+        XCTAssertEqual(store.ids.first, "c")
+        XCTAssertEqual(store.ids.count, ExercisePickerRecents.limit)
+        XCTAssertEqual(store.ids.filter { $0 == "c" }.count, 1)
+    }
+
+    func test_aSwapKeepsSuggestedAlternativesAboveAToZ_andNeverOffersTheCurrentExercise() throws {
+        let current = try XCTUnwrap(catalog.first { $0.id == "bench_press" })
+        let sections = ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: ["leg_press"], swapping: current)
+        XCTAssertEqual(sections.map(\.kind).prefix(2), [.recent, .suggested], "recent first, then the suggestions, then A-Z")
+        let suggested = try XCTUnwrap(sections.first { $0.kind == .suggested })
+        XCTAssertTrue(suggested.exercises.allSatisfy { $0.primaryMuscle == current.primaryMuscle })
+        XCTAssertFalse(sections.flatMap(\.exercises).contains(current))
+        XCTAssertTrue(sections.dropFirst(2).allSatisfy { if case .letter = $0.kind { return true } else { return false } })
+        // Add mode has no suggestions.
+        XCTAssertFalse(ExercisePickerModel.sections(exercises: catalog, query: "").contains { $0.kind == .suggested })
+    }
+
+    func test_everyAliasIsForARealExercise() {
+        let ids = Set(catalog.map(\.id))
+        XCTAssertEqual(Set(ExerciseSearch.aliasesById.keys).subtracting(ids), [], "an alias row for an exercise that is not in the catalog")
+        for (id, list) in ExerciseSearch.aliasesById { XCTAssertFalse(list.isEmpty, id); XCTAssertTrue(list.allSatisfy { !ExerciseSearch.normalize($0).isEmpty }, id) }
+    }
+
+    // MARK: One component everywhere
+
+    func test_everyPickerIsTheSameComponent() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+        let callSites: [(String, Int)] = [
+            ("Features/Session/SessionView.swift", 2),               // add in a session, swap in a session
+            ("Features/Home/ProgramDayDetailView.swift", 1),         // add on the day page
+            ("Features/Home/ReplaceExerciseFlow.swift", 1),          // swap on the day page
+            ("Features/Onboarding/OnboardingFlowView.swift", 2),     // preview swap, preview add
+        ]
+        for (path, count) in callSites {
+            let source = try text(path)
+            XCTAssertEqual(source.components(separatedBy: "ExercisePickerList(").count - 1, count, "\(path) uses the shared picker \(count)x")
+        }
+        // The three old pickers are gone, and nothing builds its own exercise list any more.
+        let features = try FileManager.default.subpathsOfDirectory(atPath: root.appendingPathComponent("Features").path).filter { $0.hasSuffix(".swift") }
+        for file in features {
+            let source = try text("Features/\(file)")
+            for old in ["struct AddExerciseSheet", "struct ProgramExerciseSwapSheet", "struct ExerciseSwapSheet"] {
+                XCTAssertFalse(source.contains(old), "\(file) still defines \(old)")
+            }
+        }
+        let list = try text("Features/ExercisePicker/ExercisePickerList.swift")
+        XCTAssertTrue(list.contains(".searchable("), "search")
+        XCTAssertTrue(list.contains("ExercisePickerModel.sections("), "the pure model builds the sections")
+        XCTAssertTrue(list.contains("SectionIndex"), "side index")
+    }
+}

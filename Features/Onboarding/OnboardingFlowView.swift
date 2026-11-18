@@ -947,9 +947,8 @@ struct OnboardingFlowView: View {
                     let key = SlotKey(dayId: target.dayId, slotIndex: target.slotIndex)
                     let displayId = previewOverrides.slotKeyed[key]?.substituteExerciseId
                         ?? dayTemplate.exerciseTemplates[target.slotIndex].exerciseId
-                    ProgramExerciseSwapSheet(
-                        currentExerciseId: displayId,
-                        currentExerciseName: ExerciseCatalog.displayName(for: displayId),
+                    ExercisePickerList(
+                        mode: .swap(currentExerciseId: displayId, currentName: ExerciseCatalog.displayName(for: displayId)),
                         onSelect: { catalogExercise in
                             let existing = previewOverrides.slotKeyed[key] ?? ExerciseWaveOverride()
                             previewOverrides.slotKeyed[key] = existing.applyingSubstitute(catalogExercise.id)
@@ -976,9 +975,8 @@ struct OnboardingFlowView: View {
                 }
             }) {
                 if let dayId = addingToDayId {
-                    ProgramExerciseSwapSheet(
-                        currentExerciseId: "",
-                        currentExerciseName: "Add Exercise",
+                    ExercisePickerList(
+                        mode: .add,
                         onSelect: { catalogExercise in
                             pendingAdd = (
                                 dayId: dayId,

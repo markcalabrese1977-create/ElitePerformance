@@ -186,7 +186,8 @@ struct ProgramDayDetailView: View {
         
         // ✅ ADD THIS
         .sheet(isPresented: $showingAddExerciseSheet) {
-            AddExerciseSheet(
+            ExercisePickerList(
+                mode: .add,
                 onSelect: { catalogExercise in
                     addExercise(from: catalogExercise)
                     showingAddExerciseSheet = false
@@ -583,88 +584,6 @@ private struct ChangeTarget: Identifiable {
 private struct SwapTarget: Identifiable {
     let id = UUID()
     let item: SessionItem
-}
-
-// MARK: - Swap Sheet
-
-/// Sheet to pick a replacement exercise from the catalog for a plan slot.
-/// Shows "recommended" (same primary muscle group) first, then all others.
-/// Intentionally separate from SessionView's ExerciseSwapSheet, which is
-/// private and typed to that screen's UISessionExercise view-model.
-struct ProgramExerciseSwapSheet: View {
-    let currentExerciseId: String
-    let currentExerciseName: String
-    let onSelect: (CatalogExercise) -> Void
-    let onCancel: () -> Void
-
-    @State private var showingCreateCustom = false
-
-    private var options: [CatalogExercise] {
-        let all = ExerciseCatalog.all
-        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentExerciseId)
-
-        guard let currentCatalog = all.first(where: { $0.id == canonicalId }) else {
-            return all
-        }
-
-        let same = all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
-        let others = all.filter {
-            $0.id != currentCatalog.id && $0.primaryMuscle != currentCatalog.primaryMuscle
-        }
-
-        return same + others
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        showingCreateCustom = true
-                    } label: {
-                        Label("Create Custom Exercise", systemImage: "plus.circle.fill")
-                    }
-                }
-
-                Section {
-                    ForEach(options) { exercise in
-                        Button {
-                            onSelect(exercise)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(exercise.name)
-                                    .font(.body)
-
-                                Text(exercise.primaryMuscle.rawValue.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Choose a replacement for \(currentExerciseName)")
-                }
-            }
-            .navigationTitle("Swap Exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                    }
-                }
-            }
-            .sheet(isPresented: $showingCreateCustom) {
-                CreateCustomExerciseSheet(
-                    onDone: { newExercise in
-                        showingCreateCustom = false
-                        onSelect(newExercise)
-                    },
-                    onCancel: { showingCreateCustom = false }
-                )
-            }
-        }
-    }
 }
 
 // MARK: - Per-exercise plan row
