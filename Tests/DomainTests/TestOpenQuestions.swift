@@ -365,27 +365,16 @@
 //   in MechanicalLoadAppGroupTests (StubTests.swift), which exercise the
 //   full projection path end-to-end without HealthKit involvement.
 
-// OPEN Q17 (NEW): CoachingEngine.recommend cannot tell a genuine 0-rep
-//   total-failure set apart from a not-yet-logged one — both withhold a
-//   verdict entirely instead of producing a hold/reduce recommendation.
-//   Discovered while building T-M.6. workingIndices (Domain/Logic
-//   /CoachingEngine.swift:79-85) is built from `reps[idx] > 0 && loads[idx]
-//   > 0` — a set where the lifter attempted the prescribed load and failed
-//   every single rep (reps == 0, load == the attempted weight) fails this
-//   filter exactly the same way an entirely unlogged set would. With every
-//   set in the item failing to 0 reps, workingIndices ends up empty and
-//   `guard !workingIndices.isEmpty else { return nil }` (line 91) returns
-//   nil — silence, not a hold/reduce coaching message. SessionItem has no
-//   "this set was attempted" flag independent of reps/load to disambiguate
-//   the two cases. A user who fails every rep on every set of an exercise
-//   gets zero feedback from the coach, same as if they'd skipped it
-//   entirely. Do not fix here, flag for next task. Confirmed by
-//   ExtraSetsAndFailureTests
-//   .test_M6_BUG_totalFailureAllSetsZeroRepsIsIndistinguishableFromUnloggedAndWithholdsEntirely
-//   (StubTests.swift) — left failing on purpose. A more realistic partial
-//   failure (one set craters but isn't literally 0 reps) is unaffected and
-//   correctly produces a hold; see
-//   .test_M6_failureWithBigRepCrashHoldsNeverIncreasesNoNaN in the same file.
+// OPEN Q17 (RESOLVED): CoachingEngine.recommend could not tell a genuine 0-rep total-failure set apart from a not-yet-
+//   logged one: a row only counted when reps > 0 (`loggedRowIndices`), so a session where every set was attempted at the
+//   planned load and failed produced no working sets and no verdict, the same silence as an unlogged item.
+//   Fix: a PERFORMED set is reps and load logged, or a failed attempt (load > 0, no reps, no "SKIP" marker;
+//   `CoachingEngine.isPerformedRow`). The attempted load separates it from a set never touched (load 0) and the marker from
+//   a skipped one. A total failure now gets a hold/reduce verdict, never an increase, and counts as performed for the
+//   held-load rule (`PlaceholderRefresh`). Pinned by ExtraSetsAndFailureTests
+//   .test_M6_totalFailureAllSetsZeroRepsIsAPerformedAttemptAndGetsAVerdict and .test_Q17_unloggedAndSkippedSetsAreStillNotPerformed
+//   (StubTests.swift). Note: the session screen persists a set's load only when it has reps (SessionView.persist), so no
+//   screen writes a load-without-reps row yet; the engine and the data model are ready for one.
 
 // OPEN Q18 — RESOLVED: usesKilograms removed entirely (this commit).
 //   No unit conversion logic existed; removal was cleaner than fixing.

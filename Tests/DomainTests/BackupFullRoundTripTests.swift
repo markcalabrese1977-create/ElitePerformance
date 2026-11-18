@@ -3445,3 +3445,312 @@ final class AppStoreSampleReplayTests: XCTestCase {
         XCTAssertGreaterThan(noteCount, exerciseCount / 2, "most exercises carry an engine-written note")
     }
 }
+
+// MARK: - PlaceholderRefresh dry run on a real backup
+
+final class PlaceholderRefreshDryRunTests: XCTestCase {
+
+    /// LOCAL ONLY, READ-ONLY: every change `PlaceholderRefresh` would make on a real backup, old -> new with its reason.
+    /// Nothing is saved; the backup is imported into an in-memory store.
+    func test_audit_whatPlaceholderRefreshWouldChangeOnTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        let now = ISO8601DateFormatter().date(from: ProcessInfo.processInfo.environment["EP_AUDIT_NOW"] ?? "2026-11-17T23:20:00Z") ?? Date()
+        let profile = try? ctx.fetch(FetchDescriptor<UserProfile>()).first
+        let unit = profile?.loadUnit ?? .lb
+        let changes = PlaceholderRefresh.plan(in: ctx, now: now)
+        let fmt = DateFormatter(); fmt.dateFormat = "EEE MMM d"
+        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        var lines = ["PLACEHOLDER REFRESH DRY RUN (as of \(now)) — \(changes.count) planned exercises would change (nothing was saved), unit \(unit)"]
+        for c in changes.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
+            lines.append("\(fmt.string(from: c.session.date)) wk\(c.session.weekIndex) \(c.session.dayLabel ?? "-") · \(ExerciseCatalog.displayName(for: c.item.exerciseId)) (\(c.item.waveRaw ?? "-")): \(n(c.oldLoad)) -> \(n(c.newLoad)) · \(c.reason.text)")
+        }
+        // Idempotence: apply, then plan again.
+        PlaceholderRefresh.apply(changes, ctx: .init(profile: profile, customExercises: (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []))
+        let second = PlaceholderRefresh.plan(in: ctx, now: now)
+        lines.append("second pass after applying: \(second.count) changes")
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+        XCTAssertTrue(second.isEmpty, "idempotent")
+    }
+}
+
+// MARK: - PlaceholderRefresh: the real cases as fixtures
+
+/// The Nov 17 backup's real cases, rebuilt by hand: T-Bar Row Pull A (wk 6 c, set 3 skipped), Legs B (wk 7 a missed, wk 8 b
+/// performed), Single Arm Pulldown Pull B (wk 8 b hand-edited). "Today" is Tue Nov 17 2026.
+final class PlaceholderRefreshTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func day(_ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: 2026, month: m, day: d, hour: 9))! }
+    private var now: Date { cal.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 20))! }
+    private let sep22 = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 22, hour: 12))!
+
+    private func context(profile: UserProfile? = nil) throws -> (ModelContext, MesoBlock) {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: "12-Week DUP Meso", startDate: day(9, 25), status: .active, totalWeeks: 12)
+        ctx.insert(meso)
+        if let profile { ctx.insert(profile) }
+        return (ctx, meso)
+    }
+
+    @discardableResult
+    private func session(_ ctx: ModelContext, _ meso: MesoBlock, _ date: Date, _ status: SessionStatus, week: Int, label: String, _ items: [SessionItem]) -> Session {
+        let s = Session(date: date, status: status, weekIndex: week, dayLabel: label, items: items)
+        s.meso = meso; ctx.insert(s); meso.sessions.append(s)
+        return s
+    }
+
+    private func item(_ id: String, wave: String, sets: Int = 3, repMin: Int, repMax: Int, rir: Int = 2, suggested: Double,
+                      planned: [Double]? = nil, actual: [Double] = [], reps: [Int] = [], rirs: [Int] = [],
+                      patterns: [String] = [], feedback: [String] = [], edited: Bool = false, updated: Date? = nil) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: repMin, targetSets: sets, targetRIR: rir, suggestedLoad: suggested,
+                            waveRaw: wave, priorityRaw: "anchor", repMin: repMin, repMax: repMax, targetRIRMin: rir, targetRIRMax: rir,
+                            plannedRepsBySet: Array(repeating: repMin, count: sets),
+                            plannedLoadsBySet: planned ?? Array(repeating: suggested, count: sets),
+                            plannedRIRsBySet: Array(repeating: rir, count: sets),
+                            actualReps: reps, actualLoads: actual, actualRIRs: rirs,
+                            restPausePatternsBySet: patterns, setFeedbackBySet: feedback)
+        i.planEdited = edited
+        i.updatedAt = updated ?? sep22
+        return i
+    }
+
+    private func tBar(_ ctx: ModelContext, _ meso: MesoBlock, feedback: [String]? = nil) -> (done: SessionItem, target: SessionItem) {
+        let done = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 330, planned: [330, 330, 330, 0],
+                        actual: [330, 330, 0, 0], reps: [10, 10, 0, 0], rirs: [2, 1, 0, 0],
+                        patterns: ["", "", "SKIP", ""], feedback: feedback ?? ["", "", "fatigue", ""], edited: true)
+        let target = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 255)
+        session(ctx, meso, day(11, 1), .completed, week: 6, label: "Pull A", [done])
+        session(ctx, meso, day(11, 22), .planned, week: 9, label: "Pull A", [target])
+        return (done, target)
+    }
+
+    // MARK: Rule 1 — the held load
+
+    func test_TBar_Nov22_isHeldAt330_notLoweredToTheStaleSeed() throws {
+        let (ctx, meso) = try context()
+        let (done, target) = tBar(ctx, meso)
+        XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(done), "2 of 3 sets performed: carry-forward cannot write")
+        XCTAssertEqual(CoachingEngine.heldLoad(for: done), 330)
+
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes[0].oldLoad, 255); XCTAssertEqual(changes[0].newLoad, 330)
+        XCTAssertEqual(target.suggestedLoad, 330)
+        XCTAssertEqual(target.plannedLoadsBySet, [330, 330, 330])
+        XCTAssertFalse(target.planEdited, "an automatic write")
+        XCTAssertTrue(target.coachNote?.contains("Held at 330") == true, target.coachNote ?? "nil")
+    }
+
+    func test_aSkippedSetNeverLowersOrRaises_andAPainSkipLeavesTheTargetAlone() throws {
+        for reason in ["", "soreness", "disruption", "fatigue"] {
+            let (ctx, meso) = try context()
+            let (_, target) = tBar(ctx, meso, feedback: ["", "", reason, ""])
+            let changes = PlaceholderRefresh.run(in: ctx, now: now)
+            XCTAssertEqual(changes.first?.newLoad, 330, "skip reason \(reason.isEmpty ? "none" : reason): the held load, never a decrease from the unperformed set")
+            XCTAssertEqual(target.suggestedLoad, 330)
+        }
+        let (ctx, meso) = try context()
+        let (_, target) = tBar(ctx, meso, feedback: ["", "", "pain", ""])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "pain holds: nothing is written")
+        XCTAssertEqual(target.suggestedLoad, 255)
+    }
+
+    func test_enoughEvidenceIsCarryForwardsToWrite_notPlaceholderRefreshs() throws {
+        let (ctx, meso) = try context()
+        let done = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 330, actual: [330, 330, 330], reps: [10, 10, 10], rirs: [2, 2, 2])
+        let target = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 255)
+        session(ctx, meso, day(11, 1), .completed, week: 6, label: "Pull A", [done])
+        session(ctx, meso, day(11, 22), .planned, week: 9, label: "Pull A", [target])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 255)
+    }
+
+    func test_aFailedAttempt_countsAsPerformed_soItIsTheHeldLoad() throws {
+        let (ctx, meso) = try context()
+        // One set attempted at 330 and failed (no reps); the other two never touched.
+        let done = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 330, actual: [330, 0, 0], reps: [0, 0, 0], rirs: [0, -1, -1])
+        let target = item("t_bar_row", wave: "c", repMin: 8, repMax: 10, suggested: 255)
+        session(ctx, meso, day(11, 1), .completed, week: 6, label: "Pull A", [done])
+        session(ctx, meso, day(11, 22), .planned, week: 9, label: "Pull A", [target])
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.first?.newLoad, 330)
+        XCTAssertTrue(changes.first?.reason.text.contains("1 of 3") == true, changes.first?.reason.text ?? "")
+    }
+
+    // MARK: Rule 2 — estimate after a missed session
+
+    /// Legs B: wk 7 (a, Nov 10) never logged; wk 8 (b, Nov 17) performed RDL 325 x 10, 10, 9 at RIR 2; wk 10 (a, Dec 1) still
+    /// carries the seed copied from wk 7.
+    private func legsB(_ ctx: ModelContext, _ meso: MesoBlock, targetLoad: Double = 280, targetEdited: Bool = false, updated: Date? = nil) -> SessionItem {
+        let missed = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 280)
+        let done = item("romanian_deadlift", wave: "b", repMin: 8, repMax: 10, suggested: 325, actual: [325, 325, 325], reps: [10, 10, 9], rirs: [2, 2, 2])
+        let target = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: targetLoad, edited: targetEdited, updated: updated)
+        session(ctx, meso, day(11, 10), .planned, week: 7, label: "Legs B", [missed])
+        session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        return target
+    }
+
+    func test_LegsB_Dec1_isEstimatedFromTheNov17Sets_withTheRuleTheSpecStates() throws {
+        let (ctx, meso) = try context()
+        let target = legsB(ctx, meso)
+        // 325 x 10 at RIR 2 -> e1RM = 325 * (1 + 12/30) = 455. Target: 8 reps + RIR 2 -> 455 / (1 + 10/30) = 341.25; x 0.95 = 324.2;
+        // round DOWN to the default 2.5 step -> 322.5.
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(target.suggestedLoad, 322.5)
+        XCTAssertEqual(target.plannedLoadsBySet, [322.5, 322.5, 322.5])
+        XCTAssertEqual(target.coachNote, "Estimated from your recent B-week sets — set 1 calibrates.")
+        XCTAssertFalse(target.planEdited)
+        guard case .estimated(_, let letter, let e1rm, let why) = changes[0].reason else { return XCTFail("estimated") }
+        XCTAssertEqual(letter, "b"); XCTAssertEqual(e1rm, 455, accuracy: 0.01)
+        XCTAssertTrue(why.contains("Nov 10") && why.contains("missed"), why)
+    }
+
+    func test_theStepIsTheExercisesEffectiveStep_androundsDown() throws {
+        let profile = UserProfile(); profile.minLoadIncrement = 5
+        let (ctx, meso) = try context(profile: profile)
+        let target = legsB(ctx, meso)
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 320, "324.2 rounds DOWN to the 5 lb step")
+    }
+
+    func test_theMaxLoadClampsTheEstimate() throws {
+        let profile = UserProfile(); profile.minLoadIncrement = 5
+        profile.maxLoadByExerciseStored = ["romanian_deadlift": 300]
+        let (ctx, meso) = try context(profile: profile)
+        let target = legsB(ctx, meso)
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 300)
+    }
+
+    func test_aMissingRIR_countsAsTheItemsTargetRIR() throws {
+        let (ctx, meso) = try context()
+        let target = legsB(ctx, meso)
+        // Unset the logged RIRs: the source item's target RIR (2) stands in, so the numbers are the same as with 2.
+        for s in meso.sessions where s.status == .completed { for i in s.items { i.actualRIRs = [-1, -1, -1] } }
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 322.5)
+    }
+
+    func test_onlySetsOfTwelveRepsOrFewerQualify() throws {
+        let (ctx, meso) = try context()
+        let target = legsB(ctx, meso)
+        // A newer same-day session of 15-rep sets is passed over for the 10-rep session before it.
+        let light = item("romanian_deadlift", wave: "c", repMin: 12, repMax: 15, suggested: 200, actual: [200, 200, 200], reps: [15, 15, 15], rirs: [2, 2, 2])
+        session(ctx, meso, day(11, 18) , .completed, week: 8, label: "Legs B", [light])
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 322.5, "the 15-rep session is not a source")
+
+        // Only 15-rep sets exist: no qualifying source, the target is left alone.
+        let (ctx2, meso2) = try context()
+        let only = item("romanian_deadlift", wave: "b", repMin: 12, repMax: 15, suggested: 200, actual: [200, 200, 200], reps: [15, 15, 15], rirs: [2, 2, 2])
+        let target2 = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 280)
+        session(ctx2, meso2, day(11, 17), .completed, week: 8, label: "Legs B", [only])
+        session(ctx2, meso2, day(12, 1), .planned, week: 10, label: "Legs B", [target2])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx2, now: now).isEmpty)
+        XCTAssertEqual(target2.suggestedLoad, 280)
+    }
+
+    func test_noSourceAtAll_leavesTheTargetAlone() throws {
+        let (ctx, meso) = try context()
+        let target = item("romanian_deadlift", wave: "a", repMin: 6, repMax: 8, suggested: 280)
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 280)
+    }
+
+    // MARK: Rule 3 — never
+
+    func test_SAPulldown_Nov18_handEdited_isUntouched() throws {
+        let (ctx, meso) = try context()
+        // wk 7 (a, Nov 11) performed 110 x 3 then 100 x 5, 5, 6; wk 8 (b, Nov 18) was set to 110 by hand.
+        let done = item("custom_sa_pulldown", wave: "a", repMin: 6, repMax: 8, suggested: 100, actual: [110, 100, 100], reps: [3, 5, 5], rirs: [2, 2, 2])
+        let handEdited = item("custom_sa_pulldown", wave: "b", repMin: 6, repMax: 8, suggested: 0, planned: [110, 110, 110], edited: true)
+        session(ctx, meso, day(11, 11), .completed, week: 7, label: "Pull B", [done])
+        session(ctx, meso, day(11, 18), .planned, week: 8, label: "Pull B", [handEdited])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(handEdited.plannedLoadsBySet, [110, 110, 110])
+        XCTAssertEqual(handEdited.suggestedLoad, 0)
+        XCTAssertTrue(handEdited.planEdited)
+    }
+
+    func test_neverTouchesAnEditedItem_whateverTheRule() throws {
+        let (ctx, meso) = try context()
+        let target = legsB(ctx, meso, targetEdited: true)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 280)
+        let (ctx2, meso2) = try context()
+        let (_, t2) = tBar(ctx2, meso2)
+        t2.planEdited = true
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx2, now: now).isEmpty)
+        XCTAssertEqual(t2.suggestedLoad, 255)
+    }
+
+    func test_neverLowersATargetTheLifterPerformedAgainstSinceItWasWritten() throws {
+        // Seated leg curl Dec 1 (a): target 175. The Nov 17 sets (175 x 12 x 3 at RIR 2) estimate 170: lower than the target, and the
+        // lifter has performed 175 since the target was last written. It stays.
+        let (ctx, meso) = try context()
+        let missed = item("seated_leg_curl", wave: "a", repMin: 8, repMax: 10, suggested: 175)
+        let done = item("seated_leg_curl", wave: "b", repMin: 10, repMax: 12, suggested: 175, actual: [175, 175, 175], reps: [12, 12, 12], rirs: [2, 2, 2])
+        let target = item("seated_leg_curl", wave: "a", repMin: 8, repMax: 10, suggested: 175, updated: day(10, 10))
+        session(ctx, meso, day(11, 10), .planned, week: 7, label: "Legs B", [missed])
+        session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
+        session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 175)
+
+        // Written AFTER the last performance, the same estimate may lower it.
+        target.updatedAt = day(11, 18)
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertLessThan(target.suggestedLoad, 175)
+    }
+
+    func test_bodyweightAndFixedLoadExercisesAreLeftAlone() throws {
+        let profile = UserProfile(); profile.setProgressionExempt(true, exerciseId: "romanian_deadlift")
+        let (ctx, meso) = try context(profile: profile)
+        let target = legsB(ctx, meso)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "fixed-load")
+        XCTAssertEqual(target.suggestedLoad, 280)
+    }
+
+    // MARK: Idempotence and the gate
+
+    func test_runningItTwiceChangesNothingTheSecondTime() throws {
+        let (ctx, meso) = try context()
+        _ = tBar(ctx, meso)
+        _ = legsB(ctx, meso)
+        // Both targets share the day label only per exercise; they are separate chains.
+        let first = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(first.count, 2)
+        let snapshot = meso.sessions.flatMap(\.items).map { "\($0.suggestedLoad)|\($0.plannedLoadsBySet)|\($0.coachNote ?? "-")" }
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(meso.sessions.flatMap(\.items).map { "\($0.suggestedLoad)|\($0.plannedLoadsBySet)|\($0.coachNote ?? "-")" }, snapshot)
+    }
+
+    func test_theAutomaticEntryPointsAreOffUntilTheBackfillIsReviewed() throws {
+        XCTAssertFalse(PlaceholderRefresh.isEnabled)
+        let (ctx, meso) = try context()
+        let (_, target) = tBar(ctx, meso)
+        PlaceholderRefresh.afterCompletion(in: ctx, now: now)
+        PlaceholderRefreshBackfill.runIfNeeded(in: ctx)
+        XCTAssertEqual(target.suggestedLoad, 255, "gated")
+        PlaceholderRefresh.isEnabled = true
+        defer { PlaceholderRefresh.isEnabled = false }
+        PlaceholderRefresh.afterCompletion(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 330)
+    }
+}

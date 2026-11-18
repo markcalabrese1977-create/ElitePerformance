@@ -1,6 +1,16 @@
 import Foundation
 import SwiftData
 
+/// RELATION TO `PlaceholderRefresh`. This is the older, narrower rule for one case of the same problem: a planned target that
+/// carries no usable load because its chain's previous session did not give carry-forward anything to write. It only reads
+/// targets at 0 load, uses a conservative 0.975 factor on a reps-only e1RM, and falls back to any block within 12 weeks.
+/// `PlaceholderRefresh` is the whole rule: the same trigger (a missed, all-skipped or absent previous session) but for any
+/// unedited target whose load has gone stale, not only one at 0, plus the held-load case for a partly performed session,
+/// with one estimator (Epley from reps + RIR, 0.95, rounded down to the step). The two overlap on every target this
+/// file seeds, so when `PlaceholderRefresh` is switched on, `MissedSourceSeedBackfill` is replaced by
+/// `PlaceholderRefreshBackfill` in `StartupBackfills.registered` and this file is deleted: one path. Until then this
+/// backfill stays registered unchanged, and the new one is off, so the two never write the same target.
+///
 /// A planned target at zero load, because the session that would have carried a load into it (its same-meso, same-dayLabel,
 /// same-wave predecessor, dated before today) was never completed, is seeded from history instead of staying at 0. Every other
 /// zero-load target is left to carry-forward.
