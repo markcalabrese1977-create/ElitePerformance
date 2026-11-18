@@ -141,7 +141,10 @@ struct ExercisePickerList: View {
                 Text(ex.primaryMuscle.rawValue.capitalized + (ex.isCompound ? " · Compound" : " · Isolation"))
                     .font(.caption).foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())          // the whole row taps
         }
+        .buttonStyle(.plain)                     // names read as text, not as links
         .swipeActions(edge: .leading) {
             if isCustom {
                 Button { mappingTarget = MappingTarget(id: ex.id) } label: {
