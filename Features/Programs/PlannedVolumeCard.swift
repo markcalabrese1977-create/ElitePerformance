@@ -48,6 +48,7 @@ struct PlannedVolumeCard: View {
                     Spacer()
                     Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.tertiary)
                 }
+                .contentShape(Rectangle())          // the whole header row taps, not only its text
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("plannedVolumeToggle")
