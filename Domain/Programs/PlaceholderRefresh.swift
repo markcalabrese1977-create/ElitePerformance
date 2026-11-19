@@ -26,7 +26,8 @@ import SwiftData
 ///    completed session of the same day label (any letter) with working sets of 12 reps or fewer. Each set gives an Epley
 ///    max from its reps plus its logged RIR (a missing RIR counts as the item's target RIR); the best is converted to the
 ///    target's top rep plus its target RIR (the midpoint of a range), taken 5% lower, rounded DOWN to the exercise's step
-///    and clamped to its max load. The note reads "Estimated from your recent B-week sets — set 1 calibrates." Sources
+///    and clamped to its max load. Floor: when the target's repMax is no more than the reps performed in the source
+///    set that gave the estimate, the load is max(estimate, that set's load). The note reads "Estimated from your recent B-week sets — set 1 calibrates." Sources
 ///    come from the same block, or from the last 12 weeks.
 ///    (iii) Otherwise the load is left alone. A target not written since its block was created gets the one-time note
 ///    "No recent data for this week type — set 1 calibrates."; a target at 0 gets "No recent history — set a load.".
@@ -360,11 +361,15 @@ enum PlaceholderRefresh {
             let rows = WorkingSetFilter.workingRows(of: src).filter { $0.reps <= maxSourceReps }
             guard !rows.isEmpty else { continue }
             if hasPain(src) { return (nil, false) }                         // pain holds
-            let e1rm = rows.map { r -> Double in
+            // The set that gives the estimate (the highest e1RM; the first on a tie).
+            var best: (e1rm: Double, load: Double, reps: Int)?
+            for r in rows {
                 let rir = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
-                return r.load * (1.0 + Double(r.reps + rir) / 30.0)
-            }.max() ?? 0
-            guard e1rm > 0 else { return (nil, false) }
+                let e = r.load * (1.0 + Double(r.reps + rir) / 30.0)
+                if best == nil || e > best!.e1rm { best = (e, r.load, r.reps) }
+            }
+            guard let top = best, top.e1rm > 0 else { return (nil, false) }
+            let e1rm = top.e1rm
 
             let topReps = item.repMax ?? item.targetReps
             let rir: Double = {
@@ -375,7 +380,10 @@ enum PlaceholderRefresh {
             let step = CoachingEngine.loadIncrement(
                 for: item, base: raw,
                 minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: ctx.profile, unit: ctx.unit), unit: ctx.unit)
-            let rounded = UnitAwareRounding.round(raw, increment: step, unit: ctx.unit, mode: .down)
+            var rounded = UnitAwareRounding.round(raw, increment: step, unit: ctx.unit, mode: .down)
+            // Floor: a target whose top rep count is no more than the reps already done in the source set is not
+            // an easier ask than that set, so it never writes below that set's load (the clamp to max load still applies).
+            if topReps <= top.reps { rounded = max(rounded, top.load) }
             let letter = letterKey(src).isEmpty ? nil : letterKey(src)
             let note = "Estimated from your recent \(letter.map { "\($0.uppercased())-week " } ?? "")sets — set 1 calibrates."
             return ((rounded, .estimated(from: s.date, letter: letter, e1RM: e1rm, why: why), note), false)

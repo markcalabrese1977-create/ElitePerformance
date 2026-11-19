@@ -3449,11 +3449,12 @@ final class PlaceholderRefreshTests: XCTestCase {
         let (ctx, meso) = try context()
         let target = legsB(ctx, meso)
         // 325 x 10 at RIR 2 -> e1RM = 325 * (1 + 12/30) = 455. Target: 8 reps + RIR 2 -> 455 / (1 + 10/30) = 341.25; x 0.95 = 324.2;
-        // round DOWN to the default 2.5 step -> 322.5.
+        // round DOWN to the default 2.5 step -> 322.5. Floor: the target's repMax (8) is no more than the 10 reps done at 325,
+        // so the written load is max(322.5, 325) = 325.
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(changes.count, 1)
-        XCTAssertEqual(target.suggestedLoad, 322.5)
-        XCTAssertEqual(target.plannedLoadsBySet, [322.5, 322.5, 322.5])
+        XCTAssertEqual(target.suggestedLoad, 325)
+        XCTAssertEqual(target.plannedLoadsBySet, [325, 325, 325])
         XCTAssertEqual(target.coachNote, "Estimated from your recent B-week sets — set 1 calibrates.")
         XCTAssertFalse(target.planEdited)
         guard case .estimated(_, let letter, let e1rm, let why) = changes[0].reason else { return XCTFail("estimated") }
@@ -3461,12 +3462,43 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertTrue(why.contains("Nov 10") && why.contains("missed"), why)
     }
 
+    /// The floor: CS Incline DB Row, source B week 90 x 10, 10, 10 at RIR 2, 2, 1; target an A week at 6-8, RIR 2.
+    /// e1RM = 90 * (1 + 12/30) = 126; 126 / (1 + 10/30) = 94.5; x 0.95 = 89.8 -> rounds down to 85. The target's repMax (8)
+    /// is no more than the 10 reps done at 90, so the written load is max(85, 90) = 90.
+    func test_floor_aTargetNoHarderThanTheSourceSet_neverWritesBelowThatSetsLoad() throws {
+        let (ctx, meso) = try context()
+        let missed = item("cs_incline_db_row", wave: "a", repMin: 6, repMax: 8, suggested: 85)
+        let done = item("cs_incline_db_row", wave: "b", repMin: 8, repMax: 10, suggested: 90, actual: [90, 90, 90], reps: [10, 10, 10], rirs: [2, 2, 1])
+        let target = item("cs_incline_db_row", wave: "a", repMin: 6, repMax: 8, suggested: 85)
+        session(ctx, meso, day(11, 3), .planned, week: 7, label: "Pull B", [missed])
+        session(ctx, meso, day(11, 10), .completed, week: 8, label: "Pull B", [done])
+        session(ctx, meso, day(12, 2), .planned, week: 10, label: "Pull B", [target])
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 90, "not 85")
+        XCTAssertEqual(target.plannedLoadsBySet, [90, 90, 90])
+        XCTAssertEqual(changes.last?.newLoad, 90)
+    }
+
+    func test_floor_doesNotApplyWhenTheTargetAsksForMoreRepsThanTheSourceSet() throws {
+        let (ctx, meso) = try context()
+        let done = item("cs_incline_db_row", wave: "b", repMin: 8, repMax: 10, suggested: 90, actual: [90, 90, 90], reps: [8, 8, 8], rirs: [2, 2, 2])
+        let target = item("cs_incline_db_row", wave: "a", repMin: 10, repMax: 12, suggested: 60)
+        session(ctx, meso, day(11, 3), .planned, week: 7, label: "Pull B", [item("cs_incline_db_row", wave: "a", repMin: 10, repMax: 12, suggested: 60)])
+        session(ctx, meso, day(11, 10), .completed, week: 8, label: "Pull B", [done])
+        session(ctx, meso, day(12, 2), .planned, week: 10, label: "Pull B", [target])
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertLessThan(target.suggestedLoad, 90, "12 reps asked vs 8 done: the estimate stands, no floor")
+    }
+
     func test_theStepIsTheExercisesEffectiveStep_androundsDown() throws {
         let profile = UserProfile(); profile.minLoadIncrement = 5
         let (ctx, meso) = try context(profile: profile)
         let target = legsB(ctx, meso)
+        // 6-rep source sets (so the floor, which needs target repMax <= reps done, does not apply): 325 x 6 at RIR 2 ->
+        // e1RM 411.7; / (1 + 10/30) = 308.8; x 0.95 = 293.4 -> rounds DOWN to the 5 lb step: 290 (2.5 step would give 292.5).
+        for s in meso.sessions where s.status == .completed { for i in s.items { i.actualReps = [6, 6, 6] } }
         _ = PlaceholderRefresh.run(in: ctx, now: now)
-        XCTAssertEqual(target.suggestedLoad, 320, "324.2 rounds DOWN to the 5 lb step")
+        XCTAssertEqual(target.suggestedLoad, 290, "293.4 rounds DOWN to the 5 lb step")
     }
 
     func test_theMaxLoadClampsTheEstimate() throws {
@@ -3482,9 +3514,10 @@ final class PlaceholderRefreshTests: XCTestCase {
         let (ctx, meso) = try context()
         let target = legsB(ctx, meso)
         // Unset the logged RIRs: the source item's target RIR (2) stands in, so the numbers are the same as with 2.
-        for s in meso.sessions where s.status == .completed { for i in s.items { i.actualRIRs = [-1, -1, -1] } }
+        // 6-rep sets keep the floor out of it: 325 x 6 at RIR 2 -> 293.4 -> 292.5 (the same as with RIR logged as 2).
+        for s in meso.sessions where s.status == .completed { for i in s.items { i.actualRIRs = [-1, -1, -1]; i.actualReps = [6, 6, 6] } }
         _ = PlaceholderRefresh.run(in: ctx, now: now)
-        XCTAssertEqual(target.suggestedLoad, 322.5)
+        XCTAssertEqual(target.suggestedLoad, 292.5)
     }
 
     func test_onlySetsOfTwelveRepsOrFewerQualify() throws {
@@ -3494,7 +3527,7 @@ final class PlaceholderRefreshTests: XCTestCase {
         let light = item("romanian_deadlift", wave: "c", repMin: 12, repMax: 15, suggested: 200, actual: [200, 200, 200], reps: [15, 15, 15], rirs: [2, 2, 2])
         session(ctx, meso, day(11, 18) , .completed, week: 8, label: "Legs B", [light])
         _ = PlaceholderRefresh.run(in: ctx, now: now)
-        XCTAssertEqual(target.suggestedLoad, 322.5, "the 15-rep session is not a source")
+        XCTAssertEqual(target.suggestedLoad, 325, "the 15-rep session is not a source (the 10-rep session is: 322.5, floored to its 325)")
 
         // Only 15-rep sets exist: no qualifying source, the target is left alone.
         let (ctx2, meso2) = try context()
@@ -3554,11 +3587,11 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
         XCTAssertEqual(target.suggestedLoad, 175)
 
-        // Written AFTER the last performance, the same estimate may lower it.
+        // Written AFTER the last performance, the same estimate may lower it - but the floor (repMax 10 <= the 12 reps done at 175)
+        // holds it at 175, so nothing is lowered here either.
         target.updatedAt = day(11, 18)
-        let changes = PlaceholderRefresh.run(in: ctx, now: now)
-        XCTAssertEqual(changes.count, 1)
-        XCTAssertLessThan(target.suggestedLoad, 175)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
+        XCTAssertEqual(target.suggestedLoad, 175)
     }
 
     /// Calf raise, Legs B Dec 1 (a): target 330 (10-12 reps). The lifter performed 301 x 12, 12, 11 on Nov 17 - under the target's
@@ -3572,11 +3605,11 @@ final class PlaceholderRefreshTests: XCTestCase {
         session(ctx, meso, day(11, 17), .completed, week: 8, label: "Legs B", [done])
         session(ctx, meso, day(12, 1), .planned, week: 10, label: "Legs B", [target])
         // 301 x 12 at RIR 1 -> e1RM 301 * (1 + 13/30) = 431.5; target 12 reps + RIR 2 -> 431.5 / (1 + 14/30) = 294.1; x 0.95 = 279.4;
-        // down to the 2.5 step -> 277.5.
+        // down to the 2.5 step -> 277.5. Floor: the target's repMax (12) is no more than the 12 reps done at 301, so max(277.5, 301) = 301.
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(changes.count, 1)
-        XCTAssertEqual(target.suggestedLoad, 277.5)
-        XCTAssertEqual(target.plannedLoadsBySet, [277.5, 277.5, 277.5])
+        XCTAssertEqual(target.suggestedLoad, 301)
+        XCTAssertEqual(target.plannedLoadsBySet, [301, 301, 301])
     }
 
     func test_aLoadAtOrAboveTheTargetStillLowersWhenTheRepsWereBelowTheTargetsRepMin() throws {
@@ -3671,7 +3704,7 @@ final class PlaceholderRefreshTests: XCTestCase {
         session(ctx, meso, day(11, 3), .planned, week: 6, label: "Legs B", [nov3c])
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(changes.count, 1)
-        XCTAssertEqual(target.suggestedLoad, 322.5, "the Nov 17 cross-letter estimate, not Sep 29's 300")
+        XCTAssertEqual(target.suggestedLoad, 325, "the Nov 17 cross-letter estimate (322.5, floored to its 325), not Sep 29's 300")
         guard case .estimated? = changes.first?.reason else { return XCTFail("rule 2 (ii)") }
     }
 
