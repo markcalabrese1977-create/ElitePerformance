@@ -14,7 +14,8 @@ import SwiftData
 /// active block. For each, the previous same-day, same-letter session of the same block is found, and:
 ///
 /// 1. **Held load.** It was completed, at least one working set was performed, no set was flagged for pain, and the coach
-///    could not write for incomplete evidence (fewer than min(planned sets, 3) primary sets): the target gets the HELD load,
+///    could not write for incomplete evidence (fewer than min(planned sets, 3) primary sets), or the target is still at 0
+///    although the evidence was complete (the plan had no baseline to judge against): the target gets the HELD load,
 ///    the last performed primary set's load (`CoachingEngine.heldLoad`). A skipped or unlogged set never lowers it and
 ///    never raises it.
 /// 2. **No usable previous session** (missed, all sets skipped, or no such session exists), in this order:
@@ -155,7 +156,13 @@ enum PlaceholderRefresh {
                             outcome = rule2(for: item, target: target, meso: meso, why: "the \(dayText(predecessor.date)) session had no performed sets",
                                             completed: completed, now: now, ctx: ctx)
                         } else if CoachingEngine.hasSufficientPrimaryEvidence(predItem) {
-                            continue                                       // carry-forward owns it
+                            // Carry-forward owns a target that has a load. One still at 0 was never written (the plan the coach judged
+                            // against had no baseline): it gets the held load, not a progression.
+                            guard isZeroTarget(item), let held = CoachingEngine.heldLoad(for: predItem), held > 0 else { continue }
+                            let count = CoachingEngine.plannedWorkingSetIndices(for: predItem).count
+                            let planned = max(1, predItem.targetSets)
+                            outcome = .write((held, .heldLoad(from: predecessor.date, performed: count, planned: planned),
+                                              "Held at \(compact(held, ctx)) from \(dayText(predecessor.date)): the load you used."))
                         } else if let held = CoachingEngine.heldLoad(for: predItem), held > 0 {
                             let planned = max(1, predItem.targetSets)
                             let count = CoachingEngine.plannedWorkingSetIndices(for: predItem).count

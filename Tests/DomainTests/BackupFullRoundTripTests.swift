@@ -3888,6 +3888,49 @@ final class WavelessBlockTests: XCTestCase {
         XCTAssertNotNil(PlanMemoryEngine.nextTargetItem(for: try XCTUnwrap(week1A.items.first), after: week1A, in: block.sessions))
     }
 
+    /// What really happens in the app: a block the lifter just wrote has NO planned load anywhere; week 1 is logged at loads typed on the
+    /// day. Week 2 must show what the coach wrote from those sets.
+    func test_firstWeekLoggedWithNoPlannedLoad_writesWeek2FromTheActualSets() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay())
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        for item in week1A.items {
+            XCTAssertEqual(item.suggestedLoad, 0, "a fresh block carries no load")
+            item.actualLoads = Array(repeating: 100, count: item.targetSets)
+            item.actualReps = Array(repeating: item.repMax ?? 10, count: item.targetSets)
+            item.actualRIRs = Array(repeating: 2, count: item.targetSets)
+            item.isCompleted = true
+        }
+        week1A.status = .completed; week1A.completedAt = week1A.date
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        let week2A = try XCTUnwrap(sessions(block, week: 2, label: "Upper A").first)
+        let bench = try XCTUnwrap(week2A.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertGreaterThanOrEqual(bench.suggestedLoad, 100, "the coach wrote week 2's bench from week 1's 3 x 10 at 100")
+        XCTAssertTrue(bench.plannedLoadsBySet.prefix(3).allSatisfy { $0 >= 100 })
+    }
+
+    /// A week already completed before the baseline fix: the startup backfill gives week 2 the held load of week 1's same-day session.
+    func test_aCompletedWeekWhoseTargetWasNeverWritten_getsTheHeldLoadFromTheBackfill() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay())
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        for item in week1A.items {
+            item.actualLoads = Array(repeating: 100, count: item.targetSets); item.actualReps = Array(repeating: 10, count: item.targetSets)
+            item.actualRIRs = Array(repeating: 2, count: item.targetSets); item.isCompleted = true
+        }
+        week1A.status = .completed; week1A.completedAt = week1A.date
+        try ctx.save()
+        let week2A = try XCTUnwrap(sessions(block, week: 2, label: "Upper A").first)
+        let bench = try XCTUnwrap(week2A.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual(bench.suggestedLoad, 0)
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(bench.suggestedLoad, 100)
+        XCTAssertEqual(bench.plannedLoadsBySet, [100, 100, 100])
+        XCTAssertEqual(changes.filter { $0.item === bench }.count, 1)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
+    }
+
     func test_theChainIsBlockAndDay_notChronological() throws {
         let ctx = try context()
         let block = try seed(ctx, fourDay())

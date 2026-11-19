@@ -75,6 +75,9 @@ struct PlanMemoryEngine {
         guard !futureSessions.isEmpty else { return }
 
         for sourceItem in session.items {
+            // A plan with no load at all (a block the lifter wrote, a lift swapped in mid-block) has no baseline for the coach to
+            // judge against: the load actually lifted becomes it, so the next session is written from what was done.
+            Self.adoptPerformedLoadAsBaseline(sourceItem)
             // The step is per exercise: the lifter's own step for this lift, else the default load step.
             let loadIncrement = UserProfile.loadStep(for: sourceItem.exerciseId, profile: profile, unit: unit)
             guard hasMeaningfulPlan(sourceItem) else { continue }
@@ -339,6 +342,17 @@ struct PlanMemoryEngine {
                             }
                         }
         }
+    }
+
+    /// An item whose plan carries no load (suggested and every planned slot 0) but whose sets were performed takes the held
+    /// load (the last performed primary back-off set) as its baseline. Deload and bodyweight items are left alone, as is any
+    /// item that already has a planned load.
+    static func adoptPerformedLoadAsBaseline(_ item: SessionItem) {
+        guard item.suggestedLoad <= 0, item.plannedLoadsBySet.allSatisfy({ $0 <= 0 }),
+              item.waveRaw?.lowercased() != "deload",
+              !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),
+              let held = CoachingEngine.heldLoad(for: item), held > 0 else { return }
+        item.suggestedLoad = held
     }
 
     // MARK: - Canonical target resolution
