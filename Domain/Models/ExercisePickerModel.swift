@@ -98,12 +98,16 @@ enum ExerciseSearch {
     /// word it stands for, and a plural the singular. An empty query matches everything.
     static func matches(_ exercise: CatalogExercise, query: String) -> Bool { rank(exercise, query: query) != nil }
 
-    /// nil = no match. Lower is better: 0 name starts with the query, 1 a name word starts with it, 2 the name contains it,
-    /// 3 only an alias or abbreviation matches.
+    /// nil = no match. Lower is better, in this order: 0 the name IS the query (case, diacritics and punctuation ignored), 1 the
+    /// name starts with the query, 2 per-word matches (a name word starts with each query word), 3 the name contains them,
+    /// 4 only an alias or abbreviation matches. "romanian deadlift" lists Romanian Deadlift before Dumbbell Romanian Deadlift.
     static func rank(_ exercise: CatalogExercise, query: String) -> Int? {
         let words = tokens(query)
         guard !words.isEmpty else { return 0 }
         let h = haystack(for: exercise)
+        let whole = words.joined(separator: " ")
+        if h.name == whole { return 0 }
+        if h.name.hasPrefix(whole) { return 1 }
         let all = h.name + " | " + h.aliases
         var worst = 0
         for word in words {
@@ -112,10 +116,10 @@ enum ExerciseSearch {
             var best: Int?
             for c in candidates {
                 let r: Int?
-                if h.name.hasPrefix(c) { r = 0 }
-                else if h.name.split(separator: " ").contains(where: { $0.hasPrefix(c) }) { r = 1 }
-                else if h.name.contains(c) { r = 2 }
-                else if all.contains(c) { r = 3 }
+                if h.name.hasPrefix(c) { r = 2 }
+                else if h.name.split(separator: " ").contains(where: { $0.hasPrefix(c) }) { r = 2 }
+                else if h.name.contains(c) { r = 3 }
+                else if all.contains(c) { r = 4 }
                 else { r = nil }
                 if let r { best = min(best ?? r, r) }
             }

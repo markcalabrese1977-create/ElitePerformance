@@ -701,6 +701,25 @@ final class ExercisePickerTests: XCTestCase {
         XCTAssertTrue(ExercisePickerModel.sections(exercises: catalog, query: "qqqqxx").isEmpty)
     }
 
+    func test_anExactNameMatchAlwaysRanksFirst_thenNamesThatStartWithIt_thenPerWordMatches() throws {
+        let r = results("romanian deadlift").map(\.name)
+        XCTAssertEqual(r.first, "Romanian Deadlift")
+        XCTAssertLessThan(try XCTUnwrap(r.firstIndex(of: "Romanian Deadlift")), try XCTUnwrap(r.firstIndex(of: "Dumbbell Romanian Deadlift")))
+        XCTAssertEqual(results("ROMANIAN  DEADLIFT").first?.name, "Romanian Deadlift", "case and spacing ignored")
+        let custom = CatalogExercise(id: "custom_rdl", name: "Romanian Déadlift", primaryMuscle: .hamstrings, isCompound: true)
+        XCTAssertEqual(results("romanian deadlift", in: catalog + [custom]).prefix(2).map(\.id).sorted(), ["custom_rdl", "romanian_deadlift"].sorted(), "an accent-only difference is still an exact name")
+        // Starts-with beats per-word: "bench" lists the names that begin with it before names that merely contain a word starting with it.
+        let bench = results("bench press")
+        XCTAssertEqual(bench.first?.name, "Bench Press")
+        XCTAssertEqual(ExerciseSearch.rank(try XCTUnwrap(bench.first), query: "bench press"), 0)
+        let close = try XCTUnwrap(bench.first { $0.name == "Close Grip Bench Press" })
+        XCTAssertEqual(ExerciseSearch.rank(close, query: "bench press"), 2, "per-word match")
+        let prefixed = ExerciseSearch.rank(try XCTUnwrap(catalog.first { $0.name == "Romanian Deadlift" }), query: "romanian")
+        XCTAssertEqual(prefixed, 1, "a name that starts with the query")
+        let perWord = ExerciseSearch.rank(try XCTUnwrap(catalog.first { $0.name == "Dumbbell Romanian Deadlift" }), query: "romanian")
+        XCTAssertEqual(perWord, 2)
+    }
+
     func test_betterMatchesRankFirst() {
         let r = results("curl")
         // A name that starts with the query beats one that merely contains it.
