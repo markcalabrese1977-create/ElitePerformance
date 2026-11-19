@@ -77,7 +77,8 @@ struct PlanMemoryEngine {
         for sourceItem in session.items {
             // A plan with no load at all (a block the lifter wrote, a lift swapped in mid-block) has no baseline for the coach to
             // judge against: the load actually lifted becomes it, so the next session is written from what was done.
-            Self.adoptPerformedLoadAsBaseline(sourceItem)
+            let adoptedBaseline = Self.adoptPerformedLoadAsBaseline(
+                sourceItem, isExempt: UserProfile.isProgressionExempt(exerciseId: sourceItem.exerciseId, profile: profile))
             // The step is per exercise: the lifter's own step for this lift, else the default load step.
             let loadIncrement = UserProfile.loadStep(for: sourceItem.exerciseId, profile: profile, unit: unit)
             guard hasMeaningfulPlan(sourceItem) else { continue }
@@ -94,6 +95,10 @@ struct PlanMemoryEngine {
                 after: session,
                 in: allSessions
             ) else { continue }
+
+            // A write that exists only because of the adopted baseline never lands on a target the lifter edited by hand
+            // (an edited plan with no load is a choice, not a gap).
+            if adoptedBaseline && targetItem.planEdited { continue }
 
             // Already-materialized future plan (not empty): the seed path below only
             // fills empty plans, so an earned bump would never reach an anchored/
@@ -345,14 +350,19 @@ struct PlanMemoryEngine {
     }
 
     /// An item whose plan carries no load (suggested and every planned slot 0) but whose sets were performed takes the held
-    /// load (the last performed primary back-off set) as its baseline. Deload and bodyweight items are left alone, as is any
-    /// item that already has a planned load.
-    static func adoptPerformedLoadAsBaseline(_ item: SessionItem) {
+    /// load (the last performed primary back-off set) as its baseline. Never for: a deload item, a bodyweight item, an item the
+    /// lifter edited by hand (`planEdited`), a fixed-load exercise, or an item with a pain flag (pain makes no call), nor for
+    /// one that already has a planned load.
+    @discardableResult
+    static func adoptPerformedLoadAsBaseline(_ item: SessionItem, isExempt: Bool = false) -> Bool {
         guard item.suggestedLoad <= 0, item.plannedLoadsBySet.allSatisfy({ $0 <= 0 }),
+              !item.planEdited, !isExempt,
               item.waveRaw?.lowercased() != "deload",
+              !item.setFeedbackBySet.contains(SetFeedback.pain.rawValue),
               !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),
-              let held = CoachingEngine.heldLoad(for: item), held > 0 else { return }
+              let held = CoachingEngine.heldLoad(for: item), held > 0 else { return false }
         item.suggestedLoad = held
+        return true
     }
 
     // MARK: - Canonical target resolution

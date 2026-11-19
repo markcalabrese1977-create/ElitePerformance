@@ -3931,6 +3931,106 @@ final class WavelessBlockTests: XCTestCase {
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
     }
 
+    // MARK: The no-load baseline never touches what it must not
+
+    /// Week 1 Upper A done with a performed bench at 100 and no planned load; `tweak` sets up the case under test. Returns the source and the week 2 target.
+    private func baselineCase(profile: UserProfile? = nil, exercise: String = "bench_press",
+                              _ tweak: (SessionItem, SessionItem) -> Void = { _, _ in }) throws -> (ModelContext, SessionItem, SessionItem, Session) {
+        let ctx = try context()
+        if let profile { ctx.insert(profile) }
+        let block = try seed(ctx, fourDay())
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        let source = try XCTUnwrap(week1A.items.first { $0.exerciseId == exercise })
+        let target = try XCTUnwrap(sessions(block, week: 2, label: "Upper A").first?.items.first { $0.exerciseId == exercise })
+        source.actualLoads = Array(repeating: 100, count: source.targetSets); source.actualReps = Array(repeating: 10, count: source.targetSets)
+        source.actualRIRs = Array(repeating: 2, count: source.targetSets); source.isCompleted = true
+        week1A.status = .completed; week1A.completedAt = week1A.date
+        tweak(source, target)
+        try ctx.save()
+        return (ctx, source, target, week1A)
+    }
+
+    func test_baselineAndFillAt0_doWriteInTheOrdinaryCase() throws {
+        let (ctx, source, target, week1A) = try baselineCase()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        XCTAssertEqual(source.suggestedLoad, 100, "the load lifted became its baseline")
+        XCTAssertGreaterThan(target.suggestedLoad, 0)
+        let (ctx2, _, target2, _) = try baselineCase()
+        XCTAssertFalse(PlaceholderRefresh.run(in: ctx2, now: now).isEmpty)
+        XCTAssertEqual(target2.suggestedLoad, 100)
+    }
+
+    func test_neverForABodyweightItem() throws {
+        let bw = "push_up"
+        XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: bw))
+        func slotted() -> ProgramTemplate {
+            .waveless(name: "BW", totalWeeks: 4, days: [WavelessDay(title: "A", slots: [.defaults(exerciseId: bw, isCompound: true)]),
+                                                        WavelessDay(title: "B", slots: [.defaults(exerciseId: "bench_press", isCompound: true)])])
+        }
+        let ctx = try context()
+        try DUPProgramSeeder.seed(startDate: monday, trainingWeekdays: [2, 5], context: ctx, template: slotted(), calendar: cal, mesoName: "BW", mesoStatus: .active)
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first)
+        let wk1 = try XCTUnwrap(sessions(block, week: 1, label: "A").first)
+        let source = try XCTUnwrap(wk1.items.first)
+        source.actualLoads = [20, 20, 20]; source.actualReps = [10, 10, 10]; source.actualRIRs = [2, 2, 2]     // even a loaded set
+        wk1.status = .completed; wk1.completedAt = wk1.date
+        let target = try XCTUnwrap(sessions(block, week: 2, label: "A").first?.items.first)
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: wk1)
+        XCTAssertEqual(source.suggestedLoad, 0, "no baseline for a bodyweight item")
+        XCTAssertEqual(target.suggestedLoad, 0)
+        _ = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 0, "the fill-at-0 path leaves it too")
+    }
+
+    func test_neverForAPlanEditedItem() throws {
+        // The source's plan was edited by hand (even to nothing): its baseline is the lifter's, not the coach's.
+        let (ctx, source, target, week1A) = try baselineCase { source, _ in source.planEdited = true }
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        XCTAssertEqual(source.suggestedLoad, 0)
+        // A hand-edited TARGET is left exactly as it is by both paths.
+        let (ctx2, _, target2, week1B) = try baselineCase { _, target in
+            target.planEdited = true; target.plannedLoadsBySet = [0, 0, 0]; target.suggestedLoad = 0
+        }
+        PlanMemoryEngine(context: ctx2).carryForwardPlans(from: week1B)
+        XCTAssertEqual(target2.suggestedLoad, 0); XCTAssertEqual(target2.plannedLoadsBySet, [0, 0, 0])
+        XCTAssertFalse(PlaceholderRefresh.run(in: ctx2, now: now).contains { $0.item === target2 }, "not even a note")
+        XCTAssertEqual(target2.suggestedLoad, 0); XCTAssertEqual(target2.plannedLoadsBySet, [0, 0, 0]); XCTAssertTrue(target2.planEdited)
+        _ = target
+    }
+
+    func test_neverForAFixedLoadExercise() throws {
+        let profile = UserProfile()
+        profile.setProgressionExempt(true, exerciseId: "bench_press")
+        let (ctx, source, target, week1A) = try baselineCase(profile: profile)
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        XCTAssertEqual(source.suggestedLoad, 0, "no baseline adopted")
+        XCTAssertEqual(target.suggestedLoad, 0)
+        XCTAssertFalse(PlaceholderRefresh.run(in: ctx, now: now).contains { $0.item === target }, "left alone by the fill-at-0 path")
+        XCTAssertEqual(target.suggestedLoad, 0)
+    }
+
+    func test_neverWhenTheSourceHasAPainFlag() throws {
+        let (ctx, source, target, week1A) = try baselineCase { source, _ in
+            source.setFeedbackBySet = ["", "pain", ""]
+        }
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        XCTAssertEqual(source.suggestedLoad, 0, "pain: no baseline, no call")
+        XCTAssertEqual(target.suggestedLoad, 0)
+        XCTAssertFalse(PlaceholderRefresh.run(in: ctx, now: now).contains { $0.item === target }, "left alone by the fill-at-0 path")
+        XCTAssertEqual(target.suggestedLoad, 0)
+        XCTAssertEqual(target.plannedLoadsBySet, [0, 0, 0])
+        XCTAssertFalse(target.coachNote?.contains("Held at") == true, "the pain warning stands; no held-load note")
+    }
+
+    func test_theBaselineIsAlsoSkippedForADeloadItem() {
+        let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 4, suggestedLoad: 0, waveRaw: "deload",
+                               plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [0, 0, 0],
+                               actualReps: [8, 8, 8], actualLoads: [100, 100, 100], actualRIRs: [4, 4, 4])
+        PlanMemoryEngine.adoptPerformedLoadAsBaseline(item)
+        XCTAssertEqual(item.suggestedLoad, 0)
+    }
+
     func test_theChainIsBlockAndDay_notChronological() throws {
         let ctx = try context()
         let block = try seed(ctx, fourDay())
