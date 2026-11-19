@@ -3,7 +3,7 @@
 #
 #   scripts/upgrade_test.sh [--released <commit>] [--seed fixture:<backup.json> | --seed onboarding] [--keep]
 #
-# 1. checks out <commit> (default: the uploaded build, 1.2.2 (4) = tag v1.2.2-b4 = 3faaf49, see BACKLOG.md "Release check") in a worktree,
+# 1. checks out <commit> (default: the live App Store build, 1.2.2 (5) = tag v1.2.2-b5 = c981c47, see BACKLOG.md "Release check") in a worktree,
 #    patches only what a current Xcode needs to build it and makes it take the DEVICE store path (not the simulator one);
 # 2. seeds the app's real default store with that build's own code (a fixture imported through its importer, or the
 #    onboarding path plus two completed sessions) and launches it once, as a device would;
@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 3
 REPO="$PWD"
-RELEASED="3faaf49"; SEED="onboarding"; KEEP=0
+RELEASED="c981c47"; SEED="onboarding"; KEEP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --released) RELEASED="$2"; shift 2 ;;
@@ -93,7 +93,9 @@ GOT=$(grep -c "Backfill [A-Za-z]*:" "$WORK/head_launch.log")
 ! find "$HOME/Library/Logs/DiagnosticReports" -name 'ElitePerformance*' -newer "$WORK/launch.mark" 2>/dev/null | grep -q .; check "no crash report" $?
 
 echo "---- automatic backups written by the candidate's launch (oldest first) ----"
-BKS="$(find "$HOME/Library/Developer/CoreSimulator/Devices/$DEV/data" -name 'ElitePerformance_AutoBackup_*.json' 2>/dev/null | sort)"
+# Only the files written AFTER the candidate was launched count: a released build that writes its own launch backup (1.2.2 (4) and later)
+# leaves one of its own from the seeding launch, which is not the candidate's.
+BKS="$(find "$HOME/Library/Developer/CoreSimulator/Devices/$DEV/data" -name 'ElitePerformance_AutoBackup_*.json' -newer "$WORK/launch.mark" 2>/dev/null | sort)"
 if [ -n "$BKS" ]; then
   echo "$BKS" | while IFS= read -r f; do python3 - "$f" <<'PY'
 import json,sys

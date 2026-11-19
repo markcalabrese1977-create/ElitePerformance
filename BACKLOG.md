@@ -68,12 +68,12 @@ was BEFORE the backfills.
 
 - `scripts/upgrade_test.sh --seed onboarding` : one template program (as onboarding applies it), shifted so its first two sessions are the only ones in the past and both are completed (nothing missed), no customs, no import.
 - `scripts/upgrade_test.sh --seed fixture:<backup.json>` : a real backup imported through the released build's importer.
-- `--released <commit>` : the build to upgrade from. The default is `3faaf49`, the uploaded build: 1.2.2 (4), archived from `3faaf49` (tag `v1.2.2-b4`; the
-  device's About row shows `3faaf49`). It was first mis-pointed at `c9b4792`, the commit before the docs-only screenshot commit; the two differ only by `docs/screenshots/guide/`.
-  The previous default was `26006d5` (1.2.1 (4), last uploaded as of Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed with a 403 and was never distributed).
+- `--released <commit>` : the build to upgrade from. The default is `c981c47`, the live App Store build: 1.2.2 (5), archived from `c981c47` (tag `v1.2.2-b5`).
+  Earlier defaults: `3faaf49` (1.2.2 (4), tag `v1.2.2-b4`; first mis-pointed at `c9b4792`, the commit before the docs-only screenshot commit) and `26006d5` (1.2.1 (4),
+  last uploaded as of Jul 7 2026; the 1.2.2 (1) upload of Oct 17 failed with a 403 and was never distributed).
   After the next upload, set the default in the script to that build's commit (tag it when you archive).
 - The script never touches a physical device; it deletes its simulator and worktree unless `--keep` is given.
-- Runs: 1.2.1 (4) -> ec64bd5 with the Nov 14 15:12 fixture (294 sessions) and with onboarding (40 sessions, 2 completed): both PASS.
+- Runs: 1.2.2 (5) c981c47 -> 7ce9fa3 (+ the 1.3.0 bump) with the onboarding seed (40 sessions, 2 completed) and with the App Store sample data (84 sessions, 60 completed): both PASS (the seeding test opens the store with cloudKitDatabase .none like the app; only backups written after the candidate's launch count). 1.2.1 (4) -> ec64bd5 with the Nov 14 15:12 fixture (294 sessions) and with onboarding (40 sessions, 2 completed): both PASS.
 
 ## Done (Oct 2026)
 
