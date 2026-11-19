@@ -919,3 +919,92 @@ final class ExercisePickerTests: XCTestCase {
         XCTAssertEqual(list.components(separatedBy: "mappingTarget = MappingTarget(").count - 1, 1, "no other way to open the editor from a picker")
     }
 }
+
+// MARK: - Customization sheet: apply to all week types
+
+final class WaveCustomizationTests: XCTestCase {
+
+    private let template = DUP10WeekTemplate.template
+    private var slot: ProgramExerciseTemplate { template.dayTemplates[0].exerciseTemplates[0] }   // bench: a ramp over the weeks
+
+    /// The drafts the sheet loads for an exercise: each letter's first-week values.
+    private func loaded(_ existing: ExerciseWaveOverride? = nil) -> [WaveType: WaveDraft] {
+        var out: [WaveType: WaveDraft] = [:]
+        for wave in WaveCustomization.editableWaves {
+            let week = template.weekRules.first { $0.wave == wave }?.weekNumber ?? 1
+            let p = slot.prescription(for: wave)
+            out[wave] = WaveDraft(repMin: p?.repMin ?? 1, repMax: p?.repMax ?? 1, rir: p?.targetRIRMax ?? 0,
+                                  sets: existing?.setsByWeek.flatMap { week - 1 < $0.count ? $0[week - 1] : nil } ?? slot.sets(forWeek: week, wave: wave))
+        }
+        return out
+    }
+
+    func test_applyToAll_copiesTheEditedLettersSetsRepsAndRIR_toEveryOtherLetter() {
+        var drafts = loaded()
+        drafts[.b] = WaveDraft(repMin: 9, repMax: 14, rir: 0, sets: 5)
+        let out = WaveCustomization.applyToAll(from: .b, drafts: drafts)
+        for wave in WaveCustomization.editableWaves { XCTAssertEqual(out[wave], WaveDraft(repMin: 9, repMax: 14, rir: 0, sets: 5), "\(wave)") }
+        XCTAssertEqual(WaveCustomization.applyToAll(from: .a, drafts: [:]), [:])
+        XCTAssertEqual(Set(out.keys), Set(WaveCustomization.editableWaves), "deload is not a draft")
+    }
+
+    func test_unchangedSets_keepThePerWeekRamp_everyWeek() {
+        let start = loaded()
+        // Only reps changed.
+        var drafts = start
+        drafts[.a]?.repMax = 12
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            XCTAssertEqual(o.setsByWeek?[week - 1], slot.sets(forWeek: week, wave: rule.wave), "week \(week) keeps the template's ramp")
+        }
+        XCTAssertEqual(o.wavePrescriptions?[.a]?.repMax, 12)
+        XCTAssertEqual(o.wavePrescriptions?[.b]?.repMax, start[.b]?.repMax)
+    }
+
+    func test_changedSets_apply_toEveryWeekOfThatLetterOnly_deloadUntouched() {
+        let start = loaded()
+        var drafts = start
+        drafts[.a]?.sets = 6
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            let expected = rule.wave == .a ? 6 : slot.sets(forWeek: week, wave: rule.wave)
+            XCTAssertEqual(o.setsByWeek?[week - 1], expected, "week \(week) (\(rule.wave))")
+        }
+    }
+
+    func test_applyToAll_thenSave_putsTheNumbersEverywhere_butKeepsRampsWhereSetsAreUnchanged() {
+        let start = loaded()
+        // Copy A's values to B and C. A's sets equal what it loaded with, so letters whose own sets already match keep their ramps.
+        let a = start[.a]!
+        var drafts = WaveCustomization.applyToAll(from: .a, drafts: start)
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for wave in [WaveType.b, .c] {
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.repMin, a.repMin)
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.repMax, a.repMax)
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.targetRIR, a.rir)
+        }
+        // A letter whose sets now differ from what it loaded with takes the copied number in every week of that letter.
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            guard rule.wave != .deload else { XCTAssertEqual(o.setsByWeek?[week - 1], slot.sets(forWeek: week, wave: .deload)); continue }
+            let expected = start[rule.wave]?.sets == a.sets ? slot.sets(forWeek: week, wave: rule.wave) : a.sets
+            XCTAssertEqual(o.setsByWeek?[week - 1], expected, "week \(week)")
+        }
+        // Changing sets before copying copies the new number.
+        drafts = start
+        drafts[.a]?.sets = 2
+        drafts = WaveCustomization.applyToAll(from: .a, drafts: drafts)
+        let o2 = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks where template.rule(forWeek: week)!.wave != .deload { XCTAssertEqual(o2.setsByWeek?[week - 1], 2) }
+    }
+
+    func test_theSheetOffersTheButton_inEveryLettersSection() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Features/Onboarding/ExerciseCustomizationSheet.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("Button(\"Apply to all week types\")"))
+        XCTAssertTrue(source.contains("WaveCustomization.applyToAll(from: wave"))
+        XCTAssertTrue(source.contains("WaveCustomization.override("))
+    }
+}
