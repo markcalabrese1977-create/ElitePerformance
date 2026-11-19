@@ -21,7 +21,8 @@ enum ProgramApplicationService {
     ) -> Result<Void, ApplyError> {
         let weekdays = normalizedWeekdays(from: result)
         // The same fit the onboarding preview shows; preview overrides are keyed to this fitted template.
-        let template = fittedProgram(for: result).template
+        // A program the lifter wrote is used as it is (no fitting, no goal modifier); anything else is fitted to the person.
+        let template = result.ownProgram?.template ?? fittedProgram(for: result).template
 
         do {
             try DUPProgramReplaceService.replacePlannedProgram(

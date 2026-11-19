@@ -3,7 +3,7 @@ import Foundation
 
 /// A program the lifter writes themselves: days, exercises, ONE prescription per exercise, no A/B/C undulation. The sessions it
 /// makes carry no wave letter; the coach chains the weeks by block + day name (see `PlanMemoryEngine.nextTargetItem`).
-struct WavelessSlot: Equatable {
+struct WavelessSlot: Equatable, Codable {
     var exerciseId: String
     var sets: Int
     var repMin: Int
@@ -20,7 +20,7 @@ struct WavelessSlot: Equatable {
     }
 }
 
-struct WavelessDay: Equatable {
+struct WavelessDay: Equatable, Codable {
     var title: String
     var slots: [WavelessSlot]
 }
@@ -58,4 +58,101 @@ extension ProgramTemplate {
         return ProgramTemplate(id: id, name: name, totalWeeks: weeks, trainingDaysPerWeek: days.count, weekRules: rules,
                                dayTemplates: dayTemplates, waveless: true)
     }
+}
+
+
+/// What the "Use my own program" flow collects, and what travels in `OnboardingResult.ownProgram`: the lifter's days (names and
+/// exercises with one prescription each), the block length and whether the last week is a deload.
+struct OwnProgramSpec: Codable, Equatable {
+    var name: String = "My program"
+    var days: [WavelessDay]
+    var totalWeeks: Int = ProgramTemplate.wavelessDefaultWeeks
+    var deloadFinalWeek: Bool = false
+
+    var template: ProgramTemplate {
+        .waveless(name: name, totalWeeks: totalWeeks, deloadFinalWeek: deloadFinalWeek, days: days)
+    }
+
+    /// Every day has a name and at least one exercise; 2-6 days.
+    var isValid: Bool {
+        (2...6).contains(days.count)
+            && days.allSatisfy { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty && !$0.slots.isEmpty }
+    }
+}
+
+/// The pure editing operations of the own-program flow.
+enum OwnProgramBuilder {
+
+    /// The prescription a compound or an isolation starts with.
+    static let compoundDefault = WavelessSlot.defaults(exerciseId: "", isCompound: true)
+    static let isolationDefault = WavelessSlot.defaults(exerciseId: "", isCompound: false)
+
+    /// A new slot for `exercise` with the default prescription for its kind.
+    static func newSlot(for exercise: CatalogExercise) -> WavelessSlot {
+        .defaults(exerciseId: exercise.id, isCompound: RIREntry.isCompound(exercise.id) || exercise.isCompound)
+    }
+
+    static func blankDays(count: Int, names: [String]? = nil) -> [WavelessDay] {
+        (0..<max(0, count)).map { WavelessDay(title: names?[safe: $0] ?? "Day \($0 + 1)", slots: []) }
+    }
+
+    /// Resizes the day list: new days are blank and named "Day n", removed days drop off the end. Existing names and exercises stay.
+    static func resized(_ days: [WavelessDay], to count: Int) -> [WavelessDay] {
+        if days.count >= count { return Array(days.prefix(count)) }
+        return days + blankDays(count: count, names: nil).dropFirst(days.count)
+    }
+
+    /// "Copy day": `target`'s exercises become copies of `source`'s (the same exercises and prescriptions), independent of it.
+    static func copyDay(_ days: [WavelessDay], from source: Int, to target: Int) -> [WavelessDay] {
+        guard days.indices.contains(source), days.indices.contains(target), source != target else { return days }
+        var out = days
+        out[target].slots = days[source].slots
+        return out
+    }
+
+    /// Chosen names with repeats numbered: Upper, Lower, Upper, Lower, Upper -> Upper A, Lower A, Upper B, Lower B, Upper C.
+    /// A name used once stays as it is; names the lifter already made distinct ("Upper A") are never touched.
+    static func numberedNames(_ names: [String]) -> [String] {
+        let trimmed = names.map { $0.trimmingCharacters(in: .whitespaces) }
+        let counts = Dictionary(trimmed.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
+        var seen: [String: Int] = [:]
+        let letters = Array("ABCDEFGH")
+        return trimmed.map { name in
+            guard !name.isEmpty, (counts[name.lowercased()] ?? 0) > 1 else { return name }
+            let n = seen[name.lowercased(), default: 0]
+            seen[name.lowercased()] = n + 1
+            return "\(name) \(letters[min(n, letters.count - 1)])"
+        }
+    }
+
+    /// Sets every compound (or isolation) slot to `slot`'s sets, reps and RIR.
+    static func applyPrescription(_ slot: WavelessSlot, toCompounds compounds: Bool, in days: [WavelessDay]) -> [WavelessDay] {
+        days.map { day in
+            var d = day
+            d.slots = day.slots.map { existing in
+                guard existing.isCompound == compounds else { return existing }
+                var s = existing
+                s.sets = slot.sets; s.repMin = slot.repMin; s.repMax = max(slot.repMin, slot.repMax)
+                s.rirMin = slot.rirMin; s.rirMax = max(slot.rirMin, slot.rirMax)
+                return s
+            }
+            return d
+        }
+    }
+
+    /// The suggested day names for a day count (the lifter edits them).
+    static func suggestedNames(count: Int) -> [String] {
+        switch count {
+        case 2: return ["Full body", "Full body"]
+        case 3: return ["Push", "Pull", "Legs"]
+        case 4: return ["Upper", "Lower", "Upper", "Lower"]
+        case 5: return ["Upper", "Lower", "Upper", "Lower", "Upper"]
+        case 6: return ["Push", "Pull", "Legs", "Push", "Pull", "Legs"]
+        default: return (1...max(1, count)).map { "Day \($0)" }
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

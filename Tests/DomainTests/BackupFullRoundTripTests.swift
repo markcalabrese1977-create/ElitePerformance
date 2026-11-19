@@ -4106,3 +4106,136 @@ final class ScheduledDeloadTests: XCTestCase {
         XCTAssertNil(dto.scheduledDeload)
     }
 }
+
+// MARK: - "Use my own program"
+
+final class OwnProgramTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    func test_theDefaultsAreTheDesignedOnes() {
+        let c = OwnProgramBuilder.compoundDefault, i = OwnProgramBuilder.isolationDefault
+        XCTAssertEqual([c.sets, c.repMin, c.repMax, c.rirMin, c.rirMax], [3, 6, 10, 2, 2])
+        XCTAssertEqual([i.sets, i.repMin, i.repMax, i.rirMin, i.rirMax], [3, 10, 15, 1, 2])
+        XCTAssertEqual(ProgramTemplate.wavelessDefaultWeeks, 8)
+        let spec = OwnProgramSpec(days: [], totalWeeks: ProgramTemplate.wavelessDefaultWeeks)
+        XCTAssertFalse(spec.deloadFinalWeek, "deload off by default")
+        let bench = OwnProgramBuilder.newSlot(for: ExerciseCatalog.builtIn.first { $0.id == "bench_press" }!)
+        let lateral = OwnProgramBuilder.newSlot(for: ExerciseCatalog.builtIn.first { $0.id == "dumbbell_lateral_raise" }!)
+        XCTAssertTrue(bench.isCompound); XCTAssertEqual(bench.repMax, 10)
+        XCTAssertFalse(lateral.isCompound); XCTAssertEqual(lateral.repMax, 15)
+    }
+
+    func test_copyDayMakesIndependentCopies_andIgnoresNonsense() {
+        var days = OwnProgramBuilder.blankDays(count: 3, names: ["Upper", "Lower", "Upper"])
+        days[0].slots = [.defaults(exerciseId: "bench_press", isCompound: true), .defaults(exerciseId: "hammer_curl", isCompound: false)]
+        days[2].slots = [.defaults(exerciseId: "leg_press", isCompound: true)]
+        let copied = OwnProgramBuilder.copyDay(days, from: 0, to: 2)
+        XCTAssertEqual(copied[2].slots, days[0].slots)
+        XCTAssertEqual(copied[2].title, "Upper", "the name stays")
+        var edited = copied
+        edited[2].slots[0].sets = 5
+        XCTAssertEqual(copied[0].slots[0].sets, 3, "a copy is its own")
+        XCTAssertEqual(OwnProgramBuilder.copyDay(days, from: 0, to: 0), days)
+        XCTAssertEqual(OwnProgramBuilder.copyDay(days, from: 0, to: 9), days)
+    }
+
+    func test_repeatedNamesAreNumbered_distinctOnesAreLeftAlone() {
+        XCTAssertEqual(OwnProgramBuilder.numberedNames(["Upper", "Lower", "Upper", "Lower", "Upper"]),
+                       ["Upper A", "Lower A", "Upper B", "Lower B", "Upper C"])
+        XCTAssertEqual(OwnProgramBuilder.numberedNames(["Push", "Pull", "Legs"]), ["Push", "Pull", "Legs"])
+        XCTAssertEqual(OwnProgramBuilder.numberedNames(["Upper A", "Upper B"]), ["Upper A", "Upper B"])
+        XCTAssertEqual(OwnProgramBuilder.numberedNames(["upper", "Upper"]), ["upper A", "Upper B"], "case does not hide a repeat")
+        XCTAssertEqual(OwnProgramBuilder.suggestedNames(count: 5), ["Upper", "Lower", "Upper", "Lower", "Upper"])
+    }
+
+    func test_groupPrescriptionAppliesToOneKindOnly_andResizeKeepsWhatIsThere() {
+        var days = OwnProgramBuilder.blankDays(count: 2, names: ["A", "B"])
+        days[0].slots = [.defaults(exerciseId: "bench_press", isCompound: true), .defaults(exerciseId: "hammer_curl", isCompound: false)]
+        var all = OwnProgramBuilder.compoundDefault; all.sets = 4; all.repMin = 5; all.repMax = 8; all.rirMin = 1; all.rirMax = 1
+        let out = OwnProgramBuilder.applyPrescription(all, toCompounds: true, in: days)
+        XCTAssertEqual([out[0].slots[0].sets, out[0].slots[0].repMin, out[0].slots[0].repMax, out[0].slots[0].rirMin], [4, 5, 8, 1])
+        XCTAssertEqual(out[0].slots[1], days[0].slots[1], "isolations untouched")
+        XCTAssertEqual(OwnProgramBuilder.resized(days, to: 4).count, 4)
+        XCTAssertEqual(OwnProgramBuilder.resized(days, to: 4)[0].slots.count, 2)
+        XCTAssertEqual(OwnProgramBuilder.resized(days, to: 4)[3].title, "Day 4")
+        XCTAssertEqual(OwnProgramBuilder.resized(days, to: 2), days)
+    }
+
+    func test_validity() {
+        var spec = OwnProgramSpec(days: OwnProgramBuilder.blankDays(count: 3, names: ["A", "B", "C"]))
+        XCTAssertFalse(spec.isValid, "days need exercises")
+        for i in spec.days.indices { spec.days[i].slots = [.defaults(exerciseId: "bench_press", isCompound: true)] }
+        XCTAssertTrue(spec.isValid)
+        spec.days[1].title = "  "
+        XCTAssertFalse(spec.isValid, "a day needs a name")
+        XCTAssertFalse(OwnProgramSpec(days: [WavelessDay(title: "Only", slots: [.defaults(exerciseId: "bench_press", isCompound: true)])]).isValid)
+    }
+
+    func test_theResultCarriesTheProgram_andOldResultsStillDecode() throws {
+        var result = OnboardingDraft().result(startDate: Date(), weekdays: [2, 3, 5, 6])
+        XCTAssertNil(result.ownProgram)
+        result.ownProgram = OwnProgramSpec(name: "Mine", days: [WavelessDay(title: "Upper", slots: [.defaults(exerciseId: "bench_press", isCompound: true)])], totalWeeks: 6, deloadFinalWeek: true)
+        let data = try JSONEncoder().encode(result)
+        let back = try JSONDecoder().decode(OnboardingResult.self, from: data)
+        XCTAssertEqual(back.ownProgram, result.ownProgram)
+        // A result encoded before the field existed.
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "ownProgram")
+        let old = try JSONDecoder().decode(OnboardingResult.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(old.ownProgram)
+    }
+
+    func test_anAngelaCase_fiveDayUpperLower_seedsAsAWavelessBlock_throughTheSameApplyPath() throws {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        func day(_ title: String, _ ids: [String]) -> WavelessDay {
+            WavelessDay(title: title, slots: ids.map { id in OwnProgramBuilder.newSlot(for: ExerciseCatalog.builtIn.first { $0.id == id }!) })
+        }
+        let spec = OwnProgramSpec(name: "Angela's split", days: [
+            day("Upper A", ["bench_press", "barbell_row", "dumbbell_lateral_raise", "cable_tricep_rope_pushdown", "barbell_curl"]),
+            day("Lower A", ["barbell_back_squat", "romanian_deadlift", "leg_extension", "seated_leg_curl", "seated_calf_raise"]),
+            day("Upper B", ["machine_chest_press", "wide_grip_pulldown", "cable_face_pull", "hammer_curl", "pec_deck"]),
+            day("Lower B", ["leg_press", "lying_leg_curl", "leg_extension", "seated_calf_raise", "cable_rope_crunch"]),
+            day("Upper C", ["dumbbell_shoulder_press", "seated_cable_row", "incline_rear_delt_fly", "overhead_rope_tricep_extension", "incline_dumbbell_curl"]),
+        ], totalWeeks: 8, deloadFinalWeek: false)
+        XCTAssertTrue(spec.isValid)
+        var result = OnboardingDraft().result(startDate: Calendar.current.startOfDay(for: Date()), weekdays: [2, 3, 4, 5, 6])
+        result.ownProgram = spec
+        result.daysPerWeek = 5
+        result.trainingDaysOfWeek = [2, 3, 4, 5, 6]
+        switch ProgramApplicationService.apply(result, context: ctx, startDate: result.startDate) {
+        case .success: break
+        case .failure(let e): return XCTFail(e.message)
+        }
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active })
+        XCTAssertEqual(block.name, "Angela's split")
+        XCTAssertEqual(block.totalWeeks, 8)
+        XCTAssertEqual(block.scheduledDeload, false)
+        XCTAssertEqual(block.sessions.count, 40)
+        XCTAssertTrue(block.sessions.flatMap(\.items).allSatisfy { $0.waveRaw == nil })
+        XCTAssertEqual(Set(block.sessions.compactMap(\.dayLabel)), ["Upper A", "Lower A", "Upper B", "Lower B", "Upper C"])
+        XCTAssertEqual(block.sessions.filter { $0.dayLabel == "Upper A" }.first?.items.count, 5, "exactly the five she chose; nothing fitted away")
+        XCTAssertTrue(block.sessions.allSatisfy { $0.mesoPhase != .deload })
+    }
+
+    func test_bothEntryPointsAndTheSharedPickerAreWiredUp() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+        let onboarding = try text("Features/Onboarding/OnboardingFlowView.swift")
+        XCTAssertTrue(onboarding.contains("Use my own program"), "on the first page of onboarding, which Change program also opens")
+        XCTAssertTrue(onboarding.contains("OwnProgramFlowView(base: currentBaseResult()"))
+        XCTAssertTrue(onboarding.contains("submit(result, overrides: .empty)"), "the result goes through the same onComplete as every program")
+        let home = try text("Features/Home/HomeView.swift")
+        XCTAssertTrue(home.contains("OnboardingFlowView("), "Change program opens the onboarding flow")
+        XCTAssertTrue(home.contains("Replace your upcoming sessions?"), "and still asks before replacing")
+        let flow = try text("Features/Programs/OwnProgramFlowView.swift")
+        XCTAssertTrue(flow.contains("ExercisePickerList(mode: .add"), "the shared picker")
+        XCTAssertTrue(flow.contains("PlannedVolumeCard(input: .template("), "the preview has the volume card")
+        XCTAssertTrue(flow.contains("Copy day"))
+        let service = try text("Domain/Logic/ProgramApplicationService.swift")
+        XCTAssertTrue(service.contains("result.ownProgram?.template ?? fittedProgram(for: result).template"))
+    }
+}

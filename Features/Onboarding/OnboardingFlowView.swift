@@ -48,12 +48,14 @@ struct OnboardingResult: Codable {
     var equipmentChecklist: [GearTag] = []
     /// The unit the lifter sees loads in; `minLoadIncrement` is in this unit. Results encoded before kg support decode as lb.
     var unit: LoadUnit = .lb
+    /// Set by "Use my own program": the lifter's own days and exercises, no waves. nil for every generated program.
+    var ownProgram: OwnProgramSpec? = nil
 }
 
 extension OnboardingResult {
     private enum CodingKeys: String, CodingKey {
         case goal, experience, daysPerWeek, trainingDaysOfWeek, equipmentProfile, sessionLengthMinutes
-        case injuryFlags, minLoadIncrement, startDate, equipmentPreset, equipmentChecklist, unit
+        case injuryFlags, minLoadIncrement, startDate, equipmentPreset, equipmentChecklist, unit, ownProgram
     }
 
     /// Results encoded before the preset and checklist existed decode as full gym with no checklist.
@@ -71,7 +73,8 @@ extension OnboardingResult {
             startDate: try c.decode(Date.self, forKey: .startDate),
             equipmentPreset: try c.decodeIfPresent(EquipmentPreset.self, forKey: .equipmentPreset) ?? .fullGym,
             equipmentChecklist: try c.decodeIfPresent([GearTag].self, forKey: .equipmentChecklist) ?? [],
-            unit: try c.decodeIfPresent(LoadUnit.self, forKey: .unit) ?? .lb
+            unit: try c.decodeIfPresent(LoadUnit.self, forKey: .unit) ?? .lb,
+            ownProgram: try c.decodeIfPresent(OwnProgramSpec.self, forKey: .ownProgram)
         )
     }
 }
@@ -290,6 +293,7 @@ struct OnboardingFlowView: View {
     @State private var finishFailure: String?
 
     @State private var pageIndex: Int = 0
+    @State private var showOwnProgram = false
 
     // Page 1 — Goal
     @State private var selectedGoal: Goal
@@ -398,6 +402,12 @@ struct OnboardingFlowView: View {
             overridesSignature = newValue
         }
         .onAppear { overridesSignature = fitSignature }
+        .fullScreenCover(isPresented: $showOwnProgram) {
+            OwnProgramFlowView(base: currentBaseResult(), initialWeekdays: selectedWeekdays, onCreate: { result in
+                showOwnProgram = false
+                submit(result, overrides: .empty)
+            }, onCancel: { showOwnProgram = false })
+        }
         .alert("Couldn't create your program", isPresented: Binding(
             get: { finishFailure != nil }, set: { if !$0 { finishFailure = nil } }
         )) {
@@ -459,6 +469,22 @@ struct OnboardingFlowView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Button { showOwnProgram = true } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Use my own program").font(.headline).foregroundColor(.primary)
+                        Text("Enter the days and exercises you already train. No waves, one prescription per exercise.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemGray6)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("useMyOwnProgram")
 
             if let onRestore {
                 Divider()
@@ -1431,7 +1457,8 @@ struct OnboardingFlowView: View {
 
     // MARK: - Finish
 
-    private func finish() {
+    /// The answers so far as a result (goal, experience, equipment ...), before any program is chosen.
+    private func currentBaseResult() -> OnboardingResult {
         var draft = OnboardingDraft()
         draft.goal = selectedGoal
         draft.experience = selectedExperience
@@ -1442,10 +1469,15 @@ struct OnboardingFlowView: View {
         draft.loadIncrement = selectedLoadIncrement
         draft.unit = selectedUnit
         draft.injuryFlags = selectedInjuryFlags
-        let result = draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
+        return draft.result(startDate: mesoStartDate, weekdays: selectedWeekdays)
+    }
 
+    private func finish() { submit(currentBaseResult(), overrides: previewOverrides) }
+
+    /// Hands a finished result to the caller (first run: seeds it; Change program: asks before replacing and backs up first).
+    private func submit(_ result: OnboardingResult, overrides: PreviewOverrides) {
         isFinishing = true
-        onComplete(result, previewOverrides) { finish in
+        onComplete(result, overrides) { finish in
             isFinishing = false
             switch finish {
             case .done:             dismiss()
