@@ -8,6 +8,11 @@ struct MaterializedProgramDay {
     let title: String
     let role: String
     let exercises: [ResolvedExercisePlan]
+    /// The template has no waves: the sessions carry no letter (a deload week still says "deload").
+    var waveless = false
+
+    /// What the items' `waveRaw` is: the week's wave, or nil for a normal week of a waveless program.
+    var itemWaveRaw: String? { waveless && wave != .deload ? nil : wave.rawValue }
 }
 
 enum ProgramMaterializerError: Error {
@@ -42,7 +47,8 @@ enum DUPSessionMaterializer {
             dayNumber: dayNumber,
             title: dayTemplate.title,
             role: dayTemplate.role,
-            exercises: resolved
+            exercises: resolved,
+            waveless: template.waveless
         )
     }
 
@@ -75,7 +81,7 @@ enum DUPSessionMaterializer {
                 targetRIR: exercise.defaultTargetRIR,
                 suggestedLoad: 0.0,
 
-                waveRaw: materializedDay.wave.rawValue,
+                waveRaw: materializedDay.itemWaveRaw,
                 priorityRaw: exercise.priority.rawValue,
                 // The band covers the week's set ramp (a 4-set ramp week of a 2-3 band reads "2-4", never "2-3" with 4 planned).
                 setMin: defaultSets > 0 ? min(exercise.setMin, defaultSets) : exercise.setMin,
@@ -113,7 +119,8 @@ enum DUPSessionMaterializer {
             date: date,
             status: .planned,
             readinessStars: 0,
-            sessionNotes: "\(materializedDay.title) · \(materializedDay.wave.displayName) wave",
+            sessionNotes: materializedDay.waveless && materializedDay.wave != .deload
+                ? materializedDay.title : "\(materializedDay.title) · \(materializedDay.wave.displayName) wave",
             weekIndex: weekNumber,
             dayLabel: materializedDay.title,
             items: items

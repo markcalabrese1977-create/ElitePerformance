@@ -75,6 +75,10 @@ struct PlanMemoryEngine {
         guard !futureSessions.isEmpty else { return }
 
         for sourceItem in session.items {
+            // A plan with no load at all (a block the lifter wrote, a lift swapped in mid-block) has no baseline for the coach to
+            // judge against: the load actually lifted becomes it, so the next session is written from what was done.
+            let adoptedBaseline = Self.adoptPerformedLoadAsBaseline(
+                sourceItem, isExempt: UserProfile.isProgressionExempt(exerciseId: sourceItem.exerciseId, profile: profile))
             // The step is per exercise: the lifter's own step for this lift, else the default load step.
             let loadIncrement = UserProfile.loadStep(for: sourceItem.exerciseId, profile: profile, unit: unit)
             guard hasMeaningfulPlan(sourceItem) else { continue }
@@ -91,6 +95,10 @@ struct PlanMemoryEngine {
                 after: session,
                 in: allSessions
             ) else { continue }
+
+            // A write that exists only because of the adopted baseline never lands on a target the lifter edited by hand
+            // (an edited plan with no load is a choice, not a gap).
+            if adoptedBaseline && targetItem.planEdited { continue }
 
             // Already-materialized future plan (not empty): the seed path below only
             // fills empty plans, so an earned bump would never reach an anchored/
@@ -341,6 +349,22 @@ struct PlanMemoryEngine {
         }
     }
 
+    /// An item whose plan carries no load (suggested and every planned slot 0) but whose sets were performed takes the held
+    /// load (the last performed primary back-off set) as its baseline. Never for: a deload item, a bodyweight item, an item the
+    /// lifter edited by hand (`planEdited`), a fixed-load exercise, or an item with a pain flag (pain makes no call), nor for
+    /// one that already has a planned load.
+    @discardableResult
+    static func adoptPerformedLoadAsBaseline(_ item: SessionItem, isExempt: Bool = false) -> Bool {
+        guard item.suggestedLoad <= 0, item.plannedLoadsBySet.allSatisfy({ $0 <= 0 }),
+              !item.planEdited, !isExempt,
+              item.waveRaw?.lowercased() != "deload",
+              !item.setFeedbackBySet.contains(SetFeedback.pain.rawValue),
+              !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),
+              let held = CoachingEngine.heldLoad(for: item), held > 0 else { return false }
+        item.suggestedLoad = held
+        return true
+    }
+
     // MARK: - Canonical target resolution
 
     /// The materialized session item this exercise's result carries into.
@@ -402,11 +426,20 @@ struct PlanMemoryEngine {
             })
         }
 
-        // No wave on the source → not in a letter rotation; legacy chronological path.
-        // Deload items never anchor a working session's result: skip them so the next
-        // working occurrence (past the deload) is the target.
+        // No wave on the source → not in a letter rotation (a program the lifter wrote, or an older block). Deload items never
+        // anchor a working session's result: skip them so the next working occurrence (past the deload) is the target.
+        // When the session belongs to a block and has a day name, the chain is that block + that day: week 1's Upper A bench
+        // feeds week 2's Upper A bench, never another day's bench. Without a block or a day name (hand-built sessions) it stays
+        // the chronological next occurrence, as it always was.
         guard let sourceWave = sourceItem.waveRaw?.lowercased(), !sourceWave.isEmpty else {
+            let chainMeso = session.meso?.persistentModelID
+            let chainDay = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let byBlockAndDay = session.meso != nil && !chainDay.isEmpty
             return future.lazy.compactMap { candidate -> SessionItem? in
+                if byBlockAndDay {
+                    guard candidate.meso?.persistentModelID == chainMeso,
+                          SessionDayLabelMatcher.matches(candidate.dayLabel, session.dayLabel) else { return nil }
+                }
                 guard let item = matchingItem(in: candidate),
                       item.waveRaw?.lowercased() != "deload" else { return nil }
                 return item

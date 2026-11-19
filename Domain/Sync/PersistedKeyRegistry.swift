@@ -88,6 +88,10 @@ enum PersistedKeyRegistry {
         Entry(match: .suffix(".completed"),
               disposition: .excluded("migration completion flag: device-local; migrations are idempotent and report not needed after a restore")),
 
+        // Exercise picker convenience.
+        Entry(match: .exact("exercisePicker.recentIds.v1"),
+              disposition: .excluded("the exercises last picked in a picker (recent picks): a device-local convenience, rebuilt by use; a restore need not carry it")),
+
         // Per-session UI state.
         Entry(match: .prefix("warmup_crankyJoint_"), disposition: .excluded("per-session UI state")),
         Entry(match: .prefix("warmup_done_"), disposition: .excluded("per-session UI state")),

@@ -26,6 +26,8 @@ struct ProgramDayDetailView: View {
     @State private var pendingRename: DayLabelRename.Plan?
     /// The last removal, restorable for a few seconds.
     @State private var undoDelete: UndoDelete?
+    /// The last multi-session prescription change, restorable for 10 seconds.
+    @State private var undoChange: UndoChange?
 
     // MARK: - Derived ordered items
 
@@ -65,7 +67,7 @@ struct ProgramDayDetailView: View {
                             item: item,
                             onDelete:  { requestDelete([item], propagate: true) },
                             onSwapTapped: { swapTarget = SwapTarget(item: item) },
-                            onChangePrescriptionTapped: { scope in changeTarget = ChangeTarget(item: item, scope: scope) },
+                            onChangePrescriptionTapped: { changeTarget = ChangeTarget(item: item) },
                             onHistoryTapped: { exerciseId, exerciseName in
                                                             let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
                                                             historyTarget = HistoryTarget(
@@ -127,6 +129,26 @@ struct ProgramDayDetailView: View {
             }
         }
         .animation(.default, value: undoDelete?.id)
+        .overlay(alignment: .bottom) {
+            if let u = undoChange {
+                HStack {
+                    Text(u.label).font(.subheadline)
+                    Spacer()
+                    Button("Undo") { undoPrescriptionChange(u) }.fontWeight(.semibold)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: u.id) {
+                    try? await Task.sleep(nanoseconds: UndoChange.visibleNanoseconds)
+                    if undoChange?.id == u.id { undoChange = nil }
+                }
+            }
+        }
+        .animation(.default, value: undoChange?.id)
         
         
         .alert("Apply to this block?", isPresented: Binding(get: { pendingBlockApply != nil }, set: { if !$0 { pendingBlockApply = nil } })) {
@@ -164,7 +186,8 @@ struct ProgramDayDetailView: View {
         
         // ✅ ADD THIS
         .sheet(isPresented: $showingAddExerciseSheet) {
-            AddExerciseSheet(
+            ExercisePickerList(
+                mode: .add,
                 onSelect: { catalogExercise in
                     addExercise(from: catalogExercise)
                     showingAddExerciseSheet = false
@@ -195,7 +218,7 @@ struct ProgramDayDetailView: View {
             ChangePrescriptionFlow(
                 session: session,
                 item: target.item,
-                initialScope: target.scope,
+                onApplied: { undo, summary in undoChange = UndoChange(undo: undo, label: summary) },
                 onFinish: { changeTarget = nil }
             )
         }
@@ -260,14 +283,18 @@ struct ProgramDayDetailView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
     
-    /// e.g. "Dec 9, 2025 · Week 1"
+    /// e.g. "Dec 9, 2025 · Week 1 · Moderate (B)"
     private var sessionLabel: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
 
         let dateString = formatter.string(from: session.date)
-        return "\(dateString) · Week \(session.weekIndex)"
+        let week = "\(dateString) · Week \(session.weekIndex)"
+        // "· Moderate (B)" after the week; nothing on a block without waves.
+        let labels = WaveLabels.labels(meso: session.meso)
+        let shown = Array(NSOrderedSet(array: session.items.compactMap { WaveLabels.display(forRaw: $0.waveRaw, labels: labels, mesoName: session.meso?.name) })) as? [String] ?? []
+        return shown.isEmpty ? week : week + " · " + shown.joined(separator: ", ")
     }
 
     /// e.g. "5 exercises · 16 working sets"
@@ -413,6 +440,22 @@ struct ProgramDayDetailView: View {
         let propagate: Bool
     }
 
+    struct UndoChange: Identifiable {
+        let id = UUID()
+        let undo: SessionItemEditService.PrescriptionUndo
+        let label: String
+        static let visibleNanoseconds: UInt64 = 10_000_000_000
+    }
+
+    /// Puts back exactly the fields the change wrote, on exactly the items it changed.
+    private func undoPrescriptionChange(_ u: UndoChange) {
+        undoChange = nil
+        switch Result(catching: { try SessionItemEditService.undoPrescriptionChange(u.undo, in: modelContext) }) {
+        case .success(let n): presentFeedback("Undone: \(n) session\(n == 1 ? "" : "s") back as they were.")
+        case .failure: presentFeedback("The change couldn't be undone, so nothing was written.")
+        }
+    }
+
     struct UndoDelete: Identifiable {
         let id = UUID()
         let entries: [(item: SessionItem, order: Int)]
@@ -537,93 +580,10 @@ private struct NoteTarget: Identifiable {
 private struct ChangeTarget: Identifiable {
     let id = UUID()
     let item: SessionItem
-    let scope: ReplaceScopeChoice
 }
 private struct SwapTarget: Identifiable {
     let id = UUID()
     let item: SessionItem
-}
-
-// MARK: - Swap Sheet
-
-/// Sheet to pick a replacement exercise from the catalog for a plan slot.
-/// Shows "recommended" (same primary muscle group) first, then all others.
-/// Intentionally separate from SessionView's ExerciseSwapSheet, which is
-/// private and typed to that screen's UISessionExercise view-model.
-struct ProgramExerciseSwapSheet: View {
-    let currentExerciseId: String
-    let currentExerciseName: String
-    let onSelect: (CatalogExercise) -> Void
-    let onCancel: () -> Void
-
-    @State private var showingCreateCustom = false
-
-    private var options: [CatalogExercise] {
-        let all = ExerciseCatalog.all
-        let canonicalId = ExerciseCatalog.canonicalExerciseId(for: currentExerciseId)
-
-        guard let currentCatalog = all.first(where: { $0.id == canonicalId }) else {
-            return all
-        }
-
-        let same = all.filter { $0.primaryMuscle == currentCatalog.primaryMuscle }
-        let others = all.filter {
-            $0.id != currentCatalog.id && $0.primaryMuscle != currentCatalog.primaryMuscle
-        }
-
-        return same + others
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        showingCreateCustom = true
-                    } label: {
-                        Label("Create Custom Exercise", systemImage: "plus.circle.fill")
-                    }
-                }
-
-                Section {
-                    ForEach(options) { exercise in
-                        Button {
-                            onSelect(exercise)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(exercise.name)
-                                    .font(.body)
-
-                                Text(exercise.primaryMuscle.rawValue.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Choose a replacement for \(currentExerciseName)")
-                }
-            }
-            .navigationTitle("Swap Exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                    }
-                }
-            }
-            .sheet(isPresented: $showingCreateCustom) {
-                CreateCustomExerciseSheet(
-                    onDone: { newExercise in
-                        showingCreateCustom = false
-                        onSelect(newExercise)
-                    },
-                    onCancel: { showingCreateCustom = false }
-                )
-            }
-        }
-    }
 }
 
 // MARK: - Per-exercise plan row
@@ -635,7 +595,7 @@ private struct ProgramExercisePlanRow: View {
 
     let onDelete: () -> Void
     let onSwapTapped: () -> Void
-    let onChangePrescriptionTapped: (_ scope: ReplaceScopeChoice) -> Void
+    let onChangePrescriptionTapped: () -> Void
     let onHistoryTapped: (_ exerciseId: String, _ exerciseName: String) -> Void
     let onNoteTapped: () -> Void
         var isMaintenance: Bool = false
@@ -649,9 +609,9 @@ private struct ProgramExercisePlanRow: View {
             prescriptionSummaryRow
             planRow
             Button {
-                onChangePrescriptionTapped(.allRemaining)
+                onChangePrescriptionTapped()
             } label: {
-                Label("Change for remaining sessions", systemImage: "slider.horizontal.3")
+                Label("Change prescription…", systemImage: "slider.horizontal.3")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
@@ -835,7 +795,7 @@ private struct ProgramExercisePlanRow: View {
                     .foregroundStyle(.secondary)
 
                 Button {
-                    onChangePrescriptionTapped(.thisSession)
+                    onChangePrescriptionTapped()
                 } label: {
                     HStack(spacing: 4) {
                         Text(repsRangeText)

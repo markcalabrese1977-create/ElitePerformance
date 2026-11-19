@@ -54,13 +54,7 @@ extension MuscleVolume {
         var counted = window.filter { !$0.isIncomplete && !$0.hasDeload }
         if counted.isEmpty { counted = window }          // nothing clean to average: use what there is
         let ranges = profile?.muscleSetRanges ?? MuscleVolumeRanges.defaults
-        let rows: [MuscleVolumeSummary.Row] = FineMuscle.allCases.map { m in
-            let avg = counted.isEmpty ? 0 : counted.map { $0.sets[m] ?? 0 }.reduce(0, +) / Double(counted.count)
-            let direct = counted.isEmpty ? 0 : counted.map { $0.directSets[m] ?? 0 }.reduce(0, +) / Double(counted.count)
-            let r = ranges[m] ?? MuscleVolumeRanges.defaults[m] ?? MuscleSetRange(min: 0, max: 0)
-            return .init(muscle: m, range: r, average: avg, directAverage: direct, status: status(avg, range: r),
-                         series: elapsed.map { $0.sets[m] ?? 0 })
-        }
+        let rows = rows(counted: counted, elapsed: elapsed, ranges: ranges)
         // Unmapped: every exercise with hard sets in the block that has no built-in row and no saved mapping.
         let editable = Set(customs.map(\.id))
         let mapped = Set(customShares(from: customs).keys)

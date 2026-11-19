@@ -279,6 +279,16 @@ struct SettingsView: View {
             .task(id: autoBackup.statusRevision) { await refreshBackups() }
             .task { await autoBackup.refreshICloudAvailability() }
 
+            // MARK: - Help
+            Section("Help") {
+                NavigationLink("User Guide") { UserGuideView() }
+                    .foregroundStyle(.primary)
+                if let mail = UserGuide.supportMailURLForThisBuild {
+                    Link("Contact support", destination: mail)
+                        .foregroundStyle(.primary)
+                }
+            }
+
             // MARK: - About
             // Tap to copy, so a bug report can carry the exact build without the
             // user retyping a git hash.

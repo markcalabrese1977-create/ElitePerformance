@@ -536,7 +536,494 @@ final class SettingsHasNoFitterOnlyFieldsTests: XCTestCase {
         XCTAssertTrue(plan.contains("ChangeProgramRow(action: onChangeProgram)"), "visible in the block header, not only in the menu")
         // The flow still opens pre-filled from the profile and still asks before replacing the meso.
         let home = try source("Features/Home/HomeView.swift")
-        XCTAssertTrue(home.contains("OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first)"))
+        XCTAssertTrue(home.contains("OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first, activeWeekdays: OnboardingDraft.weekdays(of: activeMeso))"))
         XCTAssertTrue(home.contains("Replace your upcoming sessions?"))
+    }
+}
+
+// MARK: - In-app user guide
+
+final class UserGuideTests: XCTestCase {
+
+    private func guideURL() throws -> URL {
+        if let url = UserGuide.guideURL() { return url }
+        for bundle in Bundle.allBundles { if let url = UserGuide.guideURL(in: bundle) { return url } }
+        throw XCTSkip("Guide.html is not in any loaded bundle")
+    }
+
+    private func html() throws -> String { try String(contentsOf: try guideURL(), encoding: .utf8) }
+
+    func test_theBundleContainsTheGuide_andEveryImageResolvesToABundledFile() throws {
+        let url = try guideURL()
+        XCTAssertEqual(url.lastPathComponent, "Guide.html")
+        let page = try html()
+        let sources = page.components(separatedBy: "<img ").dropFirst().compactMap { chunk -> String? in
+            guard let r = chunk.range(of: "src=\"") else { return nil }
+            return String(chunk[r.upperBound...].prefix { $0 != "\"" })
+        }
+        XCTAssertEqual(sources.count, 9, "the guide carries nine screenshots")
+        XCTAssertEqual(Set(sources).count, sources.count)
+        for src in sources {
+            XCTAssertFalse(src.contains("/") || src.contains(":"), "\(src): a bare file name beside the page")
+            let file = url.deletingLastPathComponent().appendingPathComponent(src)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "\(src) is not bundled beside Guide.html")
+            XCTAssertGreaterThan((try? Data(contentsOf: file))?.count ?? 0, 1000, "\(src) is empty")
+        }
+    }
+
+    func test_theGuideLoadsNothingFromTheNetwork() throws {
+        let page = try html()
+        XCTAssertFalse(page.contains("http://"))
+        XCTAssertFalse(page.contains("https://"))
+    }
+
+    func test_navigationPolicy_allowsTheGuideAndItsAnchors_opensMail_cancelsTheRest() throws {
+        let guide = try guideURL()
+        XCTAssertEqual(UserGuide.navigationDecision(for: guide, guideURL: guide), .allow)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: guide.absoluteString + "#welcome")!, guideURL: guide), .allow)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "mailto:eliteperformanceapp@gmail.com")!, guideURL: guide), .openExternally)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "https://example.com")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "http://example.com/Guide.html")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(string: "tel:5551234")!, guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: URL(fileURLWithPath: "/etc/hosts"), guideURL: guide), .cancel)
+        XCTAssertEqual(UserGuide.navigationDecision(for: guide.deletingLastPathComponent().appendingPathComponent("Info.plist"), guideURL: guide), .cancel)
+    }
+
+    func test_supportMail_carriesTheVersionAndBuild() throws {
+        let url = try XCTUnwrap(UserGuide.supportMailURL(version: "1.2.2", build: "5"))
+        XCTAssertEqual(url.absoluteString, "mailto:eliteperformanceapp@gmail.com?subject=Elite%20Performance%201.2.2%20(5)")
+        let live = try XCTUnwrap(UserGuide.supportMailURLForThisBuild).absoluteString
+        XCTAssertTrue(live.contains(BuildInfo.version.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!), live)
+    }
+
+    func test_settingsShowsTheHelpSection_aboveAbout() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let settings = try String(contentsOf: root.appendingPathComponent("Features/Settings/SettingsView.swift"), encoding: .utf8)
+        let help = try XCTUnwrap(settings.range(of: "Section(\"Help\")"))
+        let about = try XCTUnwrap(settings.range(of: "Section(\"About\")"))
+        XCTAssertLessThan(help.lowerBound, about.lowerBound, "Help sits above About")
+        let section = String(settings[help.lowerBound..<about.lowerBound])
+        XCTAssertTrue(section.contains("User Guide") && section.contains("UserGuideView()"))
+        XCTAssertTrue(section.contains("Contact support") && section.contains("supportMailURLForThisBuild"))
+    }
+}
+
+// MARK: - Change program pre-selects the active block's training days
+
+final class ChangeProgramWeekdaysTests: XCTestCase {
+
+    private func block(weekdays: [Int]) throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let ctx = ModelContext(container)
+        let meso = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: 2)
+        ctx.insert(meso)
+        let cal = Calendar.current
+        // 2026-11-01 is a Sunday (weekday 1); 2026-11-01 + (w - 1) days has weekday w.
+        let sunday = cal.date(from: DateComponents(year: 2026, month: 11, day: 1))!
+        for week in 0..<2 {
+            for w in weekdays {
+                let date = cal.date(byAdding: .day, value: week * 7 + (w - 1), to: sunday)!
+                let s = Session(date: date, status: week == 0 ? .completed : .planned, weekIndex: week + 1, dayLabel: "D", items: [])
+                s.meso = meso
+                ctx.insert(s)
+            }
+        }
+        try ctx.save()
+        return (ctx, meso)
+    }
+
+    func test_fridayToWednesdayBlock_preselectsExactlyThoseSix_andNextIsEnabled() throws {
+        let (_, meso) = try block(weekdays: [6, 7, 1, 2, 3, 4])
+        let days = OnboardingDraft.weekdays(of: meso)
+        XCTAssertEqual(days, [6, 7, 1, 2, 3, 4], "planned and completed sessions both count")
+        let draft = OnboardingDraft(profile: UserProfile(), activeWeekdays: days)
+        XCTAssertEqual(draft.weekdays, [1, 2, 3, 4, 6, 7])
+        XCTAssertEqual(draft.daysPerWeek, 6, "the day count follows the chips")
+        XCTAssertTrue(OnboardingDraft.scheduleIsComplete(weekdays: draft.weekdays, daysPerWeek: draft.daysPerWeek))
+    }
+
+    func test_noActiveBlock_isUnchanged() {
+        XCTAssertTrue(OnboardingDraft.weekdays(of: nil).isEmpty)
+        let profile = UserProfile()
+        XCTAssertEqual(OnboardingDraft(profile: profile, activeWeekdays: []), OnboardingDraft(profile: profile))
+        XCTAssertEqual(OnboardingDraft(profile: nil, activeWeekdays: []), OnboardingDraft())
+    }
+
+    func test_anUnusableWeekdaySet_fallsBackToTheDefaultPattern() {
+        XCTAssertTrue(OnboardingDraft(profile: nil, activeWeekdays: [2]).weekdays.isEmpty)
+        XCTAssertTrue(OnboardingDraft(profile: nil, activeWeekdays: Set(1...7)).weekdays.isEmpty)
+    }
+}
+
+// MARK: - The shared exercise picker
+
+final class ExercisePickerTests: XCTestCase {
+
+    private let catalog = ExerciseCatalog.builtIn
+    private func names(_ exercises: [CatalogExercise]) -> [String] { exercises.map(\.name) }
+    private func results(_ query: String, in pool: [CatalogExercise]? = nil) -> [CatalogExercise] {
+        ExercisePickerModel.sections(exercises: pool ?? catalog, query: query).flatMap(\.exercises)
+    }
+    private let custom = CatalogExercise(id: "custom_ecarte", name: "Écarté Poulie Vis-à-vis", primaryMuscle: .chest, isCompound: false)
+    private let customLower = CatalogExercise(id: "custom_zottman", name: "zottman curl", primaryMuscle: .biceps, isCompound: false)
+
+    // MARK: Search
+
+    func test_searchIgnoresCaseAndDiacritics() {
+        XCTAssertEqual(results("BENCH PRESS").first?.id, "bench_press")
+        XCTAssertEqual(results("bench press").map(\.id), results("Bench  Press").map(\.id))
+        let pool = catalog + [custom]
+        XCTAssertEqual(results("ecarte poulie", in: pool).map(\.id), ["custom_ecarte"], "accents folded both ways")
+        XCTAssertEqual(results("ÉCARTÉ", in: pool).first?.id, "custom_ecarte")
+        XCTAssertEqual(results("vis a vis", in: pool).map(\.id), ["custom_ecarte"], "punctuation and spacing do not matter")
+        XCTAssertEqual(results("push up").first?.id, "push_up")
+        XCTAssertEqual(results("pushup").first?.id, "push_up", "an alias for the same exercise")
+    }
+
+    func test_searchMatchesCommonAliasesAndAbbreviations() {
+        XCTAssertEqual(results("rdl").first?.id, "romanian_deadlift")
+        XCTAssertTrue(results("rdl").map(\.id).contains("dumbbell_romanian_deadlift"))
+        XCTAssertTrue(results("lat pulldown").map(\.id).contains("wide_grip_pulldown"))
+        XCTAssertTrue(results("skullcrusher").map(\.id).contains("ez_bar_skull_crusher"))
+        XCTAssertTrue(results("ohp").map(\.id).contains("barbell_overhead_press"))
+        XCTAssertTrue(results("side raise").map(\.id).contains("dumbbell_lateral_raise"))
+        let db = results("db")
+        XCTAssertFalse(db.isEmpty)
+        XCTAssertTrue(db.allSatisfy { let n = ExerciseSearch.normalize($0.name); return n.contains("dumbbell") || n.split(separator: " ").contains("db") || ExerciseSearch.aliases(for: $0).contains { $0.contains("db") } }, "an abbreviation finds what it stands for")
+        XCTAssertTrue(results("curls").map(\.id).contains("hammer_curl"), "a plural finds the singular")
+    }
+
+    func test_everyWordMustMatch_inAnyOrder_andNothingMatchesGibberish() {
+        XCTAssertTrue(results("press bench").map(\.id).contains("bench_press"))
+        XCTAssertFalse(results("bench zzzz").map(\.id).contains("bench_press"))
+        XCTAssertTrue(results("qqqqxx").isEmpty)
+        XCTAssertTrue(ExercisePickerModel.sections(exercises: catalog, query: "qqqqxx").isEmpty)
+    }
+
+    func test_anExactNameMatchAlwaysRanksFirst_thenNamesThatStartWithIt_thenPerWordMatches() throws {
+        let r = results("romanian deadlift").map(\.name)
+        XCTAssertEqual(r.first, "Romanian Deadlift")
+        XCTAssertLessThan(try XCTUnwrap(r.firstIndex(of: "Romanian Deadlift")), try XCTUnwrap(r.firstIndex(of: "Dumbbell Romanian Deadlift")))
+        XCTAssertEqual(results("ROMANIAN  DEADLIFT").first?.name, "Romanian Deadlift", "case and spacing ignored")
+        let custom = CatalogExercise(id: "custom_rdl", name: "Romanian Déadlift", primaryMuscle: .hamstrings, isCompound: true)
+        XCTAssertEqual(results("romanian deadlift", in: catalog + [custom]).prefix(2).map(\.id).sorted(), ["custom_rdl", "romanian_deadlift"].sorted(), "an accent-only difference is still an exact name")
+        // Starts-with beats per-word: "bench" lists the names that begin with it before names that merely contain a word starting with it.
+        let bench = results("bench press")
+        XCTAssertEqual(bench.first?.name, "Bench Press")
+        XCTAssertEqual(ExerciseSearch.rank(try XCTUnwrap(bench.first), query: "bench press"), 0)
+        let close = try XCTUnwrap(bench.first { $0.name == "Close Grip Bench Press" })
+        XCTAssertEqual(ExerciseSearch.rank(close, query: "bench press"), 2, "per-word match")
+        let prefixed = ExerciseSearch.rank(try XCTUnwrap(catalog.first { $0.name == "Romanian Deadlift" }), query: "romanian")
+        XCTAssertEqual(prefixed, 1, "a name that starts with the query")
+        let perWord = ExerciseSearch.rank(try XCTUnwrap(catalog.first { $0.name == "Dumbbell Romanian Deadlift" }), query: "romanian")
+        XCTAssertEqual(perWord, 2)
+    }
+
+    func test_betterMatchesRankFirst() {
+        let r = results("curl")
+        // A name that starts with the query beats one that merely contains it.
+        let firstStarting = r.firstIndex { ExerciseSearch.normalize($0.name).hasPrefix("curl") } ?? -1
+        let firstContaining = r.firstIndex { !ExerciseSearch.normalize($0.name).hasPrefix("curl") && ExerciseSearch.normalize($0.name).contains("curl") } ?? Int.max
+        XCTAssertLessThanOrEqual(firstStarting, firstContaining)
+        // An alias-only match comes after name matches.
+        let rdl = results("deadlift")
+        XCTAssertLessThanOrEqual(ExerciseSearch.rank(rdl.first { $0.id == "conventional_deadlift" }!, query: "deadlift") ?? 9, 3)
+    }
+
+    // MARK: Sorting and sections
+
+    func test_emptySearch_isAToZ_withSectionsInOrder_andASideIndex() {
+        let sections = ExercisePickerModel.sections(exercises: catalog + [custom, customLower], query: "")
+        let letters = ExercisePickerModel.indexLetters(sections)
+        XCTAssertEqual(letters.filter { $0 != "#" }, letters.filter { $0 != "#" }.sorted(), "the side index is in order (# last)")
+        XCTAssertEqual(Set(letters).count, letters.count)
+        XCTAssertTrue(letters.contains("A") && letters.contains("B") && letters.contains("E"))
+        for section in sections {
+            guard case .letter(let l) = section.kind else { continue }
+            XCTAssertTrue(section.exercises.allSatisfy { ExercisePickerModel.letter(for: $0) == l }, "section \(l)")
+            let keys = section.exercises.map { ExerciseSearch.normalize($0.name) }
+            XCTAssertEqual(keys, keys.sorted(), "section \(l) is sorted")
+        }
+        // Every exercise appears exactly once in A-Z.
+        let az = sections.filter { if case .letter = $0.kind { return true } else { return false } }.flatMap(\.exercises)
+        XCTAssertEqual(az.count, Set(az.map(\.id)).count)
+        XCTAssertEqual(Set(az.map(\.id)), Set((catalog + [custom, customLower]).map(\.id)))
+    }
+
+    func test_aNameThatDoesNotStartWithALetterGoesUnderHash_lastInTheIndex() {
+        let odd = CatalogExercise(id: "custom_45", name: "45° Plate Pinch", primaryMuscle: .biceps, isCompound: false)
+        let letters = ExercisePickerModel.indexLetters(ExercisePickerModel.sections(exercises: catalog + [odd], query: ""))
+        XCTAssertEqual(letters.last, "#")
+        XCTAssertEqual(ExercisePickerModel.letter(for: odd), "#")
+    }
+
+    func test_customExercisesAreIncluded_inAToZ_andInSearch() {
+        let sections = ExercisePickerModel.sections(exercises: catalog + [custom, customLower], query: "")
+        let e = sections.first { $0.kind == .letter("E") }
+        XCTAssertTrue(e?.exercises.contains(custom) == true, "a custom 'Écarté' sorts under E")
+        let z = sections.first { $0.kind == .letter("Z") }
+        XCTAssertTrue(z?.exercises.contains(customLower) == true, "a lower-case custom name is sorted by its folded name")
+        XCTAssertTrue(results("zottman", in: catalog + [customLower]).contains(customLower))
+    }
+
+    // MARK: Recents and suggestions
+
+    func test_recentsLeadWhenTheSearchIsEmpty_neverWhileSearching() {
+        let sections = ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: ["leg_press", "bench_press", "not_an_exercise"])
+        XCTAssertEqual(sections.first?.kind, .recent)
+        XCTAssertEqual(sections.first?.exercises.map(\.id), ["leg_press", "bench_press"], "newest first, unknown ids dropped")
+        XCTAssertTrue(sections.contains { $0.kind == .letter("B") }, "recents are also in A-Z")
+        let searching = ExercisePickerModel.sections(exercises: catalog, query: "press", recentIds: ["leg_press"])
+        XCTAssertEqual(searching.map(\.kind), [.results])
+        XCTAssertEqual(ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: []).first?.kind, .letter("A"))
+    }
+
+    func test_recentsStoreIsNewestFirst_deduplicated_andCapped() {
+        let suite = UserDefaults(suiteName: "ExercisePickerTests.\(UUID().uuidString)")!
+        let store = ExercisePickerRecents(defaults: suite)
+        for id in ["a", "b", "c", "bench_press", "d", "e", "f", "g"] { store.record(id) }
+        store.record("c")
+        XCTAssertEqual(store.ids.first, "c")
+        XCTAssertEqual(store.ids.count, ExercisePickerRecents.limit)
+        XCTAssertEqual(store.ids.filter { $0 == "c" }.count, 1)
+    }
+
+    func test_aSwapKeepsSuggestedAlternativesAboveAToZ_andNeverOffersTheCurrentExercise() throws {
+        let current = try XCTUnwrap(catalog.first { $0.id == "bench_press" })
+        let sections = ExercisePickerModel.sections(exercises: catalog, query: "", recentIds: ["leg_press"], swapping: current)
+        XCTAssertEqual(sections.map(\.kind).prefix(2), [.recent, .suggested], "recent first, then the suggestions, then A-Z")
+        let suggested = try XCTUnwrap(sections.first { $0.kind == .suggested })
+        XCTAssertTrue(suggested.exercises.allSatisfy { $0.primaryMuscle == current.primaryMuscle })
+        XCTAssertFalse(sections.flatMap(\.exercises).contains(current))
+        XCTAssertTrue(sections.dropFirst(2).allSatisfy { if case .letter = $0.kind { return true } else { return false } })
+        // Add mode has no suggestions.
+        XCTAssertFalse(ExercisePickerModel.sections(exercises: catalog, query: "").contains { $0.kind == .suggested })
+    }
+
+    func test_everyAliasIsForARealExercise() {
+        let ids = Set(catalog.map(\.id))
+        XCTAssertEqual(Set(ExerciseSearch.aliasesById.keys).subtracting(ids), [], "an alias row for an exercise that is not in the catalog")
+        for (id, list) in ExerciseSearch.aliasesById { XCTAssertFalse(list.isEmpty, id); XCTAssertTrue(list.allSatisfy { !ExerciseSearch.normalize($0).isEmpty }, id) }
+    }
+
+    // MARK: One component everywhere
+
+    func test_everyPickerIsTheSameComponent() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+        let callSites: [(String, Int)] = [
+            ("Features/Session/SessionView.swift", 2),               // add in a session, swap in a session
+            ("Features/Home/ProgramDayDetailView.swift", 1),         // add on the day page
+            ("Features/Home/ReplaceExerciseFlow.swift", 1),          // swap on the day page
+            ("Features/Onboarding/OnboardingFlowView.swift", 2),     // preview swap, preview add
+        ]
+        for (path, count) in callSites {
+            let source = try text(path)
+            XCTAssertEqual(source.components(separatedBy: "ExercisePickerList(").count - 1, count, "\(path) uses the shared picker \(count)x")
+        }
+        // The three old pickers are gone, and nothing builds its own exercise list any more.
+        let features = try FileManager.default.subpathsOfDirectory(atPath: root.appendingPathComponent("Features").path).filter { $0.hasSuffix(".swift") }
+        for file in features {
+            let source = try text("Features/\(file)")
+            for old in ["struct AddExerciseSheet", "struct ProgramExerciseSwapSheet", "struct ExerciseSwapSheet"] {
+                XCTAssertFalse(source.contains(old), "\(file) still defines \(old)")
+            }
+        }
+        let list = try text("Features/ExercisePicker/ExercisePickerList.swift")
+        XCTAssertTrue(list.contains(".searchable("), "search")
+        XCTAssertTrue(list.contains("ExercisePickerModel.sections("), "the pure model builds the sections")
+        XCTAssertTrue(list.contains("SectionIndex"), "side index")
+    }
+
+    // MARK: Row actions are the same in every picker
+
+    /// The mode each call site passes, by context.
+    private func modes() -> [(context: String, mode: ExercisePickerList.Mode)] {
+        let swap = ExercisePickerList.Mode.swap(currentExerciseId: "bench_press", currentName: "Bench Press", footer: nil)
+        return [("session add", .add), ("session swap", swap), ("day page add", .add),
+                ("day page swap", swap), ("meso-setup preview swap", swap), ("meso-setup preview add", .add)]
+    }
+
+    func test_everyPickerContext_offersEditMusclesAndLiftTypeOnACustomExercise_andNothingOnABuiltIn() {
+        for (context, mode) in modes() {
+            XCTAssertEqual(ExercisePickerList.rowActions(isCustom: true, mode: mode), [.editMusclesAndLiftType, .delete], context)
+            XCTAssertTrue(ExercisePickerList.rowActions(isCustom: false, mode: mode).isEmpty, context)
+        }
+    }
+
+    func test_theSixCallSitesPassTheModesAbove_andTheActionOpensTheMuscleAndCompoundEditor() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+        // Each context really is ExercisePickerList in the mode this test exercises.
+        let expectations: [(String, [String])] = [
+            ("Features/Session/SessionView.swift", ["ExercisePickerList(\n                mode: .add", "mode: .swap(currentExerciseId"]),
+            ("Features/Home/ProgramDayDetailView.swift", ["ExercisePickerList(\n                mode: .add"]),
+            ("Features/Home/ReplaceExerciseFlow.swift", ["ExercisePickerList(\n                mode: .swap(currentExerciseId"]),
+            ("Features/Onboarding/OnboardingFlowView.swift", ["mode: .swap(currentExerciseId: displayId", "ExercisePickerList(\n                        mode: .add"]),
+        ]
+        for (path, needles) in expectations {
+            let source = try text(path)
+            for needle in needles { XCTAssertTrue(source.contains(needle), "\(path): \(needle)") }
+        }
+        // The one view builds its swipe actions from rowActions, and the action opens the editor with the Compound toggle.
+        let list = try text("Features/ExercisePicker/ExercisePickerList.swift")
+        XCTAssertTrue(list.contains("Self.rowActions(isCustom:"))
+        XCTAssertTrue(list.contains("actions.contains(.editMusclesAndLiftType)"))
+        XCTAssertTrue(list.contains(".swipeActions(edge: .leading)"))
+        XCTAssertTrue(list.contains("CustomMuscleMappingSheet(exerciseId:"))
+        let editor = try text("Features/ExercisePicker/AddExerciseSheet.swift")
+        XCTAssertTrue(editor.contains("Toggle(\"Compound lift\""), "the editor edits the Compound lift setting")
+        XCTAssertTrue(editor.contains("c.isCompound = compound"))
+    }
+
+    // MARK: A custom exercise that only the UserDefaults mirror knows
+
+    private func withMirror(_ entries: [CatalogExercise], _ body: () throws -> Void) rethrows {
+        let key = "custom_exercises_v2"
+        let before = UserDefaults.standard.data(forKey: key)
+        defer { if let before { UserDefaults.standard.set(before, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        UserDefaults.standard.set(try? JSONEncoder().encode(entries), forKey: key)
+        try body()
+    }
+
+    private func store() throws -> ModelContext {
+        let c = try ModelContainer(for: Schema([CustomExercise.self]), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parkedContainers.append(c)
+        return ModelContext(c)
+    }
+    private var parkedContainers: [ModelContainer] { get { Self.parked } set { Self.parked = newValue } }
+    private static var parked: [ModelContainer] = []
+
+    func test_mirrorOnlyCustomExercise_getsItsRecordBeforeTheEditorOpens() throws {
+        let stale = CatalogExercise(id: "custom_stale_probe", name: "Stale Probe Press", primaryMuscle: .chest, isCompound: false, isBodyweight: true)
+        try withMirror([stale]) {
+            let ctx = try store()
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<CustomExercise>()).isEmpty, "no record: only the mirror lists it")
+            XCTAssertTrue(ExerciseCatalog.all.contains(stale), "so the picker shows it")
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: stale.id, in: ctx))
+            let record = try XCTUnwrap(try ctx.fetch(FetchDescriptor<CustomExercise>()).first { $0.id == stale.id })
+            XCTAssertEqual(record.name, "Stale Probe Press")
+            XCTAssertEqual(record.primaryMuscleRaw, "chest")
+            XCTAssertEqual(record.isCompound, false)
+            XCTAssertEqual(record.isBodyweight, true, "every field of the mirror entry")
+            // Idempotent, and the editor's change then sticks.
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: stale.id, in: ctx))
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).filter { $0.id == stale.id }.count, 1)
+            record.isCompound = true
+            try ctx.save()
+            ExerciseCatalog.rebuildCustomMirror(from: ctx)
+            XCTAssertEqual(ExerciseCatalog.all.first { $0.id == stale.id }?.isCompound, true)
+        }
+    }
+
+    func test_ensureCustomRecord_refusesWhatIsNotACustomExercise() throws {
+        try withMirror([]) {
+            let ctx = try store()
+            XCTAssertFalse(ExerciseCatalog.ensureCustomRecord(id: "bench_press", in: ctx), "a built-in has nothing to edit")
+            XCTAssertFalse(ExerciseCatalog.ensureCustomRecord(id: "custom_nobody", in: ctx))
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<CustomExercise>()).isEmpty)
+            // An existing record is left untouched.
+            ctx.insert(CustomExercise(id: "custom_real", name: "Real", primaryMuscleRaw: "back", isCompound: true))
+            try ctx.save()
+            XCTAssertTrue(ExerciseCatalog.ensureCustomRecord(id: "custom_real", in: ctx))
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 1)
+        }
+    }
+
+    func test_theEditorOnlyOpensThroughTheRecordCheck() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let list = try String(contentsOf: root.appendingPathComponent("Features/ExercisePicker/ExercisePickerList.swift"), encoding: .utf8)
+        XCTAssertTrue(list.contains("if ExerciseCatalog.ensureCustomRecord(id: ex.id, in: modelContext) { mappingTarget = MappingTarget(id: ex.id) }"))
+        XCTAssertEqual(list.components(separatedBy: "mappingTarget = MappingTarget(").count - 1, 1, "no other way to open the editor from a picker")
+    }
+}
+
+// MARK: - Customization sheet: apply to all week types
+
+final class WaveCustomizationTests: XCTestCase {
+
+    private let template = DUP10WeekTemplate.template
+    private var slot: ProgramExerciseTemplate { template.dayTemplates[0].exerciseTemplates[0] }   // bench: a ramp over the weeks
+
+    /// The drafts the sheet loads for an exercise: each letter's first-week values.
+    private func loaded(_ existing: ExerciseWaveOverride? = nil) -> [WaveType: WaveDraft] {
+        var out: [WaveType: WaveDraft] = [:]
+        for wave in WaveCustomization.editableWaves {
+            let week = template.weekRules.first { $0.wave == wave }?.weekNumber ?? 1
+            let p = slot.prescription(for: wave)
+            out[wave] = WaveDraft(repMin: p?.repMin ?? 1, repMax: p?.repMax ?? 1, rir: p?.targetRIRMax ?? 0,
+                                  sets: existing?.setsByWeek.flatMap { week - 1 < $0.count ? $0[week - 1] : nil } ?? slot.sets(forWeek: week, wave: wave))
+        }
+        return out
+    }
+
+    func test_applyToAll_copiesTheEditedLettersSetsRepsAndRIR_toEveryOtherLetter() {
+        var drafts = loaded()
+        drafts[.b] = WaveDraft(repMin: 9, repMax: 14, rir: 0, sets: 5)
+        let out = WaveCustomization.applyToAll(from: .b, drafts: drafts)
+        for wave in WaveCustomization.editableWaves { XCTAssertEqual(out[wave], WaveDraft(repMin: 9, repMax: 14, rir: 0, sets: 5), "\(wave)") }
+        XCTAssertEqual(WaveCustomization.applyToAll(from: .a, drafts: [:]), [:])
+        XCTAssertEqual(Set(out.keys), Set(WaveCustomization.editableWaves), "deload is not a draft")
+    }
+
+    func test_unchangedSets_keepThePerWeekRamp_everyWeek() {
+        let start = loaded()
+        // Only reps changed.
+        var drafts = start
+        drafts[.a]?.repMax = 12
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            XCTAssertEqual(o.setsByWeek?[week - 1], slot.sets(forWeek: week, wave: rule.wave), "week \(week) keeps the template's ramp")
+        }
+        XCTAssertEqual(o.wavePrescriptions?[.a]?.repMax, 12)
+        XCTAssertEqual(o.wavePrescriptions?[.b]?.repMax, start[.b]?.repMax)
+    }
+
+    func test_changedSets_apply_toEveryWeekOfThatLetterOnly_deloadUntouched() {
+        let start = loaded()
+        var drafts = start
+        drafts[.a]?.sets = 6
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            let expected = rule.wave == .a ? 6 : slot.sets(forWeek: week, wave: rule.wave)
+            XCTAssertEqual(o.setsByWeek?[week - 1], expected, "week \(week) (\(rule.wave))")
+        }
+    }
+
+    func test_applyToAll_thenSave_putsTheNumbersEverywhere_butKeepsRampsWhereSetsAreUnchanged() {
+        let start = loaded()
+        // Copy A's values to B and C. A's sets equal what it loaded with, so letters whose own sets already match keep their ramps.
+        let a = start[.a]!
+        var drafts = WaveCustomization.applyToAll(from: .a, drafts: start)
+        let o = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for wave in [WaveType.b, .c] {
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.repMin, a.repMin)
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.repMax, a.repMax)
+            XCTAssertEqual(o.wavePrescriptions?[wave]?.targetRIR, a.rir)
+        }
+        // A letter whose sets now differ from what it loaded with takes the copied number in every week of that letter.
+        for week in 1...template.totalWeeks {
+            let rule = template.rule(forWeek: week)!
+            guard rule.wave != .deload else { XCTAssertEqual(o.setsByWeek?[week - 1], slot.sets(forWeek: week, wave: .deload)); continue }
+            let expected = start[rule.wave]?.sets == a.sets ? slot.sets(forWeek: week, wave: rule.wave) : a.sets
+            XCTAssertEqual(o.setsByWeek?[week - 1], expected, "week \(week)")
+        }
+        // Changing sets before copying copies the new number.
+        drafts = start
+        drafts[.a]?.sets = 2
+        drafts = WaveCustomization.applyToAll(from: .a, drafts: drafts)
+        let o2 = WaveCustomization.override(drafts: drafts, loaded: start, template: template, exerciseTemplate: slot, existing: nil)
+        for week in 1...template.totalWeeks where template.rule(forWeek: week)!.wave != .deload { XCTAssertEqual(o2.setsByWeek?[week - 1], 2) }
+    }
+
+    func test_theSheetOffersTheButton_inEveryLettersSection() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Features/Onboarding/ExerciseCustomizationSheet.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("Button(\"Apply to all week types\")"))
+        XCTAssertTrue(source.contains("WaveCustomization.applyToAll(from: wave"))
+        XCTAssertTrue(source.contains("WaveCustomization.override("))
     }
 }

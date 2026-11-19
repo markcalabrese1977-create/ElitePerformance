@@ -77,9 +77,7 @@ enum LoadProjectionService {
         }
 
         let hasFatigue = item.setFeedbackBySet.contains {
-            $0 == SetFeedback.soreness.rawValue ||
-            $0 == SetFeedback.disruption.rawValue ||
-            $0 == SetFeedback.pain.rawValue
+            SetFeedback.holdsLoad(raw: $0) || $0 == SetFeedback.pain.rawValue
         }
         if hasFatigue { return false }
 

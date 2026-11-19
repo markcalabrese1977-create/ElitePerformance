@@ -56,6 +56,7 @@ enum DUPProgramSeeder {
             notes: mesoNotes,
             totalWeeks: template.totalWeeks
         )
+        if template.waveless { mesoBlock.scheduledDeload = template.weekRules.contains { $0.isDeload } }
         context.insert(mesoBlock)
 
         var createdCount = 0
@@ -171,7 +172,8 @@ enum DUPProgramSeeder {
             totalWeeks: template.totalWeeks,
             trainingDaysPerWeek: template.trainingDaysPerWeek,
             weekRules: template.weekRules,
-            dayTemplates: patchedDays
+            dayTemplates: patchedDays,
+            waveless: template.waveless
         )
     }
 

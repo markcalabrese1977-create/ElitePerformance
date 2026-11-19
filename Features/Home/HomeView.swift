@@ -54,7 +54,7 @@ struct HomeView: View {
                 .navigationTitle("Program")
                 .sheet(isPresented: $showingChangeProgram, onDismiss: handleOnboardingDismiss) {
                     NavigationStack {
-                        OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first) { result, overrides, finished in
+                        OnboardingFlowView(initialStartDate: pendingMesoStartDate, profile: profiles.first, activeWeekdays: OnboardingDraft.weekdays(of: activeMeso)) { result, overrides, finished in
                             // Creation happens after this sheet closes, behind the replace confirmation; a failure there is
                             // reported by `seedFailure`.
                             pendingOnboardingResult = result

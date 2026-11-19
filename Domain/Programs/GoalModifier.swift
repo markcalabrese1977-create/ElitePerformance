@@ -140,7 +140,7 @@ enum GoalModifier {
         }
         return ProgramTemplate(id: template.id, name: template.name, totalWeeks: template.totalWeeks,
                                trainingDaysPerWeek: template.trainingDaysPerWeek,
-                               weekRules: template.weekRules, dayTemplates: days)
+                               weekRules: template.weekRules, dayTemplates: days, waveless: template.waveless)
     }
 
     private static func rebuilt(_ ex: ProgramExerciseTemplate, prescriptions: [WavePrescription]? = nil,

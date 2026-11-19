@@ -82,6 +82,16 @@ struct ReplaceExerciseModel {
 
     static func confirmTitle(count: Int) -> String { "Replace \(count)" }
 
+    /// More than one session changes: it is confirmed first, backed up, and then applied.
+    static func isMultiSession(_ plan: SessionItemEditService.ReplacePlan) -> Bool { plan.targets.count > 1 }
+
+    /// "Cable Fly → Pec Deck in 4 sessions (C weeks, weeks 9 and 12). Replace?"
+    static func confirmationMessage(_ plan: SessionItemEditService.ReplacePlan) -> String {
+        let from = ExerciseCatalog.displayName(for: plan.fromExerciseId), to = ExerciseCatalog.displayName(for: plan.toExerciseId)
+        let scope = MultiSessionCopy.scopeSummary(waves: plan.targets.map(\.waveRaw), weeks: plan.targets.map(\.weekIndex))
+        return "\(from) → \(to) in \(plan.targets.count) sessions (\(scope)). Replace?"
+    }
+
     static func letter(_ waveRaw: String?) -> String {
         let w = waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         switch w {
@@ -161,7 +171,7 @@ struct ReplaceExerciseModel {
 
 // MARK: - Views
 
-/// Pick a replacement (reusing `ProgramExerciseSwapSheet`), then choose the scope and review the preview.
+/// Pick a replacement (the shared `ExercisePickerList`), then choose the scope and review the preview.
 struct ReplaceExerciseFlow: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -184,9 +194,9 @@ struct ReplaceExerciseFlow: View {
                 onFinish: onFinish
             )
         } else {
-            ProgramExerciseSwapSheet(
-                currentExerciseId: item.exerciseId,
-                currentExerciseName: ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)),
+            ExercisePickerList(
+                mode: .swap(currentExerciseId: item.exerciseId,
+                            currentName: ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId))),
                 onSelect: { chosen = $0 },
                 onCancel: onFinish
             )
@@ -196,6 +206,7 @@ struct ReplaceExerciseFlow: View {
 
 private struct ReplacePreviewSheet: View {
     @Environment(\.loadUnit) private var unit
+    @Environment(\.modelContext) private var modelContext
     let model: ReplaceExerciseModel
     let surface: ReplaceExerciseSurface
     let onBack: () -> Void
@@ -204,6 +215,8 @@ private struct ReplacePreviewSheet: View {
     @State private var scope: ReplaceScopeChoice = .thisSession
     @State private var plans: [ReplaceScopeChoice: SessionItemEditService.ReplacePlan] = [:]
     @State private var errorMessage: String?
+    @State private var pendingConfirm: SessionItemEditService.ReplacePlan?
+    @StateObject private var seedGuard = SeedBackupGuard()
 
     private var scopes: [ReplaceScopeChoice] {
         ReplaceExerciseModel.availableScopes(surface: surface, session: model.session)
@@ -279,6 +292,15 @@ private struct ReplacePreviewSheet: View {
 
                 Section { } footer: { Text(ReplaceExerciseModel.unchangedFooter) }
             }
+            .seedBackupGuard(seedGuard)
+            .alert("Replace in \(pendingConfirm?.targets.count ?? 0) sessions?", isPresented: Binding(
+                get: { pendingConfirm != nil }, set: { if !$0 { pendingConfirm = nil } }
+            ), presenting: pendingConfirm) { pending in
+                Button("Replace") { applyMulti(pending) }
+                Button("Cancel", role: .cancel) { }
+            } message: { pending in
+                Text(ReplaceExerciseModel.confirmationMessage(pending))
+            }
             .navigationTitle("Replace Exercise")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -310,6 +332,15 @@ private struct ReplacePreviewSheet: View {
 
     private func confirm() {
         guard let plan else { return }
+        if ReplaceExerciseModel.isMultiSession(plan) { pendingConfirm = plan } else { applyNow(plan) }
+    }
+
+    /// A verified backup first; if it fails nothing is replaced (see SeedBackupGuard).
+    private func applyMulti(_ plan: SessionItemEditService.ReplacePlan) {
+        seedGuard.run(container: modelContext.container) { applyNow(plan) }
+    }
+
+    private func applyNow(_ plan: SessionItemEditService.ReplacePlan) {
         switch model.apply(plan) {
         case .success:
             onFinish()

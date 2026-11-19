@@ -10,6 +10,15 @@ enum SetFeedback: String, Codable {
     case fatigue = "fatigue"         // systemic fatigue/tired — distinct from disruption
 }
 
+extension SetFeedback {
+    /// A flag that makes the coach hold a load: soreness, disruption or fatigue. `.fatigue` is a fatigue flag everywhere
+    /// the coach reads feedback (CoachingEngine, LoadProjectionService; analytics' `SetRecord.hasFatigueFlag` already
+    /// counts it). Pain is separate: it stops every call.
+    var holdsLoad: Bool { self == .soreness || self == .disruption || self == .fatigue }
+
+    static func holdsLoad(raw: String) -> Bool { SetFeedback(rawValue: raw)?.holdsLoad ?? false }
+}
+
 /// Pump quality on completed sets.
 /// Stored as Int in SessionItem.pumpRatingsBySet.
 /// 0 = not rated, 1 = poor, 2 = moderate, 3 = good, 4 = excellent

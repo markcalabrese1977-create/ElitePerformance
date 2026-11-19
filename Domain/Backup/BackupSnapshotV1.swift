@@ -142,6 +142,8 @@ struct MesoBlockBackupDTO: Codable {
     let isMaintenance: Bool?
     /// Added (meso comparison). nil in old backups.
     var previousMesoId: UUID? = nil
+    /// Added (blocks the lifter wrote). nil in old backups and for generated blocks.
+    var scheduledDeload: Bool? = nil
 }
 
 // MARK: - Session

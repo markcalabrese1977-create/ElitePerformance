@@ -124,11 +124,28 @@ struct CoachingEngine {
         }
     }
 
-    /// Back-off rows (every row that is not a top row) with both load and reps > 0, before the
-    /// warm-up cull. On an item with no top set this is every logged row.
+    /// A set the lifter PERFORMED: reps and load logged, or a failed attempt (load > 0, no reps, not skipped). Skipped sets
+    /// (the "SKIP" marker, with their pain / soreness / disruption / fatigue reason) and sets never touched (load 0) are
+    /// not. This is how a 0-rep failure is told from an unlogged set (OPEN Q17): the attempted load is what marks it.
+    static func isPerformedRow(_ item: SessionItem, row i: Int) -> Bool {
+        guard item.actualLoads.indices.contains(i), item.actualReps.indices.contains(i), item.actualLoads[i] > 0 else { return false }
+        if item.actualReps[i] > 0 { return true }
+        return !WorkingSetFilter.isSkipped(item, row: i)
+    }
+
+    /// Back-off rows (every row that is not a top row) the lifter performed (`isPerformedRow`), before the
+    /// warm-up cull. On an item with no top set this is every performed row.
     private static func loggedRowIndices(for item: SessionItem) -> [Int] {
         let count = min(item.actualReps.count, item.actualLoads.count)
-        return (0..<count).filter { item.actualReps[$0] > 0 && item.actualLoads[$0] > 0 && !item.isTopRow($0) }
+        return (0..<count).filter { isPerformedRow(item, row: $0) && !item.isTopRow($0) }
+    }
+
+    /// The load the coach holds when it cannot call a progression: the last performed primary back-off set (the first up
+    /// to 3 planned working sets, as every progression rule reads them). nil when nothing was performed.
+    static func heldLoad(for item: SessionItem) -> Double? {
+        let rows = plannedWorkingSetIndices(for: item)
+        guard let last = Array(rows.prefix(min(max(1, item.targetSets), 3))).last else { return nil }
+        return item.actualLoads[last]
     }
 
     /// Logged top rows (reps and load > 0), by row. The role is the row's, never the logging order.
@@ -291,11 +308,10 @@ struct CoachingEngine {
 
         let fatigue = rows.contains { idx in
             guard idx < item.setFeedbackBySet.count else { return false }
-            let fb = item.setFeedbackBySet[idx]
-            return fb == SetFeedback.soreness.rawValue || fb == SetFeedback.disruption.rawValue
+            return SetFeedback.holdsLoad(raw: item.setFeedbackBySet[idx])
         }
         if fatigue {
-            return TopRead(message: "\(what) — soreness or disruption flagged, hold this load.", nextTopLoad: load)
+            return TopRead(message: "\(what) — soreness, disruption or fatigue flagged, hold this load.", nextTopLoad: load)
         }
         if (reps.min() ?? 0) < lo {
             return TopRead(message: "\(what), under the range (\(range)) — hold this load.", nextTopLoad: load)
@@ -382,10 +398,9 @@ struct CoachingEngine {
             )
         }
 
-        // Guard 5 — Soreness/disruption flag: captured here, applied as override below
+        // Guard 5 — Soreness/disruption/fatigue flag: captured here, applied as override below
         let hasFatigueFlag = (0..<min(count, item.setFeedbackBySet.count)).contains {
-            let fb = item.setFeedbackBySet[$0]
-            return fb == SetFeedback.soreness.rawValue || fb == SetFeedback.disruption.rawValue
+            SetFeedback.holdsLoad(raw: item.setFeedbackBySet[$0])
         }
 
         let workingIndices = workingSetIndices(for: item)
@@ -505,7 +520,12 @@ struct CoachingEngine {
             let hasSoreness = flags.contains(SetFeedback.soreness.rawValue)
             let hasDisruption = flags.contains(SetFeedback.disruption.rawValue)
             let msg: String
-            if hasSoreness && hasDisruption {
+            if !hasSoreness && !hasDisruption {
+                // Fatigue only (a set skipped or flagged as tired).
+                msg = isProgressionExempt
+                    ? "Fatigue was flagged this session. Hold this load."
+                    : "Fatigue was flagged this session. Hold this load — a tired session isn't a reliable read for an increase."
+            } else if hasSoreness && hasDisruption {
                 // Exempt (fixed-load) variants drop the progression language; non-exempt
                 // text is byte-identical.
                 msg = isProgressionExempt

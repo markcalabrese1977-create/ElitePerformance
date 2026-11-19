@@ -1,5 +1,57 @@
 import SwiftUI
 
+/// One letter's editable prescription in the customization sheet.
+struct WaveDraft: Equatable {
+    var repMin: Int
+    var repMax: Int
+    var rir: Int
+    var sets: Int
+}
+
+/// The pure part of the customization sheet: copying a letter to every letter, and turning the drafts into an override.
+enum WaveCustomization {
+
+    static let editableWaves: [WaveType] = [.a, .b, .c]
+
+    /// "Apply to all week types": the edited letter's sets, rep range and RIR on every other non-deload letter. The source is
+    /// unchanged; deload is never in the drafts.
+    static func applyToAll(from source: WaveType, drafts: [WaveType: WaveDraft]) -> [WaveType: WaveDraft] {
+        guard let draft = drafts[source] else { return drafts }
+        var out = drafts
+        for wave in editableWaves where wave != source { out[wave] = draft }
+        return out
+    }
+
+    /// The override the drafts describe. Reps and RIR are per letter. Sets: a letter whose sets the lifter did not change keeps its
+    /// per-week ramp (the existing override's weeks, else the template's); a letter whose sets were changed gets that number in
+    /// every one of its weeks. Deload weeks are never touched.
+    static func override(drafts: [WaveType: WaveDraft], loaded: [WaveType: WaveDraft], template: ProgramTemplate,
+                         exerciseTemplate: ProgramExerciseTemplate, existing: ExerciseWaveOverride?) -> ExerciseWaveOverride {
+        var wavePrescriptions: [WaveType: WavePrescriptionOverride] = [:]
+        for wave in editableWaves {
+            guard let draft = drafts[wave] else { continue }
+            wavePrescriptions[wave] = WavePrescriptionOverride(repMin: draft.repMin, repMax: draft.repMax, targetRIR: draft.rir)
+        }
+        var setsByWeek = Array(repeating: 0, count: max(template.totalWeeks, 1))
+        for weekNumber in 1...max(template.totalWeeks, 1) {
+            let idx = weekNumber - 1
+            guard let rule = template.rule(forWeek: weekNumber) else { continue }
+            let kept: Int = {
+                if let overridden = existing?.setsByWeek, idx < overridden.count { return overridden[idx] }
+                return exerciseTemplate.sets(forWeek: weekNumber, wave: rule.wave)
+            }()
+            if rule.wave != .deload, let draft = drafts[rule.wave], draft.sets != loaded[rule.wave]?.sets {
+                setsByWeek[idx] = draft.sets
+            } else if rule.wave != .deload {
+                setsByWeek[idx] = kept
+            } else {
+                setsByWeek[idx] = exerciseTemplate.sets(forWeek: weekNumber, wave: rule.wave)
+            }
+        }
+        return ExerciseWaveOverride(wavePrescriptions: wavePrescriptions, setsByWeek: setsByWeek)
+    }
+}
+
 /// Per-exercise, per-wave (A/B/C) override editor shown from the onboarding
 /// Week 1 preview. Deload is never editable here — it always reflects the
 /// template default (see ExerciseWaveOverride / DUPProgramSeeder.applying).
@@ -22,14 +74,7 @@ struct ExerciseCustomizationSheet: View {
     @State private var didCommitOrCancel = false
     @State private var confirmReset = false
 
-    private struct WaveDraft: Equatable {
-        var repMin: Int
-        var repMax: Int
-        var rir: Int
-        var sets: Int
-    }
-
-    private let editableWaves: [WaveType] = [.a, .b, .c]
+    private var editableWaves: [WaveType] { WaveCustomization.editableWaves }
 
     var body: some View {
         NavigationStack {
@@ -56,6 +101,10 @@ struct ExerciseCustomizationSheet: View {
                             value: binding(for: wave, keyPath: \.rir),
                             in: 0...5
                         )
+                        Button("Apply to all week types") {
+                            drafts = WaveCustomization.applyToAll(from: wave, drafts: drafts)
+                        }
+                        .accessibilityIdentifier("applyToAllWeekTypes-\(wave.rawValue)")
                     }
                 }
 
@@ -138,28 +187,8 @@ struct ExerciseCustomizationSheet: View {
     }
 
     private func buildOverride() -> ExerciseWaveOverride {
-        var wavePrescriptions: [WaveType: WavePrescriptionOverride] = [:]
-        for wave in editableWaves {
-            guard let draft = drafts[wave] else { continue }
-            wavePrescriptions[wave] = WavePrescriptionOverride(
-                repMin: draft.repMin,
-                repMax: draft.repMax,
-                targetRIR: draft.rir
-            )
-        }
-
-        var setsByWeek = Array(repeating: 0, count: max(template.totalWeeks, 1))
-        for weekNumber in 1...template.totalWeeks {
-            let idx = weekNumber - 1
-            guard let rule = template.rule(forWeek: weekNumber) else { continue }
-            if rule.wave != .deload, let draft = drafts[rule.wave] {
-                setsByWeek[idx] = draft.sets
-            } else {
-                setsByWeek[idx] = exerciseTemplate.sets(forWeek: weekNumber, wave: rule.wave)
-            }
-        }
-
-        return ExerciseWaveOverride(wavePrescriptions: wavePrescriptions, setsByWeek: setsByWeek)
+        WaveCustomization.override(drafts: drafts, loaded: loadedDrafts, template: template,
+                                   exerciseTemplate: exerciseTemplate, existing: existingOverride)
     }
 
     private func binding(for wave: WaveType, keyPath: WritableKeyPath<WaveDraft, Int>) -> Binding<Int> {

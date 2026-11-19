@@ -66,6 +66,57 @@ enum PlanStepperEdits {
 
 // MARK: - Model (no SwiftUI; the preview and the write both come from SessionItemEditService)
 
+/// How far a prescription change reaches. "This session only" is the default; the other two touch several sessions
+/// and are confirmed, backed up and undoable.
+enum PrescriptionScope: Hashable {
+    case thisSession
+    /// The same wave letter, every remaining session of this day in the block (waved blocks only).
+    case weekType
+    /// Every wave letter (or a block without waves), every remaining session of this day.
+    case everyRemaining
+
+    var title: String {
+        switch self {
+        case .thisSession: return "This session only"
+        case .weekType: return "This week type, rest of block"
+        case .everyRemaining: return "Every remaining session"
+        }
+    }
+}
+
+/// The words a multi-session confirmation uses: which wave letters and which weeks.
+enum MultiSessionCopy {
+
+    /// "C weeks, weeks 9 and 12" on a waved block, "weeks 2-6" without waves.
+    static func scopeSummary(waves: [String?], weeks: [Int]) -> String {
+        let letters = Set(waves.compactMap { raw -> String? in
+            let w = raw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            return w.isEmpty ? nil : w
+        }).sorted().map { $0 == "deload" ? "Deload" : $0.uppercased() }
+        let weekText = weeksText(Array(Set(weeks)).sorted())
+        guard !letters.isEmpty else { return weekText }
+        return "\(joined(letters)) weeks, \(weekText)"
+    }
+
+    static func joined(_ words: [String]) -> String {
+        switch words.count {
+        case 0: return ""
+        case 1: return words[0]
+        default: return words.dropLast().joined(separator: ", ") + " and " + words[words.count - 1]
+        }
+    }
+
+    /// "week 9", "weeks 9 and 12", "weeks 4–12" (three or more in a row).
+    static func weeksText(_ sorted: [Int]) -> String {
+        guard let first = sorted.first, let last = sorted.last else { return "no weeks" }
+        if sorted.count == 1 { return "week \(first)" }
+        if sorted.count >= 3, last - first == sorted.count - 1 { return "weeks \(first)–\(last)" }
+        return "weeks " + joined(sorted.map(String.init))
+    }
+
+    static func range(_ lo: Int, _ hi: Int) -> String { lo == hi ? "\(lo)" : "\(lo)–\(hi)" }
+}
+
 struct ChangePrescriptionModel {
 
     static let unchangedFooter = "Unchanged: loads, planned values, logged data, completed sessions, other exercises."
@@ -75,8 +126,8 @@ struct ChangePrescriptionModel {
     let context: ModelContext
     var now: Date = Date()
 
-    var scope: ReplaceScopeChoice
-    /// nil = every wave letter.
+    var scope: PrescriptionScope
+    /// The wave letter for "This week type": starts as the session's own letter and is never "all".
     var letter: String?
     var setDelta = 0                  // -1, 0, +1
     var changeReps = false
@@ -92,12 +143,19 @@ struct ChangePrescriptionModel {
     var topMode: TopSetMode = .noChange
     var topLow = 4, topHigh = 6, topRIR = 2
 
-    init(session: Session, item: SessionItem, context: ModelContext, scope: ReplaceScopeChoice, now: Date = Date()) {
+    init(session: Session, item: SessionItem, context: ModelContext, scope: PrescriptionScope = .thisSession, now: Date = Date()) {
         self.session = session; self.item = item; self.context = context; self.scope = scope; self.now = now
         let current = SessionItemEditService.PrescriptionValues(item)
         repLow = current.repMin; repHigh = current.repMax
         rirLow = current.rirMin; rirHigh = current.rirMax
         if let top = current.top { topLow = top.repMin; topHigh = top.repMax; topRIR = top.rir }
+        let own = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        letter = availableLetters.contains(own) ? own : nil
+    }
+
+    /// "This week type" only exists on blocks with waves.
+    var availableScopes: [PrescriptionScope] {
+        showsLetters ? [.thisSession, .weekType, .everyRemaining] : [.thisSession, .everyRemaining]
     }
 
     var itemHasTopSet: Bool { item.hasTopSet }
@@ -143,11 +201,12 @@ struct ChangePrescriptionModel {
         )
     }
 
-    func plan(scope override: ReplaceScopeChoice? = nil) -> SessionItemEditService.ChangePlan? {
+    func plan(scope override: PrescriptionScope? = nil) -> SessionItemEditService.ChangePlan? {
         guard let meso = session.meso else { return nil }
         let chosen = override ?? scope
         let serviceScope: SessionItemEditService.ReplaceScope = chosen == .thisSession ? .thisSession(session) : .allRemaining
-        let letters: Set<String>? = (showsLetters && chosen == .allRemaining) ? letter.map { [$0] } : nil
+        // A letter scope with no letter picked changes nothing: the empty set matches no item.
+        let letters: Set<String>? = (showsLetters && chosen == .weekType) ? Set(letter.map { [$0] } ?? []) : nil
         return SessionItemEditService.planChangePrescription(
             meso: meso, dayLabel: session.dayLabel, exerciseId: item.exerciseId, letters: letters,
             includeDeload: false, scope: serviceScope, change: change, now: now
@@ -156,14 +215,66 @@ struct ChangePrescriptionModel {
 
     // MARK: Copy
 
-    func title(for choice: ReplaceScopeChoice) -> String {
-        switch choice {
-        case .thisSession: return "This session only"
-        case .allRemaining:
-            let n = plan(scope: .allRemaining)?.targets.count ?? 0
-            return "All remaining \(dayLabel ?? "") sessions (\(n))"
-        }
+    func title(for choice: PrescriptionScope) -> String {
+        guard choice != .thisSession else { return choice.title }
+        return "\(choice.title) (\(sessionsInScope(choice)))"
     }
+
+    /// How many sessions the scope reaches, whether or not a value has been changed yet. (The confirmation alert counts
+    /// the sessions that would actually change; this is the row's own number.)
+    func sessionsInScope(_ choice: PrescriptionScope) -> Int {
+        guard let meso = session.meso else { return 0 }
+        if choice == .thisSession { return 1 }
+        let letters: Set<String>? = (showsLetters && choice == .weekType) ? Set(letter.map { [$0] } ?? []) : nil
+        return SessionItemEditService.sessionsInScope(
+            meso: meso, dayLabel: session.dayLabel, exerciseId: item.exerciseId, letters: letters,
+            includeDeload: false, scope: .allRemaining, now: now
+        )
+    }
+
+    // MARK: Confirmation (more than one session)
+
+    var exerciseName: String { ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)) }
+
+    /// "15–20 → 12–15", or "reps 15–20 → 12–15; RIR 2–3 → 1–2" when several things change.
+    static func changeSummary(_ plan: SessionItemEditService.ChangePlan) -> String {
+        let change = plan.change
+        func olds(_ text: (SessionItemEditService.PrescriptionValues) -> String) -> String? {
+            let distinct = Set(plan.targets.map { text($0.before) })
+            return distinct.count == 1 ? distinct.first : nil
+        }
+        var parts: [(label: String, text: String)] = []
+        if let d = change.setDelta { parts.append(("sets", d > 0 ? "+\(d)" : "−\(-d)")) }
+        if let r = change.repRange {
+            let new = MultiSessionCopy.range(r.lowerBound, r.upperBound)
+            let old = olds { MultiSessionCopy.range($0.repMin, $0.repMax) }
+            parts.append(("reps", old.map { "\($0) → \(new)" } ?? "→ \(new)"))
+        }
+        if let r = change.rirRange {
+            let new = MultiSessionCopy.range(r.lowerBound, r.upperBound)
+            let old = olds { MultiSessionCopy.range($0.rirMin, $0.rirMax) }
+            parts.append(("RIR", old.map { "\($0) → \(new)" } ?? "→ \(new)"))
+        }
+        switch change.topSet {
+        case .set?: parts.append(("top set", "added or updated"))
+        case .remove?: parts.append(("top set", "removed"))
+        case nil: break
+        }
+        if change.note != nil { parts.append(("note", "changed")) }
+        if parts.count == 1, parts[0].label == "reps" || parts[0].label == "RIR" { return parts[0].text }
+        return parts.map { "\($0.label) \($0.text)" }.joined(separator: "; ")
+    }
+
+    /// "Rear Delt Fly: 15–20 → 12–15 in 2 sessions (C weeks, weeks 9 and 12). Change?"
+    static func confirmationMessage(_ plan: SessionItemEditService.ChangePlan) -> String {
+        let name = ExerciseCatalog.displayName(for: plan.exerciseId)
+        let n = plan.targets.count
+        let scope = MultiSessionCopy.scopeSummary(waves: plan.targets.map(\.waveRaw), weeks: plan.targets.map(\.weekIndex))
+        return "\(name): \(changeSummary(plan)) in \(n) sessions (\(scope)). Change?"
+    }
+
+    /// True when the apply reaches more than one session: it needs the confirmation, the backup and the undo.
+    static func isMultiSession(_ plan: SessionItemEditService.ChangePlan) -> Bool { plan.targets.count > 1 }
 
     static func confirmTitle(count: Int) -> String { "Apply to \(count)" }
 
@@ -189,6 +300,17 @@ struct ChangePrescriptionModel {
         }
     }
 
+    /// The fields a multi-session apply will overwrite, captured before it runs (see `SessionItemEditService.PrescriptionUndo`).
+    func captureUndo(_ plan: SessionItemEditService.ChangePlan) -> SessionItemEditService.PrescriptionUndo {
+        SessionItemEditService.capturePrescriptionUndo(for: plan)
+    }
+
+    func undo(_ undo: SessionItemEditService.PrescriptionUndo) -> Result<Int, ReplaceExerciseModel.ApplyFailure> {
+        do { return .success(try SessionItemEditService.undoPrescriptionChange(undo, in: context)) } catch let error as SessionItemEditService.ReplaceError {
+            return .failure(.init(error: error))
+        } catch { return .failure(.init(error: .saveFailed("\(error)"))) }
+    }
+
     func apply(_ plan: SessionItemEditService.ChangePlan) -> Result<SessionItemEditService.ApplyResult, ReplaceExerciseModel.ApplyFailure> {
         do {
             return .success(try SessionItemEditService.applyChange(plan, in: context))
@@ -202,13 +324,14 @@ struct ChangePrescriptionModel {
 
 // MARK: - Views
 
-/// "Change for remaining sessions": letters, sets, rep range, RIR range, a preview from the plan, then apply.
+/// "Change prescription…": scope, letters, sets, rep range, RIR range, a preview from the plan, then apply.
 struct ChangePrescriptionFlow: View {
     @Environment(\.modelContext) private var modelContext
 
     let session: Session
     let item: SessionItem
-    let initialScope: ReplaceScopeChoice
+    /// Called after a change that reached more than one session, with what is needed to undo it.
+    var onApplied: (SessionItemEditService.PrescriptionUndo, _ summary: String) -> Void = { _, _ in }
     let onFinish: () -> Void
 
     @State private var model: ChangePrescriptionModel?
@@ -216,23 +339,28 @@ struct ChangePrescriptionFlow: View {
     var body: some View {
         Group {
             if let binding = Binding($model) {
-                ChangePrescriptionForm(model: binding, onFinish: onFinish)
+                ChangePrescriptionForm(model: binding, onApplied: onApplied, onFinish: onFinish)
             } else {
                 ProgressView()
             }
         }
         .onAppear {
             if model == nil {
-                model = ChangePrescriptionModel(session: session, item: item, context: modelContext, scope: initialScope)
+                model = ChangePrescriptionModel(session: session, item: item, context: modelContext)
             }
         }
     }
 }
 
 private struct ChangePrescriptionForm: View {
+    @Environment(\.modelContext) private var modelContext
     @Binding var model: ChangePrescriptionModel
+    let onApplied: (SessionItemEditService.PrescriptionUndo, String) -> Void
     let onFinish: () -> Void
     @State private var errorMessage: String?
+    /// The multi-session plan waiting for the lifter's "Change".
+    @State private var pendingConfirm: SessionItemEditService.ChangePlan?
+    @StateObject private var seedGuard = SeedBackupGuard()
 
     private var plan: SessionItemEditService.ChangePlan? { model.plan() }
 
@@ -241,25 +369,28 @@ private struct ChangePrescriptionForm: View {
             Form {
                 Section {
                     Picker("Scope", selection: $model.scope) {
-                        Text("This session").tag(ReplaceScopeChoice.thisSession)
-                        Text("Remaining").tag(ReplaceScopeChoice.allRemaining)
+                        ForEach(model.availableScopes, id: \.self) { choice in
+                            Text(model.title(for: choice)).tag(choice)
+                        }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } header: {
-                    Text(ExerciseCatalog.displayName(for: ExerciseCatalog.canonicalExerciseId(for: model.item.exerciseId)))
-                } footer: {
-                    Text(model.title(for: model.scope))
+                    Text(model.exerciseName)
                 }
 
-                if model.showsLetters && model.scope == .allRemaining {
-                    Section("Waves") {
-                        Picker("Waves", selection: $model.letter) {
-                            Text("All").tag(String?.none)
+                if model.showsLetters && model.scope == .weekType {
+                    Section {
+                        Picker("Week type", selection: $model.letter) {
                             ForEach(model.availableLetters, id: \.self) { l in
                                 Text(l.uppercased()).tag(String?.some(l))
                             }
                         }
                         .pickerStyle(.segmented)
+                    } header: {
+                        Text("Week type")
+                    } footer: {
+                        if model.letter == nil { Text("Choose a week type.") }
                     }
                 }
 
@@ -366,6 +497,15 @@ private struct ChangePrescriptionForm: View {
 
                 Section { } footer: { Text(ChangePrescriptionModel.unchangedFooter) }
             }
+            .seedBackupGuard(seedGuard)
+            .alert("Change \(pendingConfirm?.targets.count ?? 0) sessions?", isPresented: Binding(
+                get: { pendingConfirm != nil }, set: { if !$0 { pendingConfirm = nil } }
+            ), presenting: pendingConfirm) { pending in
+                Button("Change") { applyMulti(pending) }
+                Button("Cancel", role: .cancel) { }
+            } message: { pending in
+                Text(ChangePrescriptionModel.confirmationMessage(pending))
+            }
             .navigationTitle("Change Prescription")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -388,9 +528,30 @@ private struct ChangePrescriptionForm: View {
 
     private func confirm() {
         guard let plan else { return }
-        switch model.apply(plan) {
-        case .success: onFinish()
-        case .failure(let failure): errorMessage = failure.message
+        errorMessage = nil
+        guard ChangePrescriptionModel.isMultiSession(plan) else {
+            switch model.apply(plan) {
+            case .success: onFinish()
+            case .failure(let failure): errorMessage = failure.message
+            }
+            return
+        }
+        pendingConfirm = plan
+    }
+
+    /// After "Change": a verified backup first (if it fails nothing is applied), then the apply with the undo captured
+    /// beforehand.
+    private func applyMulti(_ plan: SessionItemEditService.ChangePlan) {
+        seedGuard.run(container: modelContext.container) {
+            let undo = model.captureUndo(plan)
+            let summary = "\(model.exerciseName): changed \(plan.targets.count) sessions"
+            switch model.apply(plan) {
+            case .success:
+                onApplied(undo, summary)
+                onFinish()
+            case .failure(let failure):
+                errorMessage = failure.message
+            }
         }
     }
 }

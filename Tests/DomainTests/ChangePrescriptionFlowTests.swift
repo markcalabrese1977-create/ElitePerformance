@@ -24,7 +24,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         return (ctx, try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first))
     }
 
-    private func model(_ ctx: ModelContext, _ block: MesoBlock, scope: ReplaceScopeChoice = .allRemaining) throws -> Model {
+    private func model(_ ctx: ModelContext, _ block: MesoBlock, scope: PrescriptionScope = .everyRemaining) throws -> Model {
         let session = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
         let item = try XCTUnwrap(session.items.sorted { $0.order < $1.order }.first {
             !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId)
@@ -75,7 +75,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
             s.meso = meso; nctx.insert(s); sessions.append(s)
         }
         try nctx.save()
-        var plain = Model(session: sessions[0], item: sessions[0].items[0], context: nctx, scope: .allRemaining)
+        var plain = Model(session: sessions[0], item: sessions[0].items[0], context: nctx, scope: .weekType)
         XCTAssertFalse(plain.showsLetters)
         plain.letter = "a"
         plain.setDelta = 1
@@ -86,7 +86,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
 
     func test_previewCountEqualsAppliedCount_forEachScope() throws {
         let (ctx, block) = try makeBlock()
-        var m = try model(ctx, block)
+        var m = try model(ctx, block, scope: .weekType)
         m.setDelta = 1
         m.letter = "a"
 
@@ -96,7 +96,7 @@ final class ChangePrescriptionFlowTests: XCTestCase {
         XCTAssertEqual(rows.count, plan.targets.count)
         XCTAssertTrue(rows.allSatisfy { $0.wave == "A" })
         XCTAssertEqual(Model.confirmTitle(count: rows.count), "Apply to \(rows.count)")
-        XCTAssertEqual(m.title(for: .allRemaining), "All remaining \(m.dayLabel ?? "") sessions (\(plan.targets.count))")
+        XCTAssertEqual(m.title(for: .weekType), "This week type, rest of block (\(plan.targets.count))")
         XCTAssertEqual(m.title(for: .thisSession), "This session only")
 
         guard case .success(let applied) = m.apply(plan) else { return XCTFail("apply failed") }
@@ -599,7 +599,7 @@ final class NoteChangeTests: XCTestCase {
         let (ctx, block) = try makeBlock()
         let first = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
         let item = try XCTUnwrap(first.items.first)
-        var model = ChangePrescriptionModel(session: first, item: item, context: ctx, scope: .allRemaining, now: longAgo)
+        var model = ChangePrescriptionModel(session: first, item: item, context: ctx, scope: .everyRemaining, now: longAgo)
         XCTAssertNil(model.change.note)
         model.noteText = "Hello"
         XCTAssertEqual(model.change.note, "Hello")
@@ -607,4 +607,457 @@ final class NoteChangeTests: XCTestCase {
         XCTAssertEqual(model.change.note, "", "Clear note wins over the text")
     }
 
+}
+
+// MARK: - Multi-session safety: default scope, letter scope, confirmation, backup, undo
+
+@MainActor
+final class MultiSessionSafetyTests: XCTestCase {
+
+    private typealias Model = ChangePrescriptionModel
+    private var container: ModelContainer!
+
+    private func makeBlock() throws -> (ModelContext, MesoBlock) {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self,
+                             UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        container = c
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        let cal = Calendar(identifier: .gregorian)
+        try DUPProgramSeeder.seed(
+            startDate: cal.date(from: DateComponents(year: 2026, month: 9, day: 25))!,
+            trainingWeekdays: [1, 2, 3, 4, 6, 7], context: ctx,
+            template: DUP10WeekTemplate.template, calendar: cal, mesoName: "10-Week DUP Meso", mesoStatus: .active
+        )
+        try ctx.save()
+        return (ctx, try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first))
+    }
+
+    private func model(_ ctx: ModelContext, _ block: MesoBlock, scope: PrescriptionScope? = nil) throws -> Model {
+        let session = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(session.items.sorted { $0.order < $1.order }.first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) })
+        let now = Date(timeIntervalSince1970: 0)
+        if let scope { return Model(session: session, item: item, context: ctx, scope: scope, now: now) }
+        return Model(session: session, item: item, context: ctx, now: now)
+    }
+
+    /// Everything a prescription change can write, plus the fields it must leave alone, for every item in the block.
+    private func snapshot(_ block: MesoBlock) -> [String] {
+        block.sessions.sorted { $0.date < $1.date }.flatMap { s in
+            s.items.sorted { $0.order < $1.order }.map { i in
+                [ "\(s.weekIndex)", i.exerciseId, i.waveRaw ?? "-", "\(i.targetSets)", "\(i.targetReps)", "\(i.targetRIR)",
+                  "\(String(describing: i.setMin))", "\(String(describing: i.setMax))", "\(String(describing: i.repMin))",
+                  "\(String(describing: i.repMax))", "\(String(describing: i.targetRIRMin))", "\(String(describing: i.targetRIRMax))",
+                  "\(i.plannedLoadsBySet)", "\(i.plannedRepsBySet)", "\(i.plannedRIRsBySet)", "\(String(describing: i.setRolesBySet))",
+                  "\(String(describing: i.topRepMin))", "\(String(describing: i.topRepMax))", "\(String(describing: i.topRIR))",
+                  "\(String(describing: i.prescribedSets))", "\(String(describing: i.intensifierNotes))",
+                  "\(String(describing: i.prescriptionNotes))", "\(i.planEdited)", "\(i.suggestedLoad)" ].joined(separator: "|")
+            }
+        }
+    }
+
+    private func lift(_ block: MesoBlock) throws -> (day: String, id: String) {
+        let first = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(first.items.sorted { $0.order < $1.order }.first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) })
+        return (try XCTUnwrap(first.dayLabel), ExerciseCatalog.canonicalExerciseId(for: item.exerciseId))
+    }
+
+    // MARK: Scope
+
+    func test_defaultScopeIsThisSessionOnly_andItIsTheFirstOption() throws {
+        let (ctx, block) = try makeBlock()
+        let m = try model(ctx, block)
+        XCTAssertEqual(m.scope, .thisSession)
+        XCTAssertEqual(m.availableScopes.first, .thisSession)
+        XCTAssertEqual(m.availableScopes, [.thisSession, .weekType, .everyRemaining], "waved block: all three")
+        XCTAssertEqual(PrescriptionScope.thisSession.title, "This session only")
+        XCTAssertEqual(PrescriptionScope.weekType.title, "This week type, rest of block")
+        XCTAssertEqual(PrescriptionScope.everyRemaining.title, "Every remaining session")
+        var edit = m
+        edit.changeReps = true; edit.repLow = 12; edit.repHigh = 15
+        XCTAssertEqual(try XCTUnwrap(edit.plan()).targets.count, 1, "untouched defaults change one session")
+    }
+
+    func test_weekTypeStartsOnTheSessionsOwnLetter_andThereIsNoAll() throws {
+        let (ctx, block) = try makeBlock()
+        let m = try model(ctx, block, scope: .weekType)
+        let own = try XCTUnwrap(m.session.items.first { $0 === m.item }?.waveRaw?.lowercased())
+        XCTAssertEqual(m.letter, own)
+        var none = m
+        none.letter = nil
+        let plan = try XCTUnwrap({ var n = none; n.changeReps = true; n.repLow = 12; n.repHigh = 15; return n.plan() }())
+        XCTAssertTrue(plan.targets.isEmpty, "no letter chosen changes nothing; there is no 'All'")
+    }
+
+    func test_nonWavedBlock_hasNoWeekTypeScope() throws {
+        let (ctx, block) = try makeBlock()
+        let session = try XCTUnwrap(block.sessions.first)
+        for s in block.sessions { for i in s.items { i.waveRaw = nil } }
+        let m = Model(session: session, item: try XCTUnwrap(session.items.first), context: ctx)
+        XCTAssertFalse(m.showsLetters)
+        XCTAssertEqual(m.availableScopes, [.thisSession, .everyRemaining])
+    }
+
+    func test_letterScopeNeverTouchesOtherLetters() throws {
+        let (ctx, block) = try makeBlock()
+        let (day, id) = try lift(block)
+        var m = try model(ctx, block, scope: .weekType)
+        m.letter = "c"
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let before = Dictionary(uniqueKeysWithValues: block.sessions.flatMap(\.items).map { ($0.persistentModelID, snapshot(of: $0)) })
+        let plan = try XCTUnwrap(m.plan())
+        XCTAssertFalse(plan.targets.isEmpty)
+        XCTAssertTrue(plan.targets.allSatisfy { $0.waveRaw?.lowercased() == "c" })
+        guard case .success = m.apply(plan) else { return XCTFail("apply failed") }
+        let changed = Set(plan.targets.map { $0.item.persistentModelID })
+        for s in block.sessions { for i in s.items where !changed.contains(i.persistentModelID) {
+            XCTAssertEqual(snapshot(of: i), before[i.persistentModelID], "\(s.dayLabel ?? "") wk\(s.weekIndex) \(i.waveRaw ?? "-") untouched")
+        } }
+        // Other letters of the same lift on the same day are among the untouched ones.
+        let sameLift = block.sessions.filter { SessionDayLabelMatcher.matches($0.dayLabel, day) }
+            .flatMap { $0.items.filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id } }
+        XCTAssertTrue(sameLift.contains { $0.waveRaw?.lowercased() != "c" })
+    }
+
+    private func snapshot(of i: SessionItem) -> String {
+        "\(i.targetSets)|\(i.targetReps)|\(i.repMin ?? -1)|\(i.repMax ?? -1)|\(i.plannedRepsBySet)|\(i.plannedLoadsBySet)|\(i.planEdited)"
+    }
+
+    // MARK: Entry point and scope counts
+
+    func test_scopeRowsCountTheSessionsInScope_beforeAnyValueChanges() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .thisSession)
+        XCTAssertFalse(m.change.isValid)
+        let every = m.sessionsInScope(.everyRemaining), type = m.sessionsInScope(.weekType)
+        XCTAssertGreaterThan(every, 1)
+        XCTAssertGreaterThan(type, 1)
+        XCTAssertLessThan(type, every, "one letter is a subset of every letter")
+        XCTAssertEqual(m.title(for: .everyRemaining), "Every remaining session (\(every))")
+        XCTAssertEqual(m.title(for: .weekType), "This week type, rest of block (\(type))")
+        XCTAssertEqual(try XCTUnwrap(m.plan(scope: .everyRemaining)).targets.count, 0, "nothing to change yet")
+
+        // A change that touches only some of those sessions: the row keeps the scope's size, the alert counts the changed ones.
+        m.scope = .everyRemaining
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        XCTAssertEqual(m.sessionsInScope(.everyRemaining), every, "the row does not move with the value")
+        XCTAssertTrue(Model.confirmationMessage(plan).contains("in \(plan.targets.count) sessions"))
+    }
+
+    func test_planEditedSessionsAreNotInTheEveryRemainingCount() throws {
+        let (ctx, block) = try makeBlock()
+        let m = try model(ctx, block, scope: .everyRemaining)
+        let before = m.sessionsInScope(.everyRemaining)
+        let (day, id) = try lift(block)
+        let items = block.sessions.sorted { $0.date < $1.date }.filter { SessionDayLabelMatcher.matches($0.dayLabel, day) }
+            .compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == id } }
+        items.first { $0.waveRaw?.lowercased() != "deload" }?.planEdited = true
+        XCTAssertEqual(m.sessionsInScope(.everyRemaining), before - 1)
+    }
+
+    func test_theEntryPointIsCalledChangePrescription() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let day = try String(contentsOf: dir.appendingPathComponent("Features/Home/ProgramDayDetailView.swift"), encoding: .utf8)
+        XCTAssertTrue(day.contains("Change prescription…"))
+        XCTAssertFalse(day.contains("Change for remaining sessions"))
+        let guide = try String(contentsOf: dir.appendingPathComponent("ElitePerformance/Resources/Guide/Guide.html"), encoding: .utf8)
+        XCTAssertTrue(guide.contains("Change prescription…"))
+        XCTAssertFalse(guide.contains("Change for remaining sessions"))
+    }
+
+    // MARK: Confirmation text
+
+    func test_scopeSummary_wordsLettersAndWeeks() {
+        XCTAssertEqual(MultiSessionCopy.scopeSummary(waves: ["c", "c"], weeks: [9, 12]), "C weeks, weeks 9 and 12")
+        XCTAssertEqual(MultiSessionCopy.scopeSummary(waves: ["a", "c", "a"], weeks: [1, 3, 4]), "A and C weeks, weeks 1, 3 and 4")
+        XCTAssertEqual(MultiSessionCopy.scopeSummary(waves: ["a", "b", "c"], weeks: [4, 5, 6, 7]), "A, B and C weeks, weeks 4–7")
+        XCTAssertEqual(MultiSessionCopy.scopeSummary(waves: [nil, nil], weeks: [2, 3]), "weeks 2 and 3", "no waves: weeks only")
+        XCTAssertEqual(MultiSessionCopy.weeksText([5]), "week 5")
+    }
+
+    func test_confirmationText_hasTheNameTheValuesTheCountTheLettersAndTheWeeks() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .weekType)
+        m.letter = "c"
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        let n = plan.targets.count
+        XCTAssertGreaterThan(n, 1)
+        let weeks = Array(Set(plan.targets.map(\.weekIndex))).sorted()
+        let before = plan.targets[0].before
+        let old = MultiSessionCopy.range(before.repMin, before.repMax)
+        let text = Model.confirmationMessage(plan)
+        XCTAssertEqual(text, "\(ExerciseCatalog.displayName(for: plan.exerciseId)): \(old) → 12–15 in \(n) sessions "
+                       + "(C weeks, \(MultiSessionCopy.weeksText(weeks))). Change?")
+        XCTAssertTrue(Model.isMultiSession(plan))
+        var one = m
+        one.scope = .thisSession
+        XCTAssertFalse(Model.isMultiSession(try XCTUnwrap(one.plan())), "one session needs no confirmation")
+    }
+
+    func test_confirmationText_namesEveryPart_whenSeveralThingsChange() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.setDelta = 1
+        m.changeRIR = true; m.rirLow = 1; m.rirHigh = 2
+        let text = Model.confirmationMessage(try XCTUnwrap(m.plan()))
+        XCTAssertTrue(text.contains("sets +1"), text)
+        XCTAssertTrue(text.contains("RIR "), text)
+        XCTAssertTrue(text.contains("→ 1–2"), text)
+    }
+
+    // MARK: Backup first
+
+    func test_aFailedBackup_appliesNothing_andASuccessfulOneAppliesAfterIt() async throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        let before = snapshot(block)
+
+        let failing = SeedBackupGuard(backup: { _ in .failure(AutoBackupError.emptyStore) })
+        var applied = 0
+        failing.run(container: container) { if case .success = m.apply(plan) { applied += 1 } }
+        try await wait { failing.failure != nil }
+        XCTAssertEqual(applied, 0)
+        XCTAssertEqual(snapshot(block), before, "nothing was written")
+
+        var order: [String] = []
+        let ok = SeedBackupGuard(backup: { _ in order.append("backup"); return .success(nil) })
+        ok.run(container: container) { order.append("apply"); _ = m.apply(plan) }
+        try await wait { order.count == 2 }
+        XCTAssertEqual(order, ["backup", "apply"])
+        XCTAssertNotEqual(snapshot(block), before)
+    }
+
+    func test_theFormTakesTheBackupBeforeApplyingMoreThanOneSession() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let change = try String(contentsOf: dir.appendingPathComponent("Features/Home/ChangePrescriptionFlow.swift"), encoding: .utf8)
+        XCTAssertTrue(change.contains("seedGuard.run(container: modelContext.container)"))
+        XCTAssertTrue(change.contains("pendingConfirm = plan"), "multi-session goes through the alert first")
+        let replace = try String(contentsOf: dir.appendingPathComponent("Features/Home/ReplaceExerciseFlow.swift"), encoding: .utf8)
+        XCTAssertTrue(replace.contains("seedGuard.run(container: modelContext.container)"))
+        XCTAssertTrue(replace.contains("ReplaceExerciseModel.isMultiSession(plan)"))
+    }
+
+    func test_replaceConfirmation_hasTheCountAndTheScope() throws {
+        let (ctx, block) = try makeBlock()
+        let session = try XCTUnwrap(block.sessions.sorted { $0.date < $1.date }.first)
+        let item = try XCTUnwrap(session.items.sorted { $0.order < $1.order }.first { !ExerciseCatalog.isBodyweight(exerciseId: $0.exerciseId) })
+        let used = Set(block.sessions.flatMap(\.items).map { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) })
+        let y = try XCTUnwrap(ExerciseCatalog.all.first { !used.contains($0.id) && !ExerciseCatalog.isBodyweight(exerciseId: $0.id) })
+        let rm = ReplaceExerciseModel(session: session, item: item, replacementId: y.id, context: ctx, now: Date(timeIntervalSince1970: 0))
+        let all = try XCTUnwrap(rm.plan(for: .allRemaining))
+        XCTAssertTrue(ReplaceExerciseModel.isMultiSession(all))
+        let text = ReplaceExerciseModel.confirmationMessage(all)
+        XCTAssertTrue(text.contains("in \(all.targets.count) sessions ("), text)
+        XCTAssertTrue(text.hasSuffix("Replace?"), text)
+        XCTAssertFalse(ReplaceExerciseModel.isMultiSession(try XCTUnwrap(rm.plan(for: .thisSession))))
+    }
+
+    // MARK: Undo
+
+    func test_undoPutsEveryChangedFieldBackExactly() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.setDelta = 1
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        m.changeRIR = true; m.rirLow = 1; m.rirHigh = 2
+        m.noteText = "Controlled tempo"
+        m.topMode = .set; m.topLow = 4; m.topHigh = 6; m.topRIR = 2
+        let before = snapshot(block)
+        let plan = try XCTUnwrap(m.plan())
+        XCTAssertGreaterThan(plan.targets.count, 1)
+        let undo = m.captureUndo(plan)
+        XCTAssertEqual(undo.sessionCount, plan.targets.count)
+        guard case .success = m.apply(plan) else { return XCTFail("apply failed") }
+        XCTAssertNotEqual(snapshot(block), before, "the apply changed something")
+        guard case .success(let restored) = m.undo(undo) else { return XCTFail("undo failed") }
+        XCTAssertEqual(restored, plan.targets.count)
+        XCTAssertEqual(snapshot(block), before, "every field of every item is as it was, planEdited included")
+    }
+
+    func test_undoRestoresOnlyTheFieldsTheChangeWrote_notAnythingTheLifterDidSince() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        let undo = m.captureUndo(plan)
+        guard case .success = m.apply(plan) else { return XCTFail("apply failed") }
+        let target = try XCTUnwrap(plan.targets.last)
+        target.item.suggestedLoad = 123.5               // not a prescription field
+        target.item.planEdited = true
+        guard case .success = m.undo(undo) else { return XCTFail("undo failed") }
+        XCTAssertEqual(target.item.suggestedLoad, 123.5, "undo is not a backup restore")
+        XCTAssertTrue(target.item.planEdited)
+        XCTAssertEqual(target.item.repMin, target.before.repMin)
+        XCTAssertEqual(target.item.repMax, target.before.repMax)
+    }
+
+    func test_undoSkipsASessionThatHasStartedSince() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let plan = try XCTUnwrap(m.plan())
+        let undo = m.captureUndo(plan)
+        guard case .success = m.apply(plan) else { return XCTFail("apply failed") }
+        let started = try XCTUnwrap(plan.targets.first)
+        started.session.status = .inProgress
+        guard case .success(let restored) = m.undo(undo) else { return XCTFail("undo failed") }
+        XCTAssertEqual(restored, plan.targets.count - 1)
+        XCTAssertEqual(started.item.repMin, 12, "the started session keeps what it has")
+    }
+
+    // MARK: Hand-edited plans
+
+    func test_everyRemaining_stillRefusesPlanEditedItems() throws {
+        let (ctx, block) = try makeBlock()
+        var m = try model(ctx, block, scope: .everyRemaining)
+        m.changeReps = true; m.repLow = 12; m.repHigh = 15
+        let all = try XCTUnwrap(m.plan())
+        let edited = try XCTUnwrap(all.targets.dropFirst(2).first)
+        edited.item.planEdited = true
+        let again = try XCTUnwrap(m.plan())
+        XCTAssertEqual(again.targets.count, all.targets.count - 1)
+        XCTAssertFalse(again.targets.contains { $0.item === edited.item })
+        XCTAssertEqual(again.editedSkipped, 1)
+        guard case .success = m.apply(again) else { return XCTFail("apply failed") }
+        XCTAssertEqual(edited.item.repMin, edited.before.repMin, "the hand-edited item is left as it is")
+    }
+
+    private func wait(_ condition: @escaping () -> Bool, timeout: TimeInterval = 10) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { XCTFail("timed out"); return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+}
+
+// MARK: - Wave labels (one path for every screen)
+final class WaveLabelsTests: XCTestCase {
+
+    private typealias S = WaveLabels.Sample
+    private func anchors(_ a: Int, _ b: Int, _ c: Int) -> [S] {
+        [S(letter: "a", repMax: a, isAnchor: true), S(letter: "b", repMax: b, isAnchor: true), S(letter: "c", repMax: c, isAnchor: true)]
+    }
+
+    // MARK: Ordering
+
+    func test_threeLetters_areOrderedByRepMax_lowestHeaviest() {
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X"), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+        // Not tied to the alphabet: the letters follow the numbers.
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(10, 6, 8), mesoName: "X"), ["a": "Light", "b": "Heavy", "c": "Moderate"])
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(8, 10, 6), mesoName: "X"), ["a": "Moderate", "b": "Light", "c": "Heavy"])
+    }
+
+    func test_twoLetters_areHeavyAndLight() {
+        let two = [S(letter: "a", repMax: 5, isAnchor: true), S(letter: "c", repMax: 12, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: two, mesoName: "X"), ["a": "Heavy", "c": "Light"])
+    }
+
+    func test_theMeanOfAnchorsDecides_notAccessories() {
+        var s = anchors(6, 8, 10)
+        // Accessories say the opposite; they are ignored while every letter has an anchor.
+        s += [S(letter: "a", repMax: 30, isAnchor: false), S(letter: "c", repMax: 3, isAnchor: false)]
+        XCTAssertEqual(WaveLabels.labels(samples: s, mesoName: "X")["a"], "Heavy")
+        // Means, not single values: a=(6+10)/2=8, b=(6+6)/2=6 -> b is the heavier.
+        let mixed = [S(letter: "a", repMax: 6, isAnchor: true), S(letter: "a", repMax: 10, isAnchor: true),
+                     S(letter: "b", repMax: 6, isAnchor: true), S(letter: "b", repMax: 6, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: mixed, mesoName: "X"), ["b": "Heavy", "a": "Light"])
+    }
+
+    func test_withNoAnchorsEveryPrescriptionCounts() {
+        let s = [S(letter: "a", repMax: 6, isAnchor: false), S(letter: "b", repMax: 12, isAnchor: false)]
+        XCTAssertEqual(WaveLabels.labels(samples: s, mesoName: "X"), ["a": "Heavy", "b": "Light"])
+    }
+
+    // MARK: Fallback
+
+    func test_lettersInTheSameRepZone_fallBackToTheExistingNames() {
+        let same = anchors(8, 8, 9)           // span 1 -> the same zone
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "12-Week DUP Meso"),
+                       ["a": "Strength", "b": "Hypertrophy", "c": "Intensification"])
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "4-Day Upper / Lower"),
+                       ["a": "Baseline", "b": "Volume", "c": "Intensity"])
+        XCTAssertEqual(WaveLabels.labels(samples: same, mesoName: "3-Day Push / Pull / Legs"),
+                       ["a": "Accumulation", "b": "Development", "c": "Intensification"])
+        // Two reps apart is a difference.
+        XCTAssertEqual(WaveLabels.labels(samples: anchors(8, 8, 10), mesoName: "X")["c"], "Light")
+    }
+
+    func test_aSingleLetter_usesTheExistingName() {
+        XCTAssertEqual(WaveLabels.labels(samples: [S(letter: "a", repMax: 8, isAnchor: true)], mesoName: "12-Week DUP Meso"), ["a": "Strength"])
+    }
+
+    // MARK: Deload, maintenance, no waves
+
+    func test_deloadAndMaintenanceKeepTheirLabels_andCarryNoLetter() {
+        let labels = WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "12-Week DUP Meso")
+        XCTAssertNil(labels["deload"], "deload is not ranked")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "12-Week DUP Meso"), "Deload")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "Maintenance Block"), "Maintenance")
+        // A deload prescription never moves the means.
+        let withDeload = anchors(6, 8, 10) + [S(letter: "deload", repMax: 20, isAnchor: true)]
+        XCTAssertEqual(WaveLabels.labels(samples: withDeload, mesoName: "X"), WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X"))
+    }
+
+    func test_noWaves_showsNothing() {
+        XCTAssertTrue(WaveLabels.labels(samples: [], mesoName: "X").isEmpty)
+        XCTAssertTrue(WaveLabels.labels(sessions: [], mesoName: "X").isEmpty)
+        XCTAssertNil(WaveLabels.display(forRaw: nil, labels: [:], mesoName: "X"))
+        XCTAssertNil(WaveLabels.display(forRaw: "  ", labels: [:], mesoName: "X"))
+    }
+
+    func test_displayReadsNameThenLetter() {
+        let labels = WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X")
+        XCTAssertEqual(WaveLabels.display(forRaw: "b", labels: labels, mesoName: "X"), "Moderate (B)")
+        XCTAssertEqual(WaveLabels.display(forRaw: "A", labels: labels, mesoName: "X"), "Heavy (A)")
+    }
+
+    // MARK: A renamed block still gets labels
+
+    private func block(name: String, reps: [String: Int]) throws -> MesoBlock {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        keep.append(c)
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: name, startDate: Date(), status: .active, totalWeeks: 3)
+        ctx.insert(meso)
+        for (i, letter) in reps.keys.sorted().enumerated() {
+            let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: reps[letter]!, targetSets: 3, targetRIR: 2, suggestedLoad: 0,
+                                   waveRaw: letter, priorityRaw: "anchor", repMin: reps[letter]! - 2, repMax: reps[letter]!)
+            let s = Session(date: Date().addingTimeInterval(Double(i) * 86400), status: .planned, weekIndex: i + 1, dayLabel: "D", items: [item])
+            s.meso = meso; ctx.insert(s)
+        }
+        try ctx.save()
+        return meso
+    }
+    private var keep: [ModelContainer] = []
+
+    func test_aRenamedBlock_stillGetsLabels() throws {
+        let original = try block(name: "12-Week DUP Meso", reps: ["a": 6, "b": 8, "c": 10])
+        let renamed = try block(name: "My summer block", reps: ["a": 6, "b": 8, "c": 10])
+        XCTAssertEqual(WaveLabels.labels(meso: original), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+        XCTAssertEqual(WaveLabels.labels(meso: renamed), WaveLabels.labels(meso: original))
+        XCTAssertEqual(WaveLabels.display(forRaw: "b", meso: renamed), "Moderate (B)")
+        // Same zone + renamed: the generic fallback names, never nothing.
+        let flat = try block(name: "My summer block", reps: ["a": 8, "b": 8, "c": 8])
+        XCTAssertEqual(WaveLabels.labels(meso: flat), ["a": "Baseline", "b": "Volume", "c": "Intensity"])
+    }
+
+    // MARK: Every built-in template (the report)
+
+    func test_everyBuiltInTemplate_labels() {
+        let templates: [ProgramTemplate] = [DUP10WeekTemplate.template, PPL3WeekTemplate.template, UpperLower4DayTemplate.template,
+                                            Hybrid5DayTemplate.template, FullBody2DayTemplate.template, PPL6DayTemplate.template]
+        for t in templates {
+            let labels = WaveLabels.labels(template: t)
+            print("WAVELABELS \(t.name): \(labels.sorted { $0.key < $1.key }.map { "\($0.key.uppercased())=\($0.value)" }.joined(separator: " "))")
+            XCTAssertFalse(labels.isEmpty, t.name)
+        }
+        XCTAssertEqual(WaveLabels.labels(template: DUP10WeekTemplate.template), ["a": "Heavy", "b": "Moderate", "c": "Light"])
+    }
 }

@@ -95,6 +95,25 @@ struct MuscleWeek: Equatable {
     var isIncomplete: Bool { adherence < MuscleVolume.minAdherence }
 }
 
+extension MuscleWeek {
+    /// THE per-set -> per-muscle step, shared by actual volume (`MuscleVolume.weekly`, one hard set at a time) and planned
+    /// volume (`PlannedVolume`, a slot's planned sets at once). Credits `sets` hard sets of `exerciseId` to every muscle it
+    /// trains by its share (primary 1.0, synergists 0.25-0.5; a built-in uses its table row, a custom exercise the lifter's
+    /// mapping). An exercise with neither is counted as unmapped and credited to no muscle.
+    mutating func credit(exerciseId: String, sets count: Double, customShares: [String: [FineMuscle: Double]] = [:]) {
+        guard count > 0 else { return }
+        if let shares = ExerciseMuscleShares.shares(for: exerciseId) ?? customShares[exerciseId], !shares.isEmpty {
+            for (m, share) in shares {
+                sets[m, default: 0] += share * count
+                if share >= 1 { directSets[m, default: 0] += count }
+            }
+        } else {
+            unmappedSets += count
+            unmappedByExercise[exerciseId, default: 0] += count
+        }
+    }
+}
+
 enum MuscleVolume {
     enum Status: String { case below, within, above }
 
@@ -140,15 +159,7 @@ enum MuscleVolume {
             if let mesoKey, s.mesoKey != mesoKey { continue }
             let ws = FatigueMonitor.weekStart(s.sessionDate)
             var w = week(ws)
-            if let shares = ExerciseMuscleShares.shares(for: s.exerciseId) ?? customShares[s.exerciseId], !shares.isEmpty {
-                for (m, share) in shares {
-                    w.sets[m, default: 0] += share
-                    if share >= 1 { w.directSets[m, default: 0] += 1 }
-                }
-            } else {
-                w.unmappedSets += 1
-                w.unmappedByExercise[s.exerciseId, default: 0] += 1
-            }
+            w.credit(exerciseId: s.exerciseId, sets: 1, customShares: customShares)
             byWeek[ws] = w
             sessionKeys[ws, default: []].insert(s.sessionKey)
         }
@@ -168,6 +179,19 @@ enum MuscleVolume {
             var w = byWeek[ws]!
             w.sessions = sessionKeys[ws]?.count ?? 0
             return w
+        }
+    }
+
+    /// One row per fine muscle: the average over `counted` weeks (the weeks that count after the exclusions), against the
+    /// lifter's range. `series` are the per-week values of `elapsed` for the sparkline. Shared by `summary` (actual) and
+    /// `PlannedVolume`, so a planned row and an actual row are the same formula.
+    static func rows(counted: [MuscleWeek], elapsed: [MuscleWeek], ranges: [FineMuscle: MuscleSetRange]) -> [MuscleVolumeSummary.Row] {
+        FineMuscle.allCases.map { m in
+            let avg = counted.isEmpty ? 0 : counted.map { $0.sets[m] ?? 0 }.reduce(0, +) / Double(counted.count)
+            let direct = counted.isEmpty ? 0 : counted.map { $0.directSets[m] ?? 0 }.reduce(0, +) / Double(counted.count)
+            let r = ranges[m] ?? MuscleVolumeRanges.defaults[m] ?? MuscleSetRange(min: 0, max: 0)
+            return .init(muscle: m, range: r, average: avg, directAverage: direct, status: status(avg, range: r),
+                         series: elapsed.map { $0.sets[m] ?? 0 })
         }
     }
 

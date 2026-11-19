@@ -2772,8 +2772,8 @@ final class CrossCuttingBehaviorCoverageMapTests: XCTestCase {
 final class ExtraSetsAndFailureTests: XCTestCase {
 
     // T-M.4: extra sets beyond plan. CoachingEngine.recommend reads from
-    // item.actualLoads/actualReps/actualRIRs in full (Domain/Logic
-    // /CoachingEngine.swift:25-29,79-93) — plannedWorkingSetCount is the
+    // item.actualLoads/actualReps/actualRIRs in full (see
+    // CoachingEngine.plannedWorkingSetIndices) — plannedWorkingSetCount is the
     // MINIMUM required for the stage gate to clear, not a hard cap on how
     // many logged sets can be read, so logging more sets than planned is
     // used in full, not truncated or out-of-range.
@@ -2791,8 +2791,8 @@ final class ExtraSetsAndFailureTests: XCTestCase {
     }
 
     // T-M.6: a realistic, partial failure (final set craters hard) hits the
-    // documented "failure + rep crash → hold" branch (Domain/Logic
-    // /CoachingEngine.swift:275-281): never an increase, never NaN/Inf/negative.
+    // documented "failure + rep crash → hold" branch (RULE 1c in CoachingEngine.recommendBackOffs): never an
+    // increase, never NaN/Inf/negative.
     func test_M6_failureWithBigRepCrashHoldsNeverIncreasesNoNaN() {
         let item = SessionItem(
             order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
@@ -2812,28 +2812,76 @@ final class ExtraSetsAndFailureTests: XCTestCase {
         }
     }
 
-    // BUG CONFIRMED: CoachingEngine.recommend cannot distinguish a true
-    // 0-rep total-failure set from a not-yet-logged one — both fail the
-    // `reps[idx] > 0 && loads[idx] > 0` workingIndices filter (Domain/Logic
-    // /CoachingEngine.swift:79-85) identically, so a session where every
-    // set was genuinely attempted at the planned load but failed at 0 reps
-    // produces workingIndices == [] and returns nil at the `guard
-    // !workingIndices.isEmpty else { return nil }` line — the same silent
-    // withholding as an entirely unlogged item, not a hold/reduce message.
-    // There is no "attempted" flag separate from reps/load in SessionItem
-    // to disambiguate the two cases. Do not fix here, flag for next task.
-    // See OPEN Q17 in TestOpenQuestions.swift.
-    func test_M6_BUG_totalFailureAllSetsZeroRepsIsIndistinguishableFromUnloggedAndWithholdsEntirely() {
+    // OPEN Q17 (RESOLVED): a 0-rep total failure used to look exactly like an unlogged item, because a row only counted
+    // when reps > 0 (CoachingEngine.loggedRowIndices). A PERFORMED set is now reps and load logged, or a failed attempt:
+    // load > 0, no reps, no "SKIP" marker (CoachingEngine.isPerformedRow). The attempted load is what separates it from
+    // a set never touched (load 0) and from a skipped one (marker). Every set failing at the planned load now gets a
+    // verdict that reduces or holds, never an increase.
+    func test_M6_totalFailureAllSetsZeroRepsIsAPerformedAttemptAndGetsAVerdict() {
         let item = SessionItem(
             order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
             plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
-            // Every set genuinely attempted at the planned load — failed to
-            // complete a single rep on any of them. Total failure, not
-            // "didn't try."
+            // Every set genuinely attempted at the planned load, no rep completed on any of them.
             actualReps: [0, 0, 0], actualLoads: [185, 185, 185], actualRIRs: [0, 0, 0]
         )
         let recommendation = CoachingEngine.recommend(for: item)
-        XCTAssertNotNil(recommendation, "BUG CONFIRMED: a genuine total-failure session (3 attempted sets, 0 reps achieved on all of them) should produce a hold/reduce verdict, but the engine cannot distinguish this from an unlogged item and withholds entirely")
+        XCTAssertNotNil(recommendation, "an attempted, failed session is a performed one: the coach answers")
+        if let next = recommendation?.nextSuggestedLoad {
+            XCTAssertFalse(next.isNaN); XCTAssertFalse(next.isInfinite)
+            XCTAssertLessThanOrEqual(next, item.suggestedLoad, "total failure never produces an increase")
+        }
+    }
+
+    func test_Q17_unloggedAndSkippedSetsAreStillNotPerformed() {
+        // Never touched: load 0, no reps.
+        let untouched = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                                    actualReps: [0, 0, 0], actualLoads: [0, 0, 0], actualRIRs: [-1, -1, -1])
+        XCTAssertNil(CoachingEngine.recommend(for: untouched))
+        XCTAssertFalse(CoachingEngine.isPerformedRow(untouched, row: 0))
+        // Skipped (any reason): the SKIP marker, even with a load on the row, is not a failed attempt.
+        let skipped = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                                  actualReps: [8, 0, 0], actualLoads: [185, 185, 0], actualRIRs: [2, -1, -1],
+                                  restPausePatternsBySet: ["", "SKIP", ""], setFeedbackBySet: ["", "soreness", ""])
+        XCTAssertTrue(CoachingEngine.isPerformedRow(skipped, row: 0))
+        XCTAssertFalse(CoachingEngine.isPerformedRow(skipped, row: 1), "a skipped set is not a failed attempt")
+        XCTAssertEqual(CoachingEngine.workingSetIndices(for: skipped), [0])
+        // A failed attempt is performed, and it is the held load's evidence.
+        let failed = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                                 actualReps: [8, 0, 0], actualLoads: [185, 185, 0], actualRIRs: [2, 0, -1])
+        XCTAssertTrue(CoachingEngine.isPerformedRow(failed, row: 1))
+        XCTAssertEqual(CoachingEngine.workingSetIndices(for: failed), [0, 1])
+        XCTAssertEqual(CoachingEngine.heldLoad(for: failed), 185)
+    }
+
+    // MARK: .fatigue is a fatigue flag everywhere the coach reads feedback
+
+    func test_fatigueIsAFatigueFlag_inTheCoachTheProjectionAndTheAnalytics() {
+        XCTAssertTrue(SetFeedback.fatigue.holdsLoad)
+        XCTAssertTrue(SetFeedback.soreness.holdsLoad); XCTAssertTrue(SetFeedback.disruption.holdsLoad)
+        XCTAssertFalse(SetFeedback.pain.holdsLoad, "pain is separate: it stops every call")
+        XCTAssertFalse(SetFeedback.none.holdsLoad)
+
+        // CoachingEngine: a set flagged fatigue holds the load (no increase), like soreness and disruption.
+        func item(_ flag: String) -> SessionItem {
+            SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 185,
+                        repMin: 6, repMax: 8,
+                        plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [185, 185, 185], plannedRIRsBySet: [2, 2, 2],
+                        actualReps: [8, 8, 8], actualLoads: [185, 185, 185], actualRIRs: [2, 2, 2], setFeedbackBySet: ["", "", flag])
+        }
+        let clean = CoachingEngine.recommend(for: item(""))
+        XCTAssertGreaterThan(clean?.nextSuggestedLoad ?? 0, 185, "all sets at the top, no flag: an increase")
+        for flag in ["fatigue", "soreness", "disruption"] {
+            let r = CoachingEngine.recommend(for: item(flag))
+            XCTAssertEqual(r?.nextSuggestedLoad, 185, "\(flag) holds the load")
+        }
+        XCTAssertTrue(CoachingEngine.recommend(for: item("fatigue"))?.message.contains("Fatigue was flagged") == true)
+
+        // LoadProjectionService: a fatigue-flagged session is not a clean one.
+        XCTAssertTrue(LoadProjectionService.isCleanSession(item(""), prescribedMin: 6))
+        XCTAssertFalse(LoadProjectionService.isCleanSession(item("fatigue"), prescribedMin: 6))
+
+        // SetRecord (analytics): already counted.
+        XCTAssertTrue(SetFeedback.holdsLoad(raw: "fatigue"))
     }
 }
 

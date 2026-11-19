@@ -450,19 +450,24 @@ struct ExerciseHistorySheet: View {
     // MARK: - Wave color
 
     private func waveColor(_ wave: String?) -> Color {
-        switch wave?.lowercased() {
+        // Labels read "Heavy (A)": colour by the letter so a letter keeps its colour in every block.
+        let text = wave?.lowercased() ?? ""
+        if text.hasSuffix("(a)") { return .red }
+        if text.hasSuffix("(b)") { return .blue }
+        if text.hasSuffix("(c)") { return .purple }
+        switch text {
         case "strength":     return .red
         case "hypertrophy":  return .blue
         case "intensification": return .purple
-        case "deload":       return .green
+        case "deload", "maintenance": return .green
         default:             return .secondary
         }
     }
 
     // MARK: - Load history
 
-    private func waveDisplayName(from raw: String?, mesoName: String? = nil) -> String? {
-        WaveType.label(forRaw: raw, mesoName: mesoName)
+    private func waveDisplayName(from raw: String?, meso: MesoBlock? = nil) -> String? {
+        WaveLabels.display(forRaw: raw, meso: meso)
     }
 
     private func prescriptionLabel(repMin: Int?, repMax: Int?, rirMin: Int?, rirMax: Int?) -> String? {
@@ -532,7 +537,7 @@ struct ExerciseHistorySheet: View {
 
                 guard let uiEx else { continue }
 
-                let waveLabel = waveDisplayName(from: uiEx.waveRaw, mesoName: session.meso?.name)
+                let waveLabel = waveDisplayName(from: uiEx.waveRaw, meso: session.meso)
                 let prescription = prescriptionLabel(
                     repMin: uiEx.repMin,
                     repMax: uiEx.repMax,

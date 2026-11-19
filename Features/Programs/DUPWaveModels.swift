@@ -100,6 +100,10 @@ struct ProgramTemplate: Identifiable, Codable {
     let trainingDaysPerWeek: Int
     let weekRules: [ProgramWeekRule]
     let dayTemplates: [ProgramDayTemplate]
+    /// A program with no A/B/C undulation: every slot has ONE prescription, and the sessions it makes carry no wave letter
+    /// (`waveRaw == nil`; a final deload week, when there is one, is "deload"). The week rules still name a placeholder wave
+    /// (`.a`) so the same scheduler and resolver run; the materializer is what leaves it off the sessions.
+    let waveless: Bool
 
     init(
         id: String,
@@ -107,8 +111,10 @@ struct ProgramTemplate: Identifiable, Codable {
         totalWeeks: Int,
         trainingDaysPerWeek: Int,
         weekRules: [ProgramWeekRule],
-        dayTemplates: [ProgramDayTemplate]
+        dayTemplates: [ProgramDayTemplate],
+        waveless: Bool = false
     ) {
+        self.waveless = waveless
         self.id = id
         self.name = name
         self.totalWeeks = totalWeeks
