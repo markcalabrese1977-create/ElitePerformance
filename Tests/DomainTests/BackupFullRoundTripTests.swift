@@ -4382,3 +4382,100 @@ final class OwnProgramTests: XCTestCase {
         XCTAssertTrue(service.contains("result.ownProgram?.template ?? fittedProgram(for: result).template"))
     }
 }
+
+// MARK: - Startup backfills: dry run on a real backup
+
+final class StartupBackfillsDryRunTests: XCTestCase {
+
+    private func fp(_ item: SessionItem, _ s: Session) -> [String: String] {
+        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        return [
+            "exercise": item.exerciseId, "name": item.exerciseNameSnapshot ?? "-", "suggested": n(item.suggestedLoad),
+            "planned loads": item.plannedLoadsBySet.map(n).joined(separator: "/"), "sets": "\(item.targetSets)",
+            "reps": "\(item.repMin ?? -1)-\(item.repMax ?? -1)", "planEdited": "\(item.planEdited)", "coach note": item.coachNote ?? "-",
+            "prescription note": item.prescriptionNotes ?? "-", "RIRs": item.actualRIRs.map(String.init).joined(separator: "/"),
+            "wave": item.waveRaw ?? "-", "prescribed": item.prescribedSets.map(String.init) ?? "-",
+        ]
+    }
+
+    private struct Snapshot { var items: [String: [String: String]]; var sessions: [String: [String: String]]; var blocks: [String: [String: String]]; var customs: [String: [String: String]] }
+
+    private func snapshot(_ ctx: ModelContext) throws -> Snapshot {
+        var items: [String: [String: String]] = [:], sessions: [String: [String: String]] = [:]
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        let f = DateFormatter(); f.dateFormat = "EEE MMM d"
+        for s in all {
+            let key = s.id?.uuidString ?? "\(s.persistentModelID)"
+            sessions[key] = ["date": f.string(from: s.date), "status": s.status.rawValue, "dayLabel": s.dayLabel ?? "-", "week": "\(s.weekIndex)",
+                             "planned date": s.plannedDate.map { f.string(from: $0) } ?? "-", "block": s.meso?.name ?? "-"]
+            for i in s.items { items["\(key)|\(i.id?.uuidString ?? "\(i.persistentModelID)")"] = fp(i, s).merging(["_where": "\(f.string(from: s.date)) wk\(s.weekIndex) \(s.dayLabel ?? "-")"]) { a, _ in a } }
+        }
+        let blocks = Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<MesoBlock>()).map {
+            ($0.id?.uuidString ?? $0.name, ["name": $0.name, "start": f.string(from: $0.startDate), "status": $0.status.rawValue, "weeks": "\($0.totalWeeks ?? -1)", "maintenance": "\($0.isMaintenance)"])
+        })
+        var customs: [String: [String: String]] = [:]
+        var seen: [String: Int] = [:]
+        for c in try ctx.fetch(FetchDescriptor<CustomExercise>()) {
+            seen[c.id, default: 0] += 1
+            let key = seen[c.id] == 1 ? c.id : "\(c.id)#\(seen[c.id]!)"          // a duplicate record shows up as its own entry
+            customs[key] = ["name": c.name, "compound": "\(c.isCompound.map(String.init) ?? "nil")", "fine": c.fineMuscleRaw ?? "-"]
+        }
+        return Snapshot(items: items, sessions: sessions, blocks: blocks, customs: customs)
+    }
+
+    private func diff(_ a: [String: [String: String]], _ b: [String: [String: String]], label: (String, [String: String]) -> String) -> [String] {
+        var out: [String] = []
+        for (k, new) in b.sorted(by: { $0.key < $1.key }) {
+            guard let old = a[k] else { out.append("  + new \(label(k, new))"); continue }
+            let changes = new.filter { $0.key != "_where" && old[$0.key] != $0.value }.sorted { $0.key < $1.key }
+            if !changes.isEmpty { out.append("  \(label(k, new)): " + changes.map { "\($0.key) \(old[$0.key] ?? "-") -> \($0.value)" }.joined(separator: "; ")) }
+        }
+        for (k, old) in a where b[k] == nil { out.append("  - removed \(label(k, old))") }
+        return out
+    }
+
+    /// LOCAL ONLY. Imports a real backup into an in-memory store, runs every REGISTERED startup backfill in order, and lists what each changed
+    /// (old -> new). Nothing is saved anywhere else; the registration is not touched.
+    func test_audit_everyRegisteredStartupBackfill_onTheLatestBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        // The device-local completion flags decide whether a one-shot runs: a real device that took this backup has them set for the
+        // migrations it already ran. Clear none of them; this reports what a launch of this head would do on a device with fresh flags
+        // for exactly the backfills that are idempotent, plus (separately) with every flag cleared.
+        // EP_CLEAR_FLAGS=1: also forget every one-shot completion flag (what a store whose flags were lost would run), then restore them.
+        var savedFlags: [String: Any] = [:]
+        if ProcessInfo.processInfo.environment["EP_CLEAR_FLAGS"] == "1" {
+            for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { savedFlags[k] = v; UserDefaults.standard.removeObject(forKey: k) }
+        }
+        defer { for (k, v) in savedFlags { UserDefaults.standard.set(v, forKey: k) } }
+        var lines: [String] = ["STARTUP BACKFILL DRY RUN — in-memory copy of \((path as NSString).lastPathComponent); nothing was saved"]
+        let start = try snapshot(ctx)
+        lines.append("store: \(start.sessions.count) sessions, \(start.items.count) items, \(start.blocks.count) blocks, \(start.customs.count) custom exercises")
+        var current = start
+        var totalItemChanges = 0
+        for backfill in StartupBackfills.registered {
+            BackfillLog.collector = []
+            backfill.run(ctx)
+            let notes = BackfillLog.collector ?? []
+            BackfillLog.collector = nil
+            let after = try snapshot(ctx)
+            let itemDiff = diff(current.items, after.items) { _, v in "\(v["_where"] ?? "?") \(ExerciseCatalog.displayName(for: v["exercise"] ?? ""))" }
+            let sessionDiff = diff(current.sessions, after.sessions) { k, v in "session \(v["date"] ?? "?") \(v["dayLabel"] ?? "")" }
+            let blockDiff = diff(current.blocks, after.blocks) { _, v in "block \(v["name"] ?? "?")" }
+            let customDiff = diff(current.customs, after.customs) { _, v in "custom \(v["name"] ?? "?")" }
+            lines.append("\n\(backfill.name): \(BackfillLog.result(from: notes)) — \(itemDiff.count) item change(s), \(sessionDiff.count) session, \(blockDiff.count) block, \(customDiff.count) custom")
+            for l in itemDiff + sessionDiff + blockDiff + customDiff { lines.append(l) }
+            totalItemChanges += itemDiff.count
+            current = after
+        }
+        lines.append("\nTOTAL item changes across all registered backfills: \(totalItemChanges)")
+        let text = lines.joined(separator: "\n")
+        print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
