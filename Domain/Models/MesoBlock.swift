@@ -37,6 +37,12 @@ final class MesoBlock {
     /// field existed; comparison then falls back to the previous non-maintenance block by `startDate`.
     var previousMesoId: UUID? = nil
 
+    /// Whether the block has a deload week at all, for a block the lifter wrote (no wave letters): true = its final week is a
+    /// deload (those items carry waveRaw "deload"), false = it has none. nil for every other block (generated waves, maintenance,
+    /// blocks from before the field): their deload is read from the items / the position band, exactly as before.
+    /// With a value set, `Session.mesoPhase` calls a week a deload only when its items say so, never by its position.
+    var scheduledDeload: Bool? = nil
+
     /// Sessions that belong to this meso
     @Relationship(deleteRule: .cascade) var sessions: [Session] = []
 

@@ -3762,3 +3762,347 @@ final class PlaceholderRefreshTests: XCTestCase {
         XCTAssertEqual(target.suggestedLoad, 330)
     }
 }
+
+// MARK: - Blocks with no waves (a program the lifter wrote)
+
+final class WavelessBlockTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func day(_ y: Int, _ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: 9))! }
+    private var monday: Date { day(2026, 9, 7) }          // a Monday
+    private var now: Date { day(2026, 9, 12) }            // after week 1 of a block that started Sep 7
+
+    private func context() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        return ctx
+    }
+
+    /// A 4-day upper/lower program, five exercises a day. Bench and rows appear on two days: the chain must not mix them up.
+    private func fourDay(weeks: Int = 6, deload: Bool = false) -> ProgramTemplate {
+        func slots(_ ids: [(String, Bool)]) -> [WavelessSlot] { ids.map { WavelessSlot.defaults(exerciseId: $0.0, isCompound: $0.1) } }
+        return .waveless(name: "My upper / lower", totalWeeks: weeks, deloadFinalWeek: deload, days: [
+            WavelessDay(title: "Upper A", slots: slots([("bench_press", true), ("barbell_row", true), ("dumbbell_lateral_raise", false), ("cable_tricep_rope_pushdown", false), ("barbell_curl", false)])),
+            WavelessDay(title: "Lower A", slots: slots([("barbell_back_squat", true), ("romanian_deadlift", true), ("leg_extension", false), ("seated_leg_curl", false), ("seated_calf_raise", false)])),
+            WavelessDay(title: "Upper B", slots: slots([("bench_press", true), ("pull_up", true), ("cable_face_pull", false), ("hammer_curl", false), ("pec_deck", false)])),
+            WavelessDay(title: "Lower B", slots: slots([("leg_press", true), ("lying_leg_curl", false), ("leg_extension", false), ("seated_calf_raise", false), ("cable_rope_crunch", false)])),
+        ])
+    }
+
+    @discardableResult
+    private func seed(_ ctx: ModelContext, _ template: ProgramTemplate, name: String = "Mine") throws -> MesoBlock {
+        try DUPProgramSeeder.seed(startDate: monday, trainingWeekdays: [2, 3, 5, 6], context: ctx, template: template, calendar: cal,
+                                  mesoName: name, mesoStatus: .active)
+        return try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.name == name })
+    }
+
+    private func sessions(_ meso: MesoBlock, week: Int? = nil, label: String? = nil) -> [Session] {
+        meso.sessions.filter { (week == nil || $0.weekIndex == week) && (label == nil || $0.dayLabel == label) }.sorted { $0.date < $1.date }
+    }
+
+    // MARK: Template and materializer
+
+    func test_aFourDayBlockWithNoWavesSeeds_sessionsCarryNoLetter() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay(weeks: 6))
+        XCTAssertEqual(block.sessions.count, 4 * 6)
+        XCTAssertEqual(block.totalWeeks, 6)
+        XCTAssertTrue(block.sessions.flatMap(\.items).allSatisfy { $0.waveRaw == nil }, "no wave letter on any item")
+        XCTAssertEqual(Set(block.sessions.compactMap(\.dayLabel)), ["Upper A", "Lower A", "Upper B", "Lower B"])
+        XCTAssertTrue(block.sessions.allSatisfy { !($0.sessionNotes ?? "").lowercased().contains("wave") })
+        // One prescription per slot: compound 3 x 6-10 @2, isolation 3 x 10-15 @1-2, the same every week.
+        let bench = try XCTUnwrap(sessions(block, week: 3, label: "Upper A").first?.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual([bench.targetSets, bench.repMin, bench.repMax, bench.targetRIRMin, bench.targetRIRMax], [3, 6, 10, 2, 2])
+        let lateral = try XCTUnwrap(sessions(block, week: 5, label: "Upper A").first?.items.first { $0.exerciseId == "dumbbell_lateral_raise" })
+        XCTAssertEqual([lateral.targetSets, lateral.repMin, lateral.repMax, lateral.targetRIRMin, lateral.targetRIRMax], [3, 10, 15, 1, 2])
+        XCTAssertTrue(block.sessions.allSatisfy { $0.mesoPhase != .deload }, "no deload unless asked")
+        XCTAssertFalse(WavePrescriptionGuard.isWaveBasedBlock(try XCTUnwrap(block.sessions.first)))
+    }
+
+    func test_anOptionalDeloadInTheFinalWeek_isTheOnlyWaveValue() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay(weeks: 5, deload: true))
+        for s in block.sessions {
+            let expected: String? = s.weekIndex == 5 ? "deload" : nil
+            XCTAssertTrue(s.items.allSatisfy { $0.waveRaw == expected }, "week \(s.weekIndex)")
+        }
+        let deloadBench = try XCTUnwrap(sessions(block, week: 5, label: "Upper A").first?.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual(deloadBench.targetSets, 2, "half the sets")
+        XCTAssertEqual(deloadBench.targetRIR, 4, "two more reps in reserve, capped at 4")
+        XCTAssertTrue(sessions(block, week: 5).allSatisfy { $0.isDeloadWeek })
+        XCTAssertTrue(sessions(block, week: 4).allSatisfy { !$0.isDeloadWeek })
+    }
+
+    func test_theBlockLengthIsFourToTwelveWeeks() {
+        XCTAssertEqual(fourDay(weeks: 2).totalWeeks, 4)
+        XCTAssertEqual(fourDay(weeks: 4).totalWeeks, 4)
+        XCTAssertEqual(fourDay(weeks: 12).totalWeeks, 12)
+        XCTAssertEqual(fourDay(weeks: 30).totalWeeks, 12)
+        XCTAssertEqual(ProgramTemplate.wavelessDefaultWeeks, 8)
+        XCTAssertTrue(fourDay().waveless)
+        XCTAssertFalse(DUP10WeekTemplate.template.waveless)
+        // The flag survives the fitter, the goal modifier and overrides.
+        XCTAssertTrue(DUPProgramSeeder.applying(overrides: .empty, to: fourDay()).waveless)
+        XCTAssertTrue(GoalModifier.apply(fourDay(), goal: .longevity).0.waveless)
+    }
+
+    // MARK: Carry-forward, week 1 -> week 2 on the same day
+
+    private func perform(_ session: Session, load: Double, reps: Int, rir: Int = 2) {
+        for item in session.items {
+            item.suggestedLoad = load
+            item.plannedLoadsBySet = Array(repeating: load, count: item.targetSets)
+            item.actualLoads = Array(repeating: load, count: item.targetSets)
+            item.actualReps = Array(repeating: reps, count: item.targetSets)
+            item.actualRIRs = Array(repeating: rir, count: item.targetSets)
+            item.isCompleted = true
+        }
+        session.status = .completed
+        session.completedAt = session.date
+    }
+
+    func test_coachingCarriesWeek1ToWeek2OnTheSameDay_andNeverAcrossDays() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay())
+        // Bench is on Upper A and Upper B. Give both days' week 1 a starting load; perform only Upper A.
+        for s in sessions(block, week: 1) where s.dayLabel == "Upper B" { for i in s.items { i.suggestedLoad = 150; i.plannedLoadsBySet = [150, 150, 150] } }
+        for s in sessions(block, week: 2) where s.dayLabel == "Upper B" { for i in s.items { i.suggestedLoad = 150; i.plannedLoadsBySet = [150, 150, 150] } }
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        perform(week1A, load: 100, reps: 10)             // every set at the top of 6-10 at RIR 2: an increase is earned
+        try ctx.save()
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+
+        let week2A = try XCTUnwrap(sessions(block, week: 2, label: "Upper A").first)
+        let bench2A = try XCTUnwrap(week2A.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertGreaterThan(bench2A.suggestedLoad, 100, "the coach wrote week 2's Upper A bench from week 1's")
+        XCTAssertEqual(bench2A.plannedLoadsBySet.first, bench2A.suggestedLoad)
+        XCTAssertFalse(bench2A.planEdited)
+        // The other day's bench, and every other week of Upper A past week 2, are not what week 1 wrote.
+        let bench2B = try XCTUnwrap(sessions(block, week: 2, label: "Upper B").first?.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual(bench2B.suggestedLoad, 150, "Upper B's bench is its own chain")
+        let bench3A = try XCTUnwrap(sessions(block, week: 3, label: "Upper A").first?.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertEqual(bench3A.suggestedLoad, 0, "only the immediate next occurrence is written")
+        XCTAssertNotNil(PlanMemoryEngine.nextTargetItem(for: try XCTUnwrap(week1A.items.first), after: week1A, in: block.sessions))
+    }
+
+    func test_theChainIsBlockAndDay_notChronological() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay())
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        let bench = try XCTUnwrap(week1A.items.first { $0.exerciseId == "bench_press" })
+        let target = try XCTUnwrap(PlanMemoryEngine.nextTargetItem(for: bench, after: week1A, in: block.sessions))
+        let owner = try XCTUnwrap(block.sessions.first { $0.items.contains { $0 === target } })
+        XCTAssertEqual(owner.dayLabel, "Upper A")
+        XCTAssertEqual(owner.weekIndex, 2)
+        // A deload week never anchors, and is skipped.
+        let ctx2 = try context()
+        let withDeload = try seed(ctx2, fourDay(weeks: 4, deload: true), name: "WithDeload")
+        let week3 = try XCTUnwrap(sessions(withDeload, week: 3, label: "Upper A").first)
+        let item3 = try XCTUnwrap(week3.items.first { $0.exerciseId == "bench_press" })
+        XCTAssertNil(PlanMemoryEngine.nextTargetItem(for: item3, after: week3, in: withDeload.sessions), "the next occurrence is the deload: nothing to write")
+    }
+
+    // MARK: PlaceholderRefresh
+
+    func test_placeholderRefreshChainsByBlockAndDay_whenThereIsNoLetter() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay())
+        // Week 1 Upper A: only two of three bench sets were performed at 100. Week 2's bench still carries a stale 60.
+        let week1A = try XCTUnwrap(sessions(block, week: 1, label: "Upper A").first)
+        let b1 = try XCTUnwrap(week1A.items.first { $0.exerciseId == "bench_press" })
+        b1.suggestedLoad = 100; b1.plannedLoadsBySet = [100, 100, 100]
+        b1.actualLoads = [100, 100, 0]; b1.actualReps = [8, 8, 0]; b1.actualRIRs = [2, 2, -1]; b1.isCompleted = true
+        week1A.status = .completed
+        let b2 = try XCTUnwrap(sessions(block, week: 2, label: "Upper A").first?.items.first { $0.exerciseId == "bench_press" })
+        b2.suggestedLoad = 60; b2.plannedLoadsBySet = [60, 60, 60]
+        let otherDay = try XCTUnwrap(sessions(block, week: 2, label: "Upper B").first?.items.first { $0.exerciseId == "bench_press" })
+        otherDay.suggestedLoad = 70; otherDay.plannedLoadsBySet = [70, 70, 70]
+        try ctx.save()
+
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(b2.suggestedLoad, 100, "the held load of week 1's same-day session")
+        XCTAssertEqual(b2.plannedLoadsBySet, [100, 100, 100])
+        XCTAssertEqual(otherDay.suggestedLoad, 70, "Upper B's bench is a different chain")
+        XCTAssertTrue(changes.contains { $0.item === b2 })
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
+    }
+
+    // MARK: Labels and next meso
+
+    func test_noLabelsOnABlockWithoutWaves_aDeloadWeekStillSaysDeload() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay(weeks: 4, deload: true))
+        XCTAssertTrue(WaveLabels.labels(meso: block).isEmpty)
+        XCTAssertNil(WaveLabels.display(forRaw: nil, meso: block), "week headers show nothing")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", meso: block), "Deload")
+        let first = try XCTUnwrap(sessions(block, week: 1).first)
+        XCTAssertNil(first.items.first?.waveRaw)
+    }
+
+    func test_startNextMesoCopiesABlockWithNoWaves() throws {
+        let ctx = try context()
+        let block = try seed(ctx, fourDay(weeks: 4, deload: true))
+        for s in block.sessions { perform(s, load: 100, reps: 8) }
+        block.status = .archived
+        try ctx.save()
+        let plan = SessionItemEditService.planNextMeso(meso: block, name: "Mine (next)", startDate: day(2026, 12, 7), endOldMesoNow: false,
+                                                       context: ctx, now: day(2026, 12, 1), calendar: cal)
+        XCTAssertTrue(plan.refusals.isEmpty, "\(plan.refusals)")
+        XCTAssertEqual(plan.weeks, 4)
+        XCTAssertEqual(plan.sessions.count, 16)
+        XCTAssertEqual(plan.firstWeek.count, 4)
+        XCTAssertTrue(plan.sessions.filter { $0.weekIndex < 4 }.allSatisfy { $0.letter.isEmpty }, "no letters")
+        XCTAssertTrue(plan.sessions.filter { $0.weekIndex == 4 }.allSatisfy { $0.letter == "deload" })
+        let result = try SessionItemEditService.startNextMeso(plan, in: ctx)
+        XCTAssertEqual(result.sessionsCreated, 16)
+        XCTAssertTrue(result.meso.sessions.filter { $0.weekIndex < 4 }.flatMap(\.items).allSatisfy { $0.waveRaw == nil })
+        XCTAssertEqual(Set(result.meso.sessions.compactMap(\.dayLabel)), ["Upper A", "Lower A", "Upper B", "Lower B"])
+        // The planned volume of the copy needs no waves either.
+        XCTAssertFalse(PlannedVolume.weeklyHardSets(plan: plan).isEmpty)
+    }
+
+    // MARK: Existing blocks are unchanged
+
+    /// The chain rule as it was before waveless blocks: letters by meso + day + letter, no letter chronological.
+    private func legacyNext(_ source: SessionItem, after session: Session, in sessions: [Session]) -> SessionItem? {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: source.exerciseId)
+        let ordered = sessions.sorted { $0.date < $1.date }
+        guard let index = ordered.firstIndex(where: { $0.persistentModelID == session.persistentModelID }) else { return nil }
+        let future = ordered.suffix(from: index + 1)
+        func match(_ c: Session) -> SessionItem? { c.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical } }
+        guard let wave = source.waveRaw?.lowercased(), !wave.isEmpty else {
+            return future.lazy.compactMap { c -> SessionItem? in
+                guard let i = match(c), i.waveRaw?.lowercased() != "deload" else { return nil }
+                return i
+            }.first
+        }
+        for c in future {
+            guard c.meso?.persistentModelID == session.meso?.persistentModelID, SessionDayLabelMatcher.matches(c.dayLabel, session.dayLabel),
+                  let i = match(c), i.waveRaw?.lowercased() == wave else { continue }
+            return i
+        }
+        return nil
+    }
+
+    func test_goldenComparison_everyChainOfAWaveBlockIsUnchanged() throws {
+        let ctx = try context()
+        try DUPProgramSeeder.seed(startDate: monday, trainingWeekdays: [2, 3, 4, 5, 6, 7], context: ctx, template: DUP10WeekTemplate.template,
+                                  calendar: cal, mesoName: "DUP", mesoStatus: .active)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        var compared = 0
+        for s in all { for i in s.items {
+            XCTAssertTrue(PlanMemoryEngine.nextTargetItem(for: i, after: s, in: all) === legacyNext(i, after: s, in: all), "\(s.dayLabel ?? "") wk\(s.weekIndex) \(i.exerciseId)")
+            compared += 1
+        } }
+        XCTAssertGreaterThan(compared, 300)
+    }
+
+    func test_goldenComparison_aNoWaveBlockWhereEachExerciseHasOneDay_isUnchanged() throws {
+        // The shape of the App Store sample: a block and day names with no letters, every lift on one day only.
+        let ctx = try context()
+        let template = ProgramTemplate.waveless(name: "Sample", totalWeeks: 6, days: [
+            WavelessDay(title: "Push A", slots: [.defaults(exerciseId: "bench_press", isCompound: true), .defaults(exerciseId: "dumbbell_lateral_raise", isCompound: false)]),
+            WavelessDay(title: "Pull A", slots: [.defaults(exerciseId: "barbell_row", isCompound: true), .defaults(exerciseId: "hammer_curl", isCompound: false)]),
+            WavelessDay(title: "Legs A", slots: [.defaults(exerciseId: "barbell_back_squat", isCompound: true), .defaults(exerciseId: "leg_extension", isCompound: false)]),
+        ])
+        try DUPProgramSeeder.seed(startDate: monday, trainingWeekdays: [2, 4, 6], context: ctx, template: template, calendar: cal, mesoName: "Sample", mesoStatus: .active)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        for s in all { for i in s.items {
+            XCTAssertTrue(PlanMemoryEngine.nextTargetItem(for: i, after: s, in: all) === legacyNext(i, after: s, in: all), "\(s.dayLabel ?? "") wk\(s.weekIndex)")
+        } }
+    }
+
+    func test_handBuiltSessionsWithNoBlockOrDayName_stayChronological() throws {
+        let ctx = try context()
+        func item() -> SessionItem { SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100) }
+        let a = Session(date: day(2026, 9, 1), status: .completed, weekIndex: 1, dayLabel: nil, items: [item()])
+        let b = Session(date: day(2026, 9, 8), status: .planned, weekIndex: 2, dayLabel: nil, items: [item()])
+        ctx.insert(a); ctx.insert(b)
+        XCTAssertTrue(PlanMemoryEngine.nextTargetItem(for: a.items[0], after: a, in: [a, b]) === b.items[0])
+    }
+
+    // MARK: Backup
+
+    func test_aBlockWithNoWavesSurvivesABackupRoundTrip() throws {
+        let source = try context()
+        let block = try seed(source, fourDay(weeks: 5, deload: true))
+        for s in sessions(block, week: 1) { perform(s, load: 95, reps: 9) }
+        try source.save()
+        let target = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: target)
+        let restored = ModelContext(target)
+        let blocks = try restored.fetch(FetchDescriptor<MesoBlock>())
+        XCTAssertEqual(blocks.count, 1)
+        let sessions = try restored.fetch(FetchDescriptor<Session>())
+        XCTAssertEqual(sessions.count, 20)
+        XCTAssertTrue(sessions.filter { $0.weekIndex < 5 }.flatMap(\.items).allSatisfy { $0.waveRaw == nil }, "a nil wave stays nil")
+        XCTAssertTrue(sessions.filter { $0.weekIndex == 5 }.flatMap(\.items).allSatisfy { $0.waveRaw == "deload" })
+        XCTAssertEqual(Set(sessions.compactMap(\.dayLabel)), ["Upper A", "Lower A", "Upper B", "Lower B"])
+        // Everything round-trips exactly, new rows included.
+        XCTAssertEqual(NSDictionary(dictionary: try BackupTestSupport.exportJSON(source)), NSDictionary(dictionary: try BackupTestSupport.exportJSON(restored)))
+    }
+}
+
+// MARK: - MesoBlock.scheduledDeload (blocks the lifter wrote)
+
+final class ScheduledDeloadTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+
+    func test_aBlockWithoutADeload_neverCallsAWeekDeloadByPosition_andAWaveBlockIsUnchanged() throws {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        let start = cal.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 9))!
+        func template(deload: Bool) -> ProgramTemplate {
+            .waveless(name: deload ? "D" : "N", totalWeeks: 10, deloadFinalWeek: deload,
+                      days: [WavelessDay(title: "A", slots: [.defaults(exerciseId: "bench_press", isCompound: true)]),
+                             WavelessDay(title: "B", slots: [.defaults(exerciseId: "barbell_row", isCompound: true)])])
+        }
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: [2, 5], context: ctx, template: template(deload: false), calendar: cal, mesoName: "N", mesoStatus: .active)
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: [2, 5], context: ctx, template: template(deload: true), calendar: cal, mesoName: "D", mesoStatus: .active)
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>())
+        let none = try XCTUnwrap(blocks.first { $0.name == "N" }), withDeload = try XCTUnwrap(blocks.first { $0.name == "D" })
+        XCTAssertEqual(none.scheduledDeload, false)
+        XCTAssertEqual(withDeload.scheduledDeload, true)
+        XCTAssertTrue(none.sessions.allSatisfy { $0.mesoPhase != .deload }, "weeks 9 and 10 sit in the 90% band but are working weeks")
+        XCTAssertTrue(none.sessions.filter { $0.weekIndex >= 9 }.allSatisfy { $0.mesoPhase == .late })
+        XCTAssertEqual(withDeload.sessions.filter { $0.mesoPhase == .deload }.map(\.weekIndex).sorted(), [10, 10], "only the deload week, by its items")
+        XCTAssertTrue(withDeload.sessions.filter { $0.weekIndex == 9 }.allSatisfy { $0.mesoPhase == .late })
+
+        // A block with no value keeps the position band exactly as before (generated waves aside).
+        let legacy = MesoBlock(name: "Legacy", startDate: start, status: .active, totalWeeks: 10)
+        ctx.insert(legacy)
+        let s10 = Session(date: start, weekIndex: 10, dayLabel: "A", items: [SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0)])
+        s10.meso = legacy; ctx.insert(s10)
+        XCTAssertNil(legacy.scheduledDeload)
+        XCTAssertEqual(s10.mesoPhase, .deload, "position band, unchanged")
+    }
+
+    func test_scheduledDeload_survivesABackupRoundTrip_nilTrueAndFalse() throws {
+        let source = ModelContext(try BackupTestSupport.makeContainer())
+        for (name, value) in [("nil", Bool?.none), ("true", true), ("false", false)] {
+            let b = MesoBlock(name: name, startDate: Date(), status: .archived, totalWeeks: 6)
+            b.scheduledDeload = value
+            source.insert(b)
+        }
+        try source.save()
+        let target = try BackupTestSupport.makeContainer()
+        try BackupTestSupport.restore(from: source, into: target)
+        let blocks = try ModelContext(target).fetch(FetchDescriptor<MesoBlock>())
+        XCTAssertNil(blocks.first { $0.name == "nil" }?.scheduledDeload)
+        XCTAssertEqual(blocks.first { $0.name == "true" }?.scheduledDeload, true)
+        XCTAssertEqual(blocks.first { $0.name == "false" }?.scheduledDeload, false)
+    }
+
+    func test_anOldBackupWithoutTheKeyRestoresAsNil() throws {
+        // The DTO field is optional with a nil default, so a backup written before it existed decodes.
+        let json = #"{"name":"Old","startDate":0,"statusRaw":"archived","totalWeeks":6}"#
+        let dto = try JSONDecoder().decode(MesoBlockBackupDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.scheduledDeload)
+    }
+}

@@ -98,6 +98,7 @@ enum BackupSnapshotImporter {
                 isMaintenance: dto.isMaintenance ?? false
             )
             block.previousMesoId = dto.previousMesoId
+            block.scheduledDeload = dto.scheduledDeload
 
             modelContext.insert(block)
 

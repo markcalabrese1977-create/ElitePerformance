@@ -402,11 +402,20 @@ struct PlanMemoryEngine {
             })
         }
 
-        // No wave on the source → not in a letter rotation; legacy chronological path.
-        // Deload items never anchor a working session's result: skip them so the next
-        // working occurrence (past the deload) is the target.
+        // No wave on the source → not in a letter rotation (a program the lifter wrote, or an older block). Deload items never
+        // anchor a working session's result: skip them so the next working occurrence (past the deload) is the target.
+        // When the session belongs to a block and has a day name, the chain is that block + that day: week 1's Upper A bench
+        // feeds week 2's Upper A bench, never another day's bench. Without a block or a day name (hand-built sessions) it stays
+        // the chronological next occurrence, as it always was.
         guard let sourceWave = sourceItem.waveRaw?.lowercased(), !sourceWave.isEmpty else {
+            let chainMeso = session.meso?.persistentModelID
+            let chainDay = session.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let byBlockAndDay = session.meso != nil && !chainDay.isEmpty
             return future.lazy.compactMap { candidate -> SessionItem? in
+                if byBlockAndDay {
+                    guard candidate.meso?.persistentModelID == chainMeso,
+                          SessionDayLabelMatcher.matches(candidate.dayLabel, session.dayLabel) else { return nil }
+                }
                 guard let item = matchingItem(in: candidate),
                       item.waveRaw?.lowercased() != "deload" else { return nil }
                 return item

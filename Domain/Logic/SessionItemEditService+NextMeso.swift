@@ -259,8 +259,12 @@ extension SessionItemEditService {
         // Week -> letter. A wave letter is a property of the whole week (the majority of its items' waves).
         let weekOrder = Array(Set(sources.map(\.weekIndex))).sorted()
         let waveBased = !meso.isMaintenance && sources.contains { $0.items.contains { WavePrescriptionGuard.isWaveLetter($0.waveRaw) } }
+        // A block the lifter wrote has no letters, but its deload week is still a different kind of week: it must supply the deload
+        // week, and the working weeks the working ones (a letter-less block with a deload otherwise copies the deload everywhere).
+        let deloadOnly = !meso.isMaintenance && !waveBased
+            && sources.contains { $0.items.contains { $0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" } }
         func weekLetter(_ week: Int) -> String {
-            guard waveBased else { return "" }
+            guard waveBased || deloadOnly else { return "" }
             var counts: [String: Int] = [:]
             for s in sources where s.weekIndex == week {
                 for i in s.items {
@@ -533,6 +537,7 @@ extension SessionItemEditService {
             totalWeeks: live.weeks, isMaintenance: old.isMaintenance
         )
         block.previousMesoId = old.id
+        block.scheduledDeload = old.scheduledDeload
         context.insert(block)
         newMeso = block
         for sp in live.sessions {
@@ -633,6 +638,9 @@ extension SessionItemEditService {
                 for c in later {
                     guard let match = c.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) else { continue }
                     if wave.isEmpty {
+                        // No wave: the chain is this block + this day name (as `nextTargetItem` pairs them), else chronological.
+                        let byBlockAndDay = s.meso != nil && !(s.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                        if byBlockAndDay && !(c.meso?.persistentModelID == s.meso?.persistentModelID && SessionDayLabelMatcher.matches(c.dayLabel, s.dayLabel)) { continue }
                         if match.waveRaw?.lowercased() != deloadWaveRaw { expected = match; break }
                     } else if SessionDayLabelMatcher.matches(c.dayLabel, s.dayLabel), match.waveRaw?.lowercased() == wave {
                         expected = match; break

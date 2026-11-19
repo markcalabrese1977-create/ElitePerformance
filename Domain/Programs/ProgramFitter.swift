@@ -139,7 +139,7 @@ enum ProgramFitter {
 
         let fitted = ProgramTemplate(id: template.id, name: template.name, totalWeeks: template.totalWeeks,
                                      trainingDaysPerWeek: template.trainingDaysPerWeek,
-                                     weekRules: template.weekRules, dayTemplates: days)
+                                     weekRules: template.weekRules, dayTemplates: days, waveless: template.waveless)
         return FitResult(template: fitted, reasons: reasons, advice: FitAdvice(days: adviceDays))
     }
 

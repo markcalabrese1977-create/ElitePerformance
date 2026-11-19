@@ -607,6 +607,8 @@ extension Session {
     ///   2. else ANY item with a wave letter (a/b/c)  -> position band, but .deload is
     ///                                                   capped to .late
     ///   3. else (no item has wave data)              -> position band, unchanged
+    ///   (A block the lifter wrote, `meso.scheduledDeload != nil`, follows rules 1 and 2 even though it has no letters: its
+    ///   deload week is the one whose items say "deload", and no other week is ever a deload by position.)
     /// So a session mixing deload items with nil-wave items is .deload (the nil-wave items
     /// are ignored, not counted against it), and a session mixing a deload item with letter
     /// items is also .deload. Mixed sessions do not occur in generated blocks (the
@@ -628,7 +630,8 @@ extension Session {
         }
 
         guard meso?.isMaintenance != true,
-              items.contains(where: { WavePrescriptionGuard.isWaveLetter($0.waveRaw) || $0.waveRaw?.lowercased() == "deload" })
+              meso?.scheduledDeload != nil
+                || items.contains(where: { WavePrescriptionGuard.isWaveLetter($0.waveRaw) || $0.waveRaw?.lowercased() == "deload" })
         else {
             return band
         }
