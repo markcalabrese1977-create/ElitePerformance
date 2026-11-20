@@ -4104,7 +4104,10 @@ final class WavelessBlockTests: XCTestCase {
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(b2.suggestedLoad, 100, "the held load of week 1's same-day session")
         XCTAssertEqual(b2.plannedLoadsBySet, [100, 100, 100])
-        XCTAssertEqual(otherDay.suggestedLoad, 70, "Upper B's bench is a different chain")
+        // Upper B's bench is a different chain: it is not held at Upper A's 100. With no Upper B history it takes the last-priority
+        // cross-day estimate from Upper A's 100 x 8 at RIR 2 (its stale 70 is replaced by 90).
+        XCTAssertEqual(otherDay.suggestedLoad, 90)
+        XCTAssertEqual(otherDay.coachNote, "Estimated from your Upper A sets — set 1 calibrates.")
         XCTAssertTrue(changes.contains { $0.item === b2 })
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
     }
@@ -4513,5 +4516,326 @@ final class StartupBackfillsDryRunTests: XCTestCase {
         let text = lines.joined(separator: "\n")
         print(text)
         if let out = ProcessInfo.processInfo.environment["EP_AUDIT_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+// MARK: - PlaceholderRefresh on Angela's backups (1.2.2 -> what a 1.3.1 first launch writes, against the actual 1.3.0 result)
+
+/// LOCAL fixtures (health data, not committed). TEST_RUNNER_EP_ANGELA_122 = the 1.2.2 backup, TEST_RUNNER_EP_ANGELA_130 = the 1.3.0 backup that
+/// first launch produced. Skipped when they are not set (`scripts/full_gate.sh` sets them when the files are in ~/Downloads).
+final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
+
+    struct Row: Equatable {
+        var date: String, day: String, wave: String, name: String, exerciseId: String
+        var planEdited: Bool, status: String
+        var load: String, planned: String, coach: String, prescription: String
+        var summary: String { "\(date) · \(day) · \(wave) · \(name)" }
+    }
+
+    private func path(_ key: String) throws -> String {
+        guard let p = ProcessInfo.processInfo.environment[key], !p.isEmpty, FileManager.default.fileExists(atPath: p) else {
+            throw XCTSkip("set TEST_RUNNER_\(key) to the Angela fixture")
+        }
+        return p
+    }
+
+    private func importStore(_ path: String) throws -> ModelContext {
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+        keep.append(container)
+        return ctx
+    }
+    private var keep: [ModelContainer] = []
+
+    private func rows(_ ctx: ModelContext) throws -> [String: Row] {
+        func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        var out: [String: Row] = [:]
+        for s in try ctx.fetch(FetchDescriptor<Session>()) {
+            for i in s.items {
+                out[i.id?.uuidString ?? "\(i.persistentModelID)"] = Row(
+                    date: f.string(from: s.date), day: s.dayLabel ?? "-", wave: (i.waveRaw ?? "-").uppercased(),
+                    name: i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId), exerciseId: i.exerciseId,
+                    planEdited: i.planEdited, status: s.status.rawValue, load: n(i.suggestedLoad),
+                    planned: i.plannedLoadsBySet.map(n).joined(separator: "/"), coach: i.coachNote ?? "", prescription: i.prescriptionNotes ?? "")
+            }
+        }
+        return out
+    }
+
+    /// Imports the 1.2.2 backup, forgets the one-shot flags (a first launch of the new build), runs every registered startup backfill in order, and
+    /// returns the resulting rows plus the refresh's own changes (with reasons) taken just before it ran.
+    private func launch122() throws -> (rows: [String: Row], reasons: [String: String], ctx: ModelContext) {
+        let ctx = try importStore(try path("EP_ANGELA_122"))
+        var saved: [String: Any] = [:]
+        for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v; UserDefaults.standard.removeObject(forKey: k) }
+        defer { for (k, v) in saved { UserDefaults.standard.set(v, forKey: k) } }
+        var reasons: [String: String] = [:]
+        for b in StartupBackfills.registered {
+            if b.name.contains("PlaceholderRefresh") {
+                for c in PlaceholderRefresh.plan(in: ctx) { reasons[c.item.id?.uuidString ?? "\(c.item.persistentModelID)"] = c.reason.text }
+            }
+            b.run(ctx)
+        }
+        return (try rows(ctx), reasons, ctx)
+    }
+
+    func test_report_122ThroughTheChangedRefresh_versusTheActual130() throws {
+        let r = try launch122()
+        let actual = try rows(try importStore(try path("EP_ANGELA_130")))
+        var lines = ["1.2.2 backup through this head's startup backfills, versus the 1.3.0 backup (the actual first-launch result)", ""]
+        var n = 0
+        for (k, new) in r.rows.sorted(by: { ($0.value.date, $0.value.day, $0.value.name) < ($1.value.date, $1.value.day, $1.value.name) }) {
+            guard let old = actual[k], old != new else { continue }
+            n += 1
+            lines.append("\(new.summary) · load \(old.load) → \(new.load) · planned [\(old.planned)] → [\(new.planned)] · coach note: \(old.coach.isEmpty ? "-" : old.coach) → \(new.coach.isEmpty ? "-" : new.coach) · prescription note: \(old.prescription.isEmpty ? "-" : old.prescription) → \(new.prescription.isEmpty ? "-" : new.prescription)")
+            if let why = r.reasons[k] { lines.append("    ↳ \(why)") }
+        }
+        lines.append("\n\(n) item(s) differ from the 1.3.0 backup")
+        let text = lines.joined(separator: "\n"); print(text)
+        if let out = ProcessInfo.processInfo.environment["EP_ANGELA_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+
+    func test_122ThroughTheChangedRefresh_isTheActual130_plusExactlyTheHoldAndCrossDayWrites() throws {
+        let r = try launch122()
+        let actual = try rows(try importStore(try path("EP_ANGELA_130")))
+        let differing = r.rows.filter { actual[$0.key] != nil && actual[$0.key] != $0.value }
+        XCTAssertEqual(differing.count, 14, "every difference from the 1.3.0 backup is one of the writes pinned below")
+
+        func row(_ date: String, _ day: String, _ name: String) -> Row? { r.rows.values.first { $0.date == date && $0.day == day && $0.name == name } }
+        // Hold from the Nov 20 Lower A 15-rep sets (same day).
+        for (date, wave) in [("Nov 27", "B"), ("Dec 4", "C")] {
+            let press = try XCTUnwrap(row(date, "Lower A", "Single leg press")), abd = try XCTUnwrap(row(date, "Lower A", "Cable Abduction"))
+            XCTAssertEqual(press.load, "145", date); XCTAssertEqual(press.wave, wave); XCTAssertEqual(abd.load, "42.5", date)
+            XCTAssertEqual(press.coach, "Held from your recent A-week sets — set 1 calibrates.")
+            XCTAssertEqual(abd.coach, "Held from your recent A-week sets — set 1 calibrates.")
+            XCTAssertFalse(press.prescription.contains(PlaceholderRefresh.noRecentHistoryNote), "the stale note is gone"); XCTAssertFalse(abd.prescription.contains(PlaceholderRefresh.noRecentHistoryNote))
+        }
+        // Cross-day: Lower C has no history of its own, so the lifts come from the Nov 20 Lower A session. (Nov 26 Lower C is week 1 and
+        // planEdited: it already plans these loads and is untouched.)
+        for date in ["Dec 3", "Dec 10"] {
+            XCTAssertEqual(row(date, "Lower C", "Single leg press")?.load, "145", date)
+            XCTAssertEqual(row(date, "Lower C", "Cable Abduction")?.load, "42.5", date)
+            XCTAssertEqual(row(date, "Lower C", "Seated Calf Raise")?.load, "151", date)
+            XCTAssertEqual(row(date, "Lower C", "Seated Calf Raise")?.coach, "Estimated from your Lower A sets — set 1 calibrates.")
+            XCTAssertEqual(row(date, "Lower C", "Single leg press")?.coach, "Held from your Lower A sets — set 1 calibrates.")
+        }
+        // Unchanged: the Nov 20 session, Dec 11, every planEdited item, Copenhagen.
+        for (k, new) in r.rows {
+            guard let old = actual[k] else { continue }
+            if old.date == "Nov 20" || old.date == "Dec 11" || old.planEdited || old.name == "Copenhagen" {
+                XCTAssertEqual(new, old, "\(old.summary) must not change")
+            }
+        }
+        // Bodyweight classification: Hanging Knee Raise (built-in, bodyweight) loses "set a load"; the loadable ones keep it.
+        for new in r.rows.values where new.name == "Hanging Knee Raise" && !new.planEdited { XCTAssertFalse(new.prescription.contains(PlaceholderRefresh.noRecentHistoryNote), new.summary) }
+        var keptNote = 0
+        for (k, new) in r.rows where ["Weighted Dead Bug", "Kettle Balance Abs", "Archer Pull"].contains(new.name) && !new.planEdited {
+            guard actual[k]?.prescription.contains(PlaceholderRefresh.noRecentHistoryNote) == true else { continue }   // only the items 1.3.0 noted
+            XCTAssertTrue(new.prescription.contains(PlaceholderRefresh.noRecentHistoryNote), new.summary); keptNote += 1
+        }
+        XCTAssertGreaterThan(keptNote, 0)
+        // Idempotent: a second pass over the result changes nothing.
+        let again = PlaceholderRefresh.plan(in: r.ctx)
+        XCTAssertTrue(again.isEmpty, again.map { "\($0.session.dayLabel ?? "-") \($0.item.exerciseNameSnapshot ?? "-") \($0.oldLoad)->\($0.newLoad) \($0.reason.text)" }.joined(separator: " | "))
+    }
+}
+
+// MARK: - PlaceholderRefresh: hold from a high-rep source, cross-day source, stale note, bodyweight classification
+
+/// Angela's real shapes (Single leg press / Cable Abduction 15-rep sets, Seated Calf Raise, Copenhagen), rebuilt by hand. "Today" is Tue Nov 17 2026.
+final class PlaceholderRefreshHoldAndCrossDayTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func day(_ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: 2026, month: m, day: d, hour: 9))! }
+    private var now: Date { cal.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 20))! }
+    private let sep22 = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 22, hour: 12))!
+
+    private func context() throws -> (ModelContext, MesoBlock) {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        let meso = MesoBlock(name: "5-Day Upper / Lower + Pump", startDate: day(9, 25), status: .active, totalWeeks: 10)
+        meso.createdAt = day(8, 1)
+        ctx.insert(meso)
+        return (ctx, meso)
+    }
+
+    @discardableResult
+    private func session(_ ctx: ModelContext, _ meso: MesoBlock, _ date: Date, _ status: SessionStatus, week: Int, label: String, _ items: [SessionItem]) -> Session {
+        let s = Session(date: date, status: status, weekIndex: week, dayLabel: label, items: items)
+        s.meso = meso; ctx.insert(s); meso.sessions.append(s)
+        return s
+    }
+
+    private func item(_ id: String, wave: String, sets: Int = 3, repMin: Int, repMax: Int, rir: Int = 2, suggested: Double = 0,
+                      actual: [Double] = [], reps: [Int] = [], rirs: [Int] = [], edited: Bool = false) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: repMin, targetSets: sets, targetRIR: rir, suggestedLoad: suggested,
+                            waveRaw: wave, priorityRaw: "standard", repMin: repMin, repMax: repMax, targetRIRMin: rir, targetRIRMax: rir,
+                            plannedRepsBySet: Array(repeating: repMin, count: sets),
+                            plannedLoadsBySet: Array(repeating: suggested, count: sets),
+                            plannedRIRsBySet: Array(repeating: rir, count: sets),
+                            actualReps: reps, actualLoads: actual, actualRIRs: rirs,
+                            restPausePatternsBySet: Array(repeating: "", count: sets), setFeedbackBySet: Array(repeating: "", count: sets))
+        i.planEdited = edited
+        i.updatedAt = sep22
+        return i
+    }
+
+    /// Nov 10 Lower A (a): leg press 145 x 15 at RIR 0, four sets.
+    private func legPressSource(_ ctx: ModelContext, _ meso: MesoBlock, date: Date? = nil, load: Double = 145, reps: Int = 15, rir: Int = 0, label: String = "Lower A") {
+        let done = item("leg_press", wave: "a", sets: 4, repMin: 12, repMax: 15, rir: 1, suggested: load,
+                        actual: Array(repeating: load, count: 4), reps: Array(repeating: reps, count: 4), rirs: Array(repeating: rir, count: 4), edited: true)
+        session(ctx, meso, date ?? day(11, 10), .completed, week: 1, label: label, [done])
+    }
+
+    // MARK: hold from a high-rep source
+
+    func test_hold_aHighRepSourceIsHeldAtItsOwnLoad_ifItCoversTheTargetsRepMin() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso)
+        let target = item("leg_press", wave: "b", repMin: 12, repMax: 15, rir: 2)
+        session(ctx, meso, day(11, 24), .planned, week: 2, label: "Lower A", [target])
+        let changes = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(target.suggestedLoad, 145, "15 reps - max(0, 2 - 0) = 13 >= 12: held, no estimate (15 reps is not a 12-rep source)")
+        XCTAssertEqual(target.plannedLoadsBySet, [145, 145, 145])
+        XCTAssertEqual(target.coachNote, "Held from your recent A-week sets — set 1 calibrates.")
+        XCTAssertFalse(target.planEdited)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
+    }
+
+    func test_hold_notWrittenWhenTheReserveCannotCoverTheRepMin() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso, reps: 13, rir: 0)                       // 13 - max(0, 2 - 0) = 11 < 12
+        let target = item("leg_press", wave: "b", repMin: 12, repMax: 15, rir: 2)
+        session(ctx, meso, day(11, 24), .planned, week: 2, label: "Lower A", [target])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 0)
+        XCTAssertEqual(target.prescriptionNotes, PlaceholderRefresh.noRecentHistoryNote)
+        // The same source at RIR 2 has no reserve to spend (target RIR 2 - set RIR 2 = 0): 13 >= 12, held.
+        let (ctx2, meso2) = try context()
+        legPressSource(ctx2, meso2, reps: 13, rir: 2)
+        let target2 = item("leg_press", wave: "b", repMin: 12, repMax: 15, rir: 2)
+        session(ctx2, meso2, day(11, 24), .planned, week: 2, label: "Lower A", [target2])
+        PlaceholderRefresh.run(in: ctx2, now: now)
+        XCTAssertEqual(target2.suggestedLoad, 145)
+    }
+
+    func test_hold_usesTheMostRecentQualifyingSet_andNeverRaises() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso, date: day(11, 3), load: 150)            // older and heavier
+        legPressSource(ctx, meso, date: day(11, 10), load: 145)
+        let target = item("leg_press", wave: "b", repMin: 12, repMax: 15, rir: 2)
+        session(ctx, meso, day(11, 24), .planned, week: 2, label: "Lower A", [target])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.suggestedLoad, 145, "the most recent session's set, not the heavier older one")
+    }
+
+    func test_estimateStillWinsWhenASourceSetHasTwelveRepsOrFewer() throws {
+        let (ctx, meso) = try context()
+        let done = item("leg_press", wave: "a", sets: 3, repMin: 8, repMax: 12, rir: 1, suggested: 200,
+                        actual: [200, 200, 200], reps: [10, 10, 10], rirs: [1, 1, 1], edited: true)
+        session(ctx, meso, day(11, 10), .completed, week: 1, label: "Lower A", [done])
+        let target = item("leg_press", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        session(ctx, meso, day(11, 24), .planned, week: 2, label: "Lower A", [target])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.coachNote, "Estimated from your recent A-week sets — set 1 calibrates.")
+    }
+
+    // MARK: cross-day
+
+    func test_crossDay_aLiftNeverDoneOnThisDayIsTakenFromTheDayItWasDone() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso)                                          // done on Lower A only
+        let calfDone = item("seated_calf_raise", wave: "a", sets: 4, repMin: 12, repMax: 15, rir: 1, suggested: 151,
+                            actual: [151, 151, 151, 151], reps: [15, 12, 12, 15], rirs: [0, 0, 0, 0], edited: true)
+        session(ctx, meso, day(11, 11), .completed, week: 1, label: "Lower A", [calfDone])
+        let press = item("leg_press", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        let calf = item("seated_calf_raise", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        session(ctx, meso, day(11, 25), .planned, week: 2, label: "Lower C", [press, calf])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(press.suggestedLoad, 145, "15 reps - max(0, 2 - 0) = 13 >= 8: held from Lower A")
+        XCTAssertEqual(press.coachNote, "Held from your Lower A sets — set 1 calibrates.")
+        // e1RM 151 x (1 + 12/30) = 211.4; 12 reps at RIR 2: 211.4 / (1 + 14/30) x 0.95 = 136.9 -> 135 rounded down, floored to the 12-rep set's 151.
+        XCTAssertEqual(calf.suggestedLoad, 151)
+        XCTAssertEqual(calf.coachNote, "Estimated from your Lower A sets — set 1 calibrates.")
+    }
+
+    func test_crossDay_isLastPriority_aSameDaySourceWins() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso)                                          // Lower A: 145 x 15
+        let c = item("leg_press", wave: "a", sets: 3, repMin: 8, repMax: 12, rir: 1, suggested: 100,
+                     actual: [100, 100, 100], reps: [10, 10, 10], rirs: [1, 1, 1], edited: true)
+        session(ctx, meso, day(11, 12), .completed, week: 1, label: "Lower C", [c])
+        let press = item("leg_press", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        session(ctx, meso, day(11, 25), .planned, week: 2, label: "Lower C", [press])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(press.coachNote, "Estimated from your recent A-week sets — set 1 calibrates.", "the same-day (Lower C) estimate, not the Lower A hold")
+        XCTAssertLessThan(press.suggestedLoad, 145)
+    }
+
+    func test_crossDay_ignoresASourceOlderThanTwoRotations_andAnEditedTarget() throws {
+        let (ctx, meso) = try context()
+        legPressSource(ctx, meso, date: day(9, 1))                         // 12+ weeks before: outside two A/B/C rotations (letters a, b below)
+        let press = item("leg_press", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        let edited = item("leg_press", wave: "b", repMin: 8, repMax: 12, rir: 2, edited: true)
+        session(ctx, meso, day(11, 25), .planned, week: 2, label: "Lower C", [press])
+        session(ctx, meso, day(11, 26), .planned, week: 2, label: "Lower D", [edited])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(press.suggestedLoad, 0)
+        XCTAssertEqual(press.prescriptionNotes, PlaceholderRefresh.noRecentHistoryNote)
+        XCTAssertEqual(edited.suggestedLoad, 0)
+        XCTAssertNil(edited.prescriptionNotes, "a planEdited item is never touched")
+    }
+
+    // MARK: the stale note
+
+    func test_staleNote_refreshWritesIt_completingTheSourceSessionWritesTheLoadAndClearsIt() throws {
+        let (ctx, meso) = try context()
+        let source = item("cable_curl", wave: "a", sets: 3, repMin: 10, repMax: 12, rir: 2)
+        let target = item("cable_curl", wave: "a", sets: 3, repMin: 10, repMax: 12, rir: 2)
+        let sourceSession = session(ctx, meso, day(11, 10), .planned, week: 1, label: "Upper B", [source])   // missed so far: no history
+        session(ctx, meso, day(11, 24), .planned, week: 4, label: "Upper B", [target])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(target.prescriptionNotes, PlaceholderRefresh.noRecentHistoryNote)
+        XCTAssertEqual(target.suggestedLoad, 0)
+
+        // The source session is performed late: sets logged, session completed, carry-forward writes.
+        source.actualLoads = [60, 60, 60]; source.actualReps = [12, 12, 12]; source.actualRIRs = [2, 2, 2]
+        source.suggestedLoad = 60; source.plannedLoadsBySet = [60, 60, 60]
+        sourceSession.status = .completed
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: sourceSession)
+        XCTAssertGreaterThan(target.suggestedLoad, 0, "carry-forward wrote a load")
+        XCTAssertNil(target.prescriptionNotes, "the note no longer holds")
+    }
+
+    func test_staleNote_onlyTheNoHistoryText_isRemoved_whenALoadIsWritten() throws {
+        let i = item("cable_curl", wave: "a", repMin: 10, repMax: 12)
+        i.prescriptionNotes = "Slow negatives. " + PlaceholderRefresh.noRecentHistoryNote
+        PlaceholderRefresh.clearStaleNoHistoryNote(i)
+        XCTAssertEqual(i.prescriptionNotes, "Slow negatives. " + PlaceholderRefresh.noRecentHistoryNote, "no load yet: the note stays")
+        i.suggestedLoad = 40
+        PlaceholderRefresh.clearStaleNoHistoryNote(i)
+        XCTAssertEqual(i.prescriptionNotes, "Slow negatives.")
+    }
+
+    // MARK: bodyweight classification
+
+    func test_bodyweight_eligibleKeysOnTheCatalogOrTheCustomExercisesFlag() throws {
+        for id in ["hanging_knee_raise", "hanging_straight_leg_raise", "toes_to_bar", "pull_up", "push_up", "nordic_curl"] {
+            XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: id), id)
+        }
+        for id in ["cable_rope_crunch", "dead_bug", "russian_twist", "leg_press"] { XCTAssertFalse(ExerciseCatalog.isBodyweight(exerciseId: id), id) }
+        let (ctx, meso) = try context()
+        let knee = item("hanging_knee_raise", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        let crunch = item("cable_rope_crunch", wave: "b", repMin: 8, repMax: 12, rir: 2)
+        session(ctx, meso, day(11, 25), .planned, week: 2, label: "Lower C", [knee, crunch])
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertNil(knee.prescriptionNotes, "a truly bodyweight lift never gets \"set a load\"")
+        XCTAssertEqual(crunch.prescriptionNotes, PlaceholderRefresh.noRecentHistoryNote, "a loadable one keeps the note")
     }
 }

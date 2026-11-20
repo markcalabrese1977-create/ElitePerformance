@@ -29,6 +29,15 @@ import SwiftData
 ///    and clamped to its max load. Floor: when the target's repMax is no more than the reps performed in the source
 ///    set that gave the estimate, the load is max(estimate, that set's load). The note reads "Estimated from your recent B-week sets — set 1 calibrates." Sources
 ///    come from the same block, or from the last 12 weeks.
+///    (ii-hold) When no source set has 12 reps or fewer (so there is no estimate), the most recent same-day source set of MORE than
+///    12 reps that still covers the target is held: its load is written unchanged, never raised, when
+///    `sourceReps - max(0, targetRIR - sourceRIR) >= target.repMin` (the source's logged RIR; a missing one counts as the source
+///    item's target RIR). The note reads "Held from your recent B-week sets — set 1 calibrates." A hold only fills a target that has
+///    no load: a planned load is never replaced or lowered by it.
+///    (cross-day) Last of all, only when (i), (ii) and (ii-hold) found nothing on the same day: the same exercise performed on
+///    any other day of the same block within two rotations, with the same math (estimate, else hold). The note reads
+///    "Estimated from your Lower A sets — set 1 calibrates." ("Held from ..." for a hold). A separate lookup: the day-label matcher
+///    shared with the edit-safety checks is not involved.
 ///    (iii) Otherwise the load is left alone. A target not written since its block was created gets the one-time note
 ///    "No recent data for this week type — set 1 calibrates."; a target at 0 gets "No recent history — set a load.".
 /// 3. **Lowering** is blocked only when, since the target was last written, the lifter performed a working set of that
@@ -36,7 +45,8 @@ import SwiftData
 ///    shown to be doable. Otherwise it is lowered to the estimate. Never touches an edited item or a fixed-load one. A
 ///    previous session or source with a pain flag is left alone: pain holds.
 ///
-/// A target at 0 load with no qualifying source gets the note "No recent history — set a load." (once) and stays at 0.
+/// A target at 0 load with no qualifying source gets the note "No recent history — set a load." (once) and stays at 0. The
+/// note is cleared as soon as a load is written to the item, by this rule or by carry-forward (`clearStaleNoHistoryNote`).
 ///
 /// A performed set counts, a failed attempt (load > 0, no reps, no "SKIP") included; a performed WORKING set for rule 3
 /// has reps (a failed attempt shows nothing doable).
@@ -68,6 +78,10 @@ enum PlaceholderRefresh {
         case estimated(from: Date, letter: String?, e1RM: Double, why: String)
         /// The most recent same-letter session with performed sets within two rotations: its held load.
         case earlierSameLetter(from: Date, rotationWeeks: Int)
+        /// No estimate was possible (every source set has more than 12 reps): the source set's load, unchanged. `math` shows the check.
+        case heldHighRep(from: Date, source: String, math: String)
+        /// The same exercise on another day of the block, estimated or held; `math` shows the arithmetic.
+        case crossDay(from: Date, day: String, math: String)
         /// A target at 0 with nothing to estimate from.
         case noRecentHistory(why: String)
         /// A target still at its block-setup value with nothing to estimate from.
@@ -84,6 +98,10 @@ enum PlaceholderRefresh {
                 return "no source to estimate from; \(why); keeps its block-setup load with a note"
             case .noRecentHistory(let why):
                 return "no recent history to estimate from; \(why); stays 0 with a note"
+            case .heldHighRep(let d, let source, let math):
+                return "held from the \(day(d)) session (\(source)); \(math)"
+            case .crossDay(let d, let label, let math):
+                return "from your \(label) session of \(day(d)); \(math)"
             case .estimated(let d, let letter, let e1rm, let why):
                 return "estimated from the \(day(d))\(letter.map { " \($0.uppercased())-week" } ?? "") session (e1RM \(Int(e1rm.rounded()))); \(why)"
             }
@@ -221,6 +239,7 @@ enum PlaceholderRefresh {
             PlanMemoryEngine.applyPropagatedLoad(c.newLoad, to: c.item)
             PlanMemoryEngine.enforceMax(on: c.item, profile: ctx.profile, customExercises: ctx.customExercises)
             if let note = c.note { c.item.coachNote = note }
+            clearStaleNoHistoryNote(c.item)
             // planEdited stays false: this is an automatic write.
         }
     }
@@ -322,12 +341,19 @@ enum PlaceholderRefresh {
                            "Held at \(compact(held, ctx)) from \(dayText(s.date)): your last \(letter.isEmpty ? "" : letter.uppercased() + "-week ")session."))
         }
 
-        // (ii)
-        if (item.repMin ?? item.targetReps) <= maxEstimatedTargetRepMin {
-            let r = estimate(for: item, target: target, why: why, completed: completed, now: now, ctx: ctx)
-            if let d = r.decision { return .write(d) }
-            if !r.noSource { return .leave }                                // pain / degenerate: leave it
-        }
+        // (ii) estimate, else (ii-hold); then the cross-day lookup. Each stops the rule when it decides or when a pain flag holds.
+        let cutoff = calendar.date(byAdding: .weekOfYear, value: -sourceWindowWeeks, to: now) ?? .distantPast
+        let sameDay = completed.filter {
+            $0.date < target.date && SessionDayLabelMatcher.matches($0.dayLabel, target.dayLabel)
+                && ($0.meso?.persistentModelID == target.meso?.persistentModelID || $0.date >= cutoff)
+        }.sorted { $0.date > $1.date }
+        if let o = derive(for: item, from: sameDay, crossDay: false, why: why, ctx: ctx) { return o }
+
+        let otherDays = completed.filter { s in
+            s.date < target.date && s.meso?.persistentModelID == meso.persistentModelID
+                && (calendar.dateComponents([.day], from: calendar.startOfDay(for: s.date), to: targetDay).day ?? Int.max) <= windowDays
+        }.sorted { $0.date > $1.date }
+        if let o = derive(for: item, from: otherDays, crossDay: true, why: why, ctx: ctx) { return o }
 
         // (iii)
         if isZeroTarget(item) {
@@ -346,49 +372,102 @@ enum PlaceholderRefresh {
         return updated > created.addingTimeInterval(60)
     }
 
-    /// `noSource` is true only when no session qualified (a pain flag or a degenerate e1RM is neither).
-    private static func estimate(for item: SessionItem, target: Session, why: String, completed: [Session], now: Date, ctx: Context)
-        -> (decision: (load: Double, reason: Reason, note: String?)?, noSource: Bool) {
+    /// The estimate, else the hold, over `candidates` (most recent first). nil when neither found a source (the caller goes on to
+    /// the next lookup); `.leave` when a pain flag or a degenerate e1RM stops the rule.
+    private static func derive(for item: SessionItem, from candidates: [Session], crossDay: Bool, why: String, ctx: Context) -> Outcome? {
         let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-        let cutoff = Calendar.current.date(byAdding: .weekOfYear, value: -sourceWindowWeeks, to: now) ?? .distantPast
-        let candidates = completed.filter {
-            $0.date < target.date && SessionDayLabelMatcher.matches($0.dayLabel, target.dayLabel)
-                && ($0.meso?.persistentModelID == target.meso?.persistentModelID || $0.date >= cutoff)
-        }.sorted { $0.date > $1.date }
-
-        for s in candidates {
-            guard let src = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) != "deload" }) else { continue }
-            let rows = WorkingSetFilter.workingRows(of: src).filter { $0.reps <= maxSourceReps }
-            guard !rows.isEmpty else { continue }
-            if hasPain(src) { return (nil, false) }                         // pain holds
-            // The set that gives the estimate (the highest e1RM; the first on a tie).
-            var best: (e1rm: Double, load: Double, reps: Int)?
-            for r in rows {
-                let rir = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
-                let e = r.load * (1.0 + Double(r.reps + rir) / 30.0)
-                if best == nil || e > best!.e1rm { best = (e, r.load, r.reps) }
-            }
-            guard let top = best, top.e1rm > 0 else { return (nil, false) }
-            let e1rm = top.e1rm
-
-            let topReps = item.repMax ?? item.targetReps
-            let rir: Double = {
-                if let lo = item.targetRIRMin, let hi = item.targetRIRMax { return Double(lo + hi) / 2 }
-                return Double(item.targetRIR)
-            }()
-            let raw = e1rm / (1.0 + (Double(topReps) + rir) / 30.0) * estimateFactor
-            let step = CoachingEngine.loadIncrement(
-                for: item, base: raw,
-                minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: ctx.profile, unit: ctx.unit), unit: ctx.unit)
-            var rounded = UnitAwareRounding.round(raw, increment: step, unit: ctx.unit, mode: .down)
-            // Floor: a target whose top rep count is no more than the reps already done in the source set is not
-            // an easier ask than that set, so it never writes below that set's load (the clamp to max load still applies).
-            if topReps <= top.reps { rounded = max(rounded, top.load) }
-            let letter = letterKey(src).isEmpty ? nil : letterKey(src)
-            let note = "Estimated from your recent \(letter.map { "\($0.uppercased())-week " } ?? "")sets — set 1 calibrates."
-            return ((rounded, .estimated(from: s.date, letter: letter, e1RM: e1rm, why: why), note), false)
+        let repMin = item.repMin ?? item.targetReps
+        func source(in s: Session) -> SessionItem? {
+            s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letterKey($0) != "deload" }
         }
-        return (nil, true)
+
+        // Estimate: a source set of 12 reps or fewer, for a target whose repMin is 12 or less.
+        if repMin <= maxEstimatedTargetRepMin {
+            for s in candidates {
+                guard let src = source(in: s) else { continue }
+                let rows = WorkingSetFilter.workingRows(of: src).filter { $0.reps <= maxSourceReps }
+                guard !rows.isEmpty else { continue }
+                if hasPain(src) { return .leave }                           // pain holds
+                // The set that gives the estimate (the highest e1RM; the first on a tie).
+                var best: (e1rm: Double, load: Double, reps: Int, rir: Int)?
+                for r in rows {
+                    let rir = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
+                    let e = r.load * (1.0 + Double(r.reps + rir) / 30.0)
+                    if best == nil || e > best!.e1rm { best = (e, r.load, r.reps, rir) }
+                }
+                guard let top = best, top.e1rm > 0 else { return .leave }
+                let e1rm = top.e1rm
+
+                let topReps = item.repMax ?? item.targetReps
+                let rir: Double = {
+                    if let lo = item.targetRIRMin, let hi = item.targetRIRMax { return Double(lo + hi) / 2 }
+                    return Double(item.targetRIR)
+                }()
+                let raw = e1rm / (1.0 + (Double(topReps) + rir) / 30.0) * estimateFactor
+                let step = CoachingEngine.loadIncrement(
+                    for: item, base: raw,
+                    minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: ctx.profile, unit: ctx.unit), unit: ctx.unit)
+                var rounded = UnitAwareRounding.round(raw, increment: step, unit: ctx.unit, mode: .down)
+                var floored = ""
+                // Floor: a target whose top rep count is no more than the reps already done in the source set is not
+                // an easier ask than that set, so it never writes below that set's load (the clamp to max load still applies).
+                if topReps <= top.reps, top.load > rounded { rounded = top.load; floored = ", floored to the source set's load" }
+                let math = "e1RM \(f(top.load)) x (1 + (\(top.reps) + \(top.rir))/30) = \(f(e1rm)); target \(topReps) reps at RIR \(f(rir)): \(f(e1rm)) / (1 + (\(topReps) + \(f(rir)))/30) x 0.95 = \(f(raw)), rounded down to \(f(step)) = \(f(rounded))\(floored)"
+                let note: String
+                if crossDay { note = "Estimated from your \(s.dayLabel ?? "other-day") sets — set 1 calibrates." }
+                else {
+                    let l = letterKey(src)
+                    note = "Estimated from your recent \(l.isEmpty ? "" : l.uppercased() + "-week ")sets — set 1 calibrates."
+                }
+                let reason: Reason = crossDay ? .crossDay(from: s.date, day: s.dayLabel ?? "other day", math: "estimate: " + math)
+                                              : .estimated(from: s.date, letter: letterKey(src).isEmpty ? nil : letterKey(src), e1RM: e1rm, why: why)
+                return .write((rounded, reason, note))
+            }
+        }
+
+        // Hold: no estimate is possible when every source set has more than 12 reps. The most recent such set that still covers the
+        // target's repMin once its reserve is spent down to the target's RIR is held at its own load: never raised. It only fills a
+        // target that has no load (or already holds that exact load); a planned load (a block-setup seed, a carried one) is never replaced or
+        // lowered by a hold.
+        let current = currentLoad(item)
+        for s in candidates {
+            guard let src = source(in: s) else { continue }
+            let rows = WorkingSetFilter.workingRows(of: src).filter { $0.reps > maxSourceReps }
+            guard !rows.isEmpty else { continue }
+            if hasPain(src) { return .leave }                               // pain holds
+            for r in rows.reversed() {                                      // the last set of the most recent session first
+                let sourceRIR = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
+                let spend = max(0, item.targetRIR - sourceRIR)
+                guard r.load > 0, r.reps - spend >= repMin else { continue }
+                if current > 0, abs(current - r.load) > 0.001 { return nil }       // a planned load is not replaced (the held value itself is: idempotent)
+                let math = "\(r.reps) reps - max(0, target RIR \(item.targetRIR) - set RIR \(sourceRIR)) = \(r.reps - spend) >= repMin \(repMin): hold \(f(r.load))"
+                let note: String
+                let reason: Reason
+                if crossDay {
+                    note = "Held from your \(s.dayLabel ?? "other-day") sets — set 1 calibrates."
+                    reason = .crossDay(from: s.date, day: s.dayLabel ?? "other day", math: "hold: " + math)
+                } else {
+                    let l = letterKey(src)
+                    let which = l.isEmpty ? "" : l.uppercased() + "-week "
+                    note = "Held from your recent \(which)sets — set 1 calibrates."
+                    reason = .heldHighRep(from: s.date, source: l.isEmpty ? "a recent session" : "\(l.uppercased())-week", math: math)
+                }
+                return .write((r.load, reason, note))
+            }
+        }
+        return nil
+    }
+
+    private static func f(_ x: Double) -> String { x == x.rounded() ? String(Int(x)) : String(format: "%.1f", x) }
+
+    /// The "No recent history — set a load." note is only true while the item has no load. Called wherever a load is written to
+    /// an item (the refresh itself, and carry-forward on session completion): drops the note, leaving any other prescription note.
+    static func clearStaleNoHistoryNote(_ item: SessionItem) {
+        guard let notes = item.prescriptionNotes, notes.contains(noRecentHistoryNote) else { return }
+        guard item.suggestedLoad > 0 || item.plannedLoadsBySet.contains(where: { $0 > 0 }) else { return }
+        let rest = notes.replacingOccurrences(of: noRecentHistoryNote, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        item.prescriptionNotes = rest.isEmpty ? nil : rest
     }
 }
 
