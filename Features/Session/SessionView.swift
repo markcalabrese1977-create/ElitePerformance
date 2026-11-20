@@ -3158,7 +3158,7 @@ struct UISessionSet: Identifiable {
                                 .font(.headline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                            VStack(spacing: 0) {
+                            VStack(alignment: .leading, spacing: 0) {
                                 ForEach(recap.exercises) { ex in
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(ex.name)
@@ -3182,6 +3182,7 @@ struct UISessionSet: Identifiable {
                                 }
                             }
                             .padding()
+                            .recapCardFrame()
                             .background(
                                 RoundedRectangle(cornerRadius: 20)
                                     .fill(Color(.systemBackground))
@@ -3199,6 +3200,7 @@ struct UISessionSet: Identifiable {
                                     ForEach(itemsNeedingPrompt, id: \.exerciseId) { item in
                                         LoadOverridePromptRow(item: item)
                                             .padding()
+                                            .recapCardFrame()
                                             .background(
                                                 RoundedRectangle(cornerRadius: 20)
                                                     .fill(Color(.systemBackground))
@@ -3320,6 +3322,7 @@ struct UISessionSet: Identifiable {
                     }
                 }
             }
+            .recapCardFrame()
         }
         private var itemsNeedingPrompt: [SessionItem] {
             recap.exercises.compactMap { ex -> SessionItem? in

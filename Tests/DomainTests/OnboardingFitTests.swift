@@ -1027,3 +1027,54 @@ final class WaveCustomizationTests: XCTestCase {
         XCTAssertTrue(source.contains("WaveCustomization.override("))
     }
 }
+
+// MARK: - Session recap: card alignment and the single Duration
+
+final class RecapLayoutAndDurationTests: XCTestCase {
+
+    func test_duration_healthWorkoutLinked_showsOnlyTheHealthDuration_labelled() {
+        let l = RecapDuration.line(healthLinked: true, healthSeconds: 3_000, appSeconds: 2_000)
+        XCTAssertEqual(l, RecapDuration.Line(label: "Duration (Apple Health)", seconds: 3_000))
+        // Linked wins even when the app's own number is longer, and a short Health workout still shows.
+        XCTAssertEqual(RecapDuration.line(healthLinked: true, healthSeconds: 120, appSeconds: 4_000)?.label, "Duration (Apple Health)")
+    }
+
+    func test_duration_noHealthWorkout_showsTheAppDuration_unlessUnderFiveMinutes() {
+        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 3_000), RecapDuration.Line(label: "Duration", seconds: 3_000))
+        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 300)?.label, "Duration", "exactly 5 minutes shows")
+        XCTAssertNil(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 299), "under 5 minutes: nothing")
+        XCTAssertNil(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: nil))
+    }
+
+    func test_duration_formatting() {
+        XCTAssertEqual(RecapDuration.text(65), "1:05")
+        XCTAssertEqual(RecapDuration.text(3_725), "1:02:05")
+    }
+
+    private func source(_ rel: String, file: StaticString = #filePath) throws -> String {
+        let root = URL(fileURLWithPath: "\(file)").deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)
+    }
+
+    /// No snapshot tooling in the project: the layout contract is pinned on the source. Every card on a recap screen goes
+    /// through `recapCardFrame()` (full width, leading), and the separate "Duration: X" caption is gone.
+    func test_everyRecapCard_usesTheSharedFullWidthLeadingFrame() throws {
+        let frame = try source("Features/Components/RecapCard.swift")
+        XCTAssertTrue(frame.contains("frame(maxWidth: .infinity, alignment: .leading)"))
+
+        let history = try source("Features/History/HistoryView.swift")
+        let d = try XCTUnwrap(history.range(of: "private struct HistoryDayDetailView"))
+        let detail = String(history[d.lowerBound...])
+        XCTAssertGreaterThanOrEqual(detail.components(separatedBy: "recapCardFrame()").count - 1, 2, "By-exercise card and its container")
+        XCTAssertTrue(detail.contains("VStack(alignment: .leading, spacing: 0) {\n                ForEach(Array(exerciseDetails"), "the exercise list stack is leading-aligned")
+
+        let session = try source("Features/Session/SessionView.swift")
+        let r = try XCTUnwrap(session.range(of: "private struct SessionRecapSheet"))
+        let sheet = String(session[r.lowerBound...])
+        XCTAssertGreaterThanOrEqual(sheet.components(separatedBy: "recapCardFrame()").count - 1, 3, "header, by-exercise and load-adjustment cards")
+
+        let spark = try source("Features/Components/HeartRateSparklineView.swift")
+        XCTAssertFalse(spark.contains("Duration:"), "the sparkline no longer prints its own Duration line")
+        XCTAssertFalse(detail.contains("formatDuration"), "one duration path")
+    }
+}

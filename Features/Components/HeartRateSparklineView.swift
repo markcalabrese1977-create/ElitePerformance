@@ -68,29 +68,6 @@ struct HeartRateSparklineView: View {
                 .padding(.vertical, 10)
             }
             .frame(height: height)
-
-            // Duration caption (clean + consistent)
-            if stepSeconds > 0, series.count >= 2 {
-                let total = Double(series.count - 1) * stepSeconds
-                Text("Duration: \(formatDuration(total))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
-    }
-
-    private func formatDuration(_ seconds: Double) -> String {
-        let s = max(0, Int(seconds.rounded()))
-        let m = s / 60
-        let r = s % 60
-
-        if m >= 60 {
-            let h = m / 60
-            let mm = m % 60
-            return "\(h)h \(mm)m"
-        }
-
-        // If it's ~2 minutes, "1m 55s" is fine.
-        return "\(m)m \(r)s"
     }
 }

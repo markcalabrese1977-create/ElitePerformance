@@ -565,8 +565,10 @@ private struct HistoryDayDetailView: View {
                     }
 
                     HStack {
-                        metricBlock(title: "Duration", value: formatDuration(s.hkDuration))
-                        Spacer()
+                        if let d = RecapDuration.line(healthLinked: true, healthSeconds: s.hkDuration, appSeconds: nil) {
+                            metricBlock(title: d.label, value: RecapDuration.text(d.seconds))
+                            Spacer()
+                        }
                         metricBlock(title: "Total cals", value: formatNumber(s.hkTotalCalories))
                     }
 
@@ -602,21 +604,13 @@ private struct HistoryDayDetailView: View {
         return "\(Int(value.rounded()))"
     }
 
-    private func formatDuration(_ seconds: Double) -> String {
-        guard seconds > 0 else { return "—" }
-        let total = Int(seconds.rounded())
-        let m = total / 60
-        let s = total % 60
-        return "\(m):" + String(format: "%02d", s)
-    }
-
     private var exerciseBreakdown: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("By exercise")
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(exerciseDetails.enumerated()), id: \.element.id) { index, ex in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(ex.name)
@@ -672,11 +666,13 @@ private struct HistoryDayDetailView: View {
                 }
             }
             .padding()
+            .recapCardFrame()
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(.systemBackground))
             )
         }
+        .recapCardFrame()
     }
 
     // MARK: - Session matching
