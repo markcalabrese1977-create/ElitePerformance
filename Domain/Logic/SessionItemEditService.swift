@@ -1547,7 +1547,7 @@ extension SessionItemEditService {
         if !collisions.isEmpty { return refused(.dateCollision, week: week, collisions: collisions) }
 
         let survivors = all.filter { !removedIDs.contains($0.persistentModelID) }
-        let shiftedByID = Dictionary(uniqueKeysWithValues: shifted.map { ($0.session.persistentModelID, $0.newDate) })
+        let shiftedByID = Dictionary(shifted.map { ($0.session.persistentModelID, $0.newDate) }, uniquingKeysWith: { first, _ in first })
         let blockEndAfter = survivors.map { shiftedByID[$0.persistentModelID] ?? $0.date }.max()
         return RemoveDeloadPlan(meso: meso, now: now, weekIndex: week, removals: removals, shifted: shifted,
                                 collisions: [], refusal: nil, blockEndBefore: blockEndBefore, blockEndAfter: blockEndAfter)

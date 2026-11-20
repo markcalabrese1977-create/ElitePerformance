@@ -505,8 +505,8 @@ extension SessionItemEditService {
         }
 
         let calendar = Calendar.current
-        let completedBefore = Dictionary(uniqueKeysWithValues: old.sessions.filter { $0.status == .completed }
-            .map { ($0.persistentModelID, sessionFingerprint($0)) })
+        let completedBefore = Dictionary(old.sessions.filter { $0.status == .completed }
+            .map { ($0.persistentModelID, sessionFingerprint($0)) }, uniquingKeysWith: { first, _ in first })
         let blocksBefore = (try? context.fetch(FetchDescriptor<MesoBlock>())) ?? []
         let statusBefore = blocksBefore.map { (block: $0, status: $0.status) }
         let removedIDs = Set(live.sessionsToDelete.map(\.persistentModelID))

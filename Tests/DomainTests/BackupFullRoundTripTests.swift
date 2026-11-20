@@ -4839,3 +4839,102 @@ final class PlaceholderRefreshHoldAndCrossDayTests: XCTestCase {
         XCTAssertEqual(crunch.prescriptionNotes, PlaceholderRefresh.noRecentHistoryNote, "a loadable one keeps the note")
     }
 }
+
+// MARK: - Duplicate custom exercise rows never trap a launch
+
+/// A store with several rows for one custom id (what CustomExerciseStoreMigration leaves when a restore runs it again over existing rows)
+/// used to crash CustomExerciseDedupMigration in `Dictionary(uniqueKeysWithValues:)` on every launch. Now the launch collapses them.
+final class CustomExerciseDuplicateRowsTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func day(_ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: 2026, month: m, day: d, hour: 9))! }
+
+    private func item(_ id: String, name: String) -> SessionItem {
+        SessionItem(order: 1, exerciseId: id, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 40,
+                    waveRaw: "a", priorityRaw: "standard", repMin: 8, repMax: 12, targetRIRMin: 2, targetRIRMax: 2,
+                    plannedRepsBySet: [10, 10, 10], plannedLoadsBySet: [40, 40, 40], plannedRIRsBySet: [2, 2, 2],
+                    actualReps: [10, 10, 10], actualLoads: [40, 40, 40], actualRIRs: [2, 2, 2],
+                    restPausePatternsBySet: ["", "", ""], setFeedbackBySet: ["", "", ""])
+    }
+
+    /// Runs `body` with every completion flag and the custom-exercise mirror cleared (a first launch), and puts them back.
+    private func withCleanDefaults(_ body: (_ clearFlags: () -> Void) throws -> Void) rethrows {
+        let d = UserDefaults.standard
+        func flagKeys() -> [String] { d.dictionaryRepresentation().keys.filter { $0.hasSuffix(".completed") } + ["custom_exercises_v2"] }
+        var saved: [String: Any] = [:]
+        for k in flagKeys() { if let v = d.object(forKey: k) { saved[k] = v } }
+        defer { for k in flagKeys() { d.removeObject(forKey: k) }; for (k, v) in saved { d.set(v, forKey: k) } }
+        for k in flagKeys() { d.removeObject(forKey: k) }
+        try body({ for k in flagKeys() { d.removeObject(forKey: k) } })
+    }
+
+    func test_duplicateCustomIds_launch_dedupToOneRowPerId_andEveryItemKeepsItsExerciseId() throws {
+        try withCleanDefaults { clearFlags in
+            let c = try ModelContainer(for: AppSchema.makeSchema(),
+                                       configurations: ModelConfiguration("dup-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            parked.append(c)
+            let ctx = ModelContext(c)
+            func insertDuplicates() {
+                // Archer Pull: three rows; the oldest (Jan 5) is the canonical one. Kettle: two rows with the SAME createdAt. Landmine Press:
+                // two rows whose name is also a built-in (the migration remaps its items to the built-in id).
+                ctx.insert(CustomExercise(id: "custom_archer", name: "Archer Pull", primaryMuscleRaw: "back", isCompound: true, createdAt: day(3, 1)))
+                ctx.insert(CustomExercise(id: "custom_archer", name: "Archer Pull", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 5)))
+                ctx.insert(CustomExercise(id: "custom_archer", name: "Archer Pull", primaryMuscleRaw: "back", isCompound: true, createdAt: day(2, 1)))
+                ctx.insert(CustomExercise(id: "custom_kettle", name: "Kettle Balance Abs", primaryMuscleRaw: "core", isCompound: false, createdAt: day(2, 2)))
+                ctx.insert(CustomExercise(id: "custom_kettle", name: "Kettle Balance Abs", primaryMuscleRaw: "core", isCompound: false, createdAt: day(2, 2)))
+                ctx.insert(CustomExercise(id: "custom_landmine", name: "Landmine Press", primaryMuscleRaw: "shoulders", isCompound: true, createdAt: day(1, 9)))
+                ctx.insert(CustomExercise(id: "custom_landmine", name: "Landmine Press", primaryMuscleRaw: "shoulders", isCompound: true, createdAt: day(1, 9)))
+            }
+            insertDuplicates()
+            let s = Session(date: day(2, 10), status: .completed, weekIndex: 1, dayLabel: "Upper A",
+                            items: [item("custom_archer", name: "Archer Pull"), item("custom_kettle", name: "Kettle Balance Abs"), item("custom_landmine", name: "Landmine Press")])
+            ctx.insert(s)
+            try ctx.save()
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 7)
+
+            StartupBackfills.run(using: c)                                   // a launch: must not trap
+
+            let rows = try ctx.fetch(FetchDescriptor<CustomExercise>())
+            XCTAssertEqual(Dictionary(grouping: rows, by: \.id).mapValues(\.count), ["custom_archer": 1, "custom_kettle": 1, "custom_landmine": 1], "one row per id")
+            XCTAssertEqual(rows.first { $0.id == "custom_archer" }?.createdAt, day(1, 5), "the oldest row survives")
+            let ids = Set(rows.map(\.id))
+            for i in try ctx.fetch(FetchDescriptor<SessionItem>()) {
+                XCTAssertTrue(ids.contains(i.exerciseId) || ExerciseCatalog.builtIn.contains { $0.id == i.exerciseId },
+                              "\(i.exerciseNameSnapshot ?? i.exerciseId) points at a row that exists")
+            }
+            let items = try ctx.fetch(FetchDescriptor<SessionItem>())
+            XCTAssertEqual(items.first { $0.exerciseId == "custom_archer" }.map { _ in true }, true, "an unmatched custom keeps its id, now the survivor's")
+            XCTAssertEqual(items.first { $0.exerciseNameSnapshot == "Landmine Press" || $0.exerciseId == "landmine_press" }?.exerciseId, "landmine_press",
+                           "a custom that is also a built-in is remapped to the built-in, as before")
+
+            // The same again with the flags lost (a restore that re-runs every one-shot) and the duplicates back: still no trap, still one row per id.
+            insertDuplicates(); try ctx.save()
+            clearFlags()
+            StartupBackfills.run(using: c)
+            let again = try ctx.fetch(FetchDescriptor<CustomExercise>())
+            XCTAssertEqual(Dictionary(grouping: again, by: \.id).mapValues(\.count).values.max(), 1)
+            XCTAssertEqual(again.count, 3)
+            // idempotent
+            XCTAssertEqual(CustomExerciseDedupMigration.collapseDuplicateRows(in: ctx), 0)
+        }
+    }
+
+    func test_theCanonicalRow_isTheOldestCreatedAt_thenAStableTieBreak_whateverTheOrder() throws {
+        let c = try ModelContainer(for: AppSchema.makeSchema(),
+                                   configurations: ModelConfiguration("dup-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        let rows = [CustomExercise(id: "x", name: "X", primaryMuscleRaw: "back", isCompound: true, createdAt: day(3, 1)),
+                    CustomExercise(id: "x", name: "X", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 1)),
+                    CustomExercise(id: "x", name: "X", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 1)),
+                    CustomExercise(id: "a", name: "A", primaryMuscleRaw: "back", isCompound: true, createdAt: day(5, 1))]
+        for r in rows { ctx.insert(r) }
+        try ctx.save()
+        let first = CustomExerciseDedupMigration.canonicalRows(rows)
+        let reversed = CustomExerciseDedupMigration.canonicalRows(rows.reversed())
+        XCTAssertEqual(first.map(\.persistentModelID), reversed.map(\.persistentModelID), "the choice does not depend on the order")
+        XCTAssertEqual(first.count, 2)
+        XCTAssertEqual(first.first { $0.id == "x" }?.createdAt, day(1, 1))
+    }
+}

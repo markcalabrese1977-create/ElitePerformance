@@ -31,6 +31,9 @@ enum CustomExerciseStoreMigration {
             UserDefaults.standard.removeObject(forKey: key)
             UserDefaults.standard.set(true, forKey: completionKey)
             BackfillLog.note("✅ CustomExerciseStoreMigration: migrated \(decoded.count) custom exercises to SwiftData.")
+            // This runs from the legacy list without looking at the rows already in the store, so over existing rows (a restore that left
+            // this flag unset) it adds a second row per id. Keep one per id (oldest createdAt) before anything reads the table.
+            CustomExerciseDedupMigration.collapseDuplicateRows(in: context)
         } catch {
             BackfillLog.note("⚠️ CustomExerciseStoreMigration failed: \(error)")
         }
