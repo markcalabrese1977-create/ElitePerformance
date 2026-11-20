@@ -2751,10 +2751,13 @@ final class MesoCardMenuTests: XCTestCase {
         let menuStart = try XCTUnwrap(card.range(of: "Menu {")).lowerBound
         let menuEnd = try XCTUnwrap(card.range(of: "} label: {\n                            Image(systemName: \"ellipsis.circle\")")).lowerBound
         let menu = String(card[menuStart..<menuEnd])
-        for action in ["Change program…", "Start next meso from this one", "Insert deload week"] {
+        for action in ["Start next meso from this one", "Insert deload week"] {
             XCTAssertTrue(menu.contains(action), "\(action) is in the menu")
             XCTAssertEqual(card.components(separatedBy: action).count - 1, 1, "and only there: \(action)")
         }
+        XCTAssertFalse(menu.contains("Change program"), "Change program is the header row, not a duplicate menu item")
+        XCTAssertFalse(menu.contains("onChangeProgram"))
+        XCTAssertEqual(card.components(separatedBy: "ChangeProgramRow(action: onChangeProgram)").count - 1, 1, "the header row stays, exactly once")
         let outside = String(card[menuEnd...])
         XCTAssertTrue(outside.contains("View Meso Summary"), "View Meso Summary stays visible on the card")
         XCTAssertFalse(menu.contains("View Meso Summary"))

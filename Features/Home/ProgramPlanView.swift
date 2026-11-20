@@ -86,9 +86,7 @@ struct ProgramPlanView: View {
                         Spacer()
                         // The block-changing actions live behind one menu; each is previewed and confirmed on its own screen.
                         Menu {
-                            if let onChangeProgram {
-                                Button { onChangeProgram() } label: { Label("Change program…", systemImage: "line.3.horizontal.decrease.circle") }
-                            }
+                            // The header row below is the one entry for rebuilding the program; no second entry here.
                             if activeMesoBlock != nil {
                                 Button { showStartNextMeso = true } label: { Label("Start next meso from this one", systemImage: "arrow.triangle.branch") }
                                 Button { showInsertDeload = true } label: { Label("Insert deload week", systemImage: "arrow.down.to.line") }
