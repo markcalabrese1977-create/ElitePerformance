@@ -56,6 +56,8 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   O1 collision check). Decide: merge the custom into the built-in (move history,
   canonical id) via the existing dedup path, or rename. Low priority.
 - In-app guide: the styling lives in the <head> of Resources/Guide/Guide.html. When the Claude guide doc changes, re-export its body and keep this file's <head>.
+- Per-session direct-set check (~6–11 direct per muscle per session); PPL3/PPL6 D1 chest 13 direct. Weak evidence, review only.
+- 1.3.1: re-shoot `Resources/Guide/g6_block_menu.png` (it still shows "Change program…" at the top of the block menu, which was removed) and update the image alt text in Guide.html ("Change program, Start next meso, Insert deload week") with it.
 
 ## Release check (standing): upgrade test
 

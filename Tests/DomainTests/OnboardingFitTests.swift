@@ -1163,3 +1163,52 @@ final class SessionStartedAtTests: XCTestCase {
         XCTAssertNil(try ModelContext(target).fetch(FetchDescriptor<Session>()).first?.startedAt)
     }
 }
+
+// MARK: - Built-in template volume
+
+/// Every built-in template, fitted for Build muscle / full gym / no session limit / intermediate, against the default muscle ranges.
+/// The rule (hand-rebalanced, v2): a muscle's weighted sets are at least min - 0.5, and its DIRECT sets (exercises whose primary
+/// it is) are at most max + 0.5. A weighted total over the max that comes only from fractional credit is allowed.
+final class BuiltInTemplateVolumeTests: XCTestCase {
+
+    private static let tolerance = 0.5
+
+    private func fitted(_ t: ProgramTemplate) -> ProgramTemplate {
+        ProgramFitter.fit(t, profile: FitProfile(equipment: Set(GearTag.allCases), injuries: [], sessionMinutes: nil,
+                                                 experience: .intermediate, goal: .hypertrophy)).template
+    }
+
+    func test_everyBuiltInTemplateExceptFullBody2Day_isInRange_weightedFloor_directCeiling() {
+        let templates: [(String, ProgramTemplate)] = [
+            ("PPL3Week", PPL3WeekTemplate.template), ("UpperLower4Day", UpperLower4DayTemplate.template),
+            ("Hybrid5Day", Hybrid5DayTemplate.template), ("DUP10Week", DUP10WeekTemplate.template),
+            ("PPL6Day", PPL6DayTemplate.template)]
+        for (name, t) in templates {
+            let rows = PlannedVolume.weeklyHardSets(template: fitted(t), overrides: nil).rows
+            XCTAssertEqual(rows.count, FineMuscle.allCases.count, name)
+            for r in rows {
+                XCTAssertGreaterThanOrEqual(r.average, r.range.min - Self.tolerance,
+                    "\(name) \(r.muscle.rawValue): weighted \(r.average) is below min \(r.range.min) - 0.5")
+                XCTAssertLessThanOrEqual(r.directAverage, r.range.max + Self.tolerance,
+                    "\(name) \(r.muscle.rawValue): direct \(r.directAverage) is above max \(r.range.max) + 0.5")
+            }
+        }
+    }
+
+    /// FullBody2Day is lower volume by design and is NOT held to the rule above. Its numbers are pinned so a change to the template
+    /// is a deliberate decision (update this table with it). (direct, weighted) weekly sets; abs and calves have no slot.
+    func test_fullBody2Day_snapshot_pinsCurrentNumbers() {
+        let expected: [FineMuscle: (direct: Double, weighted: Double)] = [
+            .chest: (8.44, 8.44), .lats: (4.22, 6.33), .upperBack: (4.22, 7.00), .frontDelts: (0.00, 4.22),
+            .sideDelts: (3.44, 3.44), .rearDelts: (3.44, 4.50), .biceps: (6.89, 11.11), .triceps: (6.89, 11.11),
+            .quads: (7.67, 7.67), .hamstrings: (3.44, 4.50), .glutes: (4.22, 9.78), .calves: (0, 0), .abs: (0, 0),
+            .forearms: (0, 2.58), .adductors: (0, 1.92), .lowerBack: (0, 1.72)]
+        let rows = PlannedVolume.weeklyHardSets(template: fitted(FullBody2DayTemplate.template), overrides: nil).rows
+        XCTAssertEqual(Set(rows.map(\.muscle)), Set(expected.keys))
+        for r in rows {
+            guard let e = expected[r.muscle] else { continue }
+            XCTAssertEqual(r.directAverage, e.direct, accuracy: 0.01, "\(r.muscle.rawValue) direct")
+            XCTAssertEqual(r.average, e.weighted, accuracy: 0.01, "\(r.muscle.rawValue) weighted")
+        }
+    }
+}
