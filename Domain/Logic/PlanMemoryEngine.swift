@@ -125,7 +125,10 @@ struct PlanMemoryEngine {
 
             // Max load: every load this path writes onto the (empty) target stays within the lifter's cap.
             // Runs when this iteration ends, after all the writes below (fixed-load and bodyweight: no cap).
-            defer { Self.enforceMax(on: targetItem, profile: profile, customExercises: customExercises) }
+            defer {
+                Self.enforceMax(on: targetItem, profile: profile, customExercises: customExercises)
+                PlaceholderRefresh.clearStaleNoHistoryNote(targetItem)   // a load now exists: "No recent history — set a load." no longer holds
+            }
             let loadCap = CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: profile, customExercises: customExercises
             )
@@ -362,6 +365,7 @@ struct PlanMemoryEngine {
               !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),
               let held = CoachingEngine.heldLoad(for: item), held > 0 else { return false }
         item.suggestedLoad = held
+        PlaceholderRefresh.clearStaleNoHistoryNote(item)
         return true
     }
 
@@ -698,6 +702,7 @@ struct PlanMemoryEngine {
     static func applyPropagatedLoad(_ load: Double?, top: Double? = nil, to targetItem: SessionItem) {
         if let load { targetItem.suggestedLoad = load }
         targetItem.plannedLoadsBySet = propagatedPlan(load, top: top, for: targetItem)
+        PlaceholderRefresh.clearStaleNoHistoryNote(targetItem)
     }
 
     // MARK: - Helpers

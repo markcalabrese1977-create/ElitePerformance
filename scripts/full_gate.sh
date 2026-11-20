@@ -8,6 +8,11 @@ TAG="${1:-full}"
 OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/ep_gate_$TAG}"; mkdir -p "$OUT_DIR"; export OUT_DIR
 FIX="${GATE_FIXTURE:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-10-30_19-02-11.json}"
 export TEST_RUNNER_EP_BACKUP_FIXTURE="$FIX"
+# Angela's 1.2.2 backup and the 1.3.0 backup first launch produced (PlaceholderRefreshAngelaFixtureTests); the tests skip when absent.
+A122="${GATE_ANGELA_122:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_14-25-03.json}"
+A130="${GATE_ANGELA_130:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_14-29-53.json}"
+[ -f "$A122" ] && export TEST_RUNNER_EP_ANGELA_122="$A122"
+[ -f "$A130" ] && export TEST_RUNNER_EP_ANGELA_130="$A130"
 
 scripts/run_bounded.sh > "$OUT_DIR/full.out" 2>&1
 grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"

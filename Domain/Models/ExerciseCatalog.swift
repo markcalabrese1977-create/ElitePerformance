@@ -349,14 +349,16 @@ struct ExerciseCatalog {
         id: "hanging_straight_leg_raise",
         name: "Hanging Straight Leg Raise",
         primaryMuscle: .core,
-        isCompound: true
+        isCompound: true,
+        isBodyweight: true
     )
     
     static let hangingKneeRaise = CatalogExercise(
         id: "hanging_knee_raise",
         name: "Hanging Knee Raise",
         primaryMuscle: .core,
-        isCompound: true
+        isCompound: true,
+        isBodyweight: true
     )
     static let deadBug = CatalogExercise(
         id: "dead_bug",
@@ -418,7 +420,8 @@ struct ExerciseCatalog {
             id: "toes_to_bar",
             name: "Toes to Bar",
             primaryMuscle: .core,
-            isCompound: true
+            isCompound: true,
+            isBodyweight: true
         )
     // MARK: - Quads / Hinge / Glutes
 
