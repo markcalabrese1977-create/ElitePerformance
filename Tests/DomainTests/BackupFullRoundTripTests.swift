@@ -4598,6 +4598,28 @@ final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
         if let out = ProcessInfo.processInfo.environment["EP_ANGELA_REPORT_OUT"], !out.isEmpty { try text.write(toFile: out, atomically: true, encoding: .utf8) }
     }
 
+    /// Angela's 1.3.0 backup (the actual first-launch result) through the refresh alone: the only change that is not a load write is the removal of the
+    /// "set a load" note from her two Hanging Knee Raise items (Dec 3 and Dec 10), which the bodyweight classification made stale.
+    func test_130_staleNoteIsRemovedFromTheHangingKneeRaiseItems_andNothingElseChangesBesideTheLoadWrites() throws {
+        let ctx = try importStore(try path("EP_ANGELA_130"))
+        let before = try rows(ctx)
+        let changes = PlaceholderRefresh.run(in: ctx)
+        let after = try rows(ctx)
+        let cleared = changes.filter { $0.noteField == .clearNoHistory }
+        XCTAssertEqual(Set(cleared.map { ($0.item.exerciseNameSnapshot ?? "", $0.session.dayLabel ?? "") }.map { "\($0.0)|\($0.1)" }), ["Hanging Knee Raise|Lower C"])
+        XCTAssertEqual(cleared.count, 2, "Dec 3 and Dec 10")
+        let differing = after.filter { before[$0.key] != nil && before[$0.key] != $0.value }
+        let noteOnly = differing.filter { before[$0.key]?.load == $0.value.load && before[$0.key]?.planned == $0.value.planned && before[$0.key]?.coach == $0.value.coach }
+        XCTAssertEqual(noteOnly.count, 2)
+        for (k, new) in noteOnly {
+            XCTAssertEqual(new.name, "Hanging Knee Raise"); XCTAssertEqual(new.prescription, "")
+            XCTAssertTrue(before[k]?.prescription.contains(PlaceholderRefresh.noRecentHistoryNote) == true)
+            XCTAssertEqual(["Dec 3", "Dec 10"].contains(new.date), true, new.summary)
+        }
+        XCTAssertEqual(differing.count - noteOnly.count, 12, "the rest are the hold / cross-day load writes")
+        XCTAssertTrue(PlaceholderRefresh.plan(in: ctx).isEmpty, "a second pass changes nothing")
+    }
+
     func test_122ThroughTheChangedRefresh_isTheActual130_plusExactlyTheHoldAndCrossDayWrites() throws {
         let r = try launch122()
         let actual = try rows(try importStore(try path("EP_ANGELA_130")))
@@ -4811,6 +4833,29 @@ final class PlaceholderRefreshHoldAndCrossDayTests: XCTestCase {
         PlanMemoryEngine(context: ctx).carryForwardPlans(from: sourceSession)
         XCTAssertGreaterThan(target.suggestedLoad, 0, "carry-forward wrote a load")
         XCTAssertNil(target.prescriptionNotes, "the note no longer holds")
+    }
+
+    func test_staleNote_isRemovedOnEveryPass_fromAnyUneditedItemWithALoadOrOneTheRefreshNeverLoads() throws {
+        let (ctx, meso) = try context()
+        let note = PlaceholderRefresh.noRecentHistoryNote
+        func noted(_ id: String, load: Double, edited: Bool = false, extra: String = "") -> SessionItem {
+            let i = item(id, wave: "b", repMin: 8, repMax: 12, rir: 2, suggested: load, edited: edited)
+            i.prescriptionNotes = (extra.isEmpty ? "" : extra + " ") + note
+            return i
+        }
+        let loaded = noted("cable_curl", load: 40)                                    // has a load: stale
+        let bodyweight = noted("hanging_knee_raise", load: 0, extra: "Strict.")       // never loaded: stale, other text stays
+        let zero = noted("cable_curl", load: 0)                                        // loadable and empty: the note is true
+        let edited = noted("cable_curl", load: 40, edited: true)                      // hand-edited: not touched
+        session(ctx, meso, day(11, 25), .planned, week: 2, label: "Lower C", [loaded, bodyweight, zero, edited])
+        // `zero` is a second cable_curl with no history: it keeps the note (and gets nothing to write)
+        let first = PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertNil(loaded.prescriptionNotes)
+        XCTAssertEqual(bodyweight.prescriptionNotes, "Strict.")
+        XCTAssertEqual(edited.prescriptionNotes, note)
+        XCTAssertGreaterThanOrEqual(first.filter { $0.noteField == .clearNoHistory }.count, 2)
+        XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).filter { $0.noteField == .clearNoHistory }.isEmpty, "idempotent")
+        _ = zero
     }
 
     func test_staleNote_onlyTheNoHistoryText_isRemoved_whenALoadIsWritten() throws {

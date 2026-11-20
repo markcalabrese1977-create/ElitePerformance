@@ -46,7 +46,8 @@ import SwiftData
 ///    previous session or source with a pain flag is left alone: pain holds.
 ///
 /// A target at 0 load with no qualifying source gets the note "No recent history — set a load." (once) and stays at 0. The
-/// note is cleared as soon as a load is written to the item, by this rule or by carry-forward (`clearStaleNoHistoryNote`).
+/// note is cleared as soon as a load is written to the item, by this rule or by carry-forward (`clearStaleNoHistoryNote`), and on every refresh
+/// pass from any unedited planned item that has a load or is not one the refresh loads (bodyweight, fixed-load, deload).
 ///
 /// A performed set counts, a failed attempt (load > 0, no reps, no "SKIP") included; a performed WORKING set for rule 3
 /// has reps (a failed attempt shows nothing doable).
@@ -82,6 +83,8 @@ enum PlaceholderRefresh {
         case heldHighRep(from: Date, source: String, math: String)
         /// The same exercise on another day of the block, estimated or held; `math` shows the arithmetic.
         case crossDay(from: Date, day: String, math: String)
+        /// The note "No recent history — set a load." no longer holds: the item has a load, or is one the refresh never loads.
+        case staleNoteCleared(why: String)
         /// A target at 0 with nothing to estimate from.
         case noRecentHistory(why: String)
         /// A target still at its block-setup value with nothing to estimate from.
@@ -94,6 +97,8 @@ enum PlaceholderRefresh {
                 return "held load of the \(day(d)) session (\(performed) of \(planned) planned sets performed)"
             case .earlierSameLetter(let d, let weeks):
                 return "held load of the last \(day(d)) session of this letter (within two \(weeks)-week rotations)"
+            case .staleNoteCleared(let why):
+                return "\"set a load\" note removed: \(why)"
             case .placeholder(let why):
                 return "no source to estimate from; \(why); keeps its block-setup load with a note"
             case .noRecentHistory(let why):
@@ -120,7 +125,7 @@ enum PlaceholderRefresh {
         var noteField: NoteField = .coach
     }
 
-    enum NoteField { case coach, prescription }
+    enum NoteField { case coach, prescription, clearNoHistory }
 
     typealias Decision = (load: Double, reason: Reason, note: String?)
 
@@ -155,6 +160,18 @@ enum PlaceholderRefresh {
         for target in all where target.status == .planned && target.date >= today {
             guard let meso = target.meso, meso.status == .active, !meso.isMaintenance else { continue }
             for item in target.items {
+                // The note says the item has no load. When it has one, or is an item the refresh never loads (bodyweight, fixed-load, a
+                // deload week), the note is stale: removed here, on every pass, whatever wrote the load. A hand-edited item is not touched.
+                if !item.planEdited, item.prescriptionNotes?.contains(noRecentHistoryNote) == true {
+                    let loaded = currentLoad(item) > 0
+                    let loadable = eligible(item, ctx: ctx)
+                    if loaded || !loadable {
+                        changes.append(Change(session: target, item: item, oldLoad: currentLoad(item), newLoad: currentLoad(item),
+                                              reason: .staleNoteCleared(why: loaded ? "the item has a load" : "the item is not one the refresh loads"),
+                                              note: nil, noteOnly: true, noteField: .clearNoHistory))
+                        if !loadable { continue }                   // a loadable item with a load still gets the rules below
+                    }
+                }
                 guard eligible(item, ctx: ctx) else { continue }
                 let letter = letterKey(item)
                 let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
@@ -233,6 +250,8 @@ enum PlaceholderRefresh {
                     c.item.prescriptionNotes = existing.isEmpty ? noRecentHistoryNote : existing + " " + noRecentHistoryNote
                 case .coach:
                     c.item.coachNote = c.note
+                case .clearNoHistory:
+                    removeNoHistoryText(c.item)
                 }
                 continue
             }
@@ -463,8 +482,14 @@ enum PlaceholderRefresh {
     /// The "No recent history — set a load." note is only true while the item has no load. Called wherever a load is written to
     /// an item (the refresh itself, and carry-forward on session completion): drops the note, leaving any other prescription note.
     static func clearStaleNoHistoryNote(_ item: SessionItem) {
-        guard let notes = item.prescriptionNotes, notes.contains(noRecentHistoryNote) else { return }
+        guard item.prescriptionNotes?.contains(noRecentHistoryNote) == true else { return }
         guard item.suggestedLoad > 0 || item.plannedLoadsBySet.contains(where: { $0 > 0 }) else { return }
+        removeNoHistoryText(item)
+    }
+
+    /// Removes the exact note text from `prescriptionNotes`, leaving any other prescription note.
+    static func removeNoHistoryText(_ item: SessionItem) {
+        guard let notes = item.prescriptionNotes, notes.contains(noRecentHistoryNote) else { return }
         let rest = notes.replacingOccurrences(of: noRecentHistoryNote, with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         item.prescriptionNotes = rest.isEmpty ? nil : rest
