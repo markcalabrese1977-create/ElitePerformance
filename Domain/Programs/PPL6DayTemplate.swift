@@ -310,7 +310,7 @@ enum PPL6DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [4, 4, 4, 4, 5, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_legs_a_crunch",
@@ -368,16 +368,16 @@ enum PPL6DayTemplate {
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_fly",
                 order: 3,
-                exerciseId: ExerciseCatalog.dumbbellFly.id,
+                exerciseId: ExerciseCatalog.dumbbellLateralRaise.id,
                 priority: .standard,
-                notes: "Chest isolation, free-weight variation for stretch overload.",
+                notes: nil,
                 prescriptions: [
                     .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl6_push_b_lateral",

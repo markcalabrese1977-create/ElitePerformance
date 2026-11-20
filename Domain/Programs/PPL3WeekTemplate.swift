@@ -94,7 +94,7 @@ enum PPL3WeekTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [4, 4, 4, 4, 5, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl_push_pushdown",
@@ -105,6 +105,20 @@ enum PPL3WeekTemplate {
                 prescriptions: [
                     .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+            ),
+            ProgramExerciseTemplate(
+                id: "ppl_push_calves_add",
+                order: 6,
+                exerciseId: ExerciseCatalog.seatedCalfRaise.id,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    .init(wave: .a, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 3, setMax: 4, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
@@ -175,7 +189,7 @@ enum PPL3WeekTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl_pull_curl",
@@ -202,6 +216,20 @@ enum PPL3WeekTemplate {
                     .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
+                ],
+                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+            ),
+            ProgramExerciseTemplate(
+                id: "ppl_pull_lateral_add",
+                order: 7,
+                exerciseId: ExerciseCatalog.singleArmCableLateralRaise.id,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
                 ],
                 setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
             )
@@ -298,7 +326,7 @@ enum PPL3WeekTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [4, 4, 4, 4, 5, 5, 4, 5, 5, 2]
             ),
             ProgramExerciseTemplate(
                 id: "ppl_legs_crunch",
@@ -312,7 +340,7 @@ enum PPL3WeekTemplate {
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
                 ],
-                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 4, 4, 0]
             )
         ]
     )

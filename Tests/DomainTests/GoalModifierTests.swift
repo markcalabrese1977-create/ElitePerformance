@@ -101,7 +101,7 @@ final class GoalModifierTests: XCTestCase {
         let (out, notes) = GoalModifier.apply(ppl, goal: .fatLoss)
         XCTAssertEqual(slot(out, "ppl_push_bench").setsByWeek, [3, 4, 4, 4, 4, 4, 4, 4, 4, 2])
         XCTAssertEqual(slot(out, "ppl_push_pushdown").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2])
-        XCTAssertEqual(slot(out, "ppl_push_lateral").setsByWeek, [3, 3, 3, 3, 3, 3, 3, 3, 3, 2], "isolation")
+        XCTAssertEqual(slot(out, "ppl_push_lateral").setsByWeek, [4, 4, 4, 4, 4, 4, 4, 4, 4, 2], "isolation: held at its week-1 count of 4 (the template now starts the lateral raise at 4 sets)")
         XCTAssertEqual(slot(out, "ppl_push_incline_db").setsByWeek, slot(ppl, "ppl_push_incline_db").setsByWeek, "a compound that never exceeds week 1 + 1 is unchanged")
         // 10-week DUP: pushdown 3,3,3,3,3,3,3,4,3,2 -> 3,3,3,3,3,3,3,3,3,2 (week 8's 4 is held at 3)
         let dup = DUP10WeekTemplate.template

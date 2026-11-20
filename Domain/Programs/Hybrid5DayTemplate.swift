@@ -201,7 +201,7 @@ enum Hybrid5DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [4, 4, 4, 4, 5, 5, 4, 5, 5, 2]
             )
         ]
     )
@@ -502,7 +502,7 @@ enum Hybrid5DayTemplate {
                     .init(wave: .c, setMin: 2, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
                 ],
-                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 0]
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 4, 4, 0]
             )
         ]
     )

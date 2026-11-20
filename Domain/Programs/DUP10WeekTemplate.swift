@@ -418,6 +418,20 @@ enum DUP10WeekTemplate {
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
                 ],
                 setsByWeek: [2, 2, 0, 2, 2, 0, 2, 2, 0, 0]
+            ),
+            ProgramExerciseTemplate(
+                id: "d4_lateral_add",
+                order: 7,
+                exerciseId: ExerciseCatalog.dumbbellLateralRaise.id,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
+                ],
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 4, 3, 2]
             )
         ]
     )
@@ -499,6 +513,20 @@ enum DUP10WeekTemplate {
                     .init(wave: .deload, setMin: 0, setMax: 0, repMin: 0, repMax: 0, targetRIRMin: 0, targetRIRMax: 0, intensifier: .customNoteOnly, intensifierNotes: "Skip during deload.")
                 ],
                 setsByWeek: [2, 2, 0, 2, 2, 0, 2, 2, 0, 0]
+            ),
+            ProgramExerciseTemplate(
+                id: "d5_calf_add",
+                order: 6,
+                exerciseId: ExerciseCatalog.seatedCalfRaise.id,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    .init(wave: .a, setMin: 3, setMax: 4, repMin: 8, repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .b, setMin: 3, setMax: 4, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4)
+                ],
+                setsByWeek: [4, 4, 4, 5, 5, 5, 4, 5, 5, 2]
             )
         ]
     )
@@ -593,7 +621,7 @@ enum DUP10WeekTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 1, targetRIRMax: 1),
                     .init(wave: .deload, setMin: 0, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 4, intensifier: .customNoteOnly, intensifierNotes: "Optional during deload.")
                 ],
-                setsByWeek: [2, 3, 3, 2, 3, 3, 2, 3, 3, 0]
+                setsByWeek: [4, 4, 4, 4, 4, 4, 4, 4, 4, 0]
             )
         ]
     )
