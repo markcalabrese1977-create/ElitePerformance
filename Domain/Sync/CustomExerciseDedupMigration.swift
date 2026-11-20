@@ -7,10 +7,11 @@ enum CustomExerciseDedupMigration {
     static func runIfNeeded(in context: ModelContext) {
         // Rows that share an id are collapsed on EVERY launch, flag or no flag: CustomExerciseStoreMigration (re-run after a restore
         // that left its flag unset) inserts a second row for each legacy entry, and nothing may trap on that afterwards.
-        collapseDuplicateRows(in: context)
+        let collapsed = collapseDuplicateRows(in: context)
 
         if UserDefaults.standard.bool(forKey: completionKey) {
-            BackfillLog.note("ℹ️ Custom exercise dedup migration not needed.")
+            // A collapse already logged what it did; "not needed" would replace it in the one launch line.
+            if collapsed == 0 { BackfillLog.note("ℹ️ Custom exercise dedup migration not needed.") }
             return
         }
 
@@ -96,19 +97,42 @@ enum CustomExerciseDedupMigration {
         return best.values.sorted { isCanonical($0, over: $1) }
     }
 
+    /// The content fields of a custom exercise that can differ between two rows of one id, as "field: kept vs other".
+    private static func differences(_ keep: CustomExercise, _ other: CustomExercise) -> [String] {
+        var d: [String] = []
+        if keep.name != other.name { d.append("name '\(keep.name)' vs '\(other.name)'") }
+        if keep.primaryMuscleRaw != other.primaryMuscleRaw { d.append("primaryMuscle \(keep.primaryMuscleRaw) vs \(other.primaryMuscleRaw)") }
+        if keep.fineMuscleRaw != other.fineMuscleRaw || (keep.fineSecondaryShares ?? [:]) != (other.fineSecondaryShares ?? [:]) {
+            d.append("fineShares \(keep.fineMuscleRaw ?? "nil")\(keep.fineSecondaryShares ?? [:]) vs \(other.fineMuscleRaw ?? "nil")\(other.fineSecondaryShares ?? [:])")
+        }
+        if keep.isCompound != other.isCompound { d.append("isCompound \(keep.isCompound.map(String.init) ?? "nil") vs \(other.isCompound.map(String.init) ?? "nil")") }
+        if keep.isBodyweight != other.isBodyweight { d.append("isBodyweight \(keep.isBodyweight) vs \(other.isBodyweight)") }
+        return d
+    }
+
     /// Deletes every non-canonical row of an id that has more than one and returns how many were deleted. A session item names its
     /// exercise by id, and every duplicate carries that same id, so every item keeps pointing at the surviving row. Idempotent.
+    /// Logs one line per id it actually collapses (id, count, and the fields in which the deleted rows differed from the kept one).
     @discardableResult
     static func collapseDuplicateRows(in context: ModelContext) -> Int {
         guard let rows = try? context.fetch(FetchDescriptor<CustomExercise>()) else { return 0 }
-        let keep = Set(canonicalRows(rows).map(\.persistentModelID))
+        let canonical = canonicalRows(rows)
+        let keep = Set(canonical.map(\.persistentModelID))
         let extras = rows.filter { !keep.contains($0.persistentModelID) }
         guard !extras.isEmpty else { return 0 }
+        var lines: [String] = []
+        for (id, group) in Dictionary(grouping: extras, by: \.id).sorted(by: { $0.key < $1.key }) {
+            guard let kept = canonical.first(where: { $0.id == id }) else { continue }
+            var diffs: [String] = []
+            for other in group { for x in differences(kept, other) where !diffs.contains(x) { diffs.append(x) } }
+            lines.append("✅ Custom exercise dedup: \(id): deleted \(group.count) duplicate row(s), kept the oldest (created \(kept.createdAt.formatted(.iso8601.year().month().day())))"
+                         + (diffs.isEmpty ? "; the rows were identical" : "; DIFFERED: " + diffs.joined(separator: ", ")))
+        }
         for r in extras { context.delete(r) }
         do {
             try context.save()
             ExerciseCatalog.rebuildCustomMirror(from: context)
-            BackfillLog.note("✅ Custom exercise dedup: collapsed \(extras.count) duplicate custom exercise row(s) to one per id.")
+            for l in lines { BackfillLog.note(l) }
             return extras.count
         } catch {
             context.rollback()

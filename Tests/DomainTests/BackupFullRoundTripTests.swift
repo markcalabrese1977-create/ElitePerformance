@@ -4920,6 +4920,87 @@ final class CustomExerciseDuplicateRowsTests: XCTestCase {
         }
     }
 
+    // MARK: the migration is idempotent; the collapse says what it did
+
+    private func memoryContext() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(),
+                                   configurations: ModelConfiguration("dup-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        return ModelContext(c)
+    }
+
+    func test_storeMigration_insertsOnlyIdsNotInTheStore_andRunningItAgainInsertsNothing() throws {
+        try withCleanDefaults { clearFlags in
+            let ctx = try memoryContext()
+            ctx.insert(CustomExercise(id: "custom_a", name: "A", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 1)))
+            ctx.insert(CustomExercise(id: "custom_b", name: "B", primaryMuscleRaw: "core", isCompound: false, createdAt: day(1, 2)))
+            try ctx.save()
+            func legacyList() throws -> Data {
+                try JSONEncoder().encode([CatalogExercise(id: "custom_a", name: "A", primaryMuscle: .back, isCompound: true),
+                                          CatalogExercise(id: "custom_b", name: "B", primaryMuscle: .core, isCompound: false),
+                                          CatalogExercise(id: "custom_c", name: "C (only in the legacy list)", primaryMuscle: .chest, isCompound: true),
+                                          CatalogExercise(id: "custom_c", name: "C again", primaryMuscle: .chest, isCompound: true)])
+            }
+            func ids() throws -> [String] { try ctx.fetch(FetchDescriptor<CustomExercise>()).map(\.id).sorted() }
+            UserDefaults.standard.set(try legacyList(), forKey: "custom_exercises_v2")
+            CustomExerciseStoreMigration.runIfNeeded(in: ctx)
+            XCTAssertEqual(try ids(), ["custom_a", "custom_b", "custom_c"], "only the id the store lacked was inserted, once")
+            // Again, any number of times, with the flag and the list put back: the same rows.
+            for _ in 0..<3 {
+                clearFlags()
+                UserDefaults.standard.set(try legacyList(), forKey: "custom_exercises_v2")
+                BackfillLog.collector = []
+                CustomExerciseStoreMigration.runIfNeeded(in: ctx)
+                let notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+                XCTAssertTrue(notes.joined().contains("migrated 0 custom exercises"), notes.joined())
+                XCTAssertEqual(try ids(), ["custom_a", "custom_b", "custom_c"])
+            }
+            XCTAssertEqual(CustomExerciseDedupMigration.collapseDuplicateRows(in: ctx), 0, "nothing for the safety net to delete")
+        }
+    }
+
+    func test_collapse_logsOneLinePerCollapsedId_withTheFieldsTheRowsDifferedIn_andKeepsTheOldest() throws {
+        let ctx = try memoryContext()
+        let oldest = CustomExercise(id: "custom_x", name: "Archer Pull", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 1))
+        let newer = CustomExercise(id: "custom_x", name: "Archer Pulls", primaryMuscleRaw: "biceps", isCompound: false, createdAt: day(2, 1), isBodyweight: true)
+        newer.fineMuscleRaw = "lats"
+        let same1 = CustomExercise(id: "custom_y", name: "Copenhagen", primaryMuscleRaw: "core", isCompound: false, createdAt: day(1, 1))
+        let same2 = CustomExercise(id: "custom_y", name: "Copenhagen", primaryMuscleRaw: "core", isCompound: false, createdAt: day(1, 3))
+        for r in [newer, oldest, same2, same1] { ctx.insert(r) }
+        try ctx.save()
+
+        BackfillLog.collector = []
+        let deleted = CustomExerciseDedupMigration.collapseDuplicateRows(in: ctx)
+        let notes = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(deleted, 2)
+        XCTAssertEqual(notes.count, 2, "one line per id: \(notes)")
+        let x = try XCTUnwrap(notes.first { $0.contains("custom_x") }), y = try XCTUnwrap(notes.first { $0.contains("custom_y") })
+        XCTAssertTrue(x.contains("deleted 1 duplicate row(s)"), x)
+        for field in ["name 'Archer Pull' vs 'Archer Pulls'", "primaryMuscle back vs biceps", "fineShares", "isCompound true vs false", "isBodyweight false vs true"] {
+            XCTAssertTrue(x.contains(field), "\(field) in \(x)")
+        }
+        XCTAssertTrue(y.contains("identical"), y)
+        let rows = try ctx.fetch(FetchDescriptor<CustomExercise>())
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.first { $0.id == "custom_x" }?.name, "Archer Pull", "the oldest is kept")
+        XCTAssertEqual(rows.first { $0.id == "custom_y" }?.createdAt, day(1, 1))
+    }
+
+    func test_dedupLaunchLine_showsTheCollapse_notJustNotNeeded() throws {
+        try withCleanDefaults { _ in
+            let ctx = try memoryContext()
+            UserDefaults.standard.set(true, forKey: "customExerciseDedupMigration.v1.completed")    // the one-shot is done
+            ctx.insert(CustomExercise(id: "custom_x", name: "X", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 1)))
+            ctx.insert(CustomExercise(id: "custom_x", name: "X", primaryMuscleRaw: "back", isCompound: true, createdAt: day(1, 2)))
+            try ctx.save()
+            BackfillLog.collector = []
+            CustomExerciseDedupMigration.runIfNeeded(in: ctx)
+            let line = BackfillLog.result(from: BackfillLog.collector ?? []); BackfillLog.collector = nil
+            XCTAssertTrue(line.contains("custom_x: deleted 1 duplicate row(s)"), line)
+            XCTAssertFalse(line.contains("not needed"))
+        }
+    }
+
     func test_theCanonicalRow_isTheOldestCreatedAt_thenAStableTieBreak_whateverTheOrder() throws {
         let c = try ModelContainer(for: AppSchema.makeSchema(),
                                    configurations: ModelConfiguration("dup-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -4936,5 +5017,93 @@ final class CustomExerciseDuplicateRowsTests: XCTestCase {
         XCTAssertEqual(first.map(\.persistentModelID), reversed.map(\.persistentModelID), "the choice does not depend on the order")
         XCTAssertEqual(first.count, 2)
         XCTAssertEqual(first.first { $0.id == "x" }?.createdAt, day(1, 1))
+    }
+}
+
+// MARK: - Restore paths leave the custom exercise rows alone (fixture backups)
+
+/// The two restore paths that used to double the custom exercise rows, on real backups (skipped without them: TEST_RUNNER_EP_BACKUP_FIXTURE
+/// and TEST_RUNNER_EP_ANGELA_122). c2: a gate restore into an empty store runs the backfills straight away with every flag unset and the legacy
+/// list rebuilt by the import. c4: the store and the list are there, the flags are not. The migration must insert 0 rows and the collapse delete 0.
+final class RestorePathCustomRowsFixtureTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    private func paths() throws -> [(String, String)] {
+        let env = ProcessInfo.processInfo.environment
+        let found = [("EP_BACKUP_FIXTURE", "the gate fixture"), ("EP_ANGELA_122", "Angela 1.2.2")].compactMap { k, label in
+            env[k].flatMap { FileManager.default.fileExists(atPath: $0) ? ($0, label) : nil }
+        }
+        if found.isEmpty { throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE / TEST_RUNNER_EP_ANGELA_122") }
+        return found
+    }
+
+    private func isolated(_ body: () throws -> Void) rethrows {
+        let d = UserDefaults.standard
+        func keys() -> [String] { d.dictionaryRepresentation().keys.filter { $0.hasSuffix(".completed") || $0 == "custom_exercises_v2" || $0 == "prIndexRuleVersion" } }
+        var saved: [String: Any] = [:]
+        for k in keys() { if let v = d.object(forKey: k) { saved[k] = v } }
+        defer { for k in keys() { d.removeObject(forKey: k) }; for (k, v) in saved { d.set(v, forKey: k) } }
+        for k in keys() { d.removeObject(forKey: k) }
+        try body()
+    }
+
+    private func container() throws -> ModelContainer {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration("rp-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c); return c
+    }
+
+    private func rows(_ c: ModelContainer) throws -> [String: Int] {
+        Dictionary(grouping: try ModelContext(c).fetch(FetchDescriptor<CustomExercise>()), by: \.id).mapValues(\.count)
+    }
+
+    /// A launch; returns the lines the custom-exercise backfills logged.
+    private func launch(_ c: ModelContainer) -> [String] {
+        var lines: [String] = []
+        BackfillLog.lineSink = { if $0.contains("CustomExercise") || $0.contains("Custom exercise") { lines.append($0) } }
+        StartupBackfills.run(using: c)
+        BackfillLog.lineSink = nil
+        return lines
+    }
+
+    private func assertSteady(_ c: ModelContainer, expected: Int, _ lines: [String], _ what: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let r = try rows(c)
+        XCTAssertEqual(r.count, expected, "\(what): rows", file: file, line: line)
+        XCTAssertEqual(r.values.max() ?? 1, 1, "\(what): every id once", file: file, line: line)
+        XCTAssertFalse(lines.contains { $0.contains("deleted") }, "\(what): the collapse deleted nothing: \(lines)", file: file, line: line)
+        XCTAssertFalse(lines.contains { $0.contains("migrated") && !$0.contains("migrated 0 custom exercises") }, "\(what): the migration inserted nothing: \(lines)", file: file, line: line)
+    }
+
+    func test_c2_gateRestoreRunsTheBackfillsWithFlagsUnset_andTheCountsStay() throws {
+        for (path, label) in try paths() {
+            try isolated {
+                let c = try container()
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("rp-snap-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                _ = try BackupRestoreCoordinator.restore(from: URL(fileURLWithPath: path), container: c, snapshotDirectory: dir,
+                                                         sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "rp.fixture")!))
+                let expected = try rows(c).count
+                XCTAssertGreaterThan(expected, 0, label)
+                try assertSteady(c, expected: expected, launch(c), "\(label): backfills straight after the restore")
+                try assertSteady(c, expected: expected, launch(c), "\(label): next launch")
+                for k in UserDefaults.standard.dictionaryRepresentation().keys where k.hasSuffix(".completed") { UserDefaults.standard.removeObject(forKey: k) }
+                try assertSteady(c, expected: expected, launch(c), "\(label): flags lost again")
+            }
+        }
+    }
+
+    func test_c4_storeAndListPresent_flagsLost_andTheCountsStay() throws {
+        for (path, label) in try paths() {
+            try isolated {
+                let c = try container()
+                _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
+                let expected = try rows(c).count
+                XCTAssertGreaterThan(expected, 0, label)
+                try assertSteady(c, expected: expected, launch(c), "\(label): first launch")
+                try assertSteady(c, expected: expected, launch(c), "\(label): relaunch")
+                for k in UserDefaults.standard.dictionaryRepresentation().keys where k.hasSuffix(".completed") { UserDefaults.standard.removeObject(forKey: k) }
+                try assertSteady(c, expected: expected, launch(c), "\(label): flags lost again")
+            }
+        }
     }
 }

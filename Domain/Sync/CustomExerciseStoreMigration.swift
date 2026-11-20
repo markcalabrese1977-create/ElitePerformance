@@ -16,24 +16,27 @@ enum CustomExerciseStoreMigration {
             return
         }
 
-        for ex in decoded {
-            let custom = CustomExercise(
+        // Only ids the store does not hold yet (the legacy list is a mirror the app rebuilds from the store on every restore, so over
+        // existing rows it would add a second row per id), and each id of the list once: running this on any state, any number of
+        // times, leaves the same rows.
+        let existing = Set(((try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []).map(\.id))
+        var seen = existing
+        var inserted = 0
+        for ex in decoded where seen.insert(ex.id).inserted {
+            context.insert(CustomExercise(
                 id: ex.id,
                 name: ex.name,
                 primaryMuscleRaw: ex.primaryMuscle.rawValue,
                 isCompound: ex.isCompound
-            )
-            context.insert(custom)
+            ))
+            inserted += 1
         }
 
         do {
-            try context.save()
+            if inserted > 0 { try context.save() }
             UserDefaults.standard.removeObject(forKey: key)
             UserDefaults.standard.set(true, forKey: completionKey)
-            BackfillLog.note("✅ CustomExerciseStoreMigration: migrated \(decoded.count) custom exercises to SwiftData.")
-            // This runs from the legacy list without looking at the rows already in the store, so over existing rows (a restore that left
-            // this flag unset) it adds a second row per id. Keep one per id (oldest createdAt) before anything reads the table.
-            CustomExerciseDedupMigration.collapseDuplicateRows(in: context)
+            BackfillLog.note("✅ CustomExerciseStoreMigration: migrated \(inserted) custom exercises to SwiftData (\(decoded.count - inserted) of \(decoded.count) legacy entries were already in the store).")
         } catch {
             BackfillLog.note("⚠️ CustomExerciseStoreMigration failed: \(error)")
         }
