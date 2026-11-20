@@ -87,7 +87,7 @@ struct AnalyticsEngine {
 
     // MARK: - Meso
 
-    /// End-of-meso analysis. Meso-over-meso comparisons leave maintenance blocks out of the prior peaks.
+    /// End-of-meso analysis. The PR / New badges are `PersonalRecords.events` (maintenance blocks are history like any other).
     static func mesoAnalysis(meso: MesoBlock, allPriorSessions: [Session], bodyWeight: Double? = nil) -> MesoAnalysis? {
         MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: allPriorSessions, bodyWeight: bodyWeight)
     }

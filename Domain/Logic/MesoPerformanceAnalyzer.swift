@@ -69,10 +69,10 @@ struct ExercisePerformanceSummary {
     let openingReps: Double?
     let closingReps: Double?
 
-    /// Whether this exercise set a new e1RM record (vs all prior mesos).
+    /// At least one record event of `PersonalRecords.events` falls in this block for this lift (a strict improvement on every session dated before it).
         let isPR: Bool
 
-        /// The lift's first-ever working exposure is in this meso: a baseline, not a record.
+        /// The lift's baseline event (first-ever trained session) is in this block and no record follows it within the block.
         let isNew: Bool
 
         /// Total completed sets for this exercise across the meso.
@@ -237,34 +237,13 @@ enum MesoPerformanceAnalyzer {
             }
         }
 
-        // Build prior e1RM peaks for PR detection
-        // Maintenance blocks are held at deliberately reduced work: they never set or raise a prior peak.
-        var priorPeakE1RM: [String: Double] = [:]
-        // Lifts trained before this meso at ANY rep count, maintenance blocks included: they are not "New" (a first record
-        // that falls in this meso is then a PR, not a baseline).
-        var trainedBefore = Set<String>()
-        for session in allPriorSessions {
-            for item in session.items {
-                let setCount = min(item.actualLoads.count, item.actualReps.count)
-                for idx in 0..<setCount where item.actualReps[idx] > 0 && effective(item.actualLoads[idx], item) > 0 {
-                    trainedBefore.insert(ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)); break
-                }
-            }
-        }
-        for session in allPriorSessions where session.meso?.isMaintenance != true {
-            for item in session.items {
-                let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-                let setCount = min(item.actualLoads.count, item.actualReps.count)
-                for idx in 0..<setCount {
-                    let load = effective(item.actualLoads[idx], item)
-                    let reps = item.actualReps[idx]
-                    guard load > 0, reps > 0 else { continue }
-                    let e1rm = BestSetRule.e1RM(load: load, reps: reps)      // sets of 12 reps or fewer only
-                    guard e1rm > 0 else { continue }
-                    priorPeakE1RM[canonical] = max(priorPeakE1RM[canonical] ?? 0, e1rm)
-                }
-            }
-        }
+        // PR / New badges come from the one PR evaluator, `PersonalRecords.events` (the same events the Record-setting sessions count and
+        // the CSV read), computed over every session we were given plus this block's. An event only compares a session with the sessions
+        // DATED BEFORE it, so later blocks never count as prior; maintenance blocks are history like any other.
+        let eventSnapshot = SetRecordBuilder.build(sessions: allPriorSessions + meso.sessions, bodyWeight: bodyWeight)
+        let events = PersonalRecords.events(from: eventSnapshot.sets)
+        let mesoKeys = Set(meso.sessions.map { $0.id?.uuidString ?? "\($0.persistentModelID)" })
+        let mesoEvents = events.filter { mesoKeys.contains($0.sessionKey) }
 
         var exerciseSummaries: [ExercisePerformanceSummary] = []
 
@@ -364,17 +343,11 @@ enum MesoPerformanceAnalyzer {
             }()
 
 
-            // PR detection
-            // A record needs an earlier exposure to beat: a lift with none sets a baseline ("New"), not a PR.
-            // "New" = no completed working set (any rep count) before this meso. A lift trained before whose first qualifying
-            // (12 reps or fewer) record falls in this meso is a PR, not New.
-            let wasTrained = trainedBefore.contains(exerciseId)
-            let isNew: Bool = peakE1RM != nil && !wasTrained
-            let isPR: Bool = {
-                guard let peak = peakE1RM, wasTrained else { return false }
-                let prior = priorPeakE1RM[exerciseId] ?? 0
-                return peak > prior
-            }()
+            // PR detection: the events of this block for this lift. PR = at least one record event in the block. New = the lift's
+            // baseline (first-ever trained session) is in this block and no record follows it here. Otherwise no badge.
+            let liftEvents = mesoEvents.filter { $0.exerciseId == exerciseId }
+            let isPR: Bool = liftEvents.contains { !$0.isBaseline }
+            let isNew: Bool = !isPR && liftEvents.contains { $0.isBaseline }
 
             // Display name and muscle
             let catalog = ExerciseCatalog.all.first { $0.id == exerciseId }
@@ -427,10 +400,7 @@ enum MesoPerformanceAnalyzer {
         }
 
         // Record-setting sessions: the PR events over everything up to the end of this meso, counted for this meso's sessions.
-        let eventSnapshot = SetRecordBuilder.build(sessions: allPriorSessions + meso.sessions, bodyWeight: bodyWeight)
-        let mesoKeys = Set(meso.sessions.map { $0.id?.uuidString ?? "\($0.persistentModelID)" })
-        let recordSessions = Set(PersonalRecords.events(from: eventSnapshot.sets)
-            .filter { !$0.isBaseline && mesoKeys.contains($0.sessionKey) }.map(\.sessionKey)).count
+        let recordSessions = Set(mesoEvents.filter { !$0.isBaseline }.map(\.sessionKey)).count
 
         return MesoAnalysis(
             mesoName: meso.name,

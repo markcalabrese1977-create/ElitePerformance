@@ -502,7 +502,8 @@ final class AnalyticsFoundationTests: XCTestCase {
         XCTAssertNil(MesoPerformanceAnalyzer.representativeLoad(of: item(reps: [0], loads: [0])))
     }
 
-    func test_analyzer_maintenancePeaksNeverSetAPriorRecord() throws {
+    /// Maintenance blocks are history like any other: a heavy maintenance set dated before the block is a prior record to beat.
+    func test_analyzer_maintenanceHistoryCounts_likeAnyOther() throws {
         let ctx = try makeContext()
         let current = meso(ctx, weeks: 8, name: "Cur")
         let maint = meso(ctx, weeks: 2, maintenance: true, name: "Mt")
@@ -514,13 +515,15 @@ final class AnalyticsFoundationTests: XCTestCase {
         let modestPrior = session(ctx, meso: regularPrior, day: 10, items: [item(reps: [8], loads: [190])])
 
         let withMaint = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: current, allPriorSessions: [heavyMaintenance, modestPrior]))
-        XCTAssertTrue(try XCTUnwrap(withMaint.exerciseSummaries.first).isPR, "maintenance 300x10 must not block a real record")
+        let row = try XCTUnwrap(withMaint.exerciseSummaries.first)
+        XCTAssertFalse(row.isPR, "maintenance 300x10 is history: 200 and 210 do not beat it")
+        XCTAssertFalse(row.isNew)
         let onlyRegular = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: current, allPriorSessions: [modestPrior]))
         XCTAssertTrue(try XCTUnwrap(onlyRegular.exerciseSummaries.first).isPR)
 
         let heavyRegular = session(ctx, meso: regularPrior, day: 20, items: [item(reps: [10], loads: [300])])
         let beaten = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: current, allPriorSessions: [heavyRegular]))
-        XCTAssertFalse(try XCTUnwrap(beaten.exerciseSummaries.first).isPR, "a REGULAR prior still counts")
+        XCTAssertFalse(try XCTUnwrap(beaten.exerciseSummaries.first).isPR, "a REGULAR prior counts the same way")
     }
 
     // MARK: - AnalyticsEngine (what the screens read)

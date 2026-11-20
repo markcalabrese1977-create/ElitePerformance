@@ -13,6 +13,9 @@ A122="${GATE_ANGELA_122:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_1
 A130="${GATE_ANGELA_130:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_14-29-53.json}"
 [ -f "$A122" ] && export TEST_RUNNER_EP_ANGELA_122="$A122"
 [ -f "$A130" ] && export TEST_RUNNER_EP_ANGELA_130="$A130"
+# Mark's live backup (MesoComparisonTests: the Meso Summary badge agrees with the PR events on every row); the test skips when absent.
+LIVE="${GATE_LIVE_BACKUP:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_17-18-55.json}"
+[ -f "$LIVE" ] && export TEST_RUNNER_EP_LIVE_BACKUP="$LIVE"
 
 scripts/run_bounded.sh > "$OUT_DIR/full.out" 2>&1
 grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"

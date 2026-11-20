@@ -774,14 +774,55 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertTrue(e.isPR, "its first set of 12 reps or fewer is a record")
     }
 
-    func test_badge_aLiftNeverTrainedBefore_isNew_notPR() throws {
-        let a = try mesoAnalysisWith(prior: [], current: [(0, [10, 10], [120, 120]), (7, [10], [125])])
+    func test_badge_aLiftNeverTrainedBefore_isNew_whenNoRecordFollowsItInTheBlock() throws {
+        let a = try mesoAnalysisWith(prior: [], current: [(0, [10, 10], [120, 120]), (7, [10], [115])])
         let e = try XCTUnwrap(a.exerciseSummaries.first)
         XCTAssertTrue(e.isNew)
         XCTAssertFalse(e.isPR)
         // a lift whose only sets this meso are long: no e1RM, no badge at all
         let long = try mesoAnalysisWith(prior: [], current: [(0, [20, 20], [100, 100])])
         XCTAssertFalse(try XCTUnwrap(long.exerciseSummaries.first).isNew)
+    }
+
+    // MARK: The badge is `PersonalRecords.events`: one test per disagreement group found on the live backup
+
+    /// Group "New, then a later set in the same block beat the baseline": PR, not New.
+    func test_badge_newThenImprovedInTheSameBlock_isPR_notNew() throws {
+        let a = try mesoAnalysisWith(prior: [], current: [(0, [10], [120]), (7, [10], [125])])
+        let e = try XCTUnwrap(a.exerciseSummaries.first)
+        XCTAssertTrue(e.isPR, "the baseline is in this block and a record follows it here")
+        XCTAssertFalse(e.isNew)
+    }
+
+    /// Group "first exposure": the baseline is in the block, nothing beats it there: New, no PR.
+    func test_badge_firstExposureInTheBlock_isNew() throws {
+        let a = try mesoAnalysisWith(prior: [], current: [(0, [10], [120])])
+        let e = try XCTUnwrap(a.exerciseSummaries.first)
+        XCTAssertTrue(e.isNew); XCTAssertFalse(e.isPR)
+        // a block dated AFTER this one with a heavier set does not change what this block was: still the first exposure, still New
+        let later = try XCTUnwrap(try mesoAnalysisWith(prior: [[(200, [10], [300])]], current: [(0, [10], [120])]).exerciseSummaries.first)
+        XCTAssertTrue(later.isNew, "this block's session is dated before the other block's, so it holds the baseline")
+        XCTAssertFalse(later.isPR)
+    }
+
+    /// Group "later sessions counted as prior": only sessions dated BEFORE a set count. A heavier set in a later block never takes the PR away.
+    func test_badge_sessionsAfterTheBlock_neverCountAsPrior() throws {
+        let beat = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [5], [200]), (200, [5], [300])]], current: [(0, [5], [215])]).exerciseSummaries.first)
+        XCTAssertTrue(beat.isPR, "215 beats the 200 dated before it; the 300 dated after is not prior")
+        XCTAssertFalse(beat.isNew)
+        // ... and a later set can never make a first exposure look like a record of an earlier history
+        let held = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [5], [200]), (200, [5], [100])]], current: [(0, [5], [190])]).exerciseSummaries.first)
+        XCTAssertFalse(held.isPR); XCTAssertFalse(held.isNew)
+    }
+
+    /// Group "maintenance history": a maintenance block is history like any other, for the record AND for what counts as "trained before".
+    func test_badge_maintenanceBlocksAreHistory() throws {
+        // heavy maintenance set before the block: the block must beat it
+        let blocked = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [10], [300])]], current: [(0, [8], [200])], maintenancePrior: true).exerciseSummaries.first)
+        XCTAssertFalse(blocked.isPR); XCTAssertFalse(blocked.isNew)
+        // first trained in the maintenance block: not New here, and beating it is a PR
+        let pr = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [8], [150])]], current: [(0, [8], [200])], maintenancePrior: true).exerciseSummaries.first)
+        XCTAssertTrue(pr.isPR); XCTAssertFalse(pr.isNew)
     }
 
     func test_badge_beatingAnEarlier12RepPeak_isPR_andNotBeatingItIsNeither() throws {
@@ -792,6 +833,36 @@ final class MesoComparisonTests: XCTestCase {
         // training in a maintenance block counts as "trained before" too
         let m = try XCTUnwrap(try mesoAnalysisWith(prior: [[(-50, [20], [100])]], current: [(0, [8], [150])], maintenancePrior: true).exerciseSummaries.first)
         XCTAssertFalse(m.isNew)
+    }
+
+    /// LOCAL: on the live backup the badge and `PersonalRecords.events` agree on every exercise row of every block (skipped without the file:
+    /// TEST_RUNNER_EP_LIVE_BACKUP, which `scripts/full_gate.sh` sets when the file is in ~/Downloads).
+    func test_badge_agreesWithTheEventsOnEveryRowOfTheLiveBackup() throws {
+        guard let path = ProcessInfo.processInfo.environment["EP_LIVE_BACKUP"], FileManager.default.fileExists(atPath: path) else {
+            throw XCTSkip("set TEST_RUNNER_EP_LIVE_BACKUP to the live backup")
+        }
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration("badge-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        let ctx = ModelContext(container)
+        let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date, order: .forward)]))
+        let customs = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let bw = (try? ctx.fetch(FetchDescriptor<UserProfile>()))?.first?.bodyWeight
+        let events = PersonalRecords.events(from: SetRecordBuilder.build(sessions: all, customExercises: customs, bodyWeight: bw).sets)
+        var rows = 0
+        for meso in try ctx.fetch(FetchDescriptor<MesoBlock>()) {
+            let ids = Set(meso.sessions.map { $0.persistentModelID })
+            let priors = all.filter { !ids.contains($0.persistentModelID) }      // what MesoSummaryView passes
+            guard let a = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: priors, bodyWeight: bw) else { continue }
+            let keys = Set(meso.sessions.map { $0.id?.uuidString ?? "\($0.persistentModelID)" })
+            for s in a.exerciseSummaries {
+                let evs = events.filter { keys.contains($0.sessionKey) && $0.exerciseId == s.exerciseId }
+                let record = evs.contains { !$0.isBaseline }, baseline = evs.contains { $0.isBaseline }
+                XCTAssertEqual(s.isPR, record, "\(meso.name) · \(s.exerciseName): PR")
+                XCTAssertEqual(s.isNew, baseline && !record, "\(meso.name) · \(s.exerciseName): New")
+                rows += 1
+            }
+        }
+        XCTAssertGreaterThan(rows, 0)
     }
 
     func test_narrative_inProgressSaysWeekNofM_andWeeksLeft_completedKeepsTheEndOfBlockWording() throws {
