@@ -9,7 +9,8 @@ extension View {
 }
 
 /// The single Duration a recap shows. Apple Health's workout duration when a workout is linked; otherwise the app's own
-/// session duration, and nothing at all when that is under five minutes (a number that short is a misleading one).
+/// (first logged set to completion), and nothing at all when that is missing or under five minutes (a number that short
+/// is a misleading one).
 enum RecapDuration {
     static let minimumAppSeconds: Double = 5 * 60
 
@@ -20,7 +21,7 @@ enum RecapDuration {
 
     static func line(healthLinked: Bool, healthSeconds: Double, appSeconds: Double?) -> Line? {
         if healthLinked, healthSeconds > 0 { return Line(label: "Duration (Apple Health)", seconds: healthSeconds) }
-        if !healthLinked, let app = appSeconds, app >= minimumAppSeconds { return Line(label: "Duration", seconds: app) }
+        if let app = appSeconds, app >= minimumAppSeconds { return Line(label: "Duration (from first set)", seconds: app) }
         return nil
     }
 

@@ -73,6 +73,25 @@ final class Session {
     /// analytics must not read "planned, not done" off a derived date as a missed session. Additive optional Bool.
     var plannedDateExact: Bool?
 
+    /// When the first working set of this session was logged. Stamped once (`stampStartIfNeeded`) and never overwritten,
+    /// not by later sets, edits or a reopened session. nil for sessions logged before this existed. The app's own
+    /// duration is `completedAt - startedAt`. Additive optional Date.
+    var startedAt: Date?
+
+    /// Records `now` as the start the first time it is called; a later call changes nothing.
+    @discardableResult
+    func stampStartIfNeeded(_ now: Date = Date()) -> Bool {
+        guard startedAt == nil else { return false }
+        startedAt = now
+        return true
+    }
+
+    /// The app's own session length (from the first logged set to completion). nil without both ends.
+    var appDuration: TimeInterval? {
+        guard let startedAt, let completedAt, completedAt > startedAt else { return nil }
+        return completedAt.timeIntervalSince(startedAt)
+    }
+
     /// Alias used throughout the app.
     var weekIndex: Int {
         get { weekInMeso ?? 1 }

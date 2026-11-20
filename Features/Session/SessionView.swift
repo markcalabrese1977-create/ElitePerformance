@@ -1391,6 +1391,9 @@ final class SessionScreenViewModel: ObservableObject {
                 return set.plannedLoad
             }()
 
+            // The session starts when its first working set is logged; stamped once, never overwritten.
+            session.stampStartIfNeeded()
+
             // 1) Update UI state
             set.actualReps = reps
             set.actualLoad = loadToStore

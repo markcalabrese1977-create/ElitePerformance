@@ -521,6 +521,9 @@ private struct HistoryDayDetailView: View {
             if s.hkWorkoutUUID == nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Workout metrics").font(.headline)
+                    if let d = RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: s.appDuration) {
+                        metricBlock(title: d.label, value: RecapDuration.text(d.seconds))
+                    }
                     Text("Not linked yet.").font(.caption).foregroundStyle(.secondary)
                     Text("Finish your Apple Watch workout, then tap below to pull in Apple Health metrics.")
                         .font(.caption2)

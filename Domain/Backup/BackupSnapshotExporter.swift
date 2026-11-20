@@ -117,6 +117,7 @@ enum BackupSnapshotExporter {
                     insertedDeload: session.insertedDeload,
                     plannedDate: session.plannedDate,
                     plannedDateExact: session.plannedDateExact,
+                    startedAt: session.startedAt,
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
                     hkWorkoutEnd: session.hkWorkoutEnd,

@@ -1040,10 +1040,15 @@ final class RecapLayoutAndDurationTests: XCTestCase {
     }
 
     func test_duration_noHealthWorkout_showsTheAppDuration_unlessUnderFiveMinutes() {
-        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 3_000), RecapDuration.Line(label: "Duration", seconds: 3_000))
-        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 300)?.label, "Duration", "exactly 5 minutes shows")
+        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 3_000), RecapDuration.Line(label: "Duration (from first set)", seconds: 3_000))
+        XCTAssertEqual(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 300)?.label, "Duration (from first set)", "exactly 5 minutes shows")
         XCTAssertNil(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: 299), "under 5 minutes: nothing")
         XCTAssertNil(RecapDuration.line(healthLinked: false, healthSeconds: 0, appSeconds: nil))
+    }
+
+    func test_duration_aLinkedWorkoutWithNoDuration_fallsThroughToTheAppRule() {
+        XCTAssertEqual(RecapDuration.line(healthLinked: true, healthSeconds: 0, appSeconds: 3_000)?.label, "Duration (from first set)")
+        XCTAssertNil(RecapDuration.line(healthLinked: true, healthSeconds: 0, appSeconds: nil))
     }
 
     func test_duration_formatting() {
@@ -1076,5 +1081,85 @@ final class RecapLayoutAndDurationTests: XCTestCase {
         let spark = try source("Features/Components/HeartRateSparklineView.swift")
         XCTAssertFalse(spark.contains("Duration:"), "the sparkline no longer prints its own Duration line")
         XCTAssertFalse(detail.contains("formatDuration"), "one duration path")
+    }
+}
+
+
+// MARK: - Session.startedAt: stamped once, kept, backed up
+
+@MainActor
+final class SessionStartedAtTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func test_theStamp_happensOnce_onTheFirstCall_andLaterCallsNeverMoveIt() throws {
+        let s = Session(date: t0)
+        XCTAssertNil(s.startedAt)
+        XCTAssertTrue(s.stampStartIfNeeded(t0))
+        XCTAssertFalse(s.stampStartIfNeeded(t0.addingTimeInterval(600)))
+        XCTAssertEqual(s.startedAt, t0)
+    }
+
+    func test_logging_firstSetStamps_laterSetsAndEditsDoNot() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let item = BackupTestSupport.item(1, "bench_press", name: "Bench Press")
+        ctx.insert(item)
+        let s = Session(date: t0, status: .planned, weekIndex: 1, dayLabel: "Upper A", items: [])
+        ctx.insert(s); s.items.append(item); try ctx.save()
+        let vm = SessionScreenViewModel(session: s)
+        let id = vm.exercises[0].id
+        func log(_ i: Int, _ load: String, _ reps: String) {
+            vm.updateActualLoad(exerciseID: id, setIndex: i, text: load)
+            vm.updateActualReps(exerciseID: id, setIndex: i, text: reps)
+            vm.updateActualRIR(exerciseID: id, setIndex: i, text: "2")
+            vm.handleSetLogged(exerciseID: id, setIndex: i, context: ctx)
+        }
+        XCTAssertNil(s.startedAt, "nothing logged yet")
+        log(1, "135", "8")
+        let first = try XCTUnwrap(s.startedAt)
+        Thread.sleep(forTimeInterval: 0.05)
+        log(2, "135", "8")
+        vm.editSet(exerciseID: id, setIndex: 1, context: ctx)
+        log(1, "140", "9")                                              // an edit of set 1
+        XCTAssertEqual(s.startedAt, first, "later sets and an edit never overwrite it")
+    }
+
+    func test_appDuration_isCompletionMinusStart_andNilWithoutBoth() {
+        let s = Session(date: t0)
+        XCTAssertNil(s.appDuration)
+        s.startedAt = t0; XCTAssertNil(s.appDuration)
+        s.completedAt = t0.addingTimeInterval(3_000); XCTAssertEqual(s.appDuration, 3_000)
+        s.completedAt = t0.addingTimeInterval(-5); XCTAssertNil(s.appDuration, "a completion before the start is not a duration")
+    }
+
+    func test_backupRoundTrip_carriesAValue_andNil() throws {
+        let source = try BackupTestSupport.makeContainer()
+        let ctx = ModelContext(source)
+        let a = Session(date: t0, status: .completed); a.startedAt = t0.addingTimeInterval(-3_000); a.completedAt = t0
+        let b = Session(date: t0.addingTimeInterval(86_400), status: .completed)
+        ctx.insert(a); ctx.insert(b); try ctx.save()
+        let export = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: export.url, modelContainer: target)
+        let got = try ModelContext(target).fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(got.count, 2)
+        XCTAssertEqual(got[0].startedAt, t0.addingTimeInterval(-3_000))
+        XCTAssertNil(got[1].startedAt)
+    }
+
+    func test_anOldBackupWithoutTheKey_decodesWithNil() throws {
+        let source = try BackupTestSupport.makeContainer()
+        let ctx = ModelContext(source)
+        let a = Session(date: t0, status: .completed); a.startedAt = t0
+        ctx.insert(a); try ctx.save()
+        let export = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: export.url)) as? [String: Any])
+        var sessions = try XCTUnwrap(root["sessions"] as? [[String: Any]])
+        XCTAssertNotNil(sessions[0]["startedAt"], "sanity: the new key is exported")
+        sessions[0].removeValue(forKey: "startedAt"); root["sessions"] = sessions
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("old-\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: root).write(to: old)
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: old, modelContainer: target)
+        XCTAssertNil(try ModelContext(target).fetch(FetchDescriptor<Session>()).first?.startedAt)
     }
 }

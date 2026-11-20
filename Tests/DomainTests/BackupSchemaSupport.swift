@@ -189,6 +189,7 @@ enum PopulatedStoreBuilder {
         // BA2: a non-default value (Session.init sets plannedDate = date, so move it a day).
         s.plannedDate = date.addingTimeInterval(-86_400)
         s.plannedDateExact = true
+        s.startedAt = date.addingTimeInterval(-2_700)   // non-default: the recap duration's start
         s.meso = meso
         meso.sessions.append(s)
         ctx.insert(s)
