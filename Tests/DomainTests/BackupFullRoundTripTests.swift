@@ -4104,7 +4104,10 @@ final class WavelessBlockTests: XCTestCase {
         let changes = PlaceholderRefresh.run(in: ctx, now: now)
         XCTAssertEqual(b2.suggestedLoad, 100, "the held load of week 1's same-day session")
         XCTAssertEqual(b2.plannedLoadsBySet, [100, 100, 100])
-        XCTAssertEqual(otherDay.suggestedLoad, 70, "Upper B's bench is a different chain")
+        // Upper B's bench is a different chain: it is not held at Upper A's 100. With no Upper B history it takes the last-priority
+        // cross-day estimate from Upper A's 100 x 8 at RIR 2 (its stale 70 is replaced by 90).
+        XCTAssertEqual(otherDay.suggestedLoad, 90)
+        XCTAssertEqual(otherDay.coachNote, "Estimated from your Upper A sets — set 1 calibrates.")
         XCTAssertTrue(changes.contains { $0.item === b2 })
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "idempotent")
     }
