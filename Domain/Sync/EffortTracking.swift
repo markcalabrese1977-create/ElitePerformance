@@ -55,6 +55,14 @@ enum EffortTracking {
         return " @ \(rir) RIR"
     }
 
+    /// " @ 2 RIR" (Detailed), " @ Solid" (Simple: the word whose scale contains the planned RIR, 3+ is Easy) or "" (Off) for the
+    /// PLANNED RIR on a plan line. The plan line labels it as the plan (SUGGESTED / PLAN / OPTIONAL EXTRA SET).
+    static func plannedSuffix(_ rir: Int?, mode: EffortMode = EffortTracking.mode) -> String {
+        guard let rir, mode != .off else { return "" }
+        if mode == .simple { return " @ \(simpleChoices.first { $0.rir == min(max(rir, 0), 3) }?.label ?? "Solid")" }
+        return " @ \(rir) RIR"
+    }
+
     // MARK: Resolution
 
     /// Logged working sets on COMPOUND lifts that carry a recorded RIR. Isolation lifts are left out on purpose: they stored the
@@ -90,6 +98,18 @@ enum EffortTracking {
     static func canPresentPrompt(needsPrompt: Bool, shownThisLaunch: Bool, sceneActive: Bool, nothingPresented: Bool,
                                  restoreInProgress: Bool, healthKitRequesting: Bool) -> Bool {
         needsPrompt && !shownThisLaunch && sceneActive && nothingPresented && !restoreInProgress && !healthKitRequesting
+    }
+
+    /// The one-shot: a profile that never stored a mode gets the resolved one WRITTEN (Detailed if any compound RIR is recorded,
+    /// otherwise Simple), so it is never re-derived from data again. The one exception is the all-0 pattern: nothing is written, the
+    /// lifter is asked (`needsModePrompt`) and their answer is stored. Returns true when it wrote.
+    @discardableResult
+    static func resolveOnce(in context: ModelContext) -> Bool {
+        guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first,
+              EffortMode(rawValue: profile.effortModeRaw ?? "") == nil,
+              !needsModePrompt(profile: profile, in: context) else { return false }
+        profile.effortModeRaw = resolved(profile: profile, in: context).rawValue
+        return (try? context.save()) != nil
     }
 
     /// Refreshes the mirror from the profile. Call at launch, after a restore and after the lifter changes the setting.

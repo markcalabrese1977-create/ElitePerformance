@@ -488,7 +488,9 @@ struct SettingsView: View {
     /// would otherwise see no Profile section and no way to create one.
     private func ensureProfileExists() {
         guard profiles.isEmpty else { return }
-        context.insert(UserProfile())
+        let fresh = UserProfile()
+        fresh.effortModeRaw = EffortMode.simple.rawValue   // a profile created here is new: Simple, stored
+        context.insert(fresh)
         try? context.save()
     }
 

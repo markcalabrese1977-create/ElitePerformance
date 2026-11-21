@@ -172,6 +172,7 @@ enum ProgramApplicationService {
             if profile.loadUnit != result.unit { profile.rememberIncrement(for: profile.loadUnit) }
             profile.minLoadIncrement = result.minLoadIncrement
             profile.loadUnit = result.unit
+            if EffortMode(rawValue: profile.effortModeRaw ?? "") == nil { profile.effortModeRaw = EffortMode.simple.rawValue }
         } else {
             let profile = UserProfile(
                 experience: result.experience,

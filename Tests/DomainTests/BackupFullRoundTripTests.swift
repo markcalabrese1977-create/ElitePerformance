@@ -5506,6 +5506,90 @@ final class EffortTrackingTests: XCTestCase {
         XCTAssertFalse(can(restore: true)); XCTAssertFalse(can(hk: true), "the HealthKit permission sheet")
     }
 
+    // MARK: one-shot resolution
+
+    func test_resolveOnce_writesTheResolvedMode_andNeverReDerivesFromData() throws {
+        let ctx = ModelContext(try container())
+        let p = UserProfile(); ctx.insert(p); try ctx.save()
+        XCTAssertNil(p.effortModeRaw)
+        XCTAssertTrue(EffortTracking.resolveOnce(in: ctx))
+        XCTAssertEqual(p.effortModeRaw, "simple", "nothing recorded: Simple")
+        // log "Solid" (RIR 2) on a compound: the stored mode stays Simple
+        logged(ctx, compound: [2])
+        XCTAssertFalse(EffortTracking.resolveOnce(in: ctx), "already stored")
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .simple)
+        EffortTracking.sync(in: ctx)
+        XCTAssertEqual(EffortTracking.mode, .simple)
+        // log only "All out" (0): still no prompt, because a mode is stored
+        let ctx2 = ModelContext(try container())
+        let p2 = UserProfile(); ctx2.insert(p2); try ctx2.save()
+        EffortTracking.resolveOnce(in: ctx2)
+        logged(ctx2, compound: [0, 0, 0])
+        XCTAssertFalse(EffortTracking.needsModePrompt(profile: p2, in: ctx2))
+        XCTAssertEqual(p2.effortModeRaw, "simple")
+    }
+
+    func test_resolveOnce_detailedWhenRecorded_andAllZeroLeavesNilForThePrompt() throws {
+        let ctx = ModelContext(try container())
+        let p = UserProfile(); ctx.insert(p)
+        logged(ctx, compound: [2, 1]); try ctx.save()
+        XCTAssertTrue(EffortTracking.resolveOnce(in: ctx))
+        XCTAssertEqual(p.effortModeRaw, "detailed")
+
+        let ctx2 = ModelContext(try container())
+        let p2 = UserProfile(); ctx2.insert(p2)
+        logged(ctx2, compound: [0, 0]); try ctx2.save()
+        XCTAssertFalse(EffortTracking.resolveOnce(in: ctx2), "all-0: ask, do not decide")
+        XCTAssertNil(p2.effortModeRaw)
+        XCTAssertTrue(EffortTracking.needsModePrompt(profile: p2, in: ctx2))
+        EffortTracking.choose(.off, in: ctx2)
+        XCTAssertEqual(p2.effortModeRaw, "off")
+        XCTAssertFalse(EffortTracking.resolveOnce(in: ctx2))
+    }
+
+    // MARK: plan line, unset isolation, fallbacks
+
+    func test_planLine_offHasNoRIR_simpleShowsTheWord_detailedTheNumber() {
+        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .off), "")
+        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .simple), " @ Solid")
+        XCTAssertEqual(EffortTracking.plannedSuffix(3, mode: .simple), " @ Easy")
+        XCTAssertEqual(EffortTracking.plannedSuffix(4, mode: .simple), " @ Easy", "3+ left")
+        XCTAssertEqual(EffortTracking.plannedSuffix(1, mode: .simple), " @ Hard")
+        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .simple), " @ All out")
+        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .detailed), " @ 2 RIR")
+        XCTAssertEqual(EffortTracking.plannedSuffix(nil, mode: .detailed), "")
+        for m in EffortMode.allCases {
+            EffortTracking.mode = m
+            let set = UISessionSet(index: 1, exerciseId: "bench", plannedLoad: 100, plannedReps: 10, plannedRIR: 2)
+            let text = set.plannedDescription(with: RepRange(min: 8, max: 10))
+            XCTAssertEqual(text.contains("RIR"), m == .detailed, "\(m): \(text)")
+            XCTAssertEqual(text.contains("Solid"), m == .simple, "\(m): \(text)")
+            XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 10), rir: 2).contains("RIR"), m == .detailed)
+        }
+    }
+
+    func test_unsetIsolationRIR_isNotRecorded_andTheProjectionFallbackStillUsesTheTarget() throws {
+        let ctx = ModelContext(try container())
+        func project(rirs: [Int]) throws -> Double? {
+            let item = BackupTestSupport.item(1, "cable_tricep_rope_pushdown", name: "Pushdown", reps: [12, 12], loads: [40, 40])
+            item.actualRIRs = rirs
+            let s = Session(date: Date(timeIntervalSince1970: 1_790_000_000), status: .completed, weekIndex: 1, dayLabel: "A", items: [item])
+            ctx.insert(s); try ctx.save()
+            let out = LoadProjectionService.project(
+                exerciseId: item.exerciseId, targetReps: 8, targetRIR: 2, repMin: 8, repMax: 12, currentWaveRaw: nil,
+                allSessions: [s], activeMesoSessionIDs: [])?.suggestedLoad
+            ctx.delete(s); try ctx.save()
+            return out
+        }
+        let unset = try project(rirs: [-1, -1])
+        let atTarget = try project(rirs: [2, 2])
+        XCTAssertEqual(unset, atTarget, "an unset RIR counts as exactly on target in the e1RM weighting")
+        let item = BackupTestSupport.item(1, "cable_tricep_rope_pushdown", name: "Pushdown", reps: [12], loads: [40])
+        item.actualRIRs = [-1]
+        XCTAssertNil(RIREntry.recorded(item, at: 0))
+        XCTAssertNil(RIREntry.decisionRIR(item, at: 0))
+    }
+
     // MARK: backup
 
     func test_effortMode_roundTripsThroughBackup_andAnOldBackupRestoresNil() throws {

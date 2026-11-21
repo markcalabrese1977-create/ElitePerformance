@@ -1483,17 +1483,8 @@ final class SessionScreenViewModel: ObservableObject {
 
                     matchingItem.actualReps[idx] = reps
                     matchingItem.actualLoads[idx] = loadToStore
-                    // A compound set's RIR is the lifter's own tap: never pre-filled from the plan. Isolation keeps the
-                    // old convenience (it never feeds a decision).
-                    let isCompoundLift = RIREntry.isCompound(matchingItem.exerciseId)
-                    // Detailed keeps the isolation convenience (plan's number stored when nothing was tapped); Simple and Off never
-                    // store the plan as an actual.
-                    let keepsPlanConvenience = EffortTracking.mode == .detailed && !isCompoundLift
-                    if set.actualRIR == nil, keepsPlanConvenience {
-                        set.actualRIR = set.plannedRIR
-                        exercise.sets[setIdx] = set
-                    }
-                    let rirToStore = set.actualRIR ?? (keepsPlanConvenience ? (set.plannedRIR ?? matchingItem.targetRIR) : RIREntry.unset)
+                    // In every mode an untouched RIR is stored as unset: the plan's number is never recorded as an actual.
+                    let rirToStore = set.actualRIR ?? RIREntry.unset
                     RIREntry.setRecorded(matchingItem, at: idx, to: rirToStore)
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
@@ -3080,7 +3071,7 @@ struct UISessionSet: Identifiable {
     /// "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR": the line for the spare row past the planned set count (no load).
     static func extraSetLabel(repRange: RepRange, rir: Int?) -> String {
         let reps = repRange.min == repRange.max ? "\(repRange.min)" : "\(repRange.min)-\(repRange.max)"
-        let rirText = rir.map { " @ \($0) RIR" } ?? ""
+        let rirText = EffortTracking.plannedSuffix(rir)
         return "OPTIONAL EXTRA SET  \(reps) reps\(rirText)"
     }
 
@@ -3103,11 +3094,7 @@ struct UISessionSet: Identifiable {
             repsText = "\(plannedReps)"
         }
         
-        if let plannedRIR {
-                    return "\(loadText) × \(repsText) @ \(plannedRIR) RIR"
-                } else {
-                    return "\(loadText) × \(repsText)"
-                }
+        return "\(loadText) × \(repsText)" + EffortTracking.plannedSuffix(plannedRIR)
             }
         }
 

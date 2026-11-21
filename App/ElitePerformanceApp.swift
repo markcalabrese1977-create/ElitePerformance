@@ -166,6 +166,7 @@ enum StartupBackfills {
             BackfillLog.lineSink?(line)
         }
         // Not a backfill (nothing is written): refresh the effort-mode mirror that context-free readers use.
+        EffortTracking.resolveOnce(in: context)
         EffortTracking.sync(in: context)
     }
 }
