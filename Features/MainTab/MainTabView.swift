@@ -126,6 +126,28 @@ struct TodayTabView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Closing the welcome sheet (or a failed setup) leaves no program: Today offers the way back in.
+                if sessions.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("No program yet")
+                                .font(.headline)
+                            Text("Answer a few questions and get a program built for your schedule and equipment.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Button("Set up your program") { AppRoute.shared.openOnboarding() }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                Section {
+                    headerCard
+                }
+
+                // Below the session card, not above it: on the smallest screen (iPhone SE, 667 pt) a banner above pushed
+                // "Start Session" under the floating tab bar, where it needed a second tap.
                 if showBackupBanner {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -162,26 +184,6 @@ struct TodayTabView: View {
                         }
                         .padding(.vertical, 4)
                     }
-                }
-
-                // Closing the welcome sheet (or a failed setup) leaves no program: Today offers the way back in.
-                if sessions.isEmpty {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("No program yet")
-                                .font(.headline)
-                            Text("Answer a few questions and get a program built for your schedule and equipment.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Button("Set up your program") { AppRoute.shared.openOnboarding() }
-                                .buttonStyle(.borderedProminent)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-
-                Section {
-                    headerCard
                 }
 
                 if !upcomingSessions.isEmpty {

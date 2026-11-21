@@ -248,6 +248,11 @@ struct SettingsView: View {
             // Goal, experience, equipment, session length and joints are not edited here: only the program builder reads
             // them, so they live in Program > Change program, which rebuilds the program from them.
 
+            // MARK: - Exercises
+            Section("Exercises") {
+                NavigationLink("Exercise library") { ExerciseLibraryView() }
+            }
+
             // MARK: - Analytics
             if let profile = profiles.first {
                 Section("Analytics") {
