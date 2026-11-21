@@ -82,6 +82,7 @@ struct HistoryView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 24)
             }
+            .clearsFloatingTabBar()
             .navigationTitle("History")
             .sheet(isPresented: $showBlockRecap) {
                 if let meso = activeMeso {

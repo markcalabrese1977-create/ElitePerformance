@@ -126,6 +126,28 @@ struct TodayTabView: View {
     var body: some View {
         NavigationStack {
             List {
+                if showBackupBanner {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(autoBackup.iCloudAvailability == .available ? "No verified iCloud backup in the last 7 days" : "iCloud backups are unavailable",
+                                  systemImage: "exclamationmark.icloud")
+                                .font(.subheadline.bold())
+                            Text(autoBackup.iCloudAvailability.explanation.map { $0 + " Your training history lives only on this device until a backup reaches iCloud." }
+                                 ?? "Your training history lives only on this device until a backup reaches iCloud. Check Settings → Backup.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            // The buttons sit in a row when they fit, one under the other when they do not (iPhone SE width,
+                            // accessibility text sizes: a row squeezed "Use local backups only" into a column of single letters).
+                            ViewThatFits(in: .horizontal) {
+                                HStack { bannerButtons }
+                                VStack(alignment: .leading) { bannerButtons }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 // Closing the welcome sheet (or a failed setup) leaves no program: Today offers the way back in.
                 if sessions.isEmpty {
                     Section {
@@ -146,46 +168,6 @@ struct TodayTabView: View {
                     headerCard
                 }
 
-                // Below the session card, not above it: on the smallest screen (iPhone SE, 667 pt) a banner above pushed
-                // "Start Session" under the floating tab bar, where it needed a second tap.
-                if showBackupBanner {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label(autoBackup.iCloudAvailability == .available ? "No verified iCloud backup in the last 7 days" : "iCloud backups are unavailable",
-                                  systemImage: "exclamationmark.icloud")
-                                .font(.subheadline.bold())
-                            Text(autoBackup.iCloudAvailability.explanation.map { $0 + " Your training history lives only on this device until a backup reaches iCloud." }
-                                 ?? "Your training history lives only on this device until a backup reaches iCloud. Check Settings → Backup.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                Button(bannerBusy ? "Backing up…" : "Back up now") {
-                                    bannerBusy = true
-                                    Task {
-                                        _ = await autoBackup.backUpNow(container: context.container)
-                                        bannerBusy = false
-                                        bannerTick += 1
-                                    }
-                                }
-                                .disabled(bannerBusy)
-                                Spacer()
-                                if autoBackup.iCloudAvailability != .available {
-                                    Button("Use local backups only") {
-                                        autoBackup.status.localOnly = true
-                                        bannerTick += 1
-                                    }
-                                }
-                                Button("Dismiss") {
-                                    autoBackup.status.dismissBannerForToday(now: Date())
-                                    bannerTick += 1
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-
                 if !upcomingSessions.isEmpty {
                     Section(header: Text("Upcoming")) {
                         ForEach(upcomingSessions) { session in
@@ -201,6 +183,7 @@ struct TodayTabView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .clearsFloatingTabBar()
             .task { await autoBackup.refreshICloudAvailability() }   // so the iCloud reason shows on a fresh launch
             .navigationTitle("Today")
             .sheet(isPresented: $showRestToday) {
@@ -208,6 +191,28 @@ struct TodayTabView: View {
                     RestTodayFlow(meso: meso, onFinish: { showRestToday = false })
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var bannerButtons: some View {
+        Button(bannerBusy ? "Backing up…" : "Back up now") {
+            bannerBusy = true
+            Task {
+                _ = await autoBackup.backUpNow(container: context.container)
+                bannerBusy = false
+                bannerTick += 1
+            }
+        }
+        .disabled(bannerBusy)
+        if autoBackup.iCloudAvailability != .available {
+            Button("Use local backups only") {
+                autoBackup.status.localOnly = true
+                bannerTick += 1
+            }
+        }
+        Button("Dismiss") {
+            autoBackup.status.dismissBannerForToday(now: Date())
+            bannerTick += 1
         }
     }
 

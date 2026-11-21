@@ -26,6 +26,7 @@ struct AnalyticsView: View {
                 topExercisesSection
                 allExercisesSection
             }
+            .clearsFloatingTabBar()
             .navigationTitle("Analytics")
             .task(id: "\(sessions.count)-\(customExercises.count)-\(volumeRefresh)-\(profiles.first?.muscleSetRangesStored?.count ?? 0)") { refreshVolume() }
             .sheet(isPresented: $showCustomMuscles, onDismiss: { volumeRefresh = UUID() }) {
