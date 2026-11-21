@@ -1017,18 +1017,20 @@ private struct SessionSetRowView: View {
                         .opacity(isLocked ? 0.6 : 1.0)
                     } else {
                         // Only what the lifter typed is text; the plan's number is a greyed placeholder, never a logged value.
-                        TextField("optional", text: Binding(
+                        TextField("–", text: Binding(
                             get: { uiSet.actualRIR.map { "\($0)" } ?? "" },
                             set: { onRIRChanged($0) }
                         ))
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: optionalRIRWidth)
+                        .accessibilityLabel("RIR, optional")
+                        .accessibilityHint("Reps you could still have done. Leave empty to skip.")
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
                     }
                 }
-        // A logged isolation set with no RIR shows nothing (no label, no "optional"), but keeps its space so the row does not shift.
+        // A logged isolation set with no RIR shows nothing (no label, no dash), but keeps its space so the row does not shift.
         .opacity(!isCompoundLift && isLocked && uiSet.actualRIR == nil ? 0 : 1)
         .accessibilityHidden(!isCompoundLift && isLocked && uiSet.actualRIR == nil)
     }
