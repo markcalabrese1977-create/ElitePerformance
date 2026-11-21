@@ -412,6 +412,10 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
 
 
     func test_A2_extraSetLabel_andZeroLoadShowsDash() {
+        // Plan-line text follows the effort mode (a process-wide mirror that startup-backfill tests also refresh): pin Detailed.
+        let saved = EffortTracking.mode
+        EffortTracking.mode = .detailed
+        defer { EffortTracking.mode = saved }
         XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 2), "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR")
         XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 8), rir: 1), "OPTIONAL EXTRA SET  8 reps @ 1 RIR")
         let row = UISessionSet(index: 4, exerciseId: "bench_press", plannedLoad: 0, plannedReps: 6, plannedRIR: 2)

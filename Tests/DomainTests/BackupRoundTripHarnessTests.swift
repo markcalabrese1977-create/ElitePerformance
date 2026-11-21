@@ -518,6 +518,14 @@ final class BackupRoundTripHarnessTests: XCTestCase {
 /// `StartupBackfills` must leave it untouched.
 final class OtherUsersStoreStartupTests: XCTestCase {
 
+    /// The effort-mode one-shot gives a profile with no stored mode its resolved one; the export carries it under userProfile.
+    static func dropOneShotEffortMode(_ json: inout [String: Any]) {
+        guard var profile = json["userProfile"] as? [String: Any] else { return }
+        if let raw = profile["effortModeRaw"] as? String { XCTAssertTrue(["simple", "detailed"].contains(raw), "the one-shot writes Simple or Detailed, never Off") }
+        profile.removeValue(forKey: "effortModeRaw")
+        json["userProfile"] = profile
+    }
+
     private var container: ModelContainer!
 
     private static let completionKeys = [
@@ -747,6 +755,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             sessions[s]["items"] = items
         }
         after["sessions"] = sessions
+        // The effort-mode one-shot writes the resolved mode onto a profile that never stored one: the only profile change.
+        Self.dropOneShotEffortMode(&after)
         XCTAssertGreaterThan(plannedItems, 0)
         XCTAssertGreaterThan(otherItems, 0, "the store has completed and in-progress items too")
         XCTAssertGreaterThan(plannedSessions, 0)
@@ -853,6 +863,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             XCTAssertNil(sessions[s]["plannedDateExact"], "a backfill never marks a date exact")
         }
         after["sessions"] = sessions
+        Self.dropOneShotEffortMode(&after)   // the effort-mode one-shot's write onto the profile
         XCTAssertEqual(try JSONSerialization.data(withJSONObject: try withoutHistoryOrder(after), options: [.sortedKeys]),
                        try JSONSerialization.data(withJSONObject: try withoutHistoryOrder(before), options: [.sortedKeys]),
                        "nothing but ExerciseNote rows was added from the legacy keys")
