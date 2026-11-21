@@ -80,7 +80,9 @@ enum Exposures {
                 plannedLoad: rows.compactMap(\.plannedLoad).max(),
                 planEdited: first.planEdited,
                 reachedTopAtTarget: rows.allSatisfy { r in
-                    guard let top = r.repMax, r.reps >= top, let rir = r.rir else { return false }
+                    guard let top = r.repMax, r.reps >= top else { return false }
+                    if EffortTracking.mode == .off { return true }   // no effort evidence: the reps alone decide
+                    guard let rir = r.rir else { return false }
                     return rir >= (r.targetRIRMin ?? r.targetRIR)
                 },
                 meanPlannedReps: {

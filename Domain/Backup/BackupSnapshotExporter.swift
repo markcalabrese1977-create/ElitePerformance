@@ -77,6 +77,7 @@ enum BackupSnapshotExporter {
                     loadStepByExercise: $0.loadStepByExerciseStored,
                     muscleSetRanges: $0.muscleSetRangesStored,
                     birthDateOverride: $0.birthDateOverride,
+                    effortModeRaw: $0.effortModeRaw,
                     equipmentPresetRaw: $0.equipmentPresetRaw,
                     equipmentChecklistRaws: $0.equipmentChecklistRaws,
                     unitRaw: $0.unitRaw,

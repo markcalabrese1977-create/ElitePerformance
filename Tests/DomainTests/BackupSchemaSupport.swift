@@ -118,6 +118,7 @@ enum PopulatedStoreBuilder {
         profile.loadStepByExercise = ["bench_press": 2.5, "machine_chest_press": 5.0]
         profile.muscleSetRangesStored = ["chest.min": 12.0, "chest.max": 24.0, "calves.max": 14.0]
         profile.birthDateOverride = day(-9_000)
+        profile.effortModeRaw = EffortMode.simple.rawValue
         profile.loadUnit = .kg
         profile.savedIncrementLb = 5.0
         profile.savedIncrementKg = 1.25

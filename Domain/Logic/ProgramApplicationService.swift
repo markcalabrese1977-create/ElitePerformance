@@ -185,10 +185,12 @@ enum ProgramApplicationService {
             )
             profile.equipmentPreset = result.equipmentPreset
             profile.equipmentChecklist = Set(result.equipmentChecklist)
+            profile.effortModeRaw = EffortMode.simple.rawValue   // new lifters start on Simple
             context.insert(profile)
         }
 
         try? context.save()
+        EffortTracking.sync(in: context)
     }
 
     private static func goalToPrimaryGoal(_ goal: Goal) -> PrimaryGoal {

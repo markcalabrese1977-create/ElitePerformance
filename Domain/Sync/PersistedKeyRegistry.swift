@@ -92,6 +92,10 @@ enum PersistedKeyRegistry {
         Entry(match: .exact("exercisePicker.recentIds.v1"),
               disposition: .excluded("the exercises last picked in a picker (recent picks): a device-local convenience, rebuilt by use; a restore need not carry it")),
 
+        // Effort tracking.
+        Entry(match: .exact("effortTracking.mode.v1"),
+              disposition: .excluded("mirror of UserProfile.effortModeRaw (resolved): the profile field travels in the backup; the mirror is rebuilt from it at launch and after a restore (StartupBackfills.run)")),
+
         // Per-session UI state.
         Entry(match: .prefix("warmup_crankyJoint_"), disposition: .excluded("per-session UI state")),
         Entry(match: .prefix("warmup_done_"), disposition: .excluded("per-session UI state")),

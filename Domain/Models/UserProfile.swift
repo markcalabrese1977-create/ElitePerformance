@@ -273,6 +273,10 @@ final class UserProfile {
     /// both exist. Only used for age-based heart-rate zones; nil means no age is assumed.
     var birthDateOverride: Date? = nil
 
+    /// Effort tracking: "simple" | "detailed" | "off" (`EffortMode`). nil = never chosen: resolved at read time (Detailed when the
+    /// lifter has recorded RIR on compound lifts, else Simple). Stored OPTIONAL so the additive migration and old backups need no backfill.
+    var effortModeRaw: String? = nil
+
     /// Equipment preset the fitter works from. Stored OPTIONAL so the additive SwiftData migration (existing
     /// rows get nil) and old backups both read as "derive from the legacy `equipmentProfileRaw`". Use
     /// `equipmentPreset`, never this raw column.

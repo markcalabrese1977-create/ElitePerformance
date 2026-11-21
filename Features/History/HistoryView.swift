@@ -183,7 +183,7 @@ private struct HistorySetDetail: Identifiable {
             return s
         } else {
             var s = "\(setLabel)  \(loadText(load)) × \(reps)"
-            if let rir { s += " @ \(rir) RIR" }
+            s += EffortTracking.loggedSuffix(rir)
             if rpUsed {
                 let trimmed = rpPattern.trimmingCharacters(in: .whitespacesAndNewlines)
                 s += trimmed.isEmpty ? " (RP)" : " (RP: \(trimmed))"
@@ -331,7 +331,7 @@ private struct HistoryDayDetailView: View {
                     let plannedLoad = set.plannedLoad ?? 0
 
                     if actualReps > 0 {
-                        let rir = set.actualRIR ?? set.plannedRIR
+                        let rir = set.actualRIR   // logged RIR only; a skipped row below shows its plan, marked "planned"
 
                         // ✅ If actual load isn't present, fall back to planned load for display + volume.
                         let displayLoad: Double = {

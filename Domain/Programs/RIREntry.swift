@@ -41,7 +41,8 @@ enum RIREntry {
 
     /// The RIR a DECISION may use for row `idx`: the recorded one, and only on a compound lift.
     static func decisionRIR(_ item: SessionItem, at idx: Int) -> Int? {
-        isCompound(item.exerciseId) ? recorded(item, at: idx) : nil
+        guard EffortTracking.mode != .off else { return nil }   // Effort tracking Off: pure rep progression
+        return isCompound(item.exerciseId) ? recorded(item, at: idx) : nil
     }
 
     /// Rows holding a 0 with no reps behind them: padding from before RIR could be unset, not a recorded value.

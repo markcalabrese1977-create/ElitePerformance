@@ -51,6 +51,7 @@ enum BackupSnapshotImporter {
             profile.loadStepByExerciseStored = dto.loadStepByExercise
             profile.muscleSetRangesStored = dto.muscleSetRanges
             profile.birthDateOverride = dto.birthDateOverride
+            profile.effortModeRaw = dto.effortModeRaw
             profile.equipmentPresetRaw = dto.equipmentPresetRaw
             profile.equipmentChecklistRaws = dto.equipmentChecklistRaws
             // nil (old backup, or a lb lifter) stays nil = lb.

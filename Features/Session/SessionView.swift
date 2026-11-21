@@ -933,7 +933,60 @@ private struct SessionSetRowView: View {
                 }
     }
 
-    private var rirField: some View {
+    @AppStorage(EffortTracking.mirrorKey) private var effortRaw: String = ""
+    private var effortMode: EffortMode { EffortMode(rawValue: effortRaw) ?? .detailed }
+
+    @ViewBuilder private var rirField: some View {
+        switch effortMode {
+        case .off:
+            EmptyView()
+        case .simple:
+            VStack(alignment: .leading, spacing: 2) {
+                Text("How hard was it?")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) { simpleButtons }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) { simpleButtons(range: 0..<2) }
+                        HStack(spacing: 4) { simpleButtons(range: 2..<4) }
+                    }
+                }
+                .opacity(isLocked ? 0.6 : 1.0)
+            }
+        case .detailed:
+            detailedRIRField
+        }
+    }
+
+    @ViewBuilder private var simpleButtons: some View { simpleButtons(range: 0..<EffortTracking.simpleChoices.count) }
+
+    @ViewBuilder private func simpleButtons(range: Range<Int>) -> some View {
+        ForEach(Array(EffortTracking.simpleChoices[range]), id: \.rir) { choice in
+            let selected = uiSet.actualRIR == choice.rir
+            Button {
+                guard !isLocked else { return }
+                onRIRChanged(selected ? "" : "\(choice.rir)")
+            } label: {
+                VStack(spacing: 1) {
+                    Text(choice.label)
+                        .font(.callout.weight(.semibold))
+                    Text(choice.hint)
+                        .font(.caption2)
+                        .opacity(0.8)
+                }
+                .fixedSize()
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(choice.label), \(choice.hint)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        }
+    }
+
+    private var detailedRIRField: some View {
         VStack(alignment: .leading, spacing: 2) {
                     Text(isCompoundLift ? "RIR (tap one)" : "RIR")
                         .font(.caption2)
@@ -959,12 +1012,9 @@ private struct SessionSetRowView: View {
                         }
                         .opacity(isLocked ? 0.6 : 1.0)
                     } else {
-                        TextField("0", text: Binding(
-                            get: {
-                                if let actual = uiSet.actualRIR { return "\(actual)" }
-                                if let planned = uiSet.plannedRIR { return "\(planned)" }
-                                return ""
-                            },
+                        // Only what the lifter typed is text; the plan's number is a greyed placeholder, never a logged value.
+                        TextField(uiSet.plannedRIR.map { "\($0)" } ?? "0", text: Binding(
+                            get: { uiSet.actualRIR.map { "\($0)" } ?? "" },
                             set: { onRIRChanged($0) }
                         ))
                         .keyboardType(.numberPad)
@@ -972,6 +1022,12 @@ private struct SessionSetRowView: View {
                         .frame(width: 40)
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
+                    }
+                    if !isLocked {
+                        Text("RIR = reps you could still have done; 0 = nothing left")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
     }
@@ -1430,11 +1486,14 @@ final class SessionScreenViewModel: ObservableObject {
                     // A compound set's RIR is the lifter's own tap: never pre-filled from the plan. Isolation keeps the
                     // old convenience (it never feeds a decision).
                     let isCompoundLift = RIREntry.isCompound(matchingItem.exerciseId)
-                    if set.actualRIR == nil, !isCompoundLift {
+                    // Detailed keeps the isolation convenience (plan's number stored when nothing was tapped); Simple and Off never
+                    // store the plan as an actual.
+                    let keepsPlanConvenience = EffortTracking.mode == .detailed && !isCompoundLift
+                    if set.actualRIR == nil, keepsPlanConvenience {
                         set.actualRIR = set.plannedRIR
                         exercise.sets[setIdx] = set
                     }
-                    let rirToStore = set.actualRIR ?? (isCompoundLift ? RIREntry.unset : (set.plannedRIR ?? matchingItem.targetRIR))
+                    let rirToStore = set.actualRIR ?? (keepsPlanConvenience ? (set.plannedRIR ?? matchingItem.targetRIR) : RIREntry.unset)
                     RIREntry.setRecorded(matchingItem, at: idx, to: rirToStore)
                     matchingItem.usedRestPauseFlags[idx] = set.usedRestPause
                     matchingItem.restPausePatternsBySet[idx] = set.restPausePattern
@@ -2177,7 +2236,7 @@ final class SessionScreenViewModel: ObservableObject {
     ) -> ExerciseExposure? {
         let reps = recentSet.actualReps ?? recentSet.plannedReps
         let load = recentSet.actualLoad ?? recentSet.plannedLoad
-        let rir = recentSet.actualRIR ?? recentSet.plannedRIR
+        let rir = EffortTracking.mode == .off ? nil : (recentSet.actualRIR ?? recentSet.plannedRIR)
 
         guard reps > 0 else { return nil }
 
@@ -2295,8 +2354,8 @@ final class SessionScreenViewModel: ObservableObject {
 
                 let reps = set.actualReps ?? set.plannedReps
                 let load = set.actualLoad ?? set.plannedLoad
-                // A compound set's RIR counts only when the lifter recorded it; the plan's number is never assumed.
-                let rir  = RIREntry.isCompound(exercise.exerciseId) ? set.actualRIR : (set.actualRIR ?? set.plannedRIR)
+                // RIR counts only when the lifter recorded it; the plan's number is never shown as an actual.
+                let rir  = set.actualRIR   // logged RIR only
                 let effLoad = E1RMCalculator.effectiveLoad(
                     actualLoad: load,
                     exerciseId: exercise.exerciseId,
@@ -3304,7 +3363,17 @@ struct UISessionSet: Identifiable {
                     }
                 }
                 
-                if let avg = recap.averageLastSetRIR {
+                if EffortTracking.mode == .simple, let avg = recap.averageLastSetRIR,
+                   let word = EffortTracking.simpleLabel(for: Int(avg.rounded())) {
+                    HStack {
+                        Text("Last-set effort")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(word)
+                            .font(.caption)
+                    }
+                } else if EffortTracking.mode == .detailed, let avg = recap.averageLastSetRIR {
                     HStack {
                         Text("Avg last-set RIR")
                             .font(.caption)
@@ -3315,7 +3384,7 @@ struct UISessionSet: Identifiable {
                     }
                 }
                 
-                if let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
+                if EffortTracking.mode == .detailed, let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
                     HStack {
                         Text("Last-set RIR range")
                             .font(.caption)

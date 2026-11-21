@@ -560,7 +560,7 @@ struct ExerciseHistorySheet: View {
                         exerciseId: targetExerciseId,
                         bodyWeight: bodyWeight
                     )
-                    let rir = set.actualRIR ?? set.plannedRIR
+                    let rir = set.actualRIR   // logged RIR only
                     executedSetCount += 1
                     repsTotal += reps
                     volumeTotal += effLoad * Double(reps)
@@ -639,7 +639,7 @@ struct ExerciseHistorySheet: View {
             return LoadFormatter(unit: unit).compact(load)
         }()
         var s = "\(loadString)×\(reps)"
-        if let rir { s += " @ RIR \(rir)" }
+        s += EffortTracking.loggedSuffix(rir)
         if usedRP {
             let trimmed = rpPattern.trimmingCharacters(in: .whitespacesAndNewlines)
             s += trimmed.isEmpty ? " (RP)" : " (RP: \(trimmed))"

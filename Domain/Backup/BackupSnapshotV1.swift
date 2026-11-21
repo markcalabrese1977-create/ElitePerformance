@@ -90,6 +90,8 @@ struct UserProfileBackupDTO: Codable {
     var muscleSetRanges: [String: Double]? = nil
     // Added (optional birthdate for age-based heart-rate zones). Absent in older backups.
     var birthDateOverride: Date? = nil
+    // Added (effort tracking): "simple" | "detailed" | "off". Optional so OLD backups decode with nil = resolved at read time.
+    var effortModeRaw: String? = nil
     // Added (equipment preset + checklist). Optional so OLD backups decode with nil: preset derives from
     // equipmentProfileRaw, checklist empty.
     var equipmentPresetRaw: String? = nil

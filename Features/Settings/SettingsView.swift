@@ -248,6 +248,20 @@ struct SettingsView: View {
             // Goal, experience, equipment, session length and joints are not edited here: only the program builder reads
             // them, so they live in Program > Change program, which rebuilds the program from them.
 
+            // MARK: - Effort tracking
+            if let profile = profiles.first {
+                Section {
+                    Picker("Effort tracking", selection: Binding(
+                        get: { EffortTracking.resolved(profile: profile, in: context) },
+                        set: { EffortTracking.choose($0, in: context) }
+                    )) {
+                        ForEach(EffortMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                } footer: {
+                    Text(EffortTracking.resolved(profile: profile, in: context).oneLine)
+                }
+            }
+
             // MARK: - Exercises
             Section("Exercises") {
                 NavigationLink("Exercise library") { ExerciseLibraryView() }

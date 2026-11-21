@@ -5386,3 +5386,131 @@ final class CustomExerciseLibraryTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Effort tracking (Simple / Detailed / Off)
+
+final class EffortTrackingTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    override func setUp() { super.setUp(); EffortTracking.clearMirror() }
+    override func tearDown() { EffortTracking.clearMirror(); super.tearDown() }
+
+    private func container() throws -> ModelContainer {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration("eff-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c); return c
+    }
+
+    private func benchItem(reps: [Int], rirs: [Int]) -> SessionItem {
+        let i = BackupTestSupport.item(1, "bench_press", name: "Bench Press", reps: reps, loads: reps.map { _ in 185 })
+        i.actualRIRs = rirs
+        return i
+    }
+
+    private func logged(_ ctx: ModelContext, compound: [Int] = [], isolation: [Int] = []) {
+        var items: [SessionItem] = []
+        if !compound.isEmpty { items.append(benchItem(reps: compound.map { _ in 8 }, rirs: compound)) }
+        if !isolation.isEmpty {
+            let i = BackupTestSupport.item(2, "cable_tricep_rope_pushdown", name: "Pushdown", reps: isolation.map { _ in 12 }, loads: isolation.map { _ in 40 })
+            i.actualRIRs = isolation
+            items.append(i)
+        }
+        ctx.insert(Session(date: Date(timeIntervalSince1970: 1_790_000_000), status: .completed, weekIndex: 1, dayLabel: "A", items: items))
+    }
+
+    // MARK: decisions
+
+    func test_off_decisionRIR_isNil_recordedOrNot_otherModesReadTheRecordedValue() {
+        let item = benchItem(reps: [8, 8], rirs: [0, 2])
+        for m in [EffortMode.simple, .detailed] {
+            EffortTracking.mode = m
+            XCTAssertEqual(RIREntry.decisionRIR(item, at: 0), 0, "\(m)")
+            XCTAssertEqual(RIREntry.decisionRIR(item, at: 1), 2, "\(m)")
+        }
+        EffortTracking.mode = .off
+        XCTAssertNil(RIREntry.decisionRIR(item, at: 0))
+        XCTAssertNil(RIREntry.decisionRIR(item, at: 1))
+        XCTAssertEqual(RIREntry.recorded(item, at: 0), 0, "Off ignores recorded RIR in decisions only; the data stays")
+    }
+
+    func test_off_isPureRepProgression_allZeroRIRHoldsInDetailedButNotInOff() {
+        func top(rirs: [Int]) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 6, targetSets: 3, targetRIR: 2, suggestedLoad: 290, repMin: 6, repMax: 8)
+            i.setRolesBySet = SessionItem.roles(backOffs: 3, tops: 1)
+            i.topRepMin = 4; i.topRepMax = 6; i.topRIR = 2
+            i.actualReps = [7, 7, 7, 6]; i.actualLoads = [290, 290, 290, 315]; i.actualRIRs = rirs
+            i.plannedRepsBySet = [7, 7, 7, 5]; i.setFeedbackBySet = Array(repeating: "", count: 4)
+            return i
+        }
+        EffortTracking.mode = .detailed
+        XCTAssertEqual(CoachingEngine.recommend(for: top(rirs: [0, 0, 0, 0]))?.nextTopLoad, 315, "all-0 RIR holds the load")
+        EffortTracking.mode = .off
+        XCTAssertEqual(CoachingEngine.recommend(for: top(rirs: [0, 0, 0, 0]))?.nextTopLoad, 320, "Off: the reps alone earn the step")
+        XCTAssertEqual(CoachingEngine.recommend(for: top(rirs: [-1, -1, -1, -1]))?.nextTopLoad, 320, "unset behaves the same as Off")
+    }
+
+    // MARK: words, labels
+
+    func test_simpleWords_storeRIR3_2_1_0_withHints_andLoggedSuffix() {
+        XCTAssertEqual(EffortTracking.simpleChoices.map(\.label), ["Easy", "Solid", "Hard", "All out"])
+        XCTAssertEqual(EffortTracking.simpleChoices.map(\.rir), [3, 2, 1, 0])
+        XCTAssertEqual(EffortTracking.simpleChoices.map(\.hint), ["3+ left", "2 left", "1 left", "0"])
+        XCTAssertEqual(EffortTracking.loggedSuffix(2, mode: .simple), " · Solid")
+        XCTAssertEqual(EffortTracking.loggedSuffix(4, mode: .simple), " @ 4 RIR", "no word for 4: the number")
+        XCTAssertEqual(EffortTracking.loggedSuffix(2, mode: .detailed), " @ 2 RIR")
+        XCTAssertEqual(EffortTracking.loggedSuffix(2, mode: .off), "")
+        XCTAssertEqual(EffortTracking.loggedSuffix(nil, mode: .detailed), "", "planned RIR is never shown as logged")
+    }
+
+    // MARK: resolution and the prompt
+
+    func test_resolution_nilIsDetailedWhenCompoundRIRRecorded_elseSimple_storedChoiceWins() throws {
+        let ctx = ModelContext(try container())
+        let p = UserProfile(); ctx.insert(p)
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .simple, "no history")
+        logged(ctx, isolation: [2, 2])
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .simple, "isolation values are the plan's, not a choice")
+        logged(ctx, compound: [2, 1])
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .detailed)
+        p.effortModeRaw = "off"
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .off)
+        EffortTracking.sync(in: ctx)
+        XCTAssertEqual(EffortTracking.mode, .off)
+    }
+
+    func test_prompt_onlyWhenNeverChosenAndEveryRecordedCompoundRIRIsZero() throws {
+        let ctx = ModelContext(try container())
+        let p = UserProfile(); ctx.insert(p)
+        XCTAssertFalse(EffortTracking.needsModePrompt(profile: p, in: ctx), "nothing recorded")
+        logged(ctx, compound: [0, 0, 0])
+        XCTAssertTrue(EffortTracking.needsModePrompt(profile: p, in: ctx))
+        XCTAssertEqual(EffortTracking.resolved(profile: p, in: ctx), .detailed, "until they answer, nothing changes")
+        EffortTracking.choose(.simple, in: ctx)
+        XCTAssertFalse(EffortTracking.needsModePrompt(profile: p, in: ctx), "asked once")
+        XCTAssertEqual(EffortTracking.mode, .simple)
+
+        let ctx2 = ModelContext(try container())
+        let p2 = UserProfile(); ctx2.insert(p2)
+        logged(ctx2, compound: [0, 2, 0])
+        XCTAssertFalse(EffortTracking.needsModePrompt(profile: p2, in: ctx2), "a lifter who varies their taps is using it")
+    }
+
+    // MARK: backup
+
+    func test_effortMode_roundTripsThroughBackup_andAnOldBackupRestoresNil() throws {
+        for raw in [EffortMode.off.rawValue, EffortMode.simple.rawValue, nil] as [String?] {
+            let src = ModelContext(try container())
+            let p = UserProfile(); p.effortModeRaw = raw; src.insert(p)
+            try src.save()
+            let file = try BackupTestSupport.exportFile(src)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let json = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertEqual(json.contains("\"effortModeRaw\""), raw != nil, "nil is not written (old readers never see the key)")
+
+            let dstC = try container()
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: file, modelContainer: dstC)
+            let restored = try ModelContext(dstC).fetch(FetchDescriptor<UserProfile>()).first
+            XCTAssertEqual(restored?.effortModeRaw, raw)
+        }
+    }
+}

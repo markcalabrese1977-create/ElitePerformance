@@ -80,11 +80,14 @@ struct ExerciseSessionDetailView: View {
         let plannedLoad = (idx < item.plannedLoadsBySet.count) ? item.plannedLoadsBySet[idx] : 0
         let load = actualLoad > 0 ? actualLoad : plannedLoad
 
-        let rir: String = {
+        // Logged RIR as "RIR n" (a word in Simple); a set with none shows the plan, marked "plan RIR n". Off shows no effort line.
+        let effortLine: String? = {
             if let recorded = RIREntry.recorded(item, at: idx), (idx < item.actualReps.count && item.actualReps[idx] > 0) {
-                return "\(recorded)"
+                let s = EffortTracking.loggedSuffix(recorded)
+                if s.isEmpty { return nil }
+                return EffortTracking.mode == .simple ? String(s.dropFirst(3)) : "RIR \(recorded)"
             }
-            return "\(item.targetRIR)"
+            return EffortTracking.mode == .off ? nil : "plan RIR \(item.targetRIR)"
         }()
 
         HStack {
@@ -98,9 +101,11 @@ struct ExerciseSessionDetailView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
-                Text("RIR \(rir)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let effortLine {
+                    Text(effortLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)

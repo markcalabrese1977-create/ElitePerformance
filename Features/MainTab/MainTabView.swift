@@ -61,6 +61,8 @@ struct TodayTabView: View {
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     @State private var showRestToday = false
+    // Shown once, when the lifter never chose an effort mode and every RIR they recorded is 0.
+    @State private var showEffortPrompt = false
 
     // No verified off-device backup for 7 days: a banner, dismissed only until tomorrow.
     @ObservedObject private var autoBackup = AutoBackupService.shared
@@ -185,6 +187,17 @@ struct TodayTabView: View {
             .listStyle(.insetGrouped)
             .clearsFloatingTabBar()
             .task { await autoBackup.refreshICloudAvailability() }   // so the iCloud reason shows on a fresh launch
+            .task {
+                let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
+                if EffortTracking.needsModePrompt(profile: profile, in: context) { showEffortPrompt = true }
+            }
+            .alert("How do you want to track effort?", isPresented: $showEffortPrompt) {
+                ForEach(EffortMode.allCases, id: \.self) { mode in
+                    Button(mode.title) { EffortTracking.choose(mode, in: context) }
+                }
+            } message: {
+                Text(EffortMode.allCases.map { "\($0.title): \($0.oneLine)" }.joined(separator: "\n"))
+            }
             .navigationTitle("Today")
             .sheet(isPresented: $showRestToday) {
                 if let meso = todaySession?.meso {
