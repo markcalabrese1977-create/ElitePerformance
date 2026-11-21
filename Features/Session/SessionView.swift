@@ -760,6 +760,9 @@ private struct SessionExerciseCardView: View {
             }
 
             VStack(spacing: 6) {
+                let firstUnloggedIndex = exercise.displaySets.first {
+                    shouldShowSet($0) && !($0.status == .completed || $0.status.isAnySkip)
+                }?.index
                 ForEach(exercise.displaySets) { set in
                     if shouldShowSet(set) {
                         SessionSetRowView(
@@ -768,6 +771,7 @@ private struct SessionExerciseCardView: View {
                             isExtraSet: set.index > exercise.targetSets && !set.isTop,
                             isBodyweightExercise: isBodyweightExercise,
                             isCompoundLift: RIREntry.isCompound(exercise.exerciseId),
+                            showsEffortExplanation: set.index == firstUnloggedIndex,
                             bodyWeight: userProfile?.bodyWeight,
                             onBodyweightSettingsTapped: onBodyweightSettingsTapped,
                             onLoadChanged: { text in
@@ -850,6 +854,8 @@ private struct SessionSetRowView: View {
     let isBodyweightExercise: Bool
     /// Compound lifts record RIR with one tap on a 0–4 chip (never pre-filled); other lifts keep the optional number field.
     var isCompoundLift: Bool = false
+    /// True only on the card's first unlogged set, so the RIR explanation appears once per exercise.
+    var showsEffortExplanation: Bool = true
     let bodyWeight: Double?
     let onBodyweightSettingsTapped: () -> Void
 
@@ -880,6 +886,7 @@ private struct SessionSetRowView: View {
     }
 
     @ScaledMetric(relativeTo: .callout) private var chipSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var optionalRIRWidth: CGFloat = 78
     @ScaledMetric(relativeTo: .body) private var loadFieldWidth: CGFloat = 72
     @ScaledMetric(relativeTo: .body) private var repsFieldWidth: CGFloat = 52
 
@@ -1013,17 +1020,17 @@ private struct SessionSetRowView: View {
                         .opacity(isLocked ? 0.6 : 1.0)
                     } else {
                         // Only what the lifter typed is text; the plan's number is a greyed placeholder, never a logged value.
-                        TextField(uiSet.plannedRIR.map { "\($0)" } ?? "0", text: Binding(
+                        TextField("optional", text: Binding(
                             get: { uiSet.actualRIR.map { "\($0)" } ?? "" },
                             set: { onRIRChanged($0) }
                         ))
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 40)
+                        .frame(width: optionalRIRWidth)
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
                     }
-                    if !isLocked {
+                    if !isLocked && showsEffortExplanation {
                         Text("RIR = reps you could still have done; 0 = nothing left")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
