@@ -57,6 +57,8 @@ final class HealthKitAuthorizationCoordinator {
     private let authorizer: HealthKitAuthorizing
     private let readTypes: Set<HKObjectType>
     private(set) var requestedThisLaunch = false
+    /// True while the system permission sheet is up (it is not a view controller of ours, so `PresentationProbe` cannot see it).
+    private(set) var isPresentingRequest = false
 
     init(authorizer: HealthKitAuthorizing, readTypes: Set<HKObjectType> = HealthKitReadSet.full) {
         self.authorizer = authorizer
@@ -83,6 +85,8 @@ final class HealthKitAuthorizationCoordinator {
         // Mark before awaiting so a second active moment during the sheet can't ask again.
         requestedThisLaunch = true
         print("ℹ️ HK auth: requesting (\(readTypes.count) types, status shouldRequest)")
+        isPresentingRequest = true
+        defer { isPresentingRequest = false }
         do {
             try await authorizer.requestAuthorization(read: readTypes)
             return log(.requested)

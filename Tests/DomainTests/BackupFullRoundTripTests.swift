@@ -5495,6 +5495,17 @@ final class EffortTrackingTests: XCTestCase {
         XCTAssertFalse(EffortTracking.needsModePrompt(profile: p2, in: ctx2), "a lifter who varies their taps is using it")
     }
 
+    func test_prompt_waitsForEverythingElse() {
+        func can(needs: Bool = true, shown: Bool = false, active: Bool = true, clear: Bool = true, restore: Bool = false, hk: Bool = false) -> Bool {
+            EffortTracking.canPresentPrompt(needsPrompt: needs, shownThisLaunch: shown, sceneActive: active, nothingPresented: clear,
+                                            restoreInProgress: restore, healthKitRequesting: hk)
+        }
+        XCTAssertTrue(can())
+        XCTAssertFalse(can(needs: false)); XCTAssertFalse(can(shown: true), "once per launch")
+        XCTAssertFalse(can(active: false)); XCTAssertFalse(can(clear: false), "a sheet or alert is up (welcome, Rest today, restore prompt)")
+        XCTAssertFalse(can(restore: true)); XCTAssertFalse(can(hk: true), "the HealthKit permission sheet")
+    }
+
     // MARK: backup
 
     func test_effortMode_roundTripsThroughBackup_andAnOldBackupRestoresNil() throws {

@@ -84,6 +84,14 @@ enum EffortTracking {
         return !all.isEmpty && all.allSatisfy { $0 == 0 }
     }
 
+    /// The "How do you want to track effort?" prompt waits until nothing else owns the screen: no sheet or alert (the welcome
+    /// sheet, a restore prompt, Rest today), no restore running, no HealthKit permission sheet, the app active, and it has not
+    /// been shown this launch. It is answered with one of three buttons, so it cannot be left open.
+    static func canPresentPrompt(needsPrompt: Bool, shownThisLaunch: Bool, sceneActive: Bool, nothingPresented: Bool,
+                                 restoreInProgress: Bool, healthKitRequesting: Bool) -> Bool {
+        needsPrompt && !shownThisLaunch && sceneActive && nothingPresented && !restoreInProgress && !healthKitRequesting
+    }
+
     /// Refreshes the mirror from the profile. Call at launch, after a restore and after the lifter changes the setting.
     static func sync(in context: ModelContext) {
         let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first

@@ -63,6 +63,8 @@ struct TodayTabView: View {
     @State private var showRestToday = false
     // Shown once, when the lifter never chose an effort mode and every RIR they recorded is 0.
     @State private var showEffortPrompt = false
+    @State private var effortPromptShown = false
+    @Environment(\.scenePhase) private var scenePhase
 
     // No verified off-device backup for 7 days: a banner, dismissed only until tomorrow.
     @ObservedObject private var autoBackup = AutoBackupService.shared
@@ -187,10 +189,7 @@ struct TodayTabView: View {
             .listStyle(.insetGrouped)
             .clearsFloatingTabBar()
             .task { await autoBackup.refreshICloudAvailability() }   // so the iCloud reason shows on a fresh launch
-            .task {
-                let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
-                if EffortTracking.needsModePrompt(profile: profile, in: context) { showEffortPrompt = true }
-            }
+            .task { await presentEffortPromptWhenIdle() }
             .alert("How do you want to track effort?", isPresented: $showEffortPrompt) {
                 ForEach(EffortMode.allCases, id: \.self) { mode in
                     Button(mode.title) { EffortTracking.choose(mode, in: context) }
@@ -203,6 +202,25 @@ struct TodayTabView: View {
                 if let meso = todaySession?.meso {
                     RestTodayFlow(meso: meso, onFinish: { showRestToday = false })
                 }
+            }
+        }
+    }
+
+    /// Polls (cancelled when Today leaves the screen) until nothing else is presented, then raises the effort prompt once.
+    private func presentEffortPromptWhenIdle() async {
+        while !Task.isCancelled && !effortPromptShown {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if Task.isCancelled { return }
+            let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
+            let needs = EffortTracking.needsModePrompt(profile: profile, in: context)
+            if !needs { return }
+            if EffortTracking.canPresentPrompt(
+                needsPrompt: needs, shownThisLaunch: effortPromptShown, sceneActive: scenePhase == .active,
+                nothingPresented: PresentationProbe.nothingPresented(), restoreInProgress: RestoreActivity.inProgress,
+                healthKitRequesting: HealthKitAuthorizationCoordinator.shared.isPresentingRequest) {
+                effortPromptShown = true
+                showEffortPrompt = true
+                return
             }
         }
     }
