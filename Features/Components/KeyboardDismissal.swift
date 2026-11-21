@@ -37,11 +37,18 @@ enum KeyboardDismissal {
         return bar
     }
 
+    /// SwiftUI puts an empty accessory of its own on every field of a screen that has a toolbar (`InputAccessoryGenerator`, zero height).
+    /// That one is replaced; an accessory of any other kind is the field's own and is kept.
+    private static func isFree(_ accessory: UIView?) -> Bool {
+        guard let accessory else { return true }
+        return NSStringFromClass(type(of: accessory)).contains("InputAccessoryGenerator")
+    }
+
     /// Puts the Done bar on `field` when it needs one and has no accessory of its own.
     @MainActor static func attachIfNeeded(to field: UIResponder) {
-        if let f = field as? UITextField, needsDone(f.keyboardType), f.inputAccessoryView == nil {
+        if let f = field as? UITextField, needsDone(f.keyboardType), isFree(f.inputAccessoryView) {
             f.inputAccessoryView = makeAccessory(); f.reloadInputViews()
-        } else if let v = field as? UITextView, v.isEditable, v.inputAccessoryView == nil {
+        } else if let v = field as? UITextView, v.isEditable, isFree(v.inputAccessoryView) {
             v.inputAccessoryView = makeAccessory(); v.reloadInputViews()
         }
     }

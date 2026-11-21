@@ -1249,6 +1249,17 @@ final class KeyboardDismissalTests: XCTestCase {
         XCTAssertTrue(own.inputAccessoryView === mine, "a field's own accessory is never replaced")
     }
 
+    /// SwiftUI puts its own zero-height `InputAccessoryGenerator` on every field of a screen that has a toolbar (the session screen): that one is
+    /// replaced, or the Done bar never shows there (found on the iPhone SE simulator).
+    private final class InputAccessoryGeneratorStub: UIView {}
+
+    func test_swiftUIsEmptyAccessory_isReplaced() {
+        let f = UITextField(); f.keyboardType = .decimalPad
+        f.inputAccessoryView = InputAccessoryGeneratorStub()
+        begin(f, UITextField.textDidBeginEditingNotification)
+        XCTAssertNotNil(doneItem(of: f.inputAccessoryView), "the Done bar replaces SwiftUI's empty accessory")
+    }
+
     func test_multiLineFields_getADoneBar_becauseReturnAddsALine() {
         let v = UITextView(); v.isEditable = true
         begin(v, UITextView.textDidBeginEditingNotification)
