@@ -752,15 +752,16 @@ private struct ProgramExercisePlanRow: View {
             }
         }()
 
-        let rirText: String = {
+        // Follows the effort mode: "2–3 RIR" (Detailed), "Easy–Solid" (Simple), nothing (Off).
+        let rirText: String? = {
             if let min = item.targetRIRMin, let max = item.targetRIRMax {
-                return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
+                return EffortTracking.plannedRangeText(min, max)
             } else {
-                return "\(item.targetRIR) RIR"
+                return EffortTracking.plannedText(item.targetRIR)
             }
         }()
 
-        return "\(setsText) · \(repsText) · \(rirText)"
+        return EffortTracking.joined([setsText, repsText, rirText])
     }
     
     private var repsRangeText: String {
@@ -812,29 +813,34 @@ private struct ProgramExercisePlanRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // RIR
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Default RIR")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            // RIR: the number (Detailed), the word (Simple), hidden (Off; the stored value is untouched).
+            if effortMode != .off {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(effortMode == .simple ? "Default effort" : "Default RIR")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
 
-                Stepper(value: Binding(get: { item.targetRIR }, set: { PlanStepperEdits.setRIR(item, to: $0) }), in: 0...5) {
-                    Text("\(item.targetRIR)")
-                        .font(.body)
-                        .monospacedDigit()
-                        .frame(minWidth: 22, alignment: .leading)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                    Stepper(value: Binding(get: { item.targetRIR }, set: { PlanStepperEdits.setRIR(item, to: $0) }), in: 0...5) {
+                        Text(EffortTracking.plannedText(item.targetRIR, mode: effortMode)?.replacingOccurrences(of: " RIR", with: "") ?? "")
+                            .font(.body)
+                            .monospacedDigit()
+                            .frame(minWidth: 22, alignment: .leading)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
 
+    @AppStorage(EffortTracking.mirrorKey) private var effortRaw: String = ""
+    private var effortMode: EffortMode { EffortMode(rawValue: effortRaw) ?? .detailed }
+
     private var perSetPlanEditor: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Per-set plan (load × reps @ RIR)")
+            Text(effortMode == .detailed ? "Per-set plan (load × reps @ RIR)" : effortMode == .simple ? "Per-set plan (load × reps @ effort)" : "Per-set plan (load × reps)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -864,11 +870,28 @@ private struct ProgramExercisePlanRow: View {
                         .keyboardType(.numberPad)
                         .frame(width: 60)
 
-                    // RIR (per set override; blank = use targetRIR)
-                    TextField("RIR", value: bindingForRIR(at: idx), format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.numberPad)
-                        .frame(width: 50)
+                    // RIR (per set override; blank = use targetRIR): a number (Detailed), a word menu (Simple), hidden (Off)
+                    switch effortMode {
+                    case .detailed:
+                        TextField("RIR", value: bindingForRIR(at: idx), format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.numberPad)
+                            .frame(width: 50)
+                    case .simple:
+                        let rirBinding = bindingForRIR(at: idx)
+                        Menu {
+                            ForEach(EffortTracking.simpleChoices, id: \.rir) { choice in
+                                Button(choice.label) { rirBinding.wrappedValue = choice.rir }
+                            }
+                        } label: {
+                            Text(EffortTracking.plannedWord(rirBinding.wrappedValue))
+                                .font(.callout)
+                                .lineLimit(1)
+                                .frame(minWidth: 60)
+                        }
+                    case .off:
+                        EmptyView()
+                    }
                 }
             }
         }
@@ -935,9 +958,7 @@ private struct ProgramExercisePlanRow: View {
         let setsText = "\(item.targetSets) sets"
         // The reps shown are the per-set plan's (what the per-set editor below and Today use), not the flattened default.
         let repsText = ProgramDayDetailView.planRepsText(for: item)
-        let rirText = "\(item.targetRIR) RIR"
-
-        return "\(muscle) · \(setsText) · \(repsText) · \(rirText)"
+        return EffortTracking.joined([muscle, setsText, repsText, EffortTracking.plannedText(item.targetRIR)])
     }
 
     private var intensifierLine: String? {

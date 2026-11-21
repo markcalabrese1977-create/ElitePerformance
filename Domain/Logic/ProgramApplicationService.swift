@@ -132,7 +132,13 @@ enum ProgramApplicationService {
         case .fatLoss:
             return "Goal: Lose fat. Weekly sets hold steady instead of ramping up, so you keep your training volume while recovery is limited."
         case .longevity:
-            return "Goal: Maintain / move better. Every exercise has 1 fewer set and 1 more rep in reserve, with a gentler weekly ramp."
+            let easier: String
+            switch EffortTracking.setupModeNow {
+            case .detailed: easier = "1 fewer set and 1 more rep in reserve"
+            case .simple: easier = "1 fewer set and slightly easier effort"
+            case .off: easier = "1 fewer set"
+            }
+            return "Goal: Maintain / move better. Every exercise has \(easier), with a gentler weekly ramp."
         }
     }
 

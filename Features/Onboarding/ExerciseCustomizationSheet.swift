@@ -96,11 +96,23 @@ struct ExerciseCustomizationSheet: View {
                             value: binding(for: wave, keyPath: \.repMax),
                             in: 1...30
                         )
-                        Stepper(
-                            "Target RIR: \(drafts[wave]?.rir ?? 0)",
-                            value: binding(for: wave, keyPath: \.rir),
-                            in: 0...5
-                        )
+                        switch EffortTracking.setupModeNow {
+                        case .detailed:
+                            Stepper(
+                                "Target RIR: \(drafts[wave]?.rir ?? 0)",
+                                value: binding(for: wave, keyPath: \.rir),
+                                in: 0...5
+                            )
+                        case .simple:
+                            Picker("Planned effort", selection: Binding(
+                                get: { min(drafts[wave]?.rir ?? 0, 3) },
+                                set: { binding(for: wave, keyPath: \.rir).wrappedValue = $0 }
+                            )) {
+                                ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+                            }
+                        case .off:
+                            EmptyView()
+                        }
                         Button("Apply to all week types") {
                             drafts = WaveCustomization.applyToAll(from: wave, drafts: drafts)
                         }
@@ -110,7 +122,7 @@ struct ExerciseCustomizationSheet: View {
 
                 if let deload = exerciseTemplate.prescription(for: .deload) {
                     Section("Deload (fixed)") {
-                        Text("\(deload.defaultSetCount) sets · \(deload.repMin)-\(deload.repMax) reps @ \(deload.targetRIRMax) RIR")
+                        Text(EffortTracking.joined(["\(deload.defaultSetCount) sets", "\(deload.repMin)-\(deload.repMax) reps", EffortTracking.plannedText(deload.targetRIRMax, mode: EffortTracking.setupModeNow)]))
                             .foregroundStyle(.secondary)
                     }
                 }

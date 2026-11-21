@@ -8,6 +8,17 @@ struct InsertDeloadModel {
     typealias Service = SessionItemEditService
 
     static let title = "Insert deload week"
+    /// "A deload week goes in as week 7. Half the sets, the same rep range, 3–4 reps in reserve." in the effort mode's words.
+    static func introText(week: Int, mode: EffortMode = EffortTracking.mode) -> String {
+        let tail: String
+        switch mode {
+        case .detailed: tail = ", 3–4 reps in reserve."
+        case .simple: tail = ", and it feels easy."
+        case .off: tail = "."
+        }
+        return "A deload week goes in as week \(week). Half the sets, the same rep range\(tail)"
+    }
+
     static let unchangedFooter = "Unchanged: logged and completed sessions, every exercise, wave and day. Later planned sessions keep their loads and move one week later."
 
     let meso: MesoBlock
@@ -178,7 +189,7 @@ struct InsertDeloadFlow: View {
                 } else {
                     Section {
                         if let week = plan.weekIndex {
-                            Text("A deload week goes in as week \(week). Half the sets, the same rep range, 3–4 reps in reserve.")
+                            Text(InsertDeloadModel.introText(week: week))
                         }
                         Text(InsertDeloadModel.moveText(count: plan.shifted.count))
                         if let end = InsertDeloadModel.endDateText(plan) { Text(end) }
@@ -191,7 +202,7 @@ struct InsertDeloadFlow: View {
                             ForEach(Array(row.items.enumerated()), id: \.offset) { _, item in
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.name)
-                                    Text("\(item.prescription) · \(item.load)")
+                                    Text("\(EffortTracking.localize(item.prescription)) · \(item.load)")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }

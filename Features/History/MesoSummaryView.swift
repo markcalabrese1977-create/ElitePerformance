@@ -773,7 +773,7 @@ struct MesoSummaryView: View {
 
                 nextBlockButton(
                                     title: "Start maintenance block",
-                                    subtitle: "Hold your gains. Reduced volume, same loads, lower RIR targets.",
+                                    subtitle: EffortTracking.mode == .detailed ? "Hold your gains. Reduced volume, same loads, lower RIR targets." : EffortTracking.mode == .simple ? "Hold your gains. Reduced volume, same loads, easier effort." : "Hold your gains. Reduced volume, same loads.",
                                     icon: "equal.circle",
                                     color: .green
                                 ) {

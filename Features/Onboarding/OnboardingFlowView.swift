@@ -897,7 +897,7 @@ struct OnboardingFlowView: View {
                     }
                 }
 
-                Text("Tap an exercise to customize its reps, RIR, and sets before your program starts.")
+                Text(EffortTracking.setupModeNow == .detailed ? "Tap an exercise to customize its reps, RIR, and sets before your program starts." : "Tap an exercise to customize its reps and sets before your program starts.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1244,7 +1244,8 @@ struct OnboardingFlowView: View {
         private func addedWaveSummary(_ added: AddedExercise) -> String {
             [WaveType.a, .b, .c].compactMap { wave -> String? in
                 guard let p = added.wavePrescriptions[wave] else { return nil }
-                return "\(wave.displayName): \(p.repMin)-\(p.repMax) @\(p.targetRIR)RIR"
+                let rir = EffortTracking.plannedText(p.targetRIR, mode: EffortTracking.setupModeNow).map { " @ \($0)" } ?? ""
+                return "\(wave.displayName): \(p.repMin)-\(p.repMax)\(rir)"
             }.joined(separator: "  ")
         }
 
@@ -1294,7 +1295,8 @@ struct OnboardingFlowView: View {
                     sets = exercise.sets(forWeek: weekNumber, wave: wave)
                 }
 
-                return "\(wave.displayName): \(sets)×\(repMin)-\(repMax) @\(rir)RIR"
+                let rirPart = EffortTracking.plannedText(rir, mode: EffortTracking.setupModeNow).map { " @ \($0)" } ?? ""
+                return "\(wave.displayName): \(sets)×\(repMin)-\(repMax)\(rirPart)"
             }.joined(separator: "  ")
         }
 

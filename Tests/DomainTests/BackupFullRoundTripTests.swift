@@ -5568,6 +5568,55 @@ final class EffortTrackingTests: XCTestCase {
         }
     }
 
+    /// Build 15: every RIR text follows the effort mode through ONE helper.
+    func test_plannedText_followsTheMode_everywhere() {
+        XCTAssertEqual(EffortTracking.plannedText(2, mode: .detailed), "2 RIR")
+        XCTAssertEqual(EffortTracking.plannedText(2, mode: .simple), "Solid")
+        XCTAssertEqual(EffortTracking.plannedText(4, mode: .simple), "Easy")
+        XCTAssertNil(EffortTracking.plannedText(2, mode: .off))
+
+        XCTAssertEqual(EffortTracking.plannedRangeText(2, 3, mode: .detailed), "2–3 RIR")
+        XCTAssertEqual(EffortTracking.plannedRangeText(2, 2, mode: .detailed), "2 RIR")
+        XCTAssertEqual(EffortTracking.plannedRangeText(2, 3, mode: .simple), "Easy–Solid")
+        XCTAssertEqual(EffortTracking.plannedRangeText(3, 4, mode: .simple), "Easy", "3 and 4 are both Easy")
+        XCTAssertNil(EffortTracking.plannedRangeText(2, 3, mode: .off))
+
+        XCTAssertEqual(EffortTracking.joined(["Week 1", nil, "3 sets", ""]), "Week 1 · 3 sets", "an Off RIR leaves no dangling separator")
+
+        XCTAssertEqual(EffortTracking.localize("4 x 8-12 @ RIR 2-3", mode: .detailed), "4 x 8-12 @ RIR 2-3")
+        XCTAssertEqual(EffortTracking.localize("4 x 8-12 @ RIR 2-3", mode: .simple), "4 x 8-12 @ Easy–Solid")
+        XCTAssertEqual(EffortTracking.localize("2 x 8-10 @ RIR 3-4", mode: .simple), "2 x 8-10 @ Easy")
+        XCTAssertEqual(EffortTracking.localize("4 x 8-12 @ RIR 2-3", mode: .off), "4 x 8-12")
+        XCTAssertEqual(EffortTracking.localize("1 x 4-6 @ 2 top + 3 x 6-8 @ RIR 2-3", mode: .simple), "1 x 4-6 @ Solid top + 3 x 6-8 @ Easy–Solid")
+        XCTAssertEqual(EffortTracking.localize("1 x 4-6 @ 2 top + 3 x 6-8 @ RIR 2-3", mode: .off), "1 x 4-6 top + 3 x 6-8")
+
+        XCTAssertEqual(EffortTracking.targetPhrase(mode: .detailed), "the target RIR")
+        XCTAssertEqual(EffortTracking.targetPhrase(mode: .simple), "planned")
+        XCTAssertEqual(EffortTracking.setupMode(raw: ""), .simple, "a lifter with no stored mode is new: setup screens speak Simple")
+        XCTAssertEqual(EffortTracking.setupMode(raw: "off"), .off)
+    }
+
+    func test_screenTexts_followTheMode() {
+        let slot = WavelessSlot(exerciseId: "bench", sets: 3, repMin: 8, repMax: 10, rirMin: 2, rirMax: 3)
+        XCTAssertEqual(OwnProgramFlowView.summary(slot, mode: .detailed), "3 × 8–10 @ RIR 2–3")
+        XCTAssertEqual(OwnProgramFlowView.summary(slot, mode: .simple), "3 × 8–10 @ Easy–Solid")
+        XCTAssertEqual(OwnProgramFlowView.summary(slot, mode: .off), "3 × 8–10")
+        XCTAssertTrue(StartNextMesoModel.unchangedFooter(mode: .detailed).contains("rep and RIR targets"))
+        XCTAssertTrue(StartNextMesoModel.unchangedFooter(mode: .simple).contains("rep and effort targets"))
+        XCTAssertFalse(StartNextMesoModel.unchangedFooter(mode: .off).contains("RIR"))
+        XCTAssertTrue(InsertDeloadModel.introText(week: 7, mode: .detailed).contains("3–4 reps in reserve"))
+        XCTAssertFalse(InsertDeloadModel.introText(week: 7, mode: .simple).contains("reserve"))
+        XCTAssertFalse(InsertDeloadModel.introText(week: 7, mode: .off).contains("easy"))
+        for m in EffortMode.allCases {
+            EffortTracking.mode = m
+            let ex = UISessionExercise(exerciseId: "bench", name: "Bench", detail: "", weekInMeso: 1, repMin: 8, repMax: 12,
+                                       targetRIRMin: 2, targetRIRMax: 3, targetSets: 3, sets: [])
+            XCTAssertEqual(ex.prescriptionDetailLine.contains("RIR"), m == .detailed, "\(m): \(ex.prescriptionDetailLine)")
+            XCTAssertEqual(ex.prescriptionDetailLine.contains("Solid"), m == .simple, "\(m): \(ex.prescriptionDetailLine)")
+            XCTAssertFalse(ex.prescriptionDetailLine.hasSuffix(" · "), "no dangling separator in \(m)")
+        }
+    }
+
     func test_unsetIsolationRIR_isNotRecorded_andTheProjectionFallbackStillUsesTheTarget() throws {
         let ctx = ModelContext(try container())
         func project(rirs: [Int]) throws -> Double? {

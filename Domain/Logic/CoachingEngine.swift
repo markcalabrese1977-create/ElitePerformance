@@ -317,7 +317,7 @@ struct CoachingEngine {
             return TopRead(message: "\(what), under the range (\(range)) — hold this load.", nextTopLoad: load)
         }
         if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
-            return TopRead(message: "\(what), harder than the target RIR — hold this load.", nextTopLoad: load)
+            return TopRead(message: "\(what), harder than \(EffortTracking.targetPhrase()) — hold this load.", nextTopLoad: load)
         }
         if reps.allSatisfy({ $0 >= hi }) {
             if isProgressionExempt {
@@ -601,7 +601,7 @@ struct CoachingEngine {
                 let currentLoadText = LoadFormatter(unit: unit).oneDecimal(baseLoad)
                 let currentReps = primaryReps[0]
                 if let avgRIR, avgRIR < Double(targetRIR) - 0.5 {
-                    let msg = "\(setLabel) at \(currentLoadText) × \(currentReps) is already harder than the target RIR. Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
+                    let msg = "\(setLabel) at \(currentLoadText) × \(currentReps) is already harder than \(EffortTracking.targetPhrase()). Keep this load and monitor the remaining \(remaining == 1 ? "set" : "sets") — if it stays hard, this is a hold day."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: baseLoad)
                 }
                 if currentReps < plannedBottomReps {

@@ -8,7 +8,16 @@ struct StartNextMesoModel {
     typealias Service = SessionItemEditService
 
     static let title = "Start next meso"
-    static let unchangedFooter = "Kept: every exercise and its order, the sets for each week, rep and RIR targets, the wave pattern and your session cues. Finished sessions and your history don't change."
+    static var unchangedFooter: String { unchangedFooter(mode: EffortTracking.mode) }
+    static func unchangedFooter(mode: EffortMode) -> String {
+        let targets: String
+        switch mode {
+        case .detailed: targets = "rep and RIR targets"
+        case .simple: targets = "rep and effort targets"
+        case .off: targets = "rep targets"
+        }
+        return "Kept: every exercise and its order, the sets for each week, \(targets), the wave pattern and your session cues. Finished sessions and your history don't change."
+    }
 
     let meso: MesoBlock
     let context: ModelContext
@@ -253,7 +262,7 @@ struct StartNextMesoFlow: View {
                             ForEach(Array(row.items.enumerated()), id: \.offset) { _, item in
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.name)
-                                    Text([item.prescription, item.load, item.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    Text([EffortTracking.localize(item.prescription), item.load, item.source].filter { !$0.isEmpty }.joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }

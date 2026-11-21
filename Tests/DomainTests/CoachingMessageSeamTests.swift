@@ -508,6 +508,16 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertTrue(low?.message.contains("under the range (4–6)") ?? false, low?.message ?? "nil")
         let hard = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
         XCTAssertEqual(hard?.nextTopLoad, 315, "harder than the target RIR holds even at the top of the range")
+        XCTAssertTrue(hard?.message.contains("harder than the target RIR") ?? false, hard?.message ?? "nil")
+        // Simple speaks in words ("planned"); Off cannot reach this rule (decisionRIR is nil), so it never prints.
+        EffortTracking.mode = .simple
+        defer { EffortTracking.clearMirror() }
+        let simple = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
+        XCTAssertTrue(simple?.message.contains("harder than planned") ?? false, simple?.message ?? "nil")
+        XCTAssertFalse(simple?.message.contains("RIR") ?? true, simple?.message ?? "nil")
+        EffortTracking.mode = .off
+        let off = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
+        XCTAssertFalse(off?.message.contains("harder than") ?? true, "Off ignores effort entirely: \(off?.message ?? "nil")")
     }
 
     /// A skipped back-off with the top logged: back-off evidence is insufficient and the top load never

@@ -369,6 +369,9 @@ final class ChangePrescriptionFlowTests: XCTestCase {
     }
 
     func test_B5_modelBuildsTheTopSetChange() throws {
+        // The title's effort part follows the mode; the process-wide mirror may hold another mode left by an earlier test.
+        EffortTracking.mode = .detailed
+        defer { EffortTracking.clearMirror() }
         let (ctx, block) = try makeBlock()
         var m = try model(ctx, block)
         XCTAssertNil(m.change.topSet)

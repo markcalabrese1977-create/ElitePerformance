@@ -63,6 +63,83 @@ enum EffortTracking {
         return " @ \(rir) RIR"
     }
 
+    // MARK: Planned / target RIR text (one rule for every screen)
+
+    /// The Simple word for a PLANNED or TARGET RIR: 3 or more is Easy, then Solid, Hard, All out.
+    static func plannedWord(_ rir: Int) -> String {
+        simpleChoices.first { $0.rir == min(max(rir, 0), 3) }?.label ?? "Solid"
+    }
+
+    /// A planned / target RIR as display text: "2 RIR" (Detailed), "Solid" (Simple), nil (Off: no effort text anywhere).
+    static func plannedText(_ rir: Int, mode: EffortMode = EffortTracking.mode) -> String? {
+        switch mode {
+        case .detailed: return "\(rir) RIR"
+        case .simple: return plannedWord(rir)
+        case .off: return nil
+        }
+    }
+
+    /// A planned / target RIR range: "2–3 RIR" (Detailed), "Easy–Solid" (Simple; one word when both ends map to the same word), nil (Off).
+    static func plannedRangeText(_ lo: Int, _ hi: Int, mode: EffortMode = EffortTracking.mode) -> String? {
+        let (a, b) = (min(lo, hi), max(lo, hi))
+        switch mode {
+        case .detailed: return a == b ? "\(a) RIR" : "\(a)–\(b) RIR"
+        case .simple:
+            let easy = plannedWord(b), hard = plannedWord(a)
+            return easy == hard ? easy : "\(easy)–\(hard)"
+        case .off: return nil
+        }
+    }
+
+    /// Rewrites the effort part of a stored prescription summary for display: "4 x 8-12 @ RIR 2-3" and "1 x 4-6 @ 2 top + ..." stay
+    /// as they are in Detailed; Simple shows the words ("4 x 8-12 @ Easy–Solid"); Off drops the effort part. The domain strings
+    /// themselves never change (they are compared and logged), only what the lifter reads.
+    static func localize(_ text: String, mode: EffortMode = EffortTracking.mode) -> String {
+        guard mode != .detailed else { return text }
+        var out = text
+        func replace(_ pattern: String, _ body: (NSTextCheckingResult, NSString) -> String) {
+            guard let re = try? NSRegularExpression(pattern: pattern) else { return }
+            let ns = out as NSString
+            var result = ""; var last = 0
+            for m in re.matches(in: out, range: NSRange(location: 0, length: ns.length)) {
+                result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+                result += body(m, ns)
+                last = m.range.location + m.range.length
+            }
+            result += ns.substring(from: last)
+            out = result
+        }
+        // "@ RIR 2-3" / "@ RIR 3"
+        replace(#" @ RIR (\d+)(?:-(\d+))?"#) { m, ns in
+            guard mode == .simple else { return "" }
+            let lo = Int(ns.substring(with: m.range(at: 1))) ?? 0
+            let hi = m.range(at: 2).location == NSNotFound ? lo : (Int(ns.substring(with: m.range(at: 2))) ?? lo)
+            return " @ " + (plannedRangeText(lo, hi, mode: .simple) ?? "")
+        }
+        // "@ 2 top"
+        replace(#" @ (\d+) top"#) { m, ns in
+            guard mode == .simple else { return " top" }
+            return " @ \(plannedWord(Int(ns.substring(with: m.range(at: 1))) ?? 0)) top"
+        }
+        return out
+    }
+
+    /// The mode setup screens (onboarding, "Use my own program") show text in. A lifter with no stored mode yet is a NEW lifter, and
+    /// onboarding writes Simple for them, so the setup screens already speak Simple. (`raw` is the `@AppStorage` mirror value.)
+    static func setupMode(raw: String) -> EffortMode { EffortMode(rawValue: raw) ?? .simple }
+    /// The same, read now (for setup screens that build text outside a view body).
+    static var setupModeNow: EffortMode { setupMode(raw: UserDefaults.standard.string(forKey: mirrorKey) ?? "") }
+
+    /// Joins display parts with " · ", dropping nil / empty ones (so an Off-mode RIR leaves no dangling separator).
+    static func joined(_ parts: [String?], separator: String = " · ") -> String {
+        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: separator)
+    }
+
+    /// "the target RIR" (Detailed) / "planned" (Simple) in coaching sentences. Off never reaches an RIR rule (`decisionRIR` is nil).
+    static func targetPhrase(mode: EffortMode = EffortTracking.mode) -> String {
+        mode == .simple ? "planned" : "the target RIR"
+    }
+
     // MARK: Resolution
 
     /// Logged working sets on COMPOUND lifts that carry a recorded RIR. Isolation lifts are left out on purpose: they stored the

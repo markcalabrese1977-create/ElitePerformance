@@ -614,19 +614,16 @@ private struct SessionExerciseCardView: View {
             repsText = "\(repRange.min) reps"
         }
 
-        let rirText: String = {
+        // Follows the effort mode: "2 RIR" (Detailed), the word (Simple), nothing (Off).
+        let rirText: String? = {
             if let rir = exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
                 ?? exercise.sets.first?.plannedRIR {
-                return "\(rir) RIR"
+                return EffortTracking.plannedText(rir)
             }
-            return "— RIR"
+            return EffortTracking.mode == .detailed ? "— RIR" : nil
         }()
 
-        if let muscleText {
-            return "\(weekText) · \(muscleText) · \(setsText) · \(repsText) · \(rirText)"
-        } else {
-            return "\(weekText) · \(setsText) · \(repsText) · \(rirText)"
-        }
+        return EffortTracking.joined([weekText, muscleText, setsText, repsText, rirText])
     }
 
     private var hasExerciseNote: Bool {
@@ -1030,13 +1027,19 @@ private struct SessionSetRowView: View {
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
                     }
-                    if !isLocked && showsEffortExplanation {
-                        Text("RIR = reps you could still have done; 0 = nothing left")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
+        // A logged isolation set with no RIR shows nothing (no label, no "optional"), but keeps its space so the row does not shift.
+        .opacity(!isCompoundLift && isLocked && uiSet.actualRIR == nil ? 0 : 1)
+        .accessibilityHidden(!isCompoundLift && isLocked && uiSet.actualRIR == nil)
+    }
+
+    /// The one-line RIR explanation: BELOW the inputs row (never inside it, so it cannot change how Load / Reps / RIR lay out),
+    /// on the card's first unlogged set only.
+    private var effortExplanationLine: some View {
+        Text("RIR = reps you could still have done; 0 = nothing left")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var actionBar: some View {
@@ -1209,7 +1212,17 @@ private struct SessionSetRowView: View {
                                         .foregroundStyle(.green)
                                         .clipShape(Capsule())
                                     }
-                                }
+                                } else {
+                    // An unlogged row reserves the status chip's exact size (invisible), at every text size, so logging a set
+                    // (which shows the Done chip) does not nudge the rows below it.
+                    Text("Done")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
             }
 
             // PLAN / SUGGESTED line
@@ -1230,6 +1243,8 @@ private struct SessionSetRowView: View {
                 }
             }
 
+            if effortMode == .detailed && !isLocked && showsEffortExplanation { effortExplanationLine }
+
             // Log / Skip / Pump / Edit live on their own line UNDER the inputs, so no label is squeezed into a narrow column.
             // Labels never wrap mid-word (fixedSize); if the line cannot fit, the actions stack vertically instead.
             ViewThatFits(in: .horizontal) {
@@ -1237,8 +1252,9 @@ private struct SessionSetRowView: View {
                 VStack(alignment: .leading, spacing: 8) { actionBar }
             }
 
-            // Intensifier toggles row (hidden when locked)
-            if !isLocked {
+            // Intensifier toggles row. When the set is logged it is hidden but KEEPS ITS SPACE, so logging a set never moves
+            // the rows below it (the next set's Log button stays where the thumb is).
+            do {
                 HStack(spacing: 20) {
                     HStack(spacing: 6) {
                         Toggle("", isOn: Binding(
@@ -1265,6 +1281,9 @@ private struct SessionSetRowView: View {
                     Spacer()
                 }
                 .padding(.top, 2)
+                .opacity(isLocked ? 0 : 1)
+                .allowsHitTesting(!isLocked)
+                .accessibilityHidden(isLocked)
             }
 
             // RP pattern field (shown when toggle is on)
@@ -1787,14 +1806,10 @@ final class SessionScreenViewModel: ObservableObject {
         let weekText = parts.indices.contains(0) ? parts[0] : "Week \(exercise.weekIndex)"
         let muscleText = parts.indices.contains(1) ? parts[1] : nil
         let repsText = "\(plannedReps) reps"
-        let rirText = "\(plannedRIR) RIR"
+        let rirText = EffortTracking.plannedText(plannedRIR)
         let setsText = "\(exercise.targetSets) sets"
 
-        if let muscleText {
-            exercise.detail = "\(weekText) · \(muscleText) · \(setsText) · \(repsText) · \(rirText)"
-        } else {
-            exercise.detail = "\(weekText) · \(setsText) · \(repsText) · \(rirText)"
-        }
+        exercise.detail = EffortTracking.joined([weekText, muscleText, setsText, repsText, rirText])
 
         exercises[exerciseIdx] = exercise
         persist(using: context)
@@ -1972,7 +1987,7 @@ final class SessionScreenViewModel: ObservableObject {
             )
         }
 
-        let detail = "Week \(session.weekIndex) · \(catalogExercise.primaryMuscle.rawValue.capitalized) · \(defaultSets) sets · \(defaultReps) reps · \(defaultRIR) RIR"
+        let detail = EffortTracking.joined(["Week \(session.weekIndex)", catalogExercise.primaryMuscle.rawValue.capitalized, "\(defaultSets) sets", "\(defaultReps) reps", EffortTracking.plannedText(defaultRIR)])
 
         let uiExercise = UISessionExercise(
             exerciseId: catalogExercise.id,
@@ -2677,13 +2692,9 @@ extension SessionScreenViewModel {
 
             let setsText = "\(item.targetSets) sets"
             let repsText = "\(baseReps) reps"
-            let rirText = "\(baseRIR) RIR"
+            let rirText = EffortTracking.plannedText(baseRIR)
 
-            if let ce = catalogExercise {
-                detail = "Week \(session.weekIndex) · \(ce.primaryMuscle.rawValue.capitalized) · \(setsText) · \(repsText) · \(rirText)"
-            } else {
-                detail = "Week \(session.weekIndex) · \(setsText) · \(repsText) · \(rirText)"
-            }
+            detail = EffortTracking.joined(["Week \(session.weekIndex)", catalogExercise?.primaryMuscle.rawValue.capitalized, setsText, repsText, rirText])
 
             return UISessionExercise(
                 exerciseId: item.exerciseId,
@@ -2824,16 +2835,15 @@ struct UISessionExercise: Identifiable {
         return "—"
     }
 
-    var rirText: String {
-        if let min = targetRIRMin, let max = targetRIRMax {
-            return min == max ? "\(min) RIR" : "\(min)–\(max) RIR"
-        }
-        if let first = sets.first, let rir = first.plannedRIR { return "\(rir) RIR" }
-        return "—"
+    /// The planned effort as text for the current mode: "2–3 RIR" (Detailed), "Easy–Solid" (Simple), nil (Off).
+    var rirText: String? {
+        if let min = targetRIRMin, let max = targetRIRMax { return EffortTracking.plannedRangeText(min, max) }
+        if let first = sets.first, let rir = first.plannedRIR { return EffortTracking.plannedText(rir) }
+        return EffortTracking.mode == .detailed ? "—" : nil
     }
 
     var prescriptionDetailLine: String {
-        "Week \(weekIndex) · \(setsText) · \(repsText) · \(rirText)"
+        EffortTracking.joined(["Week \(weekIndex)", setsText, repsText, rirText])
     }
 
     /// Top-set rep range (nil on an exercise with no top set).
@@ -3060,13 +3070,8 @@ struct UISessionSet: Identifiable {
             return "—"
         }
         
-        if let plannedRIR {
-            return String(
-                format: "%.1f × %d @ %d RIR",
-                plannedLoad,
-                plannedReps,
-                plannedRIR
-            )
+        if let plannedRIR, EffortTracking.mode != .off {
+            return String(format: "%.1f × %d", plannedLoad, plannedReps) + EffortTracking.plannedSuffix(plannedRIR)
         } else {
             return String(
                 format: "%.1f × %d",

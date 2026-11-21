@@ -475,8 +475,8 @@ struct ExerciseHistorySheet: View {
         if let repMin, let repMax {
             parts.append(repMin == repMax ? "\(repMin) reps" : "\(repMin)–\(repMax) reps")
         }
-        if let rirMin, let rirMax {
-            parts.append(rirMin == rirMax ? "\(rirMin) RIR" : "\(rirMin)–\(rirMax) RIR")
+        if let rirMin, let rirMax, let rirText = EffortTracking.plannedRangeText(rirMin, rirMax) {
+            parts.append(rirText)
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

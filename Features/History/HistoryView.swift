@@ -178,7 +178,7 @@ private struct HistorySetDetail: Identifiable {
                 }
             }()
             var s = "\(setLabel) — \(reason) (planned \(loadText(load)) × \(reps)"
-            if let rir { s += " @ \(rir) RIR" }
+            if let rir { s += EffortTracking.plannedSuffix(rir) }
             s += ")"
             return s
         } else {
@@ -253,12 +253,8 @@ private struct HistoryDayDetailView: View {
             }
         }
 
-        if let rirMin, let rirMax {
-            if rirMin == rirMax {
-                parts.append("\(rirMin) RIR")
-            } else {
-                parts.append("\(rirMin)–\(rirMax) RIR")
-            }
+        if let rirMin, let rirMax, let rirText = EffortTracking.plannedRangeText(rirMin, rirMax) {
+            parts.append(rirText)
         }
 
         if parts.isEmpty { return nil }

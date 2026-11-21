@@ -91,7 +91,7 @@ struct CustomMuscleMappingSheet: View {
     private var compoundFootnote: String {
         let suggested = custom.map { MuscleSuggester.suggestedCompound(name: $0.name, coarse: MuscleGroup(rawValue: $0.primaryMuscleRaw) ?? .chest) } ?? false
         let state = custom?.isCompound == nil ? "not decided yet" : "your choice"
-        return "Suggested: \(suggested ? "compound" : "not compound") (\(state)). Compound lifts record RIR with one tap and are judged on total reps."
+        return "Suggested: \(suggested ? "compound" : "not compound") (\(state)). \(EffortTracking.mode == .detailed ? "Compound lifts record RIR with one tap and are judged on total reps." : EffortTracking.mode == .simple ? "Compound lifts record effort with one tap and are judged on total reps." : "Compound lifts are judged on total reps.")"
     }
 
     var body: some View {

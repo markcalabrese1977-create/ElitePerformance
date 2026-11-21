@@ -107,7 +107,13 @@ enum GoalModifier {
         var notes: [FitNote] = []
         if capped { notes.append(note("General fitness: weekly sets ramp up by at most 1 over week 1.")) }
         if lighter { notes.append(note("General fitness: 1 fewer set on every exercise (never below 2).")) }
-        if easier { notes.append(note("General fitness: 1 more rep in reserve on working sets (target RIR +1, up to 3).")) }
+        if easier {
+            switch EffortTracking.setupModeNow {
+            case .detailed: notes.append(note("General fitness: 1 more rep in reserve on working sets (target RIR +1, up to 3)."))
+            case .simple: notes.append(note("General fitness: slightly easier effort on working sets."))
+            case .off: break
+            }
+        }
         return (notes.isEmpty ? template : out, notes)
     }
 

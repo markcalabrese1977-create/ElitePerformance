@@ -260,7 +260,7 @@ private struct ReplacePreviewSheet: View {
                                         .padding(.horizontal, 6).padding(.vertical, 1)
                                         .background(.quaternary, in: Capsule())
                                     Spacer()
-                                    Text(row.prescription).font(.subheadline).foregroundStyle(.secondary)
+                                    Text(EffortTracking.localize(row.prescription)).font(.subheadline).foregroundStyle(.secondary)
                                 }
                                 Text(row.load)
                                     .font(.caption).foregroundStyle(.secondary)

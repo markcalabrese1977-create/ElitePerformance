@@ -163,7 +163,14 @@ struct ChangePrescriptionModel {
     /// "Add top set: 1 x 4-6 @ 2" / "Update top set: …"
     var topSetTitle: String {
         let reps = topLow == max(topLow, topHigh) ? "\(topLow)" : "\(topLow)-\(max(topLow, topHigh))"
-        return "\(itemHasTopSet ? "Update" : "Add") top set: 1 x \(reps) @ \(topRIR)"
+        // Detailed "@ 2" (as before), Simple "@ Solid", Off no effort part.
+        let effort: String
+        switch EffortTracking.mode {
+        case .detailed: effort = " @ \(topRIR)"
+        case .simple: effort = " @ \(EffortTracking.plannedWord(topRIR))"
+        case .off: effort = ""
+        }
+        return "\(itemHasTopSet ? "Update" : "Add") top set: 1 x \(reps)\(effort)"
     }
 
     var dayLabel: String? { session.dayLabel }
@@ -250,10 +257,16 @@ struct ChangePrescriptionModel {
             let old = olds { MultiSessionCopy.range($0.repMin, $0.repMax) }
             parts.append(("reps", old.map { "\($0) → \(new)" } ?? "→ \(new)"))
         }
-        if let r = change.rirRange {
-            let new = MultiSessionCopy.range(r.lowerBound, r.upperBound)
-            let old = olds { MultiSessionCopy.range($0.rirMin, $0.rirMax) }
-            parts.append(("RIR", old.map { "\($0) → \(new)" } ?? "→ \(new)"))
+        if let r = change.rirRange, EffortTracking.mode != .off {
+            // Detailed: "RIR 2–3 → 3–4". Simple: "effort Solid–Easy → Easy".
+            func shown(_ lo: Int, _ hi: Int) -> String {
+                EffortTracking.mode == .simple
+                    ? (EffortTracking.plannedRangeText(lo, hi) ?? "")
+                    : MultiSessionCopy.range(lo, hi)
+            }
+            let new = shown(r.lowerBound, r.upperBound)
+            let old = olds { shown($0.rirMin, $0.rirMax) }
+            parts.append((EffortTracking.mode == .simple ? "effort" : "RIR", old.map { "\($0) → \(new)" } ?? "→ \(new)"))
         }
         switch change.topSet {
         case .set?: parts.append(("top set", "added or updated"))
@@ -261,7 +274,7 @@ struct ChangePrescriptionModel {
         case nil: break
         }
         if change.note != nil { parts.append(("note", "changed")) }
-        if parts.count == 1, parts[0].label == "reps" || parts[0].label == "RIR" { return parts[0].text }
+        if parts.count == 1, parts[0].label == "reps" || parts[0].label == "RIR" || parts[0].label == "effort" { return parts[0].text }
         return parts.map { "\($0.label) \($0.text)" }.joined(separator: "; ")
     }
 
@@ -353,6 +366,16 @@ struct ChangePrescriptionFlow: View {
 }
 
 private struct ChangePrescriptionForm: View {
+    @AppStorage(EffortTracking.mirrorKey) private var effortRaw: String = ""
+    private var effortMode: EffortMode { EffortMode(rawValue: effortRaw) ?? .detailed }
+
+    /// Simple mode: the four effort words instead of a number. A stored RIR above 3 shows as Easy (3+ left).
+    private func effortPicker(_ title: String, value: Binding<Int>) -> some View {
+        Picker(title, selection: Binding(get: { min(max(value.wrappedValue, 0), 3) }, set: { value.wrappedValue = $0 })) {
+            ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+        }
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Binding var model: ChangePrescriptionModel
     let onApplied: (SessionItemEditService.PrescriptionUndo, String) -> Void
@@ -411,11 +434,21 @@ private struct ChangePrescriptionForm: View {
                     }
                 }
 
-                Section("RIR") {
-                    Toggle("Change RIR range", isOn: $model.changeRIR)
-                    if model.changeRIR {
-                        Stepper("Min \(model.rirLow)", value: $model.rirLow, in: PrescriptionChange.rirBounds)
-                        Stepper("Max \(max(model.rirLow, model.rirHigh))", value: $model.rirHigh, in: PrescriptionChange.rirBounds)
+                if effortMode == .detailed {
+                    Section("RIR") {
+                        Toggle("Change RIR range", isOn: $model.changeRIR)
+                        if model.changeRIR {
+                            Stepper("Min \(model.rirLow)", value: $model.rirLow, in: PrescriptionChange.rirBounds)
+                            Stepper("Max \(max(model.rirLow, model.rirHigh))", value: $model.rirHigh, in: PrescriptionChange.rirBounds)
+                        }
+                    }
+                } else if effortMode == .simple {
+                    Section("Effort") {
+                        Toggle("Change planned effort", isOn: $model.changeRIR)
+                        if model.changeRIR {
+                            effortPicker("Hardest set", value: $model.rirLow)
+                            effortPicker("Easiest set", value: $model.rirHigh)
+                        }
                     }
                 }
 
@@ -429,7 +462,11 @@ private struct ChangePrescriptionForm: View {
                     if model.topMode == .set {
                         Stepper("Min \(model.topLow)", value: $model.topLow, in: PrescriptionChange.repBounds)
                         Stepper("Max \(max(model.topLow, model.topHigh))", value: $model.topHigh, in: PrescriptionChange.repBounds)
-                        Stepper("RIR \(model.topRIR)", value: $model.topRIR, in: PrescriptionChange.rirBounds)
+                        if effortMode == .detailed {
+                            Stepper("RIR \(model.topRIR)", value: $model.topRIR, in: PrescriptionChange.rirBounds)
+                        } else if effortMode == .simple {
+                            effortPicker("Effort", value: $model.topRIR)
+                        }
                     }
                 } header: {
                     Text("Top set")
@@ -470,7 +507,7 @@ private struct ChangePrescriptionForm: View {
                                         .background(.quaternary, in: Capsule())
                                 }
                                 if row.before != row.after {
-                                    Text("\(row.before)  →  \(row.after)")
+                                    Text("\(EffortTracking.localize(row.before))  →  \(EffortTracking.localize(row.after))")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 if let note = row.note {

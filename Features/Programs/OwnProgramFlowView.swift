@@ -222,7 +222,7 @@ struct OwnProgramFlowView: View {
                             HStack {
                                 Text(ExerciseCatalog.displayName(for: slot.exerciseId)).foregroundStyle(.primary)
                                 Spacer()
-                                Text(Self.summary(slot)).font(.caption).foregroundStyle(.secondary)
+                                Text(Self.summary(slot, mode: setupMode)).font(.caption).foregroundStyle(.secondary)
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
                             .contentShape(Rectangle())
@@ -234,9 +234,27 @@ struct OwnProgramFlowView: View {
         }
     }
 
-    static func summary(_ s: WavelessSlot) -> String {
+    /// "3 × 8–10 @ RIR 2–3" (Detailed), "3 × 8–10 @ Easy–Solid" (Simple), "3 × 8–10" (Off).
+    static func summary(_ s: WavelessSlot, mode: EffortMode = EffortTracking.mode) -> String {
         func r(_ a: Int, _ b: Int) -> String { a == b ? "\(a)" : "\(a)–\(b)" }
-        return "\(s.sets) × \(r(s.repMin, s.repMax)) @ RIR \(r(s.rirMin, s.rirMax))"
+        let base = "\(s.sets) × \(r(s.repMin, s.repMax))"
+        switch mode {
+        case .detailed: return "\(base) @ RIR \(r(s.rirMin, s.rirMax))"
+        case .simple: return "\(base) @ \(EffortTracking.plannedRangeText(s.rirMin, s.rirMax, mode: .simple) ?? "")"
+        case .off: return base
+        }
+    }
+
+    @AppStorage(EffortTracking.mirrorKey) private var effortRaw: String = ""
+    private var setupMode: EffortMode { EffortTracking.setupMode(raw: effortRaw) }
+
+    /// The deload week's one-line description, in the effort mode's own words.
+    static func deloadFooter(mode: EffortMode) -> String {
+        switch mode {
+        case .detailed: return "The last week has half the sets and two more reps in reserve."
+        case .simple: return "The last week has half the sets and feels easier."
+        case .off: return "The last week has half the sets."
+        }
     }
 
     private func groupCard(_ title: String, slot: Binding<WavelessSlot>, compounds: Bool) -> some View {
@@ -246,8 +264,17 @@ struct OwnProgramFlowView: View {
             Stepper("Sets: \(slot.wrappedValue.sets)", value: slot.sets, in: 1...8).onChange(of: slot.wrappedValue.sets) { _, _ in apply() }
             Stepper("Rep min: \(slot.wrappedValue.repMin)", value: slot.repMin, in: 1...30).onChange(of: slot.wrappedValue.repMin) { _, _ in apply() }
             Stepper("Rep max: \(slot.wrappedValue.repMax)", value: slot.repMax, in: 1...30).onChange(of: slot.wrappedValue.repMax) { _, _ in apply() }
-            Stepper("RIR min: \(slot.wrappedValue.rirMin)", value: slot.rirMin, in: 0...5).onChange(of: slot.wrappedValue.rirMin) { _, _ in apply() }
-            Stepper("RIR max: \(slot.wrappedValue.rirMax)", value: slot.rirMax, in: 0...5).onChange(of: slot.wrappedValue.rirMax) { _, _ in apply() }
+            if setupMode == .detailed {
+                Stepper("RIR min: \(slot.wrappedValue.rirMin)", value: slot.rirMin, in: 0...5).onChange(of: slot.wrappedValue.rirMin) { _, _ in apply() }
+                Stepper("RIR max: \(slot.wrappedValue.rirMax)", value: slot.rirMax, in: 0...5).onChange(of: slot.wrappedValue.rirMax) { _, _ in apply() }
+            } else if setupMode == .simple {
+                Picker("Hardest set", selection: Binding(get: { min(slot.wrappedValue.rirMin, 3) }, set: { slot.wrappedValue.rirMin = $0 })) {
+                    ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+                }.onChange(of: slot.wrappedValue.rirMin) { _, _ in apply() }
+                Picker("Easiest set", selection: Binding(get: { min(slot.wrappedValue.rirMax, 3) }, set: { slot.wrappedValue.rirMax = $0 })) {
+                    ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+                }.onChange(of: slot.wrappedValue.rirMax) { _, _ in apply() }
+            }
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
@@ -258,7 +285,7 @@ struct OwnProgramFlowView: View {
             TextField("Program name", text: $programName).textFieldStyle(.roundedBorder)
             Stepper("Block length: \(totalWeeks) weeks", value: $totalWeeks, in: ProgramTemplate.wavelessWeeks)
             Toggle("Deload in the last week", isOn: $deload)
-            Text(deload ? "The last week has half the sets and two more reps in reserve." : "Every week is a working week.")
+            Text(deload ? Self.deloadFooter(mode: setupMode) : "Every week is a working week.")
                 .font(.caption).foregroundStyle(.secondary)
             DatePicker("Start date", selection: $startDate, in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
         }
@@ -277,7 +304,7 @@ struct OwnProgramFlowView: View {
                         HStack {
                             Text(ExerciseCatalog.displayName(for: slot.exerciseId)).font(.subheadline)
                             Spacer()
-                            Text(Self.summary(slot)).font(.caption).foregroundStyle(.secondary)
+                            Text(Self.summary(slot, mode: setupMode)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -328,6 +355,9 @@ struct OwnProgramFlowView: View {
 
 /// One exercise's single prescription.
 private struct SlotEditor: View {
+    @AppStorage(EffortTracking.mirrorKey) private var effortRaw: String = ""
+    private var setupMode: EffortMode { EffortTracking.setupMode(raw: effortRaw) }
+
     @Binding var slot: WavelessSlot
     let onDone: () -> Void
 
@@ -338,8 +368,17 @@ private struct SlotEditor: View {
                     Stepper("Sets: \(slot.sets)", value: $slot.sets, in: 1...8)
                     Stepper("Rep min: \(slot.repMin)", value: $slot.repMin, in: 1...30)
                     Stepper("Rep max: \(max(slot.repMin, slot.repMax))", value: $slot.repMax, in: 1...30)
-                    Stepper("RIR min: \(slot.rirMin)", value: $slot.rirMin, in: 0...5)
-                    Stepper("RIR max: \(max(slot.rirMin, slot.rirMax))", value: $slot.rirMax, in: 0...5)
+                    if setupMode == .detailed {
+                        Stepper("RIR min: \(slot.rirMin)", value: $slot.rirMin, in: 0...5)
+                        Stepper("RIR max: \(max(slot.rirMin, slot.rirMax))", value: $slot.rirMax, in: 0...5)
+                    } else if setupMode == .simple {
+                        Picker("Hardest set", selection: Binding(get: { min(slot.rirMin, 3) }, set: { slot.rirMin = $0 })) {
+                            ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+                        }
+                        Picker("Easiest set", selection: Binding(get: { min(max(slot.rirMin, slot.rirMax), 3) }, set: { slot.rirMax = $0 })) {
+                            ForEach(EffortTracking.simpleChoices, id: \.rir) { Text($0.label).tag($0.rir) }
+                        }
+                    }
                 }
             }
             .navigationTitle("Prescription")
