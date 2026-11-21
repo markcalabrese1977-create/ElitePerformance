@@ -5152,3 +5152,237 @@ final class RestorePathCustomRowsFixtureTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Custom exercise library (rename / collisions / delete guard)
+
+@MainActor
+final class CustomExerciseLibraryTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    private func isolated(_ body: () throws -> Void) rethrows {
+        let d = UserDefaults.standard
+        func keys() -> [String] { d.dictionaryRepresentation().keys.filter { $0.hasSuffix(".completed") || $0 == "custom_exercises_v2" || $0 == "prIndexRuleVersion" || $0 == ExercisePickerRecents.key } }
+        var saved: [String: Any] = [:]
+        for k in keys() { if let v = d.object(forKey: k) { saved[k] = v } }
+        defer { for k in keys() { d.removeObject(forKey: k) }; for (k, v) in saved { d.set(v, forKey: k) } }
+        for k in keys() { d.removeObject(forKey: k) }
+        try body()
+    }
+
+    private func container() throws -> ModelContainer {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration("lib-\(UUID().uuidString)", isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c); return c
+    }
+
+    private struct World { let c: ModelContainer; let ctx: ModelContext; let id: String; let doneId: UUID; let plannedId: UUID }
+
+    /// One custom exercise "Cable Hold" used by a completed session (with history + PR) and a planned one.
+    private func world() throws -> World {
+        let c = try container(); let ctx = ModelContext(c)
+        let ex = ExerciseCatalog.addCustomExercise(name: "Cable Hold", primaryMuscle: .core, isCompound: false, in: ctx)
+        let done = Session(date: Date(timeIntervalSince1970: 1_790_000_000), status: .completed, weekIndex: 1, dayLabel: "A",
+                           items: [BackupTestSupport.item(1, ex.id, name: "Cable Hold", reps: [10, 10], loads: [20, 20])])
+        let plan = Session(date: Date(timeIntervalSince1970: 1_800_000_000), status: .planned, weekIndex: 2, dayLabel: "A",
+                           items: [BackupTestSupport.item(1, ex.id, name: "Cable Hold")])
+        ctx.insert(done); ctx.insert(plan)
+        ctx.insert(SessionHistory(date: done.date, weekIndex: 1, title: "A", subtitle: "", totalExercises: 1, totalSets: 2, totalVolume: 400,
+                                  sessionId: done.id, exercises: [SessionHistoryExercise(name: "Cable Hold", primaryMuscle: "abs", sets: 2, reps: 20, volume: 400)]))
+        // a history of an unrelated session that carries the same name must NOT be renamed
+        ctx.insert(SessionHistory(date: done.date, weekIndex: 1, title: "B", subtitle: "", totalExercises: 1, totalSets: 1, totalVolume: 1,
+                                  sessionId: UUID(), exercises: [SessionHistoryExercise(name: "Cable Hold", primaryMuscle: "abs", sets: 1, reps: 1, volume: 1)]))
+        ctx.insert(PRIndex(exerciseId: ex.id, exerciseName: "Cable Hold", bestSetVolume: 200, bestLoad: 20, bestReps: 10))
+        try ctx.save()
+        return World(c: c, ctx: ctx, id: ex.id, doneId: done.id!, plannedId: plan.id!)
+    }
+
+    private func edit(_ name: String, compound: Bool = false, bw: Bool = false) -> CustomExerciseLibrary.Edit {
+        .init(name: name, primaryMuscle: .core, isCompound: compound, isBodyweight: bw)
+    }
+
+    private func snapshotNames(_ ctx: ModelContext, _ id: String) throws -> Set<String> {
+        Set(try ctx.fetch(FetchDescriptor<Session>()).flatMap(\.items).filter { $0.exerciseId == id }.compactMap(\.exerciseNameSnapshot))
+    }
+
+    private func assertRenamed(_ ctx: ModelContext, id: String, to name: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).filter { $0.id == id }.map(\.name), [name], file: file, line: line)
+        XCTAssertEqual(try snapshotNames(ctx, id), [name], "planned and completed snapshots", file: file, line: line)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PRIndex>()).first { $0.exerciseId == id }?.exerciseName, name, file: file, line: line)
+        let hist = try ctx.fetch(FetchDescriptor<SessionHistory>())
+        XCTAssertEqual(hist.first { $0.title == "A" }?.exercises.map(\.name), [name], file: file, line: line)
+        XCTAssertEqual(ExerciseCatalog.displayName(for: id), name, "mirror", file: file, line: line)
+    }
+
+    // MARK: normalizer
+
+    func test_normalizer_isFixedLocale_foldsCaseDiacriticsAndWhitespace() {
+        XCTAssertEqual(ExerciseNameRules.locale.identifier, "en_US_POSIX")
+        XCTAssertEqual(ExerciseNameRules.normalized("  ÉCLAIR Press "), ExerciseNameRules.normalized("eclair press"))
+        XCTAssertTrue(ExerciseNameRules.areEqual("Crème Curl", "creme CURL"))
+        XCTAssertFalse(ExerciseNameRules.areEqual("Curl", "Curls"))
+    }
+
+    // MARK: rename
+
+    func test_rename_updatesMirrorSnapshotsHistoryAndPR_andLeavesOtherHistoriesAlone() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cable Plank Hold"), in: w.ctx), .saved)
+            try assertRenamed(w.ctx, id: w.id, to: "Cable Plank Hold")
+            XCTAssertEqual(try w.ctx.fetch(FetchDescriptor<SessionHistory>()).first { $0.title == "B" }?.exercises.map(\.name), ["Cable Hold"])
+            XCTAssertEqual(try w.ctx.fetch(FetchDescriptor<Session>()).flatMap(\.items).filter { $0.exerciseId == w.id }.count, 2, "ids unchanged")
+        }
+    }
+
+    func test_caseOnlyRename_ofYourOwnExercise_isAllowed() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("CABLE HOLD"), in: w.ctx), .saved)
+            try assertRenamed(w.ctx, id: w.id, to: "CABLE HOLD")
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cáble hold"), in: w.ctx), .saved, "own name, other case + diacritics")
+            try assertRenamed(w.ctx, id: w.id, to: "Cáble hold")
+        }
+    }
+
+    func test_rename_toABuiltInOrAnotherCustomName_isBlocked_anyCaseOrDiacritics() throws {
+        try isolated {
+            let w = try world()
+            _ = ExerciseCatalog.addCustomExercise(name: "Zercher Hold", primaryMuscle: .core, isCompound: false, in: w.ctx)
+            let builtInName = try XCTUnwrap(ExerciseCatalog.builtIn.first { $0.name.contains("Bench") }).name
+            let variants = [builtInName, builtInName.uppercased(), builtInName.lowercased(), "  \(builtInName)  ",
+                            builtInName.replacingOccurrences(of: "e", with: "é"),
+                            "Zercher Hold", "ZERCHER HOLD", "zérchér hold"]
+            for v in variants {
+                let r = CustomExerciseLibrary.update(id: w.id, edit: edit(v), in: w.ctx)
+                guard case .invalidName(let check) = r else { XCTFail("“\(v)” must be blocked, got \(r)"); continue }
+                XCTAssertNotNil(check.message, v)
+            }
+            try assertRenamed(w.ctx, id: w.id, to: "Cable Hold")   // nothing changed
+            XCTAssertEqual(CustomExerciseLibrary.checkName("", forId: w.id, in: w.ctx), .empty)
+        }
+    }
+
+    func test_bodyweightAndCompound_areForwardOnly_noStoredSetChanges() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cable Hold", compound: true, bw: true), in: w.ctx), .saved)
+            XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: w.id))
+            let loads = try w.ctx.fetch(FetchDescriptor<Session>()).first { $0.status == .completed }?.items.first?.actualLoads
+            XCTAssertEqual(loads, [20, 20])
+        }
+    }
+
+    // MARK: restore with flags cleared (c2 / c4) and backup round trip
+
+    private func launch(_ c: ModelContainer) -> [String] {
+        var lines: [String] = []
+        BackfillLog.lineSink = { lines.append($0) }
+        StartupBackfills.run(using: c)
+        BackfillLog.lineSink = nil
+        return lines
+    }
+
+    private func clearFlags() {
+        for k in UserDefaults.standard.dictionaryRepresentation().keys where k.hasSuffix(".completed") { UserDefaults.standard.removeObject(forKey: k) }
+        UserDefaults.standard.removeObject(forKey: "prIndexRuleVersion")
+    }
+
+    func test_c2_renameThenRestoreIntoEmptyStore_flagsCleared_noRemap_idsUnchanged_newNameKept() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cable Plank Hold"), in: w.ctx), .saved)
+            let file = try BackupTestSupport.exportFile(w.ctx)
+            UserDefaults.standard.removeObject(forKey: "custom_exercises_v2"); clearFlags()
+
+            let target = try container()
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lib-snap-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            _ = try BackupRestoreCoordinator.restore(from: file, container: target, snapshotDirectory: dir,
+                                                     sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "lib.fixture")!))
+            for pass in 1...2 {
+                _ = launch(target)
+                let ctx = ModelContext(target)
+                try assertRenamed(ctx, id: w.id, to: "Cable Plank Hold")
+                XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 1, "pass \(pass): one row, no remap")
+                XCTAssertEqual(try ctx.fetch(FetchDescriptor<Session>()).flatMap(\.items).map(\.exerciseId).filter { $0 != w.id }, [], "pass \(pass): ids unchanged")
+                clearFlags()
+            }
+        }
+    }
+
+    func test_c4_renameThenStoreAndListPresent_flagsLost_noRemap_idsUnchanged_newNameKept() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cable Plank Hold"), in: w.ctx), .saved)
+            let file = try BackupTestSupport.exportFile(w.ctx)
+            UserDefaults.standard.removeObject(forKey: "custom_exercises_v2"); clearFlags()
+
+            let target = try container()
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: file, modelContainer: target)
+            for pass in 1...2 {
+                clearFlags()
+                _ = launch(target)
+                let ctx = ModelContext(target)
+                try assertRenamed(ctx, id: w.id, to: "Cable Plank Hold")
+                XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 1, "pass \(pass)")
+            }
+        }
+    }
+
+    func test_rename_thenBackupRoundTrip_keepsTheNewNameEverywhere() throws {
+        try isolated {
+            let w = try world()
+            XCTAssertEqual(CustomExerciseLibrary.update(id: w.id, edit: edit("Cable Plank Hold", compound: true, bw: true), in: w.ctx), .saved)
+            let file = try BackupTestSupport.exportFile(w.ctx)
+            let target = try container()
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: file, modelContainer: target)
+            let ctx = ModelContext(target)
+            try assertRenamed(ctx, id: w.id, to: "Cable Plank Hold")
+            let row = try XCTUnwrap(ctx.fetch(FetchDescriptor<CustomExercise>()).first)
+            XCTAssertEqual(row.isBodyweight, true)
+            XCTAssertEqual(row.isCompound, true)
+        }
+    }
+
+    // MARK: delete guard
+
+    func test_delete_blockedWhileUsed_withTheExactMessage_andNothingChanges() throws {
+        try isolated {
+            let w = try world()
+            let u = CustomExerciseLibrary.usage(of: w.id, in: w.ctx)
+            XCTAssertEqual(u, .init(sessions: 2, planned: 1, loggedSets: 2))
+            XCTAssertEqual(CustomExerciseLibrary.delete(id: w.id, in: w.ctx), .blocked(u))
+            XCTAssertEqual(u.deleteBlockMessage, "Used in 2 sessions (1 planned). Swap it out of your program first.")
+            XCTAssertEqual(try w.ctx.fetch(FetchDescriptor<CustomExercise>()).count, 1)
+            XCTAssertEqual(ExerciseCatalog.displayName(for: w.id), "Cable Hold")
+        }
+    }
+
+    func test_delete_whenUnused_removesRecordMirrorNoteSettingsAndRecent() throws {
+        try isolated {
+            let c = try container(); let ctx = ModelContext(c)
+            let ex = ExerciseCatalog.addCustomExercise(name: "Loose Curl", primaryMuscle: .biceps, isCompound: false, in: ctx)
+            ctx.insert(ExerciseNote(exerciseId: ex.id, note: "slow"))
+            let profile = UserProfile()
+            profile.loadStepByExercise = [ex.id: 2.5, "bench_press": 5]
+            profile.maxLoadByExercise = [ex.id: 50]
+            ctx.insert(profile)
+            try ctx.save()
+            let recents = ExercisePickerRecents(); recents.record(ex.id)
+            XCTAssertEqual(CustomExerciseLibrary.delete(id: ex.id, in: ctx), .deleted)
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<CustomExercise>()).isEmpty)
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<ExerciseNote>()).isEmpty)
+            XCTAssertEqual(profile.loadStepByExercise, ["bench_press": 5])
+            XCTAssertNil(profile.maxLoadByExercise[ex.id])
+            XCTAssertFalse(recents.ids.contains(ex.id))
+            XCTAssertFalse(ExerciseCatalog.all.contains { $0.id == ex.id })
+        }
+    }
+
+    func test_delete_aBuiltIn_isRefused() throws {
+        try isolated {
+            let c = try container()
+            XCTAssertEqual(CustomExerciseLibrary.delete(id: "bench_press", in: ModelContext(c)), .notFound)
+        }
+    }
+}

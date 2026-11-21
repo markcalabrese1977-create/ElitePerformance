@@ -148,6 +148,10 @@ struct ExercisePickerRecents {
         list.insert(id, at: 0)
         defaults.set(Array(list.prefix(Self.limit)), forKey: Self.key)
     }
+
+    func remove(_ id: String) {
+        defaults.set(ids.filter { $0 != id }, forKey: Self.key)
+    }
 }
 
 /// What an exercise picker shows: recent picks (empty search), suggested alternatives (a swap, empty search), then A-Z; or
