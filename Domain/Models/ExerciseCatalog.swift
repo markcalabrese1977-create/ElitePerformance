@@ -95,17 +95,17 @@ struct ExerciseCatalog {
         in context: ModelContext
     ) -> CatalogExercise {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedName = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let normalizedName = ExerciseNameRules.normalized(trimmed)
 
         if let existingBuiltIn = builtIn.first(where: {
-            $0.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == normalizedName
+            ExerciseNameRules.normalized($0.name) == normalizedName
         }) {
             return existingBuiltIn
         }
 
         let existing = customExercises(in: context)
         if let existingCustom = existing.first(where: {
-            $0.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == normalizedName
+            ExerciseNameRules.normalized($0.name) == normalizedName
         }) {
             return existingCustom
         }
@@ -1142,9 +1142,7 @@ extension ExerciseCatalog {
     }
 
     private static func normalizedExerciseName(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        ExerciseNameRules.normalized(value)
     }
     
     static func displayName(for exerciseId: String) -> String {

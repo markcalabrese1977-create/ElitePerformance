@@ -142,8 +142,6 @@ enum CustomExerciseDedupMigration {
     }
 
     private static func normalizedName(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        ExerciseNameRules.normalized(value)
     }
 }
