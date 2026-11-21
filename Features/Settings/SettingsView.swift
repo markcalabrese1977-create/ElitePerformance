@@ -226,11 +226,14 @@ struct SettingsView: View {
                                                 displayedComponents: .date
                                             )
                                             .labelsHidden()
+                                            // Borderless: in a Form row a plain Button takes taps for the whole row (a tap on the date cleared it).
                                             Button("Clear") { profile.birthDateOverride = nil }
+                                                .buttonStyle(.borderless)
                                         } else {
                                             Button("Set") {
                                                 profile.birthDateOverride = Calendar.current.date(byAdding: .year, value: -30, to: Date())
                                             }
+                                            .buttonStyle(.borderless)
                                         }
                                     }
                                     Text("Only used for heart-rate zones, when Health doesn't have your date of birth.")
@@ -329,6 +332,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .keyboardDismissal()   // the decimal pads (body weight, default load step) have no Return key
         .navigationTitle("Settings")
         .sheet(isPresented: $showMuscleRanges) {
             if let profile = profiles.first {

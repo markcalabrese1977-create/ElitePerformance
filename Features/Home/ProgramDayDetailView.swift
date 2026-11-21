@@ -95,6 +95,7 @@ struct ProgramDayDetailView: View {
                 }
             }
         }
+        .keyboardDismissal()   // the per-set load / reps / RIR fields are number pads
         .navigationTitle(session.date.formatted(date: .abbreviated, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { EditButton() } }   // drag to reorder

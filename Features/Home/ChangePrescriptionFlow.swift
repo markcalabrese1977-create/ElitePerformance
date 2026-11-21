@@ -506,6 +506,7 @@ private struct ChangePrescriptionForm: View {
             } message: { pending in
                 Text(ChangePrescriptionModel.confirmationMessage(pending))
             }
+            .keyboardDismissal()   // the note field is multi-line
             .navigationTitle("Change Prescription")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

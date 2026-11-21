@@ -222,6 +222,7 @@ struct SessionView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
+        .keyboardDismissal()   // set entry: load (decimal pad), reps / RIR (number pads)
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

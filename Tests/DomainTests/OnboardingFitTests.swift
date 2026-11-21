@@ -1212,3 +1212,105 @@ final class BuiltInTemplateVolumeTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Keyboard dismissal and Form-row taps (1.3.1: Settings trapped the keypad, the Birthdate row cleared on any tap)
+
+@MainActor
+final class KeyboardDismissalTests: XCTestCase {
+
+    // MARK: The Done bar
+
+    private func begin(_ field: UIResponder, _ name: Notification.Name) {
+        KeyboardDismissal.install()
+        NotificationCenter.default.post(name: name, object: field)
+    }
+
+    private func doneItem(of view: UIView?) -> UIBarButtonItem? {
+        (view as? UIToolbar)?.items?.first { $0.title == KeyboardDismissal.doneTitle }
+    }
+
+    func test_numberPadFields_getADoneBar_whenTheyBeginEditing() {
+        for type in [UIKeyboardType.decimalPad, .numberPad, .numbersAndPunctuation, .phonePad, .asciiCapableNumberPad] {
+            let f = UITextField(); f.keyboardType = type
+            begin(f, UITextField.textDidBeginEditingNotification)
+            let done = doneItem(of: f.inputAccessoryView)
+            XCTAssertNotNil(done, "\(type.rawValue) has no Return key: it gets a Done button")
+            XCTAssertEqual(done?.accessibilityIdentifier, KeyboardDismissal.doneIdentifier)
+        }
+    }
+
+    func test_fieldsWithAReturnKey_areLeftAlone_andAnExistingAccessoryIsKept() {
+        let text = UITextField(); text.keyboardType = .default
+        begin(text, UITextField.textDidBeginEditingNotification)
+        XCTAssertNil(text.inputAccessoryView)
+        let own = UITextField(); own.keyboardType = .decimalPad
+        let mine = UIView(); own.inputAccessoryView = mine
+        begin(own, UITextField.textDidBeginEditingNotification)
+        XCTAssertTrue(own.inputAccessoryView === mine, "a field's own accessory is never replaced")
+    }
+
+    func test_multiLineFields_getADoneBar_becauseReturnAddsALine() {
+        let v = UITextView(); v.isEditable = true
+        begin(v, UITextView.textDidBeginEditingNotification)
+        XCTAssertNotNil(doneItem(of: v.inputAccessoryView))
+        let readOnly = UITextView(); readOnly.isEditable = false
+        begin(readOnly, UITextView.textDidBeginEditingNotification)
+        XCTAssertNil(readOnly.inputAccessoryView)
+    }
+
+    func test_theDoneButton_callsDismiss() {
+        let f = UITextField(); f.keyboardType = .decimalPad
+        begin(f, UITextField.textDidBeginEditingNotification)
+        let done = doneItem(of: f.inputAccessoryView)
+        XCTAssertTrue(done?.target === KeyboardDismissal.Responder.shared)
+        XCTAssertEqual(done?.action, #selector(KeyboardDismissal.Responder.done))
+        // (Resigning the first responder itself needs a key window; it was checked on the simulator: Settings, Body Weight, Done.)
+    }
+
+    // MARK: Every screen that hosts a numeric or multi-line field applies the shared modifier
+
+    private func source(_ relative: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)
+    }
+
+    /// The screens that host a number pad or a multi-line field, and where the shared modifier is applied. A new file with
+    /// `.keyboardType(.decimalPad / .numberPad ...)` or a TextEditor must be listed here (or in `components`) or this test fails.
+    private let screens = ["Features/Settings/SettingsView.swift", "Features/Home/ProgramDayDetailView.swift", "Features/Notes/ExerciseNoteSheet.swift",
+                           "Features/Session/SessionView.swift", "Features/Home/ChangePrescriptionFlow.swift"]
+    /// Components with a numeric field, applied by the screen that hosts them (StoredLoadField: Settings; the two text fields are unused).
+    private let components = ["Features/Components/LoadUnitEnvironment.swift", "Features/Session/NumericTextFields.swift"]
+
+    func test_everyScreenWithANumberPadOrAMultiLineField_appliesKeyboardDismissal() throws {
+        for path in screens { XCTAssertTrue(try source(path).contains(".keyboardDismissal()"), "\(path) must apply .keyboardDismissal()") }
+        // Nothing else in Features declares such a field without being listed.
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Features")
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertGreaterThan(files.count, 20)
+        let known = Set((screens + components).map { String($0.split(separator: "/").last!) })
+        for f in files {
+            let text = try String(contentsOf: f, encoding: .utf8)
+            let hasNumeric = text.range(of: #"\.keyboardType\(\s*\.(decimalPad|numberPad|numbersAndPunctuation|phonePad|asciiCapableNumberPad)"#, options: .regularExpression) != nil
+            let hasMultiline = text.contains("TextEditor(") || text.contains("axis: .vertical")
+            if hasNumeric || hasMultiline { XCTAssertTrue(known.contains(f.lastPathComponent), "\(f.lastPathComponent) hosts a number pad or a multi-line field: add it to the screens list and apply .keyboardDismissal()") }
+        }
+        // The Settings form specifically: the screen Angela was trapped on.
+        let settings = try source("Features/Settings/SettingsView.swift")
+        XCTAssertTrue(settings.contains("StoredLoadField(") && settings.contains(".keyboardType(.decimalPad)"))
+        XCTAssertTrue(settings.contains(".keyboardDismissal()"))
+    }
+
+    // MARK: A Form row with a Button beside another control
+
+    /// A plain Button in a Form row takes the taps of the whole row, so a tap on the DatePicker fired Clear. Both Birthdate buttons are borderless.
+    func test_birthdateRow_buttonsAreBorderless_soATapOnTheDateNeverClearsIt() throws {
+        let settings = try source("Features/Settings/SettingsView.swift")
+        let row = try XCTUnwrap(settings.range(of: #"Text\("Birthdate"\)"#, options: .regularExpression))
+        let tail = String(settings[row.lowerBound...].prefix(1800))
+        for button in [#"Button("Clear")"#, #"Button("Set")"#] {
+            let at = try XCTUnwrap(tail.range(of: button), "\(button) not found in the Birthdate row")
+            let after = String(tail[at.upperBound...].prefix(400))
+            XCTAssertTrue(after.range(of: #"\.buttonStyle\(\.borderless\)"#, options: .regularExpression) != nil, "\(button) must be .buttonStyle(.borderless)")
+        }
+    }
+}

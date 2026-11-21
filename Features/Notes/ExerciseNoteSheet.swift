@@ -69,6 +69,7 @@ struct ExerciseNoteSheet: View {
             }
             .navigationTitle(exerciseName)
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissal()   // the note editor, max load and load step fields have no usable Return key
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
