@@ -801,6 +801,8 @@ final class MultiSessionSafetyTests: XCTestCase {
     }
 
     func test_confirmationText_namesEveryPart_whenSeveralThingsChange() throws {
+        EffortTracking.mode = .detailed   // the text says "RIR" in Detailed; the mirror is process-wide
+        defer { EffortTracking.clearMirror() }
         let (ctx, block) = try makeBlock()
         var m = try model(ctx, block, scope: .everyRemaining)
         m.setDelta = 1

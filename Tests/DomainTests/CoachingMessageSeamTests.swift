@@ -500,6 +500,8 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     }
 
     func test_B2_topAtTopOfRange_earnsOneStep_underRange_holds() {
+        EffortTracking.mode = .detailed   // the mirror is process-wide; other tests leave Simple behind
+        defer { EffortTracking.clearMirror() }
         let up = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315]))
         XCTAssertEqual(up?.nextTopLoad, 320)
         XCTAssertTrue(up?.message.contains("Top set: 315 x 6, top of the range — increase earned. Next top set: 320.") ?? false, up?.message ?? "nil")
