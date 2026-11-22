@@ -31,7 +31,7 @@ enum BackupSnapshotExporter {
         )
 
         let customExercises = try modelContext.fetch(
-            FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
+            FetchDescriptor<CustomExercise>(sortBy: [SortDescriptor(\.createdAt, order: .forward), SortDescriptor(\.id, order: .forward)])
         )
 
         let userProfile = try modelContext.fetch(FetchDescriptor<UserProfile>()).first

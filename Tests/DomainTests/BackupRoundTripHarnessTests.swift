@@ -1951,3 +1951,57 @@ final class CustomExerciseMergeDryRunTests: XCTestCase {
         }
     }
 }
+
+// MARK: - After the 1.4 launch backfills: a backup of the migrated store round-trips (report-only unless it differs)
+
+@MainActor
+final class PostMigrationRoundTripTests: XCTestCase {
+    private var parked: [ModelContainer] = []
+
+    func test_migratedStore_exportsImportsAndReExportsIdentically() throws {
+        // The backups the gate already points at (scripts/full_gate.sh), or an explicit comma-separated list.
+        let env = ProcessInfo.processInfo.environment
+        let fromGate = ["EP_BACKUP_FIXTURE", "EP_LIVE_BACKUP", "EP_ANGELA_130"].compactMap { env[$0] }.filter { FileManager.default.fileExists(atPath: $0) }
+        let list = (env["EP_RT_BACKUPS"].flatMap { $0.isEmpty ? nil : $0 } ?? fromGate.joined(separator: ","))
+        guard !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_RT_BACKUPS (comma-separated) or the gate's fixture variables") }
+        var saved: [String: Any] = [:]
+        for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v; UserDefaults.standard.removeObject(forKey: k) }
+        defer { for (k, v) in saved { UserDefaults.standard.set(v, forKey: k) } }
+        for path in list.split(separator: ",").map(String.init) {
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            let c1 = try BackupTestSupport.makeContainer(); parked.append(c1)
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c1)
+            let ctx1 = ModelContext(c1)
+            let before = (try ctx1.fetch(FetchDescriptor<Session>()).count, try ctx1.fetch(FetchDescriptor<SessionItem>()).count, try ctx1.fetch(FetchDescriptor<CustomExercise>()).count,
+                          try ctx1.fetch(FetchDescriptor<SessionHistory>()).count, try ctx1.fetch(FetchDescriptor<MesoBlock>()).count)
+            StartupBackfills.run(using: c1)                                         // the 1.4 launch
+            let ctx = ModelContext(c1)
+            let after = (try ctx.fetch(FetchDescriptor<Session>()).count, try ctx.fetch(FetchDescriptor<SessionItem>()).count, try ctx.fetch(FetchDescriptor<CustomExercise>()).count,
+                         try ctx.fetch(FetchDescriptor<SessionHistory>()).count, try ctx.fetch(FetchDescriptor<MesoBlock>()).count)
+            print("RT| \(name): sessions \(before.0)->\(after.0) items \(before.1)->\(after.1) custom \(before.2)->\(after.2) history \(before.3)->\(after.3) blocks \(before.4)->\(after.4)")
+            XCTAssertEqual(before.0, after.0); XCTAssertEqual(before.1, after.1); XCTAssertEqual(before.3, after.3); XCTAssertEqual(before.4, after.4)
+            XCTAssertLessThanOrEqual(after.2, before.2, "the launch backfills may merge custom exercises into built-ins, never add one")
+
+            let first = try BackupTestSupport.exportJSON(ctx)
+            let c2 = try BackupTestSupport.makeContainer(); parked.append(c2)
+            _ = try BackupTestSupport.restore(from: ctx, into: c2)
+            let ctx2 = ModelContext(c2)
+            let second = try BackupTestSupport.exportJSON(ctx2)
+            func canon(_ o: [String: Any]) throws -> Data {
+                var o = o; o.removeValue(forKey: "exportedAt"); o.removeValue(forKey: "metadata")
+                return try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
+            }
+            // Strict: the exporter orders custom exercises by createdAt then id, so even customs created in the same instant keep one order.
+            let a = try canon(first), b = try canon(second)
+            print("RT| \(name): export bytes \(a.count) vs re-export \(b.count): \(a == b ? "IDENTICAL" : "DIFFERENT")")
+            if a != b, let dir = ProcessInfo.processInfo.environment["EP_RT_DUMP"] {
+                try a.write(to: URL(fileURLWithPath: dir).appendingPathComponent("first_\(name)")); try b.write(to: URL(fileURLWithPath: dir).appendingPathComponent("second_\(name)"))
+            }
+            XCTAssertEqual(a, b, "\(name): the migrated store's backup must restore and re-export byte-identically")
+            // the 1.4 fields survive the round trip
+            let items = try ctx2.fetch(FetchDescriptor<SessionItem>())
+            XCTAssertEqual(items.filter { $0.loadEverWritten == nil }.count, 0, "every restored item carries loadEverWritten")
+            XCTAssertEqual(items.filter { $0.loadEverWritten == true }.count, try ctx.fetch(FetchDescriptor<SessionItem>()).filter { $0.loadEverWritten == true }.count)
+        }
+    }
+}
