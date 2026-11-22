@@ -1989,7 +1989,7 @@ final class SessionScreenViewModel: ObservableObject {
         // gates its retention-message branch on waveRaw == "deload"). Without this,
         // exercises added mid-block from the Today tab fall through to normal
         // progression coaching instead of the maintenance retention message.
-        let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+        let isMaintenanceSession = session.meso?.isMaintenance == true
 
         let newItem: SessionItem
         if isMaintenanceSession {

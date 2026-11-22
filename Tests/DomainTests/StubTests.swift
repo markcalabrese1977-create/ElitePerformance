@@ -877,7 +877,7 @@ final class MaintenanceBlockSeedingTests: XCTestCase {
 
     func test_F6_addedExerciseToMaintenanceSessionGetsMaintenancePrescriptionAndRetentionMessage() throws {
         let context = try makeContext()
-        let maintenanceMeso = MesoBlock(name: "Maintenance Block", startDate: Date(), status: .active, totalWeeks: 4)
+        let maintenanceMeso = MesoBlock(name: "Maintenance Block", startDate: Date(), status: .active, totalWeeks: 4, isMaintenance: true)
         let session = Session(date: Date(), status: .inProgress, weekIndex: 1, dayLabel: "Push", items: [])
         session.meso = maintenanceMeso
         context.insert(maintenanceMeso)
@@ -1199,7 +1199,8 @@ final class ProgramTemplateIntegrityTests: XCTestCase {
 
 final class WaveBadgeLabelTests: XCTestCase {
     func test_F10_waveLabelDistinguishesMaintenanceFromDeload() {
-        XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "Maintenance Block"), "Maintenance")
+        XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "Maintenance Block", isMaintenance: true), "Maintenance")
+        XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "Maintenance Block"), "Deload", "the name no longer decides: only the isMaintenance flag does")
         XCTAssertEqual(WaveType.label(forRaw: "deload", mesoName: "8-Week Hypertrophy Block"), "Deload")
     }
 }

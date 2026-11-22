@@ -474,7 +474,7 @@ struct ProgramPlanView: View {
         let labels = WaveLabels.labels(meso: meso)
         var shown: [String] = []
         for raw in group.sessions.flatMap({ $0.items.compactMap(\.waveRaw) }) {
-            if let text = WaveLabels.display(forRaw: raw, labels: labels, mesoName: meso?.name), !shown.contains(text) { shown.append(text) }
+            if let text = WaveLabels.display(forRaw: raw, labels: labels, mesoName: meso?.name, isMaintenance: meso?.isMaintenance == true), !shown.contains(text) { shown.append(text) }
         }
         return shown.isEmpty ? "Week \(group.weekIndex)" : "Week \(group.weekIndex) · " + shown.joined(separator: ", ")
     }

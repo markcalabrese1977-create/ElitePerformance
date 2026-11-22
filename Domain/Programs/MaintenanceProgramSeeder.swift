@@ -534,7 +534,7 @@ enum MaintenanceProgramSeeder {
         }
 
         guard let maintenanceMeso = blocks.first(where: {
-            $0.status == .active && $0.name.lowercased().contains("maintenance")
+            $0.status == .active && $0.isMaintenance
         }) else {
             print("ℹ️ Repair: no active maintenance meso found")
             return
@@ -567,7 +567,7 @@ enum MaintenanceProgramSeeder {
         }
 
         guard let maintenanceMeso = blocks.first(where: {
-            $0.status == .active && $0.name.lowercased().contains("maintenance")
+            $0.status == .active && $0.isMaintenance
         }) else {
             print("ℹ️ Audit: no active maintenance meso found")
             return

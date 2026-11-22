@@ -1003,7 +1003,9 @@ final class WaveLabelsTests: XCTestCase {
         let labels = WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "12-Week DUP Meso")
         XCTAssertNil(labels["deload"], "deload is not ranked")
         XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "12-Week DUP Meso"), "Deload")
-        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "Maintenance Block"), "Maintenance")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "Maintenance Block", isMaintenance: true), "Maintenance")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "Maintenance Block"), "Deload", "the name alone does not make a block maintenance")
+        XCTAssertEqual(WaveLabels.display(forRaw: "deload", labels: labels, mesoName: "My plan", isMaintenance: true), "Maintenance", "the flag does, whatever the name")
         // A deload prescription never moves the means.
         let withDeload = anchors(6, 8, 10) + [S(letter: "deload", repMax: 20, isAnchor: true)]
         XCTAssertEqual(WaveLabels.labels(samples: withDeload, mesoName: "X"), WaveLabels.labels(samples: anchors(6, 8, 10), mesoName: "X"))

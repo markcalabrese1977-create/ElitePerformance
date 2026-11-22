@@ -80,7 +80,7 @@ struct ProgramDayDetailView: View {
                                                             let name = ExerciseCatalog.displayName(for: canonicalId)
                                                             noteTarget = NoteTarget(exerciseId: canonicalId, exerciseName: name)
                                                         },
-                                                        isMaintenance: session.meso?.name.lowercased().contains("maintenance") == true
+                                                        isMaintenance: session.meso?.isMaintenance == true
                                                     )
                     }
                     .onMove(perform: moveItems)
@@ -294,7 +294,7 @@ struct ProgramDayDetailView: View {
         let week = "\(dateString) · Week \(session.weekIndex)"
         // "· Moderate (B)" after the week; nothing on a block without waves.
         let labels = WaveLabels.labels(meso: session.meso)
-        let shown = Array(NSOrderedSet(array: session.items.compactMap { WaveLabels.display(forRaw: $0.waveRaw, labels: labels, mesoName: session.meso?.name) })) as? [String] ?? []
+        let shown = Array(NSOrderedSet(array: session.items.compactMap { WaveLabels.display(forRaw: $0.waveRaw, labels: labels, mesoName: session.meso?.name, isMaintenance: session.meso?.isMaintenance == true) })) as? [String] ?? []
         return shown.isEmpty ? week : week + " · " + shown.joined(separator: ", ")
     }
 
@@ -345,7 +345,7 @@ struct ProgramDayDetailView: View {
         // engine recognizes the new item as a maintenance exercise (it gates on
         // waveRaw == "deload"). Without this, exercises added mid-block fall
         // through to normal progression coaching instead of the retention message.
-        let isMaintenanceSession = session.meso?.name.lowercased().contains("maintenance") == true
+        let isMaintenanceSession = session.meso?.isMaintenance == true
         print("🔍 addExercise debug — session.meso name: \(session.meso?.name ?? "nil"), isMaintenanceSession: \(isMaintenanceSession)")
 
         let newItem: SessionItem

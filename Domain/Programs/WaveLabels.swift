@@ -27,14 +27,14 @@ enum WaveLabels {
     // MARK: - Pure core
 
     /// letter ("a", "b", "c") -> name ("Heavy"), for the non-deload letters present in `samples`.
-    static func labels(samples: [Sample], mesoName: String?) -> [String: String] {
+    static func labels(samples: [Sample], mesoName: String?, isMaintenance: Bool = false) -> [String: String] {
         let usable = samples.filter { $0.repMax > 0 && !isDeloadOrBlank($0.letter) }
         let letters = Set(usable.map { $0.letter.lowercased() }).sorted()
         guard !letters.isEmpty else { return [:] }
 
         func fallback() -> [String: String] {
             var out: [String: String] = [:]
-            for l in letters { out[l] = WaveType.label(forRaw: l, mesoName: mesoName) ?? l.uppercased() }
+            for l in letters { out[l] = WaveType.label(forRaw: l, mesoName: mesoName, isMaintenance: isMaintenance) ?? l.uppercased() }
             return out
         }
 
@@ -72,13 +72,13 @@ enum WaveLabels {
         }
     }
 
-    static func labels(sessions: [Session], mesoName: String?) -> [String: String] {
-        labels(samples: samples(sessions: sessions), mesoName: mesoName)
+    static func labels(sessions: [Session], mesoName: String?, isMaintenance: Bool = false) -> [String: String] {
+        labels(samples: samples(sessions: sessions), mesoName: mesoName, isMaintenance: isMaintenance)
     }
 
     static func labels(meso: MesoBlock?) -> [String: String] {
         guard let meso else { return [:] }
-        return labels(sessions: meso.sessions, mesoName: meso.name)
+        return labels(sessions: meso.sessions, mesoName: meso.name, isMaintenance: meso.isMaintenance)
     }
 
     static func labels(template: ProgramTemplate) -> [String: String] {
@@ -91,21 +91,21 @@ enum WaveLabels {
     // MARK: - Names for a raw letter
 
     /// "Moderate" for a lettered week, "Deload" / "Maintenance" for a deload one, nil when there is no wave.
-    static func name(forRaw raw: String?, labels: [String: String], mesoName: String?) -> String? {
+    static func name(forRaw raw: String?, labels: [String: String], mesoName: String?, isMaintenance: Bool = false) -> String? {
         guard let raw, !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         let w = raw.trimmingCharacters(in: .whitespaces).lowercased()
-        if w == "deload" { return WaveType.label(forRaw: w, mesoName: mesoName) }
-        return labels[w] ?? WaveType.label(forRaw: w, mesoName: mesoName)
+        if w == "deload" { return WaveType.label(forRaw: w, mesoName: mesoName, isMaintenance: isMaintenance) }
+        return labels[w] ?? WaveType.label(forRaw: w, mesoName: mesoName, isMaintenance: isMaintenance)
     }
 
     /// "Moderate (B)", or "Deload" / "Maintenance" (no letter), or nil without a wave.
-    static func display(forRaw raw: String?, labels: [String: String], mesoName: String?) -> String? {
-        guard let name = name(forRaw: raw, labels: labels, mesoName: mesoName), let raw else { return nil }
+    static func display(forRaw raw: String?, labels: [String: String], mesoName: String?, isMaintenance: Bool = false) -> String? {
+        guard let name = name(forRaw: raw, labels: labels, mesoName: mesoName, isMaintenance: isMaintenance), let raw else { return nil }
         let w = raw.trimmingCharacters(in: .whitespaces).lowercased()
         return w == "deload" ? name : "\(name) (\(w.uppercased()))"
     }
 
     static func display(forRaw raw: String?, meso: MesoBlock?) -> String? {
-        display(forRaw: raw, labels: labels(meso: meso), mesoName: meso?.name)
+        display(forRaw: raw, labels: labels(meso: meso), mesoName: meso?.name, isMaintenance: meso?.isMaintenance == true)
     }
 }

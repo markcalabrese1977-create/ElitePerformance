@@ -20,13 +20,13 @@ enum WaveType: String, Codable, CaseIterable, Identifiable {
         }
 
         /// Program-aware display label derived from wave type and meso name.
-        static func label(forRaw raw: String?, mesoName: String?) -> String? {
+        static func label(forRaw raw: String?, mesoName: String?, isMaintenance: Bool = false) -> String? {
             guard let raw else { return nil }
             let wave = raw.lowercased()
             let meso = mesoName?.lowercased() ?? ""
 
             if wave == "deload" {
-                return meso.contains("maintenance") ? "Maintenance" : "Deload"
+                return isMaintenance ? "Maintenance" : "Deload"
             }
 
             let isDUP = meso.contains("dup")
