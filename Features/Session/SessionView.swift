@@ -317,6 +317,10 @@ struct SessionView: View {
                     viewModel.addExercise(catalogExercise, context: modelContext)
                     activeSheet = nil
 
+                    // "Apply to future sessions" only exists where it can act: it copies the new item's prescription into
+                    // every later same-day session, which propagation refuses on a wave block (it would flatten the
+                    // A/B/C undulation). Offering it there was a button that did nothing.
+                    guard viewModel.addedExerciseCanPropagate else { return }
                     pendingAddedExerciseForPropagation = (
                         exerciseId: catalogExercise.id,
                         exerciseName: catalogExercise.name
@@ -2094,6 +2098,9 @@ final class SessionScreenViewModel: ObservableObject {
         exercises.append(uiExercise)
     }
     
+    /// False on a wave-based block, where `propagateAddedExerciseForward` would do nothing.
+    var addedExerciseCanPropagate: Bool { !WavePrescriptionGuard.isWaveBasedBlock(session) }
+
     func propagateAddedExerciseForward(exerciseId: String, context: ModelContext) {
         // The new item below is built from the source item's prescription, wave
         // included. On a wave-based block that injects this week's wave into every

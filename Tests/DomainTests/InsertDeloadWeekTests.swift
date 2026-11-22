@@ -753,4 +753,20 @@ final class WaveSlotRestoreTests: XCTestCase {
         XCTAssertNil(new.waveRaw)
         XCTAssertEqual(new.targetSets, 3)
     }
+
+    // MARK: Today "Apply to future <weekday>" is only offered where it can act
+
+    @MainActor
+    func test_applyToFutureDialog_isNotOfferedOnAWaveBlock() throws {
+        let c = try ctx()
+        let (_, ss) = block(c, weeks: [(2, "b", [item("bench_press", wave: "b")])])
+        XCTAssertFalse(SessionScreenViewModel(session: ss[0]).addedExerciseCanPropagate)
+    }
+
+    @MainActor
+    func test_applyToFutureDialog_isOfferedOnABlockWithNoWaves() throws {
+        let c = try ctx()
+        let (_, ss) = block(c, weeks: [(2, "none", [item("bench_press", wave: nil)])])
+        XCTAssertTrue(SessionScreenViewModel(session: ss[0]).addedExerciseCanPropagate)
+    }
 }
