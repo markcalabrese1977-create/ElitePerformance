@@ -52,6 +52,12 @@ import SwiftData
 /// A performed set counts, a failed attempt (load > 0, no reps, no "SKIP") included; a performed WORKING set for rule 3
 /// has reps (a failed attempt shows nothing doable).
 ///
+/// **Scheduled deload weeks** (the template's own deload week, not an inserted one) are a separate pass: an unedited item of a
+/// planned deload session gets `DeloadRule.sizing` from the lift's latest non-deload working load (min(RIR-4 sizing at repMin,
+/// 0.95 x working load), rounded down), whatever load it holds, and is recomputed on every pass until a set is logged anywhere in that
+/// week or the item is `planEdited`. Bodyweight items are never touched; a fixed-load item gets its fixed load. Sets, reps and RIR stay
+/// as the template wrote them. A lift with no logged history stays as it is.
+///
 /// Idempotent: a target that already holds the computed load is not a change.
 ///
 /// This replaced `MissedSourceSeeding` (the older rule for targets at 0 load only), which is gone: its trigger, its
@@ -89,6 +95,8 @@ enum PlaceholderRefresh {
         case noRecentHistory(why: String)
         /// A target still at its block-setup value with nothing to estimate from.
         case placeholder(why: String)
+        /// A scheduled deload item sized by `DeloadRule`.
+        case scheduledDeload(DeloadRule.Sizing)
 
         var text: String {
             func day(_ d: Date) -> String { d.formatted(.dateTime.month(.abbreviated).day()) }
@@ -97,6 +105,9 @@ enum PlaceholderRefresh {
                 return "held load of the \(day(d)) session (\(performed) of \(planned) planned sets performed)"
             case .earlierSameLetter(let d, let weeks):
                 return "held load of the last \(day(d)) session of this letter (within two \(weeks)-week rotations)"
+            case .scheduledDeload(let z):
+                func n(_ x: Double?) -> String { x.map { LoadFormatter.number($0) } ?? "-" }
+                return "scheduled deload: working \(n(z.workingLoad)), RIR-4 sizing \(n(z.rirLoad)), 95% cap \(n(z.capLoad)) -> \(n(z.load)) [\(z.basis.rawValue)]"
             case .staleNoteCleared(let why):
                 return "\"set a load\" note removed: \(why)"
             case .placeholder(let why):
@@ -159,7 +170,12 @@ enum PlaceholderRefresh {
 
         for target in all where target.status == .planned && target.date >= today {
             guard let meso = target.meso, meso.status == .active, !meso.isMaintenance else { continue }
+            let weekLogged = deloadWeekHasLoggedSet(target, meso: meso, in: all)
             for item in target.items {
+                if let change = scheduledDeloadChange(item, in: target, weekLogged: weekLogged, sessions: all, ctx: ctx, now: now) {
+                    changes.append(change)
+                    continue
+                }
                 // The note says the item has no load. When it has one, or is an item the refresh never loads (bodyweight, fixed-load, a
                 // deload week), the note is stale: removed here, on every pass, whatever wrote the load. A hand-edited item is not touched.
                 if !item.planEdited, item.prescriptionNotes?.contains(noRecentHistoryNote) == true {
@@ -278,6 +294,32 @@ enum PlaceholderRefresh {
     static func afterCompletion(in context: ModelContext, now: Date = Date()) {
         guard isEnabled else { return }
         run(in: context, now: now)
+    }
+
+    // MARK: - Scheduled deload
+
+    static let deloadNote = "Deload: about 90–95% of your working weight, half the sets, stop well short of failure."
+    static let fixedLoadDeloadNote = "Deload: your usual fixed load, half the sets, stop well short of failure."
+
+    /// True when any set was logged in a session of the same week of the same block (the deload week is under way).
+    private static func deloadWeekHasLoggedSet(_ target: Session, meso: MesoBlock, in all: [Session]) -> Bool {
+        guard target.items.contains(where: { letterKey($0) == "deload" }) else { return false }
+        return all.contains { s in
+            s.meso?.persistentModelID == meso.persistentModelID && s.weekIndex == target.weekIndex
+                && s.items.contains { $0.actualReps.contains { $0 > 0 } || $0.actualLoads.contains { $0 > 0 } }
+        }
+    }
+
+    /// The change for one unedited item of a scheduled deload week, or nil when it is not one or nothing changes.
+    private static func scheduledDeloadChange(_ item: SessionItem, in target: Session, weekLogged: Bool, sessions: [Session], ctx: Context, now: Date) -> Change? {
+        guard letterKey(item) == "deload", target.insertedDeload != true, !item.planEdited, !weekLogged, item.targetSets > 0 else { return nil }
+        let z = DeloadRule.sizing(exerciseId: item.exerciseId, repMin: item.repMin ?? item.targetReps, in: sessions,
+                                  profile: ctx.profile, unit: ctx.unit, customExercises: ctx.customExercises, referenceDate: now)
+        guard z.basis != .bodyweight, z.basis != .noHistory, z.load > 0 else { return nil }
+        let current = currentLoad(item)
+        let note = z.basis == .exempt ? fixedLoadDeloadNote : deloadNote
+        if holdsLoad(item, z.load), item.coachNote == note { return nil }          // idempotent
+        return Change(session: target, item: item, oldLoad: current, newLoad: z.load, reason: .scheduledDeload(z), note: note)
     }
 
     // MARK: - Pieces

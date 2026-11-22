@@ -770,3 +770,127 @@ final class WaveSlotRestoreTests: XCTestCase {
         XCTAssertTrue(SessionScreenViewModel(session: ss[0]).addedExerciseCanPropagate)
     }
 }
+
+
+// MARK: - Scheduled deload weeks are filled by PlaceholderRefresh
+
+@MainActor
+final class ScheduledDeloadFillTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private let now = Date()
+
+    private func makeContext() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        return ctx
+    }
+
+    /// Seeds `template` so that its LAST week starts three days from now, completes every earlier session at 100 lb x 10, and returns
+    /// (the sessions of the deload week or last week, all sessions).
+    private func seed(_ template: ProgramTemplate, _ ctx: ModelContext) throws -> (week: [Session], all: [Session], deloadWeek: Int?) {
+        let weeks = template.totalWeeks
+        let start = cal.date(byAdding: .day, value: 3 - (weeks - 1) * 7, to: cal.startOfDay(for: now))!
+        let weekday = cal.component(.weekday, from: start)
+        let days = (0..<template.trainingDaysPerWeek).map { ((weekday - 1 + $0) % 7) + 1 }
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: days, context: ctx, template: template, mesoName: "M", mesoStatus: .active)
+        try ctx.save()
+        let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+        let deloadWeek = template.weekRules.first(where: { $0.isDeload })?.weekNumber
+        let lastWeek = deloadWeek ?? weeks
+        for s in all where s.weekIndex < lastWeek {
+            s.status = .completed
+            for i in s.items {
+                i.actualLoads = Array(repeating: 100, count: i.targetSets)
+                i.actualReps = Array(repeating: 10, count: i.targetSets)
+                i.actualRIRs = Array(repeating: 2, count: i.targetSets)
+            }
+        }
+        try ctx.save()
+        return (all.filter { $0.weekIndex == lastWeek }, all, deloadWeek)
+    }
+
+    func test_everyBuiltInTemplateWithAScheduledDeload_hasItsDeloadItemsFilled() throws {
+        let own = ProgramTemplate.waveless(name: "Own", totalWeeks: 6, deloadFinalWeek: true, days: [
+            WavelessDay(title: "A", slots: [.defaults(exerciseId: ExerciseCatalog.benchPress.id, isCompound: true),
+                                           .defaults(exerciseId: ExerciseCatalog.dumbbellLateralRaise.id, isCompound: false)]),
+            WavelessDay(title: "B", slots: [.defaults(exerciseId: ExerciseCatalog.romanianDeadlift.id, isCompound: true)])])
+        let templates: [(String, ProgramTemplate)] = [
+            ("PPL3Week", PPL3WeekTemplate.template), ("UpperLower4Day", UpperLower4DayTemplate.template),
+            ("Hybrid5Day", Hybrid5DayTemplate.template), ("DUP10Week", DUP10WeekTemplate.template),
+            ("PPL6Day", PPL6DayTemplate.template), ("FullBody2Day", FullBody2DayTemplate.template), ("Waveless", own)]
+        var covered = 0
+        var noHistory: [String] = []
+        for (name, t) in templates {
+            let ctx = try makeContext()
+            let s = try seed(t, ctx)
+            guard s.deloadWeek != nil else { continue }
+            covered += 1
+            let items = s.week.flatMap(\.items).filter { $0.waveRaw?.lowercased() == "deload" && $0.targetSets > 0 }
+            XCTAssertFalse(items.isEmpty, "\(name): the deload week has deload items")
+            let before = items.filter { $0.suggestedLoad > 0 }.count
+            PlaceholderRefresh.run(in: ctx, now: now)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            for i in items where !ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: []) {
+                let z = DeloadRule.sizing(exerciseId: i.exerciseId, repMin: i.repMin ?? i.targetReps, in: s.all, profile: profile,
+                                          unit: .lb, customExercises: [], referenceDate: now)
+                if z.basis == .noHistory { print("SDL| \(name) \(i.exerciseId) sets \(i.targetSets) repMin \(String(describing: i.repMin)) \(i.targetReps)"); noHistory.append("\(name) \(i.exerciseId)"); XCTAssertEqual(i.suggestedLoad, 0); continue }
+                XCTAssertGreaterThan(i.suggestedLoad, 0, "\(name) \(i.exerciseId): filled (\(before) were already loaded)")
+                XCTAssertLessThanOrEqual(i.suggestedLoad, 95 + 1e-9, "\(name) \(i.exerciseId): never above 95% of the 100 lb working load")
+                XCTAssertEqual(i.suggestedLoad, z.load, "\(name) \(i.exerciseId): the DeloadRule load")
+                XCTAssertTrue(i.plannedLoadsBySet.allSatisfy { $0 == z.load }, "\(name) \(i.exerciseId): every slot \(i.plannedLoadsBySet)")
+                XCTAssertEqual(i.coachNote, PlaceholderRefresh.deloadNote, name)
+                XCTAssertFalse(i.planEdited, name)
+            }
+            for i in items where ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: []) {
+                XCTAssertEqual(i.suggestedLoad, 0, "\(name) \(i.exerciseId): bodyweight is never touched")
+                XCTAssertNil(i.coachNote)
+            }
+            XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty, "\(name): idempotent")
+        }
+        XCTAssertGreaterThanOrEqual(covered, 5, "the built-ins with a scheduled deload were all exercised")
+        print("SDL| no-history (stay 0): \(noHistory)")
+    }
+
+    func test_editedItem_loggedWeek_insertedDeload_areLeftAlone_andNoHistoryStaysZero() throws {
+        let ctx = try makeContext()
+        let s = try seed(DUP10WeekTemplate.template, ctx)
+        let items = s.week.flatMap(\.items)
+        let edited = try XCTUnwrap(items.first)
+        edited.planEdited = true; edited.suggestedLoad = 42; edited.plannedLoadsBySet = Array(repeating: 42, count: edited.targetSets)
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(edited.suggestedLoad, 42, "an edited item is never touched")
+        XCTAssertTrue(items.dropFirst().contains { $0.suggestedLoad == 95 })
+
+        // Recomputed every pass: a newer working session moves the load.
+        let other = try XCTUnwrap(items.dropFirst().first { $0.suggestedLoad == 95 && $0.exerciseId != edited.exerciseId })
+        func latestSource() -> SessionItem {
+            s.all.filter { $0.status == .completed }.sorted { $0.date > $1.date }
+                .compactMap { $0.items.first { $0.exerciseId == other.exerciseId } }.first!
+        }
+        let newer = latestSource()
+        newer.actualLoads = Array(repeating: 120, count: newer.targetSets); newer.actualReps = Array(repeating: 8, count: newer.targetSets)
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertGreaterThan(other.suggestedLoad, 95, "a heavier newest working session raises the deload with it (recomputed every pass)")
+        XCTAssertLessThanOrEqual(other.suggestedLoad, 114)
+
+        // Once a set is logged in the deload week, the pass stops.
+        let held = other.suggestedLoad
+        let logged = try XCTUnwrap(items.first { $0 !== edited && $0 !== other })
+        logged.actualLoads = [50]; logged.actualReps = [10]
+        newer.actualLoads = Array(repeating: 200, count: newer.targetSets)
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertEqual(other.suggestedLoad, held, "a logged set in the deload week freezes it")
+    }
+
+    func test_inactiveHistory_leavesALiftWithNoWorkingLoadAtZero() throws {
+        let ctx = try makeContext()
+        let s = try seed(DUP10WeekTemplate.template, ctx)
+        for sess in s.all { for i in sess.items { i.actualLoads = []; i.actualReps = []; i.actualRIRs = [] } }
+        PlaceholderRefresh.run(in: ctx, now: now)
+        XCTAssertTrue(s.week.flatMap(\.items).allSatisfy { $0.suggestedLoad == 0 }, "nothing to size from: stays 0")
+    }
+}

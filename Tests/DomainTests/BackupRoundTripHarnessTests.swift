@@ -1572,3 +1572,50 @@ final class DeloadRuleDryRunTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dry-run: scheduled deload weeks through PlaceholderRefresh (report only)
+
+@MainActor
+final class ScheduledDeloadDryRunTests: XCTestCase {
+    func test_dryRun_everyScheduledDeloadItemBeforeAndAfter() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_DELOAD_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_DELOAD_BACKUPS to comma-separated backup paths")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("SDR| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_DELOAD_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        func pad(_ x: String, _ n: Int) -> String { x.padding(toLength: n, withPad: " ", startingAt: 0) }
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let unit = profile?.loadUnit ?? .lb
+            let changes = PlaceholderRefresh.plan(in: ctx)
+            var byItem: [PersistentIdentifier: PlaceholderRefresh.Change] = [:]
+            for c in changes { byItem[c.item.persistentModelID] = c }
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)  (\(all.count) sessions, \(changes.count) planned changes in all)")
+            let deloadSessions = all.filter { $0.status == .planned && $0.insertedDeload != true && $0.items.contains { $0.waveRaw?.lowercased() == "deload" } }
+            if deloadSessions.isEmpty { out("(no scheduled deload sessions)") }
+            for s in deloadSessions {
+                out("-- week \(s.weekIndex) \(s.dayLabel ?? "?")  \(s.date.formatted(.dateTime.month().day().year()))  meso \(s.meso?.name ?? "-") (\(s.meso?.status.rawValue ?? "-"))")
+                for i in s.items.sorted(by: { $0.order < $1.order }) {
+                    let name = pad(ExerciseCatalog.displayName(for: i.exerciseId), 32)
+                    let before = LoadFormatter.number(i.suggestedLoad)
+                    if let c = byItem[i.persistentModelID] {
+                        guard case .scheduledDeload(let z) = c.reason else { out(name + "(other change: \(c.reason.text))"); continue }
+                        let share = z.workingLoad.map { String(format: "%.0f%%", z.load / $0 * 100) } ?? "-"
+                        out(name + "sets \(i.targetSets) reps \(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps)  \(before) -> \(LoadFormatter.number(z.load))  working \(z.workingLoad.map { LoadFormatter.number($0) } ?? "-") (\(share))  rir@repMin \(z.rirLoad.map { LoadFormatter.number($0) } ?? "-") cap \(z.capLoad.map { LoadFormatter.number($0) } ?? "-")  [\(z.basis.rawValue)]")
+                    } else {
+                        let why = i.targetSets == 0 ? "0 sets" : i.planEdited ? "planEdited" : ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: []) ? "bodyweight" : "no change (no history, or already holds the rule's load)"
+                        let z = DeloadRule.sizing(exerciseId: i.exerciseId, repMin: i.repMin ?? i.targetReps, in: all, profile: profile, unit: unit, customExercises: [], referenceDate: Date())
+                        let done = all.filter { $0.status == .completed }.flatMap(\.items).filter { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == ExerciseCatalog.canonicalExerciseId(for: i.exerciseId) }
+                        out(name + "sets \(i.targetSets)  \(before) -> \(before)  (\(why)) basis \(z.basis.rawValue) repMin \(i.repMin ?? i.targetReps) completed items \(done.count) logged \(done.filter { $0.actualReps.contains { $0 > 0 } }.count) waves \(Set(done.map { $0.waveRaw ?? "-" }).sorted())")
+                    }
+                }
+            }
+            _ = unit
+        }
+    }
+}

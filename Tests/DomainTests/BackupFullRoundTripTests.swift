@@ -4616,15 +4616,30 @@ final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
             XCTAssertTrue(before[k]?.prescription.contains(PlaceholderRefresh.noRecentHistoryNote) == true)
             XCTAssertEqual(["Dec 3", "Dec 10"].contains(new.date), true, new.summary)
         }
-        XCTAssertEqual(differing.count - noteOnly.count, 12, "the rest are the hold / cross-day load writes")
+        let deloadWrites = differing.filter { $0.value.wave == "DELOAD" }
+        XCTAssertEqual(deloadWrites.count, 10, "week 10's deload items with a working load to size from (item 7)")
+        XCTAssertEqual(differing.count - noteOnly.count - deloadWrites.count, 12, "the rest are the hold / cross-day load writes")
         XCTAssertTrue(PlaceholderRefresh.plan(in: ctx).isEmpty, "a second pass changes nothing")
     }
+
+    private func row0(_ rows: [String: Row], _ date: String, _ day: String, _ name: String) -> Row? { rows.values.first { $0.date == date && $0.day == day && $0.name == name } }
 
     func test_122ThroughTheChangedRefresh_isTheActual130_plusExactlyTheHoldAndCrossDayWrites() throws {
         let r = try launch122()
         let actual = try rows(try importStore(try path("EP_ANGELA_130")))
         let differing = r.rows.filter { actual[$0.key] != nil && actual[$0.key] != $0.value }
-        XCTAssertEqual(differing.count, 14, "every difference from the 1.3.0 backup is one of the writes pinned below")
+        XCTAssertEqual(differing.count, 24, "every difference from the 1.3.0 backup is one of the writes pinned below: 14 hold / cross-day, 10 scheduled-deload")
+
+        // Scheduled deload week (week 10, Jan 22-28): DeloadRule from the Nov 20 Lower A working loads, min(RIR-4 sizing at repMin, 0.95 x working).
+        let deload = r.rows.values.filter { $0.wave == "DELOAD" && $0.load != "0" }
+        XCTAssertEqual(deload.count, 10)
+        for (date, day, name, load) in [("Jan 22", "Lower A", "Single leg press", "137.5"), ("Jan 22", "Lower A", "Cable Abduction", "40"),
+                                        ("Jan 22", "Lower A", "Seated Calf Raise", "142.5"), ("Jan 22", "Lower A", "Cage Kickstand RDL", "22.5"),
+                                        ("Jan 28", "Lower C", "Single leg press", "137.5"), ("Jan 26", "Lower B", "Seated Calf Raise", "142.5")] {
+            let d = try XCTUnwrap(row0(r.rows, date, day, name), "\(date) \(name)")
+            XCTAssertEqual(d.load, load, "\(date) \(name)"); XCTAssertEqual(d.coach, PlaceholderRefresh.deloadNote)
+        }
+        XCTAssertTrue(r.rows.values.filter { $0.wave == "DELOAD" && $0.name == "Copenhagen" }.allSatisfy { $0.load == "0" }, "bodyweight is never touched")
 
         func row(_ date: String, _ day: String, _ name: String) -> Row? { r.rows.values.first { $0.date == date && $0.day == day && $0.name == name } }
         // Hold from the Nov 20 Lower A 15-rep sets (same day).
