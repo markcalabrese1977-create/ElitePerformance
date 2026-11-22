@@ -610,7 +610,7 @@ final class FixedLoadExemptTests: XCTestCase {
     private func makeBackupContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -1076,7 +1076,7 @@ final class MaxLoadTests: XCTestCase {
     private func backupContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))

@@ -10,7 +10,6 @@ enum AppSchema {
         Session.self,
         SessionItem.self,
         SetLog.self,
-        PRIndex.self,
         SessionHistory.self,
         SessionHistoryExercise.self,
         ExerciseNote.self,

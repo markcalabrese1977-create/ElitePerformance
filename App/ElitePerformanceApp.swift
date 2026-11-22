@@ -144,7 +144,6 @@ enum StartupBackfills {
         (String(describing: BodyweightPhantomLoadMigration.self), { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
         (String(describing: PrescribedSetsBackfill.self), { PrescribedSetsBackfill.runIfNeeded(in: $0) }),
         (String(describing: PlannedDateBackfill.self), { PlannedDateBackfill.runIfNeeded(in: $0) }),
-        (String(describing: PRIndexRuleBackfill.self), { PRIndexRuleBackfill.runIfNeeded(in: $0) }),
         (String(describing: LegacyExerciseNotesBackfill.self), { LegacyExerciseNotesBackfill.runIfNeeded(in: $0) }),
         (String(describing: SessionHistoryExerciseOrderBackfill.self), { SessionHistoryExerciseOrderBackfill.runIfNeeded(in: $0) }),
         (String(describing: CustomExerciseCompoundBackfill.self), { CustomExerciseCompoundBackfill.runIfNeeded(in: $0) }),

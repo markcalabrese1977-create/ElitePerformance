@@ -376,7 +376,15 @@ final class AnalyticsFoundationTests: XCTestCase {
         XCTAssertTrue(PersonalRecords.suspects(from: SetRecordBuilder.build(sessions: sessions).sets, threshold: 2.0).isEmpty)
     }
 
-    // MARK: - PRService and the PRIndex rebuild (the e1RM definition)
+    // MARK: - The PR definition (the e1RM definition): derived on demand, nothing stored
+
+    private func records(_ ctx: ModelContext) throws -> (items: Set<PersistentIdentifier>, bests: [String: (load: Double, reps: Int, date: Date)]) {
+        let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+        let bw = try ctx.fetch(FetchDescriptor<UserProfile>()).first?.bodyWeight
+        let snapshot = SetRecordBuilder.build(sessions: sessions, bodyWeight: bw)
+        let bests = PersonalRecords.bests(from: snapshot.sets).mapValues { (load: $0.load, reps: $0.reps, date: $0.date) }
+        return (PRRebuildService.recordItems(sessions: sessions, records: snapshot), bests)
+    }
 
     func test_prDefinition_isTheE1RMDefinition_notVolume() throws {
         let ctx = try makeContext()
@@ -384,24 +392,23 @@ final class AnalyticsFoundationTests: XCTestCase {
         let base = item("bench_press", reps: [5], loads: [200])
         // 100x15 has MORE volume (1500) than 200x5 (1000) but a lower e1RM (150 vs 233), and 15 reps are not a record set: not a PR.
         let high = item("bench_press", reps: [15], loads: [100])
-        // 215x5: e1RM 251 > 233: a PR, and the index holds the set.
+        // 215x5: e1RM 251 > 233: a PR.
         let real = item("bench_press", reps: [5], loads: [215])
         session(ctx, meso: m, day: 1, items: [base]); session(ctx, meso: m, day: 2, items: [high]); session(ctx, meso: m, day: 3, items: [real])
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertFalse(base.isPR, "first-ever: a baseline")
-        XCTAssertFalse(high.isPR)
-        XCTAssertTrue(real.isPR)
-        let row = try XCTUnwrap(PRService.currentPR(for: "bench_press", in: ctx))
-        XCTAssertEqual(row.bestLoad, 215)
-        XCTAssertEqual(row.bestReps, 5)
-        XCTAssertEqual(row.bestSetVolume, 1075)
+        var r = try records(ctx)
+        XCTAssertFalse(r.items.contains(base.persistentModelID), "first-ever: a baseline")
+        XCTAssertFalse(r.items.contains(high.persistentModelID))
+        XCTAssertTrue(r.items.contains(real.persistentModelID))
+        XCTAssertEqual(r.bests["bench_press"]?.load, 215)
+        XCTAssertEqual(r.bests["bench_press"]?.reps, 5)
         // A rest-pause row never sets one.
         let rp = item("bench_press", reps: [12], loads: [300], rp: [true])
         session(ctx, meso: m, day: 4, items: [rp])
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertFalse(rp.isPR)
+        r = try records(ctx)
+        XCTAssertFalse(r.items.contains(rp.persistentModelID))
+        XCTAssertFalse(base.isPR || high.isPR || real.isPR || rp.isPR, "isPR is deprecated: nothing writes it")
     }
 
     func test_prDefinition_bodyweightUsesProfileBodyWeight_andCanonicalIds() throws {
@@ -415,19 +422,19 @@ final class AnalyticsFoundationTests: XCTestCase {
         let pull = item("pull_up", reps: [8], loads: [0])
         session(ctx, meso: m, day: 1, items: [first, pull]); session(ctx, meso: m, day: 2, items: [heavier])
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertFalse(first.isPR, "a lift's first-ever best is a baseline, not a record")
-        XCTAssertTrue(heavier.isPR, "beating the first best is a record")
-        XCTAssertEqual(PRService.currentPR(for: "seated_cable_press", in: ctx)?.exerciseId, "seated_cable_press", "keyed by the canonical id")
-        XCTAssertFalse(pull.isPR, "first-ever: a baseline")
-        XCTAssertEqual(PRService.currentPR(for: "pull_up", in: ctx)?.bestLoad, 180)
+        var r = try records(ctx)
+        XCTAssertFalse(r.items.contains(first.persistentModelID), "a lift's first-ever best is a baseline, not a record")
+        XCTAssertTrue(r.items.contains(heavier.persistentModelID), "beating the first best is a record")
+        XCTAssertNotNil(r.bests["seated_cable_press"], "keyed by the canonical id")
+        XCTAssertFalse(r.items.contains(pull.persistentModelID), "first-ever: a baseline")
+        XCTAssertEqual(r.bests["pull_up"]?.load, 180)
         profile.bodyWeight = nil
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx, recomputeFlags: true)
-        XCTAssertNil(PRService.currentPR(for: "pull_up", in: ctx), "no body weight: no PR for a bodyweight lift")
+        r = try records(ctx)
+        XCTAssertNil(r.bests["pull_up"], "no body weight: no PR for a bodyweight lift")
     }
 
-    func test_prRebuild_countsMaintenanceAndDeload_bodyweight_andIgnoresPlannedAndInProgress() throws {
+    func test_prDefinition_countsMaintenanceAndDeload_bodyweight_andIgnoresPlannedAndInProgress() throws {
         let ctx = try makeContext()
         let profile = UserProfile(); profile.bodyWeight = 190
         ctx.insert(profile)
@@ -438,13 +445,11 @@ final class AnalyticsFoundationTests: XCTestCase {
         session(ctx, meso: m, day: 3, status: .planned, items: [item("bench_press", reps: [5], loads: [999])])
         session(ctx, meso: m, day: 4, status: .inProgress, items: [item("bench_press", reps: [5], loads: [888])])
         try ctx.save()
-        try PRRebuildService.rebuild(in: ctx)
-        let rows = Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<PRIndex>()).map { ($0.exerciseId, $0) })
-        XCTAssertEqual(rows["bench_press"]?.bestLoad, 230, "the maintenance set is the record")
-        XCTAssertEqual(rows["bench_press"]?.bestDate, day(2))
-        XCTAssertEqual(rows["pull_up"]?.bestLoad, 190)
-        try PRRebuildService.rebuild(in: ctx)
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PRIndex>()).count, 2, "a second rebuild replaces, never duplicates")
+        let r = try records(ctx)
+        XCTAssertEqual(r.bests["bench_press"]?.load, 230, "the maintenance set is the record")
+        XCTAssertEqual(r.bests["bench_press"]?.date, day(2))
+        XCTAssertEqual(r.bests["pull_up"]?.load, 190)
+        XCTAssertEqual(r.bests.count, 2)
     }
 
     func test_personalRecords_equalIsNotARecord_andCanonicalIdsMerge() throws {

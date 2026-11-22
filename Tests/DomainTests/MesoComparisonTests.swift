@@ -573,17 +573,14 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertNil(PRService.bestSet(in: longOnly), "only sets of more than 12 reps: no PR")
     }
 
-    func test_csvExport_flagsPRsFromTheEvents_notFromTheStoredFlag_evenForASessionCompletedAfterTheBackfill() throws {
-        PRIndexRuleBackfill.resetStoredVersion()
-        defer { PRIndexRuleBackfill.resetStoredVersion() }
+    func test_csvExport_flagsPRsFromTheEvents_notFromTheStoredFlag_evenForASessionCompletedLater() throws {
         let ctx = ModelContext(try BackupTestSupport.makeContainer())
         let a = item("bench_press", reps: [5], loads: [200]); a.exerciseNameSnapshot = "Bench Press"
         let b = item("bench_press", reps: [5], loads: [210])
         ctx.insert(Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "A", items: [a]))
         ctx.insert(Session(date: day(8), status: .completed, weekIndex: 1, dayLabel: "B", items: [b]))
         try ctx.save()
-        PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        // complete a NEW session after the backfill: nothing recomputes isPR for it
+        // complete a NEW session later: nothing writes isPR for it
         let c = item("bench_press", reps: [5], loads: [220])
         let sc = Session(date: day(15), status: .completed, weekIndex: 1, dayLabel: "C", items: [c])
         ctx.insert(sc)
@@ -606,55 +603,6 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(flagsByDay[iso.string(from: day(8))], "true", "210 beats 200")
         XCTAssertEqual(flagsByDay[iso.string(from: day(15))], "true", "the session completed after the backfill is flagged from the events")
         XCTAssertEqual(flagsByDay[iso.string(from: day(22))], "false", "190 is no record: the stale stored flag is not read")
-    }
-
-    func test_prIndexRuleBackfill_rebuildsOnceUnderTheRule_andDoesNothingOnAnEmptyStore() throws {
-        PRIndexRuleBackfill.resetStoredVersion()
-        defer { PRIndexRuleBackfill.resetStoredVersion() }
-        let ctx = ModelContext(try BackupTestSupport.makeContainer())
-        PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, 0, "no sessions: not marked done")
-        // a stale index row holding an inflated 20-rep "best"
-        ctx.insert(PRIndex(exerciseId: "cable_curl", exerciseName: "Cable Curl", bestSetVolume: 3000, bestLoad: 150, bestReps: 20, bestDate: day(0)))
-        let it = item("cable_curl", reps: [5, 20], loads: [200, 150])
-        let sess = Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "D", items: [it])
-        ctx.insert(sess)
-        try ctx.save()
-        PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        let rows = try ctx.fetch(FetchDescriptor<PRIndex>())
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?.bestReps, 5)
-        XCTAssertEqual(rows.first?.bestLoad, 200)
-        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, PRIndexRuleBackfill.currentVersion)
-        XCTAssertFalse(it.isPR, "the lift\'s first-ever session: a baseline, flag recomputed")
-    }
-
-    func test_prIndexRuleBackfill_aStoreDoneUnderV1_rerunsUnderV2_thenReportsNotNeeded() throws {
-        PRIndexRuleBackfill.resetStoredVersion()
-        defer { PRIndexRuleBackfill.resetStoredVersion() }
-        XCTAssertGreaterThanOrEqual(PRIndexRuleBackfill.currentVersion, 2, "N bumped the rule version")
-        let ctx = ModelContext(try BackupTestSupport.makeContainer())
-        // a lift first trained with long sets, then its first <=12-rep set: under v2 that is a record, not a baseline
-        let long = item("cable_curl", reps: [20], loads: [100]); long.isPR = true     // stale v1 copy
-        let first = item("cable_curl", reps: [10], loads: [100])
-        ctx.insert(Session(date: day(1), status: .completed, weekIndex: 1, dayLabel: "A", items: [long]))
-        ctx.insert(Session(date: day(8), status: .completed, weekIndex: 1, dayLabel: "B", items: [first]))
-        try ctx.save()
-        PRIndexRuleBackfill.markAppliedUnderV1()
-        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, 1)
-
-        var lines: [String] = []
-        BackfillLog.collector = []
-        PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
-        XCTAssertEqual(BackfillLog.result(from: lines), "PRIndex rebuilt under rule v\(PRIndexRuleBackfill.currentVersion) (was v1)")
-        XCTAssertEqual(PRIndexRuleBackfill.storedVersion, PRIndexRuleBackfill.currentVersion)
-        XCTAssertFalse(long.isPR, "the stale v1 copy is recomputed")
-
-        BackfillLog.collector = []
-        PRIndexRuleBackfill.runIfNeeded(in: ctx)
-        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
-        XCTAssertEqual(BackfillLog.result(from: lines), "not needed")
     }
 
     func test_itemStats_bestE1RM_usesTheTwelveRepRule_whileSetRecordE1RMStaysRaw() throws {
@@ -763,31 +711,6 @@ final class MesoComparisonTests: XCTestCase {
         }
         if lines.isEmpty { lines = ["no badge changes"] }
         try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
-    }
-
-    func test_report_isPRFlagsBeforeAndAfterTheRecompute() throws {
-        guard let path = ProcessInfo.processInfo.environment["EP_BACKUP_FIXTURE"], !path.isEmpty,
-              let out = ProcessInfo.processInfo.environment["EP_ISPR_REPORT"], !out.isEmpty else {
-            throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE and TEST_RUNNER_EP_ISPR_REPORT")
-        }
-        // BEFORE: the flags exactly as the backup carries them (completed sessions only)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
-        var bItems = 0, bSessions = 0
-        for s in (json["sessions"] as? [[String: Any]]) ?? [] where (s["statusRaw"] as? String) == "completed" {
-            let n = ((s["items"] as? [[String: Any]]) ?? []).filter { ($0["isPR"] as? Bool) == true }.count
-            bItems += n; if n > 0 { bSessions += 1 }
-        }
-        // AFTER: the import rebuilds the index and recomputes the flags
-        let container = try BackupTestSupport.makeContainer()
-        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
-        PRIndexRuleBackfill.resetStoredVersion()
-        defer { PRIndexRuleBackfill.resetStoredVersion() }
-        let after = ModelContext(container)
-        PRIndexRuleBackfill.runIfNeeded(in: after)
-        let all = try after.fetch(FetchDescriptor<Session>()).filter { $0.status == .completed }
-        let aItems = all.flatMap(\.items).filter(\.isPR).count
-        let aSessions = all.filter { $0.items.contains { $0.isPR } }.count
-        try "flagged items: \(bItems) -> \(aItems); sessions with a flagged item: \(bSessions) -> \(aSessions); completed sessions \(all.count)".write(toFile: out, atomically: true, encoding: .utf8)
     }
 
     func test_report_prsUnderTheTwelveRepRule() throws {

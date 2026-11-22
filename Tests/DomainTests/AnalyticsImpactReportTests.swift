@@ -171,8 +171,6 @@ final class AnalyticsImpactReportTests: XCTestCase {
         table("5. PR index: best-volume set expressed as e1RM versus the e1RM definition", prRows)
         log("   exercises with a record: old \(oldPRSets.count) · new \(bests.count) · record SET differs \(differentSet)")
         prLines.sorted().prefix(40).forEach { log($0) }
-        let rebuilt = try ctx.fetch(FetchDescriptor<PRIndex>())
-        log("   PRIndex rows after the import's rebuild (new definition): \(rebuilt.count)")
         let events = PersonalRecords.events(from: snap.sets)
         log("   session PR events under the single definition: \(events.count) (baselines \(events.filter(\.isBaseline).count))")
 
@@ -330,15 +328,13 @@ final class AnalyticsImpactReportTests: XCTestCase {
         }
         log("Exercise sheet: \(sheetDiffs) session entries differ, of which Pull-Up (body weight now used): \(pullUps)")
 
-        // Records / PR: the engine's index equals the rebuilt PRIndex rows.
+        // Records / PR: derived by the engine on demand.
         let engine = AnalyticsEngine(sessions: completed, bodyWeight: bw)
-        let rows = try ModelContext(container).fetch(FetchDescriptor<PRIndex>())
-        log("Records: engine \(engine.records.count) lifts · PRIndex rows \(rows.count)")
+        log("Records: engine \(engine.records.count) lifts")
 
         XCTAssertEqual(summaryDiffs, [], "History summary must not change on this backup")
         XCTAssertEqual(volDiffs, ["Pull-Up"], "Analytics volume changes only for the bodyweight lift")
         XCTAssertEqual(sheetDiffs, 25, "the P1c report listed 25 changed session entries (16 of them Pull-Up)")
         XCTAssertEqual(pullUps, 16)
-        XCTAssertEqual(engine.records.count, rows.count)
     }
 }

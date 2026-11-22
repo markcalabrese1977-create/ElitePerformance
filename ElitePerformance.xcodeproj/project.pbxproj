@@ -105,7 +105,6 @@
 		D5E2937B2EC4110700034D78 /* ProgressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293752EC4110700034D78 /* ProgressionTests.swift */; };
 		D5E2937C2EC4110700034D78 /* ReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293762EC4110700034D78 /* ReadinessTests.swift */; };
 		D5E293842EC6B59900034D78 /* SwapMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293832EC6B59700034D78 /* SwapMap.swift */; };
-		D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293852EC6BD8200034D78 /* PRIndex.swift */; };
 		D5E293882EC6BDB600034D78 /* PRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293872EC6BDB400034D78 /* PRService.swift */; };
 		D5E293922EC7BBC300034D78 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293912EC7BBC000034D78 /* UserProfile.swift */; };
 		D5E2939A2EC7BC8F00034D78 /* ExerciseCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */; };
@@ -263,7 +262,6 @@
 		D5E293752EC4110700034D78 /* ProgressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressionTests.swift; sourceTree = "<group>"; };
 		D5E293762EC4110700034D78 /* ReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadinessTests.swift; sourceTree = "<group>"; };
 		D5E293832EC6B59700034D78 /* SwapMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwapMap.swift; sourceTree = "<group>"; };
-		D5E293852EC6BD8200034D78 /* PRIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRIndex.swift; sourceTree = "<group>"; };
 		D5E293872EC6BDB400034D78 /* PRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRService.swift; sourceTree = "<group>"; };
 		D5E293912EC7BBC000034D78 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseCatalog.swift; sourceTree = "<group>"; };
@@ -513,7 +511,6 @@
 				D5E293992EC7BC8E00034D78 /* ExerciseCatalog.swift */,
 				A1B2C3D4E5F60718293A4C01 /* ExercisePickerModel.swift */,
 				D5E293912EC7BBC000034D78 /* UserProfile.swift */,
-				D5E293852EC6BD8200034D78 /* PRIndex.swift */,
 				D5E293502EC410DD00034D78 /* Session.swift */,
 				D5E293512EC410DD00034D78 /* User.swift */,
 			);
@@ -898,7 +895,6 @@
 				D548927F2F8E7F1B00F2C30A /* AppState.swift in Sources */,
 				D5BEBEF52ED1ECA00035FE70 /* OnboardingFlowView.swift in Sources */,
 				E87CA9FA3DBCF24D13286701 /* ExerciseCustomizationSheet.swift in Sources */,
-				D5E293862EC6BD8B00034D78 /* PRIndex.swift in Sources */,
 				D58476E92F40F48000FE3F46 /* (null) in Sources */,
 				D532139F2FBCF9C900E01E39 /* MesoPerformanceAnalyzer.swift in Sources */,
 				D54A30DE2EEE23BC005967AA /* ProgramPlanPropagationService.swift in Sources */,

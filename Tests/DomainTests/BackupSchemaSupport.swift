@@ -10,7 +10,6 @@ enum BackupSchemaMap {
 
     /// "Entity.field" (or "Entity.*") -> why it is deliberately not in the backup. Stale entries fail BA1.
     static let exclusions: [String: String] = [
-        "PRIndex.*": "derived from completed sessions, rebuilt on import (PRRebuildService)",
         "ProgramState.*": "unused: no readers (removal is tracked separately)",
         "MesoBlock.sessions": "inverse side of Session.meso, restored from Session.mesoBlockId",
     ]

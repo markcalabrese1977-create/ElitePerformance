@@ -5214,7 +5214,6 @@ final class CustomExerciseLibraryTests: XCTestCase {
         // a history of an unrelated session that carries the same name must NOT be renamed
         ctx.insert(SessionHistory(date: done.date, weekIndex: 1, title: "B", subtitle: "", totalExercises: 1, totalSets: 1, totalVolume: 1,
                                   sessionId: UUID(), exercises: [SessionHistoryExercise(name: "Cable Hold", primaryMuscle: "abs", sets: 1, reps: 1, volume: 1)]))
-        ctx.insert(PRIndex(exerciseId: ex.id, exerciseName: "Cable Hold", bestSetVolume: 200, bestLoad: 20, bestReps: 10))
         try ctx.save()
         return World(c: c, ctx: ctx, id: ex.id, doneId: done.id!, plannedId: plan.id!)
     }
@@ -5230,7 +5229,6 @@ final class CustomExerciseLibraryTests: XCTestCase {
     private func assertRenamed(_ ctx: ModelContext, id: String, to name: String, file: StaticString = #filePath, line: UInt = #line) throws {
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).filter { $0.id == id }.map(\.name), [name], file: file, line: line)
         XCTAssertEqual(try snapshotNames(ctx, id), [name], "planned and completed snapshots", file: file, line: line)
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PRIndex>()).first { $0.exerciseId == id }?.exerciseName, name, file: file, line: line)
         let hist = try ctx.fetch(FetchDescriptor<SessionHistory>())
         XCTAssertEqual(hist.first { $0.title == "A" }?.exercises.map(\.name), [name], file: file, line: line)
         XCTAssertEqual(ExerciseCatalog.displayName(for: id), name, "mirror", file: file, line: line)

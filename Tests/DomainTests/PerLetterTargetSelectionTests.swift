@@ -505,7 +505,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
         let path = try PinnedFixture.path(requiring: "2026-10-07")
         print("CONVERSION FIXTURE|\(URL(fileURLWithPath: path).lastPathComponent)")
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
@@ -573,7 +573,7 @@ final class DUPMesoLengthConversionTests: XCTestCase {
             throw XCTSkip("set TEST_RUNNER_EP_BACKUP_FIXTURE to a backup JSON to run")
         }
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
@@ -1276,7 +1276,7 @@ final class LastSameLetterPerformanceTests: XCTestCase {
     private func importFixture() throws -> (ModelContext, MesoBlock, [Session]) {
         let url = try fixtureURL()
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])

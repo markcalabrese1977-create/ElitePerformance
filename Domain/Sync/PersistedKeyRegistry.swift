@@ -83,8 +83,6 @@ enum PersistedKeyRegistry {
               disposition: .excluded("legacy-store relocation: the older store files already offered to this device's lifter; describes files on THIS device, so a restore must not carry it")),
         Entry(match: .exact("activeSwiftDataStoreLabel.v1"),
               disposition: .excluded("read-only input: the store label pinned by builds before the one-way store opener; read to explain a relocation offer, never written")),
-        Entry(match: .exact("prIndexRuleVersion"),
-              disposition: .excluded("PRIndexRuleBackfill's applied rule version: device-local; PRIndex is rebuilt on import")),
         Entry(match: .suffix(".completed"),
               disposition: .excluded("migration completion flag: device-local; migrations are idempotent and report not needed after a restore")),
 

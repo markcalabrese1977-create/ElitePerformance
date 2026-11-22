@@ -1,13 +1,13 @@
 import Foundation
 import SwiftData
 
-/// Handles reading/writing PR data from SwiftData.
+/// The best set of an item, by the one PR definition.
 ///
 /// A PR is the best working-set e1RM of a canonical exercise (the single definition in `PersonalRecords`, sets of 12 reps
 /// or fewer only): Epley on the
 /// effective load, warm-ups / rest-pause / drop / skipped rows excluded, every completed session counted (maintenance and
-/// deload included). A bodyweight lift uses the lifter's body weight; without one it has no PR. `PRIndex` stores the
-/// best set (load = effective load, reps); its e1RM is derived, and `bestSetVolume` is kept as load x reps.
+/// deload included). A bodyweight lift uses the lifter's body weight; without one it has no PR. Nothing is stored: the records are
+/// derived on demand from the completed sessions (`PersonalRecords`).
 struct PRService {
 
     /// Best working set logged on `item` by e1RM, or nil when nothing meaningful was done (or a bodyweight lift has no
@@ -32,11 +32,5 @@ struct PRService {
             if v > (best?.volume ?? 0) { best = (v, item.actualLoads[i], item.actualReps[i]) }
         }
         return best
-    }
-
-    /// Convenience getter if we want to display current PR elsewhere.
-    static func currentPR(for exerciseId: String, in context: ModelContext) -> PRIndex? {
-        let canonical = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
-        return (try? context.fetch(FetchDescriptor<PRIndex>()))?.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
     }
 }

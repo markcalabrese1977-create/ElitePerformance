@@ -79,7 +79,6 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("BodyweightPhantomLoadMigration", { BodyweightPhantomLoadMigration.runIfNeeded(in: $0) }),
         ("PrescribedSetsBackfill", { PrescribedSetsBackfill.runIfNeeded(in: $0) }),
         ("PlannedDateBackfill", { PlannedDateBackfill.runIfNeeded(in: $0) }),
-        ("PRIndexRuleBackfill", { PRIndexRuleBackfill.runIfNeeded(in: $0) })
     ]
 
 
@@ -95,7 +94,6 @@ final class BackupRoundTripHarnessTests: XCTestCase {
         ("BodyweightPhantomLoadMigration", "bodyweightPhantomLoadMigration.v1.completed"),
         ("PrescribedSetsBackfill", "prescribedSetsBackfill.v1.completed"),
         ("PlannedDateBackfill", "plannedDateBackfill.v1.completed"),
-        ("PRIndexRuleBackfill", "prIndexRuleVersion"),
         ("(not in runStartupBackfills) CustomExerciseIdRepairMigration", "customExerciseIdRepairMigration.v1.completed")
     ]
 
@@ -104,7 +102,7 @@ final class BackupRoundTripHarnessTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -576,7 +574,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
     /// Fresh in-memory store holding the synthetic non-Mark user.
     private func makeStore() throws -> ModelContext {
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
@@ -693,8 +691,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
             "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
             "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
-            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "LoadEverWrittenBackfill", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
-        XCTAssertEqual(registered.count, 20)
+            "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "LoadEverWrittenBackfill", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 19)
         for launch in [firstLaunch, secondLaunch] {
             XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
             for (line, name) in zip(launch, registered) {
@@ -768,7 +766,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
     func test_prescribedSetsBackfill_isIdempotent_andWaitsForSessions() throws {
         // An empty store: nothing to do and NOT marked done, so it still runs after a restore.
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
@@ -803,7 +801,7 @@ final class OtherUsersStoreStartupTests: XCTestCase {
 
     func test_plannedDateBackfill_isIdempotent_waitsForSessions_andNeverOverwrites() throws {
         let schema = Schema([
-            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
             SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
             MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
@@ -1178,7 +1176,7 @@ final class InsertDeloadRealBackupTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -1370,7 +1368,7 @@ final class TopSetBackupTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -1485,7 +1483,7 @@ extension TopSetBackupTests {
     fileprivate func makeContainerForPrescribed() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -1516,7 +1514,7 @@ final class DeloadRuleDryRunTests: XCTestCase {
         func pct(_ a: Double, _ b: Double?) -> String { guard let b, b > 0 else { return "-" }; return String(format: "%.0f%%", a / b * 100) }
 
         for path in list.split(separator: ",").map(String.init) {
-            let schema = Schema([User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+            let schema = Schema([User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, 
                                  SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
                                  MesoBlock.self, UserProfile.self, CustomExercise.self])
             let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))

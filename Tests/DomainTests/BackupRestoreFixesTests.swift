@@ -3,7 +3,7 @@ import SwiftData
 @testable import ElitePerformance
 
 /// Restore must leave derived and mirrored state consistent with what was restored.
-final class BackupRestorePRIndexTests: XCTestCase {
+final class BackupRestoreRecordsTests: XCTestCase {
 
     private var sandbox: DefaultsSandbox!
 
@@ -38,32 +38,19 @@ final class BackupRestorePRIndexTests: XCTestCase {
         return ctx
     }
 
-    private func prs(_ ctx: ModelContext) throws -> [String: PRIndex] {
-        Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<PRIndex>()).map { ($0.exerciseId, $0) })
-    }
-
-    func test_restore_rebuildsPRIndex_fromCompletedSessions_withSessionDates() throws {
+    func test_restore_leavesRecordsDerivable_fromCompletedSessions_withSessionDates() throws {
         let source = try seedSource()
         let target = try BackupTestSupport.makeContainer()
         try BackupTestSupport.restore(from: source, into: target)
 
-        let rebuilt = try prs(ModelContext(target))
-        XCTAssertEqual(Set(rebuilt.keys), ["bench_press", "barbell_row"])
-        let bench = try XCTUnwrap(rebuilt["bench_press"])
-        XCTAssertEqual(bench.bestSetVolume, 1000)
-        XCTAssertEqual(bench.bestLoad, 200)
-        XCTAssertEqual(bench.bestReps, 5)
-        XCTAssertEqual(bench.bestDate, early, "bestDate is the date of the session that set the PR, not the rebuild time")
-        let row = try XCTUnwrap(rebuilt["barbell_row"])
-        XCTAssertEqual(row.bestSetVolume, 1000)
-        XCTAssertEqual(row.bestDate, late)
-
-        // A second rebuild changes nothing.
         let ctx = ModelContext(target)
-        try PRRebuildService.rebuild(in: ctx)
-        let again = try prs(ctx)
-        XCTAssertEqual(again.mapValues(\.bestSetVolume), rebuilt.mapValues(\.bestSetVolume))
-        XCTAssertEqual(again.mapValues(\.bestDate), rebuilt.mapValues(\.bestDate))
+        let sessions = try ctx.fetch(FetchDescriptor<Session>())
+        let bests = PersonalRecords.bests(from: SetRecordBuilder.build(sessions: sessions).sets)
+        XCTAssertEqual(Set(bests.keys), ["bench_press", "barbell_row"])
+        XCTAssertEqual(bests["bench_press"]?.load, 200)
+        XCTAssertEqual(bests["bench_press"]?.reps, 5)
+        XCTAssertEqual(bests["bench_press"]?.date, early, "the date of the session that set the record")
+        XCTAssertEqual(bests["barbell_row"]?.date, late)
     }
 
     func test_firstLiftAfterRestore_isNotAFalsePR() throws {
@@ -86,23 +73,6 @@ final class BackupRestorePRIndexTests: XCTestCase {
         let flagged = PRRebuildService.recordItems(sessions: sessions, records: records)
         XCTAssertFalse(flagged.contains(lighter.persistentModelID), "180x5 does not beat the restored 200x5")
         XCTAssertTrue(flagged.contains(heavier.persistentModelID))
-    }
-
-    func test_restoreOntoNonEmptyInstall_replacesStalePRs() throws {
-        let source = try seedSource()
-        let target = try BackupTestSupport.makeContainer()
-        let existing = ModelContext(target)
-        existing.insert(PRIndex(exerciseId: "bench_press", exerciseName: "Bench Press", bestSetVolume: 99_999,
-                                bestLoad: 999, bestReps: 100, bestDate: late))
-        existing.insert(PRIndex(exerciseId: "ghost_exercise", exerciseName: "Ghost", bestSetVolume: 1,
-                                bestLoad: 1, bestReps: 1, bestDate: late))
-        try existing.save()
-
-        try BackupTestSupport.restore(from: source, into: target)
-
-        let after = try prs(ModelContext(target))
-        XCTAssertNil(after["ghost_exercise"], "a PR with no completed session behind it is dropped")
-        XCTAssertEqual(try XCTUnwrap(after["bench_press"]).bestSetVolume, 1000, "the stale 99,999 is replaced")
     }
 }
 

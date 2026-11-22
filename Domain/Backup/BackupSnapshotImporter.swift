@@ -324,10 +324,6 @@ enum BackupSnapshotImporter {
 
         try modelContext.save()
 
-        // PRIndex is derived from the sessions just restored (it is not in the backup): replace whatever was
-        // there instead of keeping a stale index or starting empty.
-        try PRRebuildService.rebuild(in: modelContext)
-
         if applyingDeviceSideEffects, let restoredAppState = try modelContext.fetch(FetchDescriptor<AppState>()).first {
             AppStateBridge.syncToUserDefaults(from: restoredAppState)
         }

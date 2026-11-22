@@ -7,7 +7,7 @@ import SwiftData
 ///   ANOTHER custom exercise's name; the exercise's own name never blocks itself, so a case-only change is allowed.
 /// - A rename rewrites every place the name is stored next to the id: the mirror, `SessionItem.exerciseNameSnapshot`
 ///   (planned and completed), `SessionHistoryExercise.name` (matched by the OLD name, only inside histories of sessions
-///   that contain the exercise) and `PRIndex.exerciseName`. One save; any failure rolls everything back.
+///   that contain the exercise). One save; any failure rolls everything back.
 /// - Delete is refused while any session still has the exercise.
 /// No persisted field is added, so the backup format is unchanged.
 enum CustomExerciseLibrary {
@@ -140,9 +140,6 @@ enum CustomExerciseLibrary {
         for h in (try? context.fetch(FetchDescriptor<SessionHistory>())) ?? [] {
             guard let sid = h.sessionId, sessionIds.contains(sid) else { continue }
             for e in h.exercises where oldKeys.contains(ExerciseNameRules.normalized(e.name)) { e.name = newName }
-        }
-        for p in (try? context.fetch(FetchDescriptor<PRIndex>())) ?? [] where p.exerciseId == id {
-            p.exerciseName = newName
         }
     }
 

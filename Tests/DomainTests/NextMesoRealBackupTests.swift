@@ -19,7 +19,7 @@ final class NextMesoRealBackupTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self,
-            PRIndex.self, SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
+            SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self,
             AppState.self, MesoBlock.self, UserProfile.self, CustomExercise.self
         ])
         return try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))

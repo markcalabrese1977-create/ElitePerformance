@@ -291,8 +291,8 @@ final class SessionItem {
     var pumpRatingsBySet: [Int] = []
 
     var isCompleted: Bool
-    /// LEGACY copy of "this item set a record", kept only so old and new backups decode and round-trip. Nothing displays or exports
-    /// it: the CSV export and the Meso Summary read the PR events (`PersonalRecords`, `PRRebuildService.recordItems`).
+    /// DEPRECATED (1.4): nothing writes it any more (new items stay false) and nothing reads it. It is kept only so old backups decode and
+    /// round-trip. The records are the PR events (`PersonalRecords`, `PRRebuildService.recordItems`), derived on demand.
     var isPR: Bool
 
     var coachNote: String?

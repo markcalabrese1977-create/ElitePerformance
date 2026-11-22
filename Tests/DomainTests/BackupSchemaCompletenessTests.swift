@@ -73,6 +73,6 @@ final class BackupSchemaCompletenessTests: XCTestCase {
     func test_theAppContainerAndTheTestUseOneModelList() throws {
         // The app builds its container from AppSchema.makeSchema(); this test reads the same list.
         XCTAssertEqual(AppSchema.makeSchema().entities.count, AppSchema.models.count)
-        XCTAssertTrue(AppSchema.models.contains { $0 == PRIndex.self }, "an excluded model is still in the list")
+        XCTAssertFalse(AppSchema.models.contains { String(describing: $0) == "PRIndex" }, "PRIndex is gone: records are derived on demand")
     }
 }
