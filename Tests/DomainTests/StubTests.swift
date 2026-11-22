@@ -3591,7 +3591,7 @@ final class ExerciseWaveOverrideTests: XCTestCase {
     // setsByWeek ramp — explicit guard for Phase 2.2 set-ramp inheritance.
     func test_previewSwap_inheritsAnchorPriorityAndSetsRamp() {
         // bench_press in fb2_day_a is .anchor with ramp [3,4,4,4,4,5,4,5,5,2].
-        let anchorRamp = [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+        let anchorRamp = [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
         let substituteId = ExerciseCatalog.dumbbellPress.id
 
         let overrides: ExerciseOverrideMap = [

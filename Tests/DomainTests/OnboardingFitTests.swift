@@ -1195,14 +1195,29 @@ final class BuiltInTemplateVolumeTests: XCTestCase {
         }
     }
 
+    /// Every day of the 2-Day Full Body is 75 minutes or under at its heaviest week, untrimmed, and every anchor is still there.
+    func test_fullBody2Day_everyDayIs75MinutesOrUnder_withAllAnchorsKept() {
+        let t = FullBody2DayTemplate.template
+        for day in t.dayTemplates {
+            let minutes = Double(ProgramFitter.estimatedSeconds(day.exerciseTemplates, template: t)) / 60
+            XCTAssertLessThanOrEqual(minutes, 75, "\(day.title): \(minutes) min")
+            XCTAssertEqual(day.exerciseTemplates.filter { $0.priority == .anchor }.count, 3, "\(day.title) keeps its three anchors")
+            XCTAssertEqual(day.exerciseTemplates.count, 7, "\(day.title) keeps all seven exercises")
+        }
+        let fitted = ProgramFitter.fit(t, profile: FitProfile(equipment: Set(GearTag.allCases), sessionMinutes: 75)).template
+        XCTAssertEqual(fitted.dayTemplates.map(\.exerciseTemplates.count), [7, 7], "a 75 minute limit trims nothing")
+    }
+
     /// FullBody2Day is lower volume by design and is NOT held to the rule above. Its numbers are pinned so a change to the template
-    /// is a deliberate decision (update this table with it). (direct, weighted) weekly sets; abs and calves have no slot.
+    /// is a deliberate decision (update this table with it). 1.3.3 trimmed every day from about 99 to about 73 minutes (anchors 5 -> 4
+    /// sets at peak, RDL and leg press 4 -> 3, each isolation 3-4 -> 2); the previous table was chest 8.44, lats 4.22/6.33, upper back 4.22/7.00,
+    /// side delts 3.44, rear delts 3.44/4.50, biceps 6.89/11.11, triceps 6.89/11.11, quads 7.67, hamstrings 3.44/4.50, glutes 4.22/9.78. (direct, weighted) weekly sets; abs and calves have no slot.
     func test_fullBody2Day_snapshot_pinsCurrentNumbers() {
         let expected: [FineMuscle: (direct: Double, weighted: Double)] = [
-            .chest: (8.44, 8.44), .lats: (4.22, 6.33), .upperBack: (4.22, 7.00), .frontDelts: (0.00, 4.22),
-            .sideDelts: (3.44, 3.44), .rearDelts: (3.44, 4.50), .biceps: (6.89, 11.11), .triceps: (6.89, 11.11),
-            .quads: (7.67, 7.67), .hamstrings: (3.44, 4.50), .glutes: (4.22, 9.78), .calves: (0, 0), .abs: (0, 0),
-            .forearms: (0, 2.58), .adductors: (0, 1.92), .lowerBack: (0, 1.72)]
+            .chest: (7.78, 7.78), .lats: (3.89, 4.89), .upperBack: (2.00, 3.97), .frontDelts: (0.00, 3.89),
+            .sideDelts: (2.00, 2.00), .rearDelts: (2.00, 2.50), .biceps: (4.00, 6.94), .triceps: (4.00, 7.89),
+            .quads: (6.89, 6.89), .hamstrings: (3.00, 3.97), .glutes: (3.89, 8.83), .calves: (0, 0), .abs: (0, 0),
+            .forearms: (0, 1.50), .adductors: (0, 1.72), .lowerBack: (0, 1.50)]
         let rows = PlannedVolume.weeklyHardSets(template: fitted(FullBody2DayTemplate.template), overrides: nil).rows
         XCTAssertEqual(Set(rows.map(\.muscle)), Set(expected.keys))
         for r in rows {

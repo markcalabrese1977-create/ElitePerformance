@@ -53,7 +53,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_pulldown",
@@ -67,7 +67,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_hack",
@@ -81,7 +81,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_rdl",
@@ -95,7 +95,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_lateral",
@@ -104,12 +104,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: "Shoulder width. Light and controlled.",
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_curl",
@@ -118,12 +118,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: nil,
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_a_tricep",
@@ -132,12 +132,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: nil,
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             )
         ]
     )
@@ -158,12 +158,12 @@ enum FullBody2DayTemplate {
                 priority: .anchor,
                 notes: "Primary horizontal pull. Drive load progression here.",
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 3, targetRIRMax: 3),
                     .init(wave: .b, setMin: 4, setMax: 4, repMin: 8,  repMax: 10, targetRIRMin: 2, targetRIRMax: 2),
                     .init(wave: .c, setMin: 4, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_incline",
@@ -177,7 +177,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_hip_thrust",
@@ -191,7 +191,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 4, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 4, 4, 4, 4, 5, 4, 5, 5, 2]
+                setsByWeek: [3, 4, 4, 4, 4, 4, 4, 4, 4, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_leg_press",
@@ -205,7 +205,7 @@ enum FullBody2DayTemplate {
                     .init(wave: .c, setMin: 3, setMax: 3, repMin: 6,  repMax: 8,  targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_rear_delt",
@@ -214,12 +214,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: "Rear delt and upper back health.",
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 15, repMax: 20, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 15, repMax: 20, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_hammer",
@@ -228,12 +228,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: "Brachialis and forearm work.",
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             ),
             ProgramExerciseTemplate(
                 id: "fb2_b_oh_tricep",
@@ -242,12 +242,12 @@ enum FullBody2DayTemplate {
                 priority: .standard,
                 notes: "Long head tricep — different angle from Day A pushdown.",
                 prescriptions: [
-                    .init(wave: .a, setMin: 3, setMax: 3, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
-                    .init(wave: .b, setMin: 3, setMax: 3, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
-                    .init(wave: .c, setMin: 3, setMax: 3, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
-                setsByWeek: [3, 3, 3, 3, 4, 4, 3, 4, 4, 2]
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             )
         ]
     )
