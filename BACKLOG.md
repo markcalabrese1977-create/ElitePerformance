@@ -46,7 +46,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   landmine_press. The one-shot dedup migration already ran on existing installs, so the two coexist. Decide: merge the
   custom into the built-in (move history, canonical id) or rename. ExerciseTraitsCoverageTests tracks it as a known
   collision. Low priority.
-- DONE in 1.3.3: 2-Day Full Body trimmed from ~99 to ~72 min a day (anchors kept at 4 sets at peak; side and rear delts held at 3 sets a session; biceps and triceps isolations at 2, one arm slot dropped per day: Day A keeps the EZ curl, Day B the overhead extension; see the pinned table in OnboardingFitTests). Each day was 75.4 min with all four arm slots; dropping one a day gives 71.6.
+- DONE in 1.3.3: 2-Day Full Body trimmed from ~99 to ~75 min a day (75.4 at the heaviest week; anchors kept at 4 sets at peak; side and rear delts held at 3 sets a session; the four arm isolations at 2 sets each; see the pinned table in OnboardingFitTests).
 - CLOSED in 1.3.3: program selection does honor equipment (ProgramFitter substitutes or drops by gear tag). DumbbellBenchProgramTests proves a dumbbell + bench user never gets a machine, cable, smith, barbell, EZ bar or rack exercise at 1-7 days, every goal, experience and session length, and that no slot is left untagged.
 - Notes UX (pre-launch): two note types look alike. Label them in the UI: "Exercise
   note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"

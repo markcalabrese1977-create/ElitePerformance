@@ -124,6 +124,20 @@ enum FullBody2DayTemplate {
                     .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
                 ],
                 setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+            ),
+            ProgramExerciseTemplate(
+                id: "fb2_a_tricep",
+                order: 7,
+                exerciseId: ExerciseCatalog.cableTricepRopePushdown.id,
+                priority: .standard,
+                notes: nil,
+                prescriptions: [
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
             )
         ]
     )
@@ -208,11 +222,25 @@ enum FullBody2DayTemplate {
                 setsByWeek: [3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
             ),
             ProgramExerciseTemplate(
+                id: "fb2_b_hammer",
+                order: 6,
+                exerciseId: ExerciseCatalog.hammerCurl.id,
+                priority: .standard,
+                notes: "Brachialis and forearm work.",
+                prescriptions: [
+                    .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
+                    .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
+                    .init(wave: .c, setMin: 2, setMax: 2, repMin: 8,  repMax: 10, targetRIRMin: 1, targetRIRMax: 2),
+                    .init(wave: .deload, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 4, targetRIRMax: 4)
+                ],
+                setsByWeek: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+            ),
+            ProgramExerciseTemplate(
                 id: "fb2_b_oh_tricep",
                 order: 7,
                 exerciseId: ExerciseCatalog.overheadRopeTricepExtension.id,
                 priority: .standard,
-                notes: "Long head tricep. Pressing and rowing carry the rest of the arm volume.",
+                notes: "Long head tricep — different angle from Day A pushdown.",
                 prescriptions: [
                     .init(wave: .a, setMin: 2, setMax: 2, repMin: 12, repMax: 15, targetRIRMin: 3, targetRIRMax: 3),
                     .init(wave: .b, setMin: 2, setMax: 2, repMin: 10, repMax: 12, targetRIRMin: 2, targetRIRMax: 2),
