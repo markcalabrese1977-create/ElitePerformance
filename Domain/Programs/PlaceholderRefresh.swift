@@ -298,7 +298,7 @@ enum PlaceholderRefresh {
 
     // MARK: - Scheduled deload
 
-    static let deloadNote = "Deload: about 90–95% of your working weight, half the sets, stop well short of failure."
+    static let deloadNote = "Deload: lighter than your working weight, half the sets, stop well short of failure."
     static let fixedLoadDeloadNote = "Deload: your usual fixed load, half the sets, stop well short of failure."
 
     /// True when any set was logged in a session of the same week of the same block (the deload week is under way).
