@@ -1,7 +1,11 @@
 #!/bin/bash
 # Upgrade test: the last RELEASED build -> this checkout, on a throwaway simulator, without deleting the app.
 #
-#   scripts/upgrade_test.sh [--released <commit>] [--seed fixture:<backup.json> | --seed onboarding] [--keep]
+#   scripts/upgrade_test.sh [--released <commit>] [--seed fixture:<backup.json> | --seed onboarding] [--expect <deltas>] [--keep]
+#
+#   --expect "customExercises:-1,items:+3"   the count deltas this upgrade is EXPECTED to make (after minus before). Counts: sessions,
+#       completed, history, customExercises (alias custom), blocks, items. PASS = every listed delta occurs exactly and every
+#       unlisted count is unchanged. Default: no deltas (counts identical).
 #
 # 1. checks out <commit> (default: the live App Store build, 1.2.2 (5) = tag v1.2.2-b5 = c981c47, see BACKLOG.md "Release check") in a worktree,
 #    patches only what a current Xcode needs to build it and makes it take the DEVICE store path (not the simulator one);
@@ -14,11 +18,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 3
 REPO="$PWD"
-RELEASED="c981c47"; SEED="onboarding"; KEEP=0
+RELEASED="c981c47"; SEED="onboarding"; KEEP=0; EXPECT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --released) RELEASED="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
+    --expect) EXPECT="$2"; shift 2 ;;
     --keep) KEEP=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
@@ -84,7 +89,23 @@ NOW="counts sessions=$(Q 'select count(*) from ZSESSION') completed=$(Q "select 
 FAIL=0
 check() { if [ "$2" = "0" ]; then echo "PASS  $1"; else echo "FAIL  $1"; FAIL=1; fi; }
 echo "before: $BASE"; echo "after:  $NOW"
-[ "$BASE" = "$NOW" ]; check "counts identical" $?
+python3 - "$BASE" "$NOW" "$EXPECT" <<'PY'
+import re,sys
+def parse(t): return {k:int(v) for k,v in re.findall(r'(\w+)=(\d+)',t)}
+before,after=parse(sys.argv[1]),parse(sys.argv[2])
+alias={'customExercises':'custom','customexercises':'custom','custom':'custom'}
+expect={}
+for part in [p for p in sys.argv[3].split(',') if p.strip()]:
+    k,d=part.rsplit(':',1); expect[alias.get(k.strip(),k.strip())]=int(d)
+bad=[]
+for k in sorted(set(before)|set(after)|set(expect)):
+    delta=after.get(k,0)-before.get(k,0); want=expect.get(k,0)
+    mark='' if delta==want else '   <-- expected %+d'%want
+    if delta!=0 or k in expect: print(f"  delta {k}: {delta:+d}{' (expected)' if k in expect and delta==want else ''}{mark}")
+    if delta!=want: bad.append(k)
+sys.exit(1 if bad else 0)
+PY
+check "count deltas $( [ -n "$EXPECT" ] && echo "= expected ($EXPECT)" || echo "= none" )" $?
 OPENED="$(grep -o 'at file://[^ ]*' "$WORK/head_launch.log" | head -1 | tr -d '\r' | sed 's#^at file://##; s/%20/ /g')"; [ "$OPENED" = "$STORE" ]; check "same store URL opened" $?
 EXPECTED=$(grep -c "^        (String(describing:" "$REPO/App/ElitePerformanceApp.swift")
 GOT=$(grep -c "Backfill [A-Za-z]*:" "$WORK/head_launch.log")
