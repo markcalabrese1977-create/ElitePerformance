@@ -1721,7 +1721,7 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
 @MainActor
 final class MesoVerdictDryRunTests: XCTestCase {
 
-    struct Row: Codable { var meso: String, status: String, exercise: String, verdict: String, change: Double?, basis: String, exposures: Int, series: [Double] }
+    struct Row: Codable { var meso: String, status: String, exercise: String, verdict: String, change: Double?, basis: String, exposures: Int, series: [Double]; var blockChange: Double? = nil; var flatFor: Int? = nil; var line: String? = nil }
 
     func test_dump_everyExerciseVerdictOfEveryBlock() throws {
         guard let list = ProcessInfo.processInfo.environment["EP_VERDICT_BACKUPS"], !list.isEmpty,
@@ -1740,7 +1740,8 @@ final class MesoVerdictDryRunTests: XCTestCase {
                 guard let a = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: prior, bodyWeight: profile?.bodyWeight) else { continue }
                 for e in a.exerciseSummaries {
                     rows.append(Row(meso: meso.name, status: meso.status.rawValue, exercise: e.exerciseName, verdict: "\(e.verdict)", change: e.trendChange,
-                                    basis: "\(e.trendBasis)", exposures: e.e1rmBySession.count, series: e.e1rmBySession.map { ($0.e1rm * 10).rounded() / 10 }))
+                                    basis: "\(e.trendBasis)", exposures: e.e1rmBySession.count, series: e.e1rmBySession.map { ($0.e1rm * 10).rounded() / 10 },
+                                    blockChange: e.blockChange, flatFor: e.flatForLast, line: e.changeLine(basisLabel: "e1RM")))
                 }
                 rows.append(Row(meso: meso.name, status: meso.status.rawValue, exercise: "** OVERALL **", verdict: "\(a.overallVerdict)", change: nil, basis: "", exposures: a.exerciseSummaries.count, series: []))
             }

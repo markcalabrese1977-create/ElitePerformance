@@ -51,7 +51,12 @@ struct ExercisePerformanceSummary {
 
     /// What the trend (and the verdict) was measured on, and its change across the block's sessions within this lift (the fitted line, first -> last exposure).
     let trendBasis: ExerciseTrendBasis
+    /// The Theil-Sen trend across the block: what the verdict (and the starting-load gating of the next block) reads.
     let trendChange: Double?
+    /// The % the By-exercise row SHOWS: the first exposure against the median of the last three exposures (`blockChange(of:)`).
+    let blockChange: Double?
+    /// How many of the latest exposures sit within the verdict band of the latest one (the lift has been flat for that many sessions).
+    let flatForLast: Int
 
     /// Load used in the first session this meso.
     let openingLoad: Double?
@@ -168,16 +173,34 @@ enum MesoPerformanceAnalyzer {
     static func trendChange(of values: [Double]) -> Double? {
         let n = values.count
         guard n >= 2 else { return nil }
-        func median(_ xs: [Double]) -> Double {
-            let s = xs.sorted(), m = s.count / 2
-            return s.count % 2 == 1 ? s[m] : (s[m - 1] + s[m]) / 2
-        }
         var slopes: [Double] = []
         for i in 0..<n { for j in (i + 1)..<n { slopes.append((values[j] - values[i]) / Double(j - i)) } }
         let slope = median(slopes)
         let start = median(values.enumerated().map { $0.element - slope * Double($0.offset) })
         guard start > 0 else { return nil }
         return slope * Double(n - 1) / start
+    }
+
+    private static func median(_ xs: [Double]) -> Double {
+        let s = xs.sorted(), m = s.count / 2
+        return s.count % 2 == 1 ? s[m] : (s[m - 1] + s[m]) / 2
+    }
+
+    /// The change the row shows: the first exposure against the median of the last three (fewer when the block has fewer: never the first
+    /// exposure itself, so two exposures read first vs last). Display only; the verdict stays on the Theil-Sen trend.
+    static func blockChange(of values: [Double]) -> Double? {
+        let n = values.count
+        guard n >= 2, values[0] > 0 else { return nil }
+        let recent = median(Array(values.suffix(min(3, n - 1))))
+        return (recent - values[0]) / values[0]
+    }
+
+    /// How many of the most recent exposures (the latest included) are within the verdict band of the latest one.
+    static func flatForLast(_ values: [Double]) -> Int {
+        guard let last = values.last, last > 0 else { return 0 }
+        var k = 0
+        for v in values.reversed() { if abs(v - last) / last <= verdictThreshold { k += 1 } else { break } }
+        return k
     }
 
     /// Progressing / Declining at +/-3% or more of trend, else Holding. Nil change: not enough to say.
@@ -316,12 +339,15 @@ enum MesoPerformanceAnalyzer {
             // reps (the best load lifted for at least the reps of the closing session's heaviest set).
             var trendBasis: ExerciseTrendBasis = .none
             var trendChange: Double? = nil
+            var shownSeries: [Double] = []
             if !e1rmBySession.isEmpty {
                 trendBasis = .e1RM
-                trendChange = Self.trendChange(of: e1rmBySession.map(\.e1rm))
+                shownSeries = e1rmBySession.map(\.e1rm)
+                trendChange = Self.trendChange(of: shownSeries)
             } else if let closing = rowsBySession.last?.rows.max(by: { ($0.load, $0.reps) < ($1.load, $1.reps) }) {
                 trendBasis = .loadAtReps(closing.reps)
                 let series = rowsBySession.map { BestSetRule.bestLoad(atLeast: closing.reps, in: $0.rows.map { (load: $0.load, reps: $0.reps) }) }.filter { $0 > 0 }
+                shownSeries = series
                 trendChange = Self.trendChange(of: series)
             }
 
@@ -348,6 +374,7 @@ enum MesoPerformanceAnalyzer {
             let repSeries = repsBased ? sessionsWithExercise.compactMap { meanReps($0.item) } : []
             let openingReps = repSeries.first, closingReps = repSeries.last
             let repsChange: Double? = Self.trendChange(of: repSeries)
+            let seriesShown = repsBased ? repSeries : shownSeries
 
             // Verdict: the trend across every session of the block (`trendChange(of:)`), +-3%.
             let verdict: ExerciseVerdict = {
@@ -392,6 +419,8 @@ enum MesoPerformanceAnalyzer {
                             bestSet: bestSet,
                             trendBasis: repsBased ? .reps : trendBasis,
                             trendChange: repsBased ? repsChange : trendChange,
+                            blockChange: Self.blockChange(of: seriesShown),
+                            flatForLast: Self.flatForLast(seriesShown),
                             openingLoad: openingLoad,
                             closingLoad: closingLoad,
                             verdict: verdict,
@@ -431,3 +460,17 @@ enum MesoPerformanceAnalyzer {
     }
 }
 
+
+
+extension ExercisePerformanceSummary {
+    /// The % line of a By-exercise row. Normally "+6.2% e1RM". When the verdict is Holding but the block moved more than +3% (an early
+    /// step, then a plateau): "+17.1% this block · flat for the last 5 sessions".
+    func changeLine(basisLabel: String) -> String? {
+        guard let change = blockChange else { return nil }
+        let pct = String(format: "%+.1f%%", change * 100)
+        if verdict == .plateaued, change > MesoPerformanceAnalyzer.verdictThreshold, flatForLast >= 2 {
+            return "\(pct) this block · flat for the last \(flatForLast) sessions"
+        }
+        return "\(pct) \(basisLabel)"
+    }
+}

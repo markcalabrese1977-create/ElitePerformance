@@ -440,6 +440,7 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(try verdict([204, 200, 201, 200, 201]).0, .plateaued)
         // the one caption under the header says exactly this
         XCTAssertTrue(MesoSummaryView.trendCaption.contains("across the block"))
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("median of the last three"))
         XCTAssertTrue(MesoSummaryView.trendCaption.contains("±3%"))
     }
 
@@ -452,6 +453,47 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertLessThan(MesoPerformanceAnalyzer.trendChange(of: [120, 110, 100]) ?? 0, 0)
         XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: [-10, 0, 10]), "a line that starts at or below zero says nothing")
         XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 100, 100, 100, 400]) ?? 1, 0, accuracy: 1e-12, "one wild exposure moves the median slope not at all")
+    }
+
+    func test_blockChange_isFirstExposureAgainstTheMedianOfTheLastThree() {
+        XCTAssertNil(MesoPerformanceAnalyzer.blockChange(of: [100]))
+        XCTAssertEqual(MesoPerformanceAnalyzer.blockChange(of: [100, 110]) ?? 0, 0.10, accuracy: 1e-12, "two exposures: first vs last")
+        XCTAssertEqual(MesoPerformanceAnalyzer.blockChange(of: [100, 110, 130]) ?? 0, 0.20, accuracy: 1e-12, "three: first vs the median of the other two")
+        XCTAssertEqual(MesoPerformanceAnalyzer.blockChange(of: [100, 105, 110, 115, 112]) ?? 0, 0.12, accuracy: 1e-12, "the median of the last three (110, 115, 112)")
+        XCTAssertEqual(MesoPerformanceAnalyzer.blockChange(of: [780, 913, 913, 913, 913, 913]) ?? 0, 913.0 / 780 - 1, accuracy: 1e-12, "an early step then a plateau still shows the step")
+        XCTAssertEqual(MesoPerformanceAnalyzer.blockChange(of: [100, 100, 100, 400]) ?? 0, 0, accuracy: 1e-12, "one wild closing session does not move the median")
+    }
+
+    func test_flatForLast_andTheRowLine() {
+        XCTAssertEqual(MesoPerformanceAnalyzer.flatForLast([780, 913, 913, 913, 913, 913]), 5)
+        XCTAssertEqual(MesoPerformanceAnalyzer.flatForLast([100, 120, 130]), 1)
+        XCTAssertEqual(MesoPerformanceAnalyzer.flatForLast([100, 102, 101]), 3, "within the +-3% band of the latest")
+        func summary(_ verdict: ExerciseVerdict, change: Double?, flat: Int) -> ExercisePerformanceSummary {
+            ExercisePerformanceSummary(exerciseId: "x", exerciseName: "X", primaryMuscle: nil, e1rmBySession: [], peakE1RM: nil, bestSet: nil, trendBasis: .e1RM,
+                                       trendChange: 0, blockChange: change, flatForLast: flat, openingLoad: nil, closingLoad: nil, verdict: verdict, repsBased: false,
+                                       openingReps: nil, closingReps: nil, isPR: false, isNew: false, totalSets: 0, totalReps: 0, totalVolume: 0)
+        }
+        XCTAssertEqual(summary(.plateaued, change: 0.171, flat: 5).changeLine(basisLabel: "e1RM"), "+17.1% this block · flat for the last 5 sessions")
+        XCTAssertEqual(summary(.progressing, change: 0.171, flat: 5).changeLine(basisLabel: "e1RM"), "+17.1% e1RM", "only a Holding verdict gets the flat wording")
+        XCTAssertEqual(summary(.plateaued, change: 0.02, flat: 5).changeLine(basisLabel: "e1RM"), "+2.0% e1RM", "a % within the band is just the %")
+        XCTAssertEqual(summary(.plateaued, change: 0.10, flat: 1).changeLine(basisLabel: "e1RM"), "+10.0% e1RM", "a single flat session is not 'flat for the last 1'")
+        XCTAssertNil(summary(.insufficient, change: nil, flat: 0).changeLine(basisLabel: "e1RM"))
+    }
+
+    func test_theChipStaysOnTheTrend_whileThePercentIsTheBlockChange() throws {
+        let ctx = ModelContext(try BackupTestSupport.makeContainer())
+        let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 8)
+        ctx.insert(meso)
+        for (i, load) in [780.0, 913, 913, 913, 913, 913].enumerated() {
+            let s = Session(date: day(i * 7), status: .completed, weekIndex: i + 1, dayLabel: "D", items: [item("bench_press", reps: [5, 5], loads: [load, load])])
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        let e = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: [])?.exerciseSummaries.first)
+        XCTAssertEqual(e.verdict, .plateaued, "Theil-Sen: the median slope is 0")
+        XCTAssertEqual(e.trendChange ?? 1, 0, accuracy: 1e-9)
+        XCTAssertEqual(e.blockChange ?? 0, 913.0 / 780 - 1, accuracy: 1e-9)
+        XCTAssertEqual(e.flatForLast, 5)
+        XCTAssertEqual(e.changeLine(basisLabel: "e1RM"), "+17.1% this block · flat for the last 5 sessions")
     }
 
     func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {

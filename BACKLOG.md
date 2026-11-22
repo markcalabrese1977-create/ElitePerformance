@@ -158,7 +158,7 @@ breaks carry-forward. Offer to restore the slot's prescription from the same-let
 an exercise to a wave-based session (Undo covers the accidental-delete case only).
 
 ## MesoPerformanceAnalyzer verdict is first-vs-last session
-DONE in 1.4 (item 2): the verdict and the % on each By-exercise row are the Theil-Sen trend (median of pairwise slopes) of e1RM across ALL of the block's exposures (`MesoPerformanceAnalyzer.trendChange(of:)`, +-3%); two exposures still read as first vs last. Original entry:
+DONE in 1.4 (item 2): the verdict and the % on each By-exercise row are the Theil-Sen trend (median of pairwise slopes) of e1RM across ALL of the block's exposures (`MesoPerformanceAnalyzer.trendChange(of:)`, +-3%); two exposures still read as first vs last. Original entry: The % each row shows is the first exposure vs the median of the last three (display only); the chip stays on Theil-Sen; a Holding chip with a % above +3% reads "+N% this block · flat for the last K sessions".
 The Meso Summary verdict (and the % on each By-exercise row) compares a lift's e1RM in the block's FIRST session with its LAST
 (+-3%). Replace it with a trend over all of the block's sessions before it gates starting loads (roadmap 4.4): one noisy
 opening or closing session currently decides the chip.
