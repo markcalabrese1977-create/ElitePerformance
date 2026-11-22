@@ -1806,7 +1806,7 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
             let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
             let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
             out("================ \(URL(fileURLWithPath: path).lastPathComponent)")
-            var count = 0, compoundItems = 0
+            var count = 0, compoundItems = 0, releasedOnNext = 0, nextCompleted = 0, releasedOnTheHoldItself = 0, firstExposures = 0, firstExposuresReleased = 0
             for s in sessions where s.status == .completed && s.meso?.isMaintenance != true {
                 for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
                     let working = CoachingEngine.workingSetIndices(for: i)
@@ -1827,6 +1827,14 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
                     out("\(f.string(from: s.date)) \(s.dayLabel ?? "?") (\(s.meso?.name ?? "-"), wk \(s.weekIndex), \(letter)) \(i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId))  [\(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps) @ \(i.targetRIR) RIR]")
                     out("   done   \(n(base)) x \(working.map { String(i.actualReps[$0]) }.joined(separator: ","))  RIR \(working.map { i.actualRIRs.indices.contains($0) ? (i.actualRIRs[$0] >= 0 ? String(i.actualRIRs[$0]) : "-") : "-" }.joined(separator: ","))  -> \(withEffort) (reps-only: \(repsOnly))")
                     out("   coach  \(rec?.message ?? "-")")
+                    // The valve on this very exposure: the previous exposure of the lift (same letter) decides whether it applies at all.
+                    func increases(_ r: CoachingRecommendation?, base: Double) -> Bool { (r?.nextSuggestedLoad ?? r?.nextTopLoad).map { $0 > base + 0.001 } ?? false }
+                    EffortTracking.mode = .detailed
+                    let priorHold = CoachingEngine.priorExposureWasRIRHold(for: i, in: s, allSessions: sessions)
+                    let releasedHere = priorHold && increases(CoachingEngine.recommend(for: i, priorExposureWasRIRHold: true, ignoreEffort: false), base: base)
+                    if releasedHere { releasedOnTheHoldItself += 1 }
+                    if !priorHold { firstExposures += 1; if releasedHere { firstExposuresReleased += 1 } }
+                    out("   valve  on this exposure: previous exposure was an RIR hold = \(priorHold); released = \(releasedHere)")
                     // The next exposure of the same lift on the same letter, same block and day type.
                     let canonical = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
                     let next = sessions.first { t in
@@ -1837,6 +1845,13 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
                         let nw = CoachingEngine.workingSetIndices(for: ni)
                         if t.status == .completed, !nw.isEmpty {
                             let nb = nw.map { ni.actualLoads[$0] }.last ?? 0
+                            nextCompleted += 1
+                            EffortTracking.mode = .detailed
+                            let without = increases(CoachingEngine.recommend(for: ni), base: nb)
+                            let withValve = increases(CoachingEngine.recommend(for: ni, priorExposureWasRIRHold: true), base: nb)
+                            let released = withValve && !without
+                            if released { releasedOnNext += 1 }
+                            out("   valve  on the next exposure (previous = this hold): \(released ? "RELEASES the increase" : (without ? "not needed (already earns)" : "no release"))")
                             out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)): \(n(nb)) x \(nw.map { String(ni.actualReps[$0]) }.joined(separator: ","))  RIR \(nw.map { ni.actualRIRs.indices.contains($0) ? (ni.actualRIRs[$0] >= 0 ? String(ni.actualRIRs[$0]) : "-") : "-" }.joined(separator: ","))  (\(nb > base + 0.001 ? "load up" : (nb < base - 0.001 ? "load down" : "same load")))")
                         } else {
                             out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)) \(t.status.rawValue): planned \(n(ni.suggestedLoad)) x \(ni.plannedRepsBySet.first.map(String.init) ?? "-") @ \(ni.targetRIR) RIR")
@@ -1845,6 +1860,8 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
                 }
             }
             out("-- \(count) of \(compoundItems) completed compound items are holds caused only by the RIR adjustment")
+            out("-- valve: \(releasedOnNext) of the \(nextCompleted) holds with a completed next exposure are released at that next exposure")
+            out("-- first exposures (previous exposure not an RIR hold): \(firstExposures), released: \(firstExposuresReleased). Holds that were themselves a repeat exposure: \(count - firstExposures), released: \(releasedOnTheHoldItself)")
         }
     }
 }

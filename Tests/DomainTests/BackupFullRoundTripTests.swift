@@ -5764,3 +5764,69 @@ final class RIRAdjustedProgressionTests: XCTestCase {
         XCTAssertTrue(hard.message.contains("5 at your planned effort against a top of 6"), hard.message)
     }
 }
+
+// MARK: - The repeat-performance valve (1.4)
+
+final class RepeatPerformanceValveTests: XCTestCase {
+
+    override func setUp() { EffortTracking.mode = .detailed }
+    override func tearDown() { EffortTracking.clearMirror() }
+
+    private func bench(_ reps: [Int], rirs: [Int], load: Double = 100) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: reps.count, targetRIR: 2, suggestedLoad: load, waveRaw: "b")
+        i.actualReps = reps; i.actualLoads = Array(repeating: load, count: reps.count); i.actualRIRs = rirs
+        i.plannedRepsBySet = Array(repeating: 8, count: reps.count); i.repMin = 6; i.repMax = 8
+        return i
+    }
+
+    private func next(_ i: SessionItem, prior: Bool) throws -> CoachingRecommendation {
+        try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, priorExposureWasRIRHold: prior))
+    }
+
+    func test_sameRepsAgainAtAboutPlannedEffort_earnsTheIncrease_withTheNote() throws {
+        let again = bench([8, 8, 8], rirs: [2, 1, 1])                     // 22 adjusted: a hold on its own
+        let first = try next(again, prior: false)
+        XCTAssertEqual(first.nextSuggestedLoad, 100, "the first exposure is held (22 of 24)")
+        XCTAssertTrue(first.message.hasPrefix("22 of 24 at your planned effort — hold"), first.message)
+        let second = try next(again, prior: true)
+        XCTAssertGreaterThan(second.nextSuggestedLoad ?? 0, 100)
+        XCTAssertTrue(second.message.hasPrefix("Same reps again at about planned effort — increase earned."), second.message)
+    }
+
+    func test_theValveNeedsEverySetAtTheTop_andNoSetMoreThanOneBelowTarget() throws {
+        XCTAssertEqual(try next(bench([8, 8, 7], rirs: [2, 1, 1]), prior: true).nextSuggestedLoad, 100, "a set short of the top: still a hold")
+        XCTAssertEqual(try next(bench([8, 8, 8], rirs: [2, 2, 0]), prior: true).nextSuggestedLoad, 100, "an RIR 0 set is two below a target of 2")
+        XCTAssertGreaterThan(try next(bench([8, 8, 8], rirs: [2, 2, 1]), prior: true).nextSuggestedLoad ?? 0, 100, "one below is allowed")
+        XCTAssertGreaterThan(try next(bench([8, 8, 8], rirs: [RIREntry.unset, 1, 1]), prior: true).nextSuggestedLoad ?? 0, 100, "an unset set is not a strike")
+    }
+
+    func test_neverOnAFirstExposure_andNothingChangesWithoutThePriorHold() throws {
+        for rirs in [[2, 1, 1], [2, 2, 0], [1, 1, 1]] {
+            let a = try next(bench([8, 8, 8], rirs: rirs), prior: false)
+            XCTAssertFalse(a.message.hasPrefix("Same reps again"), a.message)
+        }
+        XCTAssertEqual(try next(bench([8, 8, 8], rirs: [1, 1, 1]), prior: false).nextSuggestedLoad, 100, "21 adjusted, first exposure: held")
+    }
+
+    func test_isolationIsUntouched() throws {
+        let fly = SessionItem(order: 1, exerciseId: "seated_cable_fly", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100)
+        fly.actualReps = [8, 8, 7]; fly.actualLoads = [100, 100, 100]; fly.actualRIRs = [2, 2, 2]; fly.repMin = 6; fly.repMax = 8
+        XCTAssertEqual(try next(fly, prior: true).nextSuggestedLoad, 100, "an isolation set short of the top holds whatever happened before")
+    }
+
+    func test_priorExposureWasRIRHold_readsTheLatestEarlierSameLetterExposure() throws {
+        let hold = bench([8, 8, 8], rirs: [2, 1, 1])
+        let earns = bench([8, 8, 8], rirs: [2, 2, 2])
+        let day: (Int) -> Date = { Date(timeIntervalSince1970: 1_700_000_000 + Double($0) * 86_400) }
+        func session(_ d: Int, _ item: SessionItem, status: SessionStatus = .completed) -> Session { Session(date: day(d), status: status, weekIndex: d, dayLabel: "Push", items: [item]) }
+        let s1 = session(1, hold), s2 = session(8, bench([8, 8, 8], rirs: [2, 1, 1]), status: .planned)
+        XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: s2.items[0], in: s2, allSessions: [s1, s2]))
+        let s0 = session(1, earns)
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s2.items[0], in: s2, allSessions: [s0, s2]), "the previous exposure earned: no hold")
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s1.items[0], in: s1, allSessions: [s1]), "no earlier exposure: a first exposure")
+        let otherLetter = bench([8, 8, 8], rirs: [2, 1, 1]); otherLetter.waveRaw = "c"
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s2.items[0], in: s2, allSessions: [session(1, otherLetter), s2]), "another letter is not the same exposure chain")
+        EffortTracking.mode = .off
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s2.items[0], in: s2, allSessions: [s1, s2]), "effort Off: there is no RIR hold")
+    }
+}

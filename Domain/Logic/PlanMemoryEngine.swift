@@ -267,6 +267,7 @@ struct PlanMemoryEngine {
                 // message may name it. Only nextSuggestedLoad is consumed below —
                 // this keeps the message correct for any future caller of it.
                 carryForwardTarget: .exists,
+                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
@@ -286,6 +287,7 @@ struct PlanMemoryEngine {
                 peakE1RM: projection?.peakE1RM,
                 lastKnownLoad: projection?.lastLoad,
                 carryForwardTarget: .exists,
+                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let topLoad = recommendation.nextTopLoad {
@@ -592,6 +594,7 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,
+            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
@@ -676,6 +679,7 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
+            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises

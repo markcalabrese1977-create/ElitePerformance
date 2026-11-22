@@ -1657,6 +1657,7 @@ final class SessionScreenViewModel: ObservableObject {
                         peakE1RM: recProjection?.peakE1RM,
                         lastKnownLoad: recProjection?.lastLoad,
                         carryForwardTarget: recCarryForwardTarget,
+                        priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: matchingItem, in: session, allSessions: allSessionsForRec),
                         isProgressionExempt: UserProfile.isProgressionExempt(
                             exerciseId: matchingItem.exerciseId,
                             profile: recProfile

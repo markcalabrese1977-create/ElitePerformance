@@ -197,6 +197,36 @@ struct CoachingEngine {
         return reps - max(0, targetRIR - recordedRIR)
     }
 
+    /// True when the previous exposure of this lift (same block, day type and wave letter, the latest completed one before `session`)
+    /// was an RIR-adjustment hold: its reps alone would have earned an increase, its effort-adjusted reps did not. Feeds the repeat-performance valve.
+    static func priorExposureWasRIRHold(for item: SessionItem, in session: Session?, allSessions: [Session]) -> Bool {
+        guard let session, RIREntry.isCompound(item.exerciseId), EffortTracking.mode != .off else { return false }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        let mesoID = session.meso?.persistentModelID
+        let previous = allSessions
+            .filter { $0 !== session && $0.status == .completed && $0.date < session.date && $0.meso?.persistentModelID == mesoID
+                && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
+            .sorted { $0.date > $1.date }
+            .lazy.compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
+                && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == letter } }
+            .first
+        guard let previous, previous.waveRaw?.lowercased() != "deload" else { return false }
+        return isRIRAdjustmentHold(previous)
+    }
+
+    /// Reps alone (effort ignored) would increase the load; with effort counted it does not.
+    static func isRIRAdjustmentHold(_ item: SessionItem) -> Bool {
+        guard RIREntry.isCompound(item.exerciseId) else { return false }
+        let working = workingSetIndices(for: item)
+        guard let base = working.map({ item.actualLoads[$0] }).last, base > 0 else { return false }
+        func increases(_ rec: CoachingRecommendation?) -> Bool {
+            guard let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad else { return false }
+            return next > base + 0.001
+        }
+        return increases(recommend(for: item, ignoreEffort: true)) && !increases(recommend(for: item))
+    }
+
     /// Back-off working sets = any back-off set with both load and reps > 0, minus warmups (< 50% of
     /// the max back-off load). Top rows are never part of this: they are read separately. Shared with
     /// PlanMemoryEngine's incomplete-evidence guard.
@@ -247,14 +277,17 @@ struct CoachingEngine {
         peakE1RM: Double? = nil,
         lastKnownLoad: Double? = nil,
         carryForwardTarget: CarryForwardTarget = .unresolved,
+        priorExposureWasRIRHold: Bool = false,
         isProgressionExempt: Bool = false,
-        loadCap: LoadCap? = nil
+        loadCap: LoadCap? = nil,
+        ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
         let rec = recommendRoles(
             for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
-            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
+            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
+            priorExposureWasRIRHold: priorExposureWasRIRHold, ignoreEffort: ignoreEffort
         )
         // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
         // is already turned into a hold at the cap, with its message, further down).
@@ -275,13 +308,16 @@ struct CoachingEngine {
         lastKnownLoad: Double?,
         carryForwardTarget: CarryForwardTarget,
         isProgressionExempt: Bool,
-        loadCap: LoadCap?
+        loadCap: LoadCap?,
+        priorExposureWasRIRHold: Bool,
+        ignoreEffort: Bool
     ) -> CoachingRecommendation? {
         let back = recommendBackOffs(
             for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
-            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap
+            carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
+            priorExposureWasRIRHold: priorExposureWasRIRHold, ignoreEffort: ignoreEffort
         )
         guard item.hasTopSet else { return back }
         // Deload keeps its maintenance message; a pain flag stops every call, top set included.
@@ -289,7 +325,7 @@ struct CoachingEngine {
         let painFlagged = item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
         if painFlagged { return back }
         guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, unit: unit, isProgressionExempt: isProgressionExempt,
-                                loadCap: loadCap) else {
+                                loadCap: loadCap, ignoreEffort: ignoreEffort) else {
             return back
         }
         let message = [top.message, back?.message].compactMap { $0 }.joined(separator: " ")
@@ -301,7 +337,7 @@ struct CoachingEngine {
     /// Judges the logged top rows: reps against topRepMin/Max, RIR against topRIR. Hold, or a
     /// one-increment bump when every top row is at the top of its range at the target difficulty.
     private static func topRead(for item: SessionItem, minLoadIncrement: Double?, unit: LoadUnit, isProgressionExempt: Bool,
-                                loadCap: LoadCap? = nil) -> TopRead? {
+                                loadCap: LoadCap? = nil, ignoreEffort: Bool = false) -> TopRead? {
         let rows = topWorkingIndices(for: item)
         guard let lastRow = rows.last else { return nil }
         let reps = rows.map { item.actualReps[$0] }
@@ -309,7 +345,7 @@ struct CoachingEngine {
         let lo = item.topRepMin ?? item.repMin ?? item.targetReps
         let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
         let targetRIR = item.topRIR ?? item.targetRIR
-        let adjusted = rows.map { adjustedReps(item.actualReps[$0], targetRIR: targetRIR, recordedRIR: RIREntry.decisionRIR(item, at: $0)) }
+        let adjusted = rows.map { adjustedReps(item.actualReps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
         let what = "Top set: \(compactLoad(load, unit: unit)) x \(reps.map(String.init).joined(separator: ", "))"
         let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
 
@@ -356,7 +392,9 @@ struct CoachingEngine {
         lastKnownLoad: Double? = nil,
         carryForwardTarget: CarryForwardTarget = .unresolved,
         isProgressionExempt: Bool = false,
-        loadCap: LoadCap? = nil
+        loadCap: LoadCap? = nil,
+        priorExposureWasRIRHold: Bool = false,
+        ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
         let reps = item.actualReps
         let loads = item.actualLoads
@@ -469,12 +507,12 @@ struct CoachingEngine {
         // these empty: the set is judged on reps against the target alone and is never assumed "on target".
         var primaryRIRs: [Int] = []
         for idx in primaryIndices {
-            if let rir = RIREntry.decisionRIR(item, at: idx) { primaryRIRs.append(rir) }
+            if !ignoreEffort, let rir = RIREntry.decisionRIR(item, at: idx) { primaryRIRs.append(rir) }
         }
 
         let minRIR: Int? = primaryRIRs.min()
         // RIR-adjusted reps of the primary sets (no adjustment where RIR is unset, Off, or an isolation lift).
-        let primaryAdjusted = primaryIndices.map { adjustedReps(reps[$0], targetRIR: targetRIR, recordedRIR: RIREntry.decisionRIR(item, at: $0)) }
+        let primaryAdjusted = primaryIndices.map { adjustedReps(reps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
 
         // Rest-pause is intentionally NOT computed as a gate here (Cut 3 decision):
         // a rest-pause session is legitimate technique and is eligible to bump.
@@ -637,7 +675,14 @@ struct CoachingEngine {
         let totalRepsEarned = adjustedTotal >= totalGoal - 1
         // What the coach note counts: the adjusted reps when the lifter recorded effort ("27 of 29 at your planned effort"), else plain reps.
         let repsCount = effortRecorded ? "\(adjustedTotal) of \(totalGoal) at your planned effort" : "\(totalReps)/\(totalGoal) reps"
-        let earnedByReps = isCompoundLift ? totalRepsEarned : allSetsAtTop
+        let earnedByAdjustedReps = isCompoundLift ? totalRepsEarned : allSetsAtTop
+        // Repeat-performance valve: the previous exposure of this lift (same letter) was held only because effort took reps off its count, and
+        // this one again has EVERY set at the top of the range with no recorded set more than 1 RIR below target: the same reps at about the
+        // planned effort twice running earn the increase. Never on a first exposure (the caller says whether the previous one was such a hold).
+        let repeatPerformance = priorExposureWasRIRHold && isCompoundLift && !earnedByAdjustedReps
+            && primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax }
+            && primaryRIRs.allSatisfy { $0 >= targetRIR - 1 }
+        let earnedByReps = earnedByAdjustedReps || repeatPerformance
         // Over-performed: every primary set two or more reps beyond the top.
         let overPerformed = primaryReps.count >= growthSetTarget && primaryAdjusted.allSatisfy { $0 >= repMax + 2 }
 
@@ -776,7 +821,9 @@ struct CoachingEngine {
             if let cap = loadCap, target > cap.max {
                 return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
-            let lead = isCompoundLift
+            let lead = repeatPerformance
+                ? "Same reps again at about planned effort — increase earned."
+                : isCompoundLift
                 ? "\(repsCount) — increase earned."
                 : "Every working set hit the top of your range — increase earned."
             let msg: String
