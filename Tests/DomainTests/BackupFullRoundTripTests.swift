@@ -4964,7 +4964,7 @@ final class CustomExerciseDuplicateRowsTests: XCTestCase {
             StartupBackfills.run(using: c)                                   // a launch: must not trap
 
             let rows = try ctx.fetch(FetchDescriptor<CustomExercise>())
-            XCTAssertEqual(Dictionary(grouping: rows, by: \.id).mapValues(\.count), ["custom_archer": 1, "custom_kettle": 1, "custom_landmine": 1], "one row per id")
+            XCTAssertEqual(Dictionary(grouping: rows, by: \.id).mapValues(\.count), ["custom_archer": 1, "custom_kettle": 1], "one row per id; the Landmine Press custom is merged into the built-in and its row is gone")
             XCTAssertEqual(rows.first { $0.id == "custom_archer" }?.createdAt, day(1, 5), "the oldest row survives")
             let ids = Set(rows.map(\.id))
             for i in try ctx.fetch(FetchDescriptor<SessionItem>()) {
@@ -4982,7 +4982,7 @@ final class CustomExerciseDuplicateRowsTests: XCTestCase {
             StartupBackfills.run(using: c)
             let again = try ctx.fetch(FetchDescriptor<CustomExercise>())
             XCTAssertEqual(Dictionary(grouping: again, by: \.id).mapValues(\.count).values.max(), 1)
-            XCTAssertEqual(again.count, 3)
+            XCTAssertEqual(again.count, 2)
             // idempotent
             XCTAssertEqual(CustomExerciseDedupMigration.collapseDuplicateRows(in: ctx), 0)
         }
@@ -5150,7 +5150,8 @@ final class RestorePathCustomRowsFixtureTests: XCTestCase {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 _ = try BackupRestoreCoordinator.restore(from: URL(fileURLWithPath: path), container: c, snapshotDirectory: dir,
                                                          sentinel: DataSentinelStore(defaults: UserDefaults(suiteName: "rp.fixture")!))
-                let expected = try rows(c).count
+                // The first launch merges the custom exercises that duplicate a built-in (CustomExerciseMerge); after that the count is steady.
+                let expected = try rows(c).count - CustomExerciseMerge.plans(in: ModelContext(c)).count
                 XCTAssertGreaterThan(expected, 0, label)
                 try assertSteady(c, expected: expected, launch(c), "\(label): backfills straight after the restore")
                 try assertSteady(c, expected: expected, launch(c), "\(label): next launch")
@@ -5165,7 +5166,7 @@ final class RestorePathCustomRowsFixtureTests: XCTestCase {
             try isolated {
                 let c = try container()
                 _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: c)
-                let expected = try rows(c).count
+                let expected = try rows(c).count - CustomExerciseMerge.plans(in: ModelContext(c)).count
                 XCTAssertGreaterThan(expected, 0, label)
                 try assertSteady(c, expected: expected, launch(c), "\(label): first launch")
                 try assertSteady(c, expected: expected, launch(c), "\(label): relaunch")

@@ -691,8 +691,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
             "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
             "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
-            "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "LoadEverWrittenBackfill", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
-        XCTAssertEqual(registered.count, 19)
+            "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "CustomExerciseMergeBackfill", "LoadEverWrittenBackfill", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 20)
         for launch in [firstLaunch, secondLaunch] {
             XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
             for (line, name) in zip(launch, registered) {
@@ -1907,6 +1907,47 @@ final class NextMesoGateDryRunTests: XCTestCase {
                 out("\(r.name) [\(r.letter)]: old \(n(r.oldSeed)) -> new \(n(r.newSeed))\(pct)  [\(r.src)\(r.factor.map { " \(Int(($0 * 100).rounded()))%" } ?? "")]  \(r.reason ?? "")")
             }
             out("-- \(rows.count) lift/letter seeds, \(changed) change; peak seeds: \(rows.filter { $0.src == "peak" }.count)")
+        }
+    }
+}
+
+// MARK: - Dry run: custom exercises that duplicate a built-in (report only)
+
+@MainActor
+final class CustomExerciseMergeDryRunTests: XCTestCase {
+    func test_report_whatTheMergeWouldMove() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_MERGE_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_MERGE_BACKUPS (comma-separated); optional TEST_RUNNER_EP_MERGE_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("MERGE| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_MERGE_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent): \((try ctx.fetch(FetchDescriptor<CustomExercise>())).count) custom exercises")
+            let plans = CustomExerciseMerge.plans(in: ctx)
+            if plans.isEmpty { out("(no custom exercise has a built-in's name)") }
+            for p in plans {
+                out(p.summary)
+                for i in p.items.sorted(by: { ($0.exerciseNameSnapshot ?? "") < ($1.exerciseNameSnapshot ?? "") }) {
+                    let s = (try ctx.fetch(FetchDescriptor<Session>())).first { $0.items.contains { $0 === i } }
+                    out("   \(s.map { f.string(from: $0.date) } ?? "?") \(s?.dayLabel ?? "?") (\(s?.status.rawValue ?? "?"), \((i.waveRaw ?? "-").uppercased())): \(i.targetSets) sets, logged \(zip(i.actualReps, i.actualLoads).filter { $0.0 > 0 }.map { "\(LoadFormatter.number($0.1))x\($0.0)" }.joined(separator: ", "))")
+                }
+            }
+            // Apply to the in-memory copy and check the result.
+            let beforeSessions = try ctx.fetch(FetchDescriptor<Session>()).flatMap(\.items).count
+            let n = CustomExerciseMerge.apply(plans, in: ctx)
+            let left = CustomExerciseMerge.plans(in: ctx).count
+            let afterItems = try ctx.fetch(FetchDescriptor<Session>()).flatMap(\.items)
+            out("-- applied to a copy: \(n) merged; custom rows now \((try ctx.fetch(FetchDescriptor<CustomExercise>())).count); items total \(beforeSessions) -> \(afterItems.count); remaining duplicates \(left)")
+            for p in plans {
+                let moved = afterItems.filter { $0.exerciseId == p.builtInId }.count
+                let stray = afterItems.filter { $0.exerciseId == p.custom.id }.count
+                out("   \(p.builtInId): \(moved) item(s) now on the built-in id; \(stray) still on the custom id")
+            }
         }
     }
 }

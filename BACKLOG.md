@@ -42,7 +42,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   template band (store it, or recompute from the wave prescription), never below it.
 - Rest today (low priority): when the refusal is a collision with the next week's first session, say
   "No open day this week. Skip a session instead."
-- Custom "Landmine Press" (shoulders, compound; 6 logged items in the Oct 30 backup) duplicates the new built-in
+- DONE in 1.4: `CustomExerciseMerge` / `CustomExerciseMergeBackfill` merge a custom exercise whose name equals a built-in (case and diacritics ignored) into the built-in: items, notes, per-exercise settings and recents move to the built-in id and the custom row is deleted. In the Nov 22 backup it moves the 6 Landmine Press items; no other custom exercise matches, in either backup. Original entry: Custom "Landmine Press" (shoulders, compound; 6 logged items in the Oct 30 backup) duplicates the new built-in
   landmine_press. The one-shot dedup migration already ran on existing installs, so the two coexist. Decide: merge the
   custom into the built-in (move history, canonical id) or rename. ExerciseTraitsCoverageTests tracks it as a known
   collision. Low priority.

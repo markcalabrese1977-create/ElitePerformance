@@ -1321,3 +1321,100 @@ final class LoadEverWrittenAndStampTests: XCTestCase {
         XCTAssertEqual(restored.map(\.loadEverWritten), [true, false, nil])
     }
 }
+
+
+// MARK: - A custom exercise that duplicates a built-in is merged into it
+
+@MainActor
+final class CustomExerciseMergeTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private var sandbox: DefaultsSandbox!
+    override func setUp() { super.setUp(); sandbox = DefaultsSandbox() }
+    override func tearDown() { sandbox.restore(); super.tearDown() }
+
+    private let customId = "custom_8dbee258-e3d5-43db-8761-ba78910e8a80"
+
+    private func world(name: String = "Landmine Press") throws -> (ModelContext, SessionItem, SessionItem, SessionItem) {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        ctx.insert(CustomExercise(id: customId, name: name, primaryMuscleRaw: "shoulders", isCompound: true))
+        func item(_ id: String, name: String?, reps: [Int]) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: id, exerciseNameSnapshot: name, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 70)
+            i.actualReps = reps; i.actualLoads = reps.map { $0 > 0 ? 70 : 0 }; return i
+        }
+        let done = item(customId, name: name, reps: [12, 12, 12])
+        let planned = item(customId, name: nil, reps: [])
+        let builtIn = item("landmine_press", name: "Landmine Press", reps: [10, 10, 10])
+        ctx.insert(Session(date: Date(timeIntervalSince1970: 1_700_000_000), status: .completed, weekIndex: 1, dayLabel: "A", items: [done]))
+        ctx.insert(Session(date: Date(timeIntervalSince1970: 1_800_000_000), status: .planned, weekIndex: 2, dayLabel: "A", items: [planned]))
+        ctx.insert(Session(date: Date(timeIntervalSince1970: 1_750_000_000), status: .completed, weekIndex: 1, dayLabel: "B", items: [builtIn]))
+        try ctx.save()
+        return (ctx, done, planned, builtIn)
+    }
+
+    func test_merge_movesItemsNotesSettingsAndRecents_andDeletesTheCustomRow() throws {
+        let (ctx, done, planned, builtIn) = try world()
+        ctx.insert(ExerciseNote(exerciseId: customId, note: "left first"))
+        let profile = UserProfile(); profile.maxLoadByExercise = [customId: 100]; profile.loadStepByExercise = [customId: 5]; profile.exemptExerciseIds = [customId]
+        ctx.insert(profile)
+        UserDefaults.standard.set(["bench_press", customId], forKey: ExercisePickerRecents.key)
+        try ctx.save()
+        let plans = CustomExerciseMerge.plans(in: ctx)
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans[0].items.count, 2)
+        XCTAssertEqual(plans[0].notes.count, 1)
+        XCTAssertEqual(plans[0].settings.sorted(), ["fixed-load", "loadStep 5.0", "maxLoad 100.0"])
+        XCTAssertTrue(plans[0].inRecents)
+
+        XCTAssertEqual(CustomExerciseMerge.apply(plans, in: ctx), 1)
+        XCTAssertEqual([done.exerciseId, planned.exerciseId, builtIn.exerciseId], ["landmine_press", "landmine_press", "landmine_press"])
+        XCTAssertEqual(done.exerciseNameSnapshot, "Landmine Press"); XCTAssertEqual(planned.exerciseNameSnapshot, "Landmine Press")
+        XCTAssertEqual(done.actualReps, [12, 12, 12], "logged sets are untouched")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<CustomExercise>()).count, 0)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ExerciseNote>()).map(\.exerciseId), ["landmine_press"])
+        XCTAssertEqual(profile.maxLoadByExercise, ["landmine_press": 100]); XCTAssertEqual(profile.loadStepByExercise, ["landmine_press": 5])
+        XCTAssertEqual(profile.exemptExerciseIds, ["landmine_press"])
+        XCTAssertEqual(UserDefaults.standard.stringArray(forKey: ExercisePickerRecents.key), ["bench_press", "landmine_press"])
+        XCTAssertTrue(CustomExerciseMerge.plans(in: ctx).isEmpty, "idempotent: nothing left to merge")
+        XCTAssertEqual(CustomExerciseMerge.apply(CustomExerciseMerge.plans(in: ctx), in: ctx), 0)
+    }
+
+    func test_builtInsOwnNoteAndSettingsWin_theCustomNoteTextIsAppended() throws {
+        let (ctx, _, _, _) = try world()
+        ctx.insert(ExerciseNote(exerciseId: "landmine_press", note: "elbow in"))
+        ctx.insert(ExerciseNote(exerciseId: customId, note: "left first"))
+        let profile = UserProfile(); profile.maxLoadByExercise = [customId: 100, "landmine_press": 80]
+        ctx.insert(profile); try ctx.save()
+        CustomExerciseMerge.apply(CustomExerciseMerge.plans(in: ctx), in: ctx)
+        let notes = try ctx.fetch(FetchDescriptor<ExerciseNote>())
+        XCTAssertEqual(notes.count, 1)
+        XCTAssertEqual(notes[0].note, "elbow in\nleft first")
+        XCTAssertEqual(profile.maxLoadByExercise, ["landmine_press": 80], "the built-in's own setting is kept")
+    }
+
+    func test_nameFold_ignoresCaseAndDiacritics_andADifferentNameIsLeftAlone() throws {
+        let (ctx, _, planned, _) = try world(name: "  LANDMINE press ")
+        XCTAssertEqual(CustomExerciseMerge.plans(in: ctx).count, 1)
+        CustomExerciseMerge.apply(CustomExerciseMerge.plans(in: ctx), in: ctx)
+        XCTAssertEqual(planned.exerciseId, "landmine_press")
+        let (ctx2, _, planned2, _) = try world(name: "Landmine Press (heavy)")
+        XCTAssertTrue(CustomExerciseMerge.plans(in: ctx2).isEmpty)
+        XCTAssertEqual(planned2.exerciseId, customId, "a custom exercise with its own name is not touched")
+    }
+
+    func test_theStartupBackfill_mergesOnce_andReportsNotNeededAfterwards() throws {
+        let (ctx, done, _, _) = try world()
+        var lines: [String] = []
+        BackfillLog.collector = []
+        CustomExerciseMergeBackfill.runIfNeeded(in: ctx)
+        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertTrue(BackfillLog.result(from: lines).hasPrefix("Custom exercise merge: 1 custom exercise(s) merged"), BackfillLog.result(from: lines))
+        XCTAssertEqual(done.exerciseId, "landmine_press")
+        BackfillLog.collector = []
+        CustomExerciseMergeBackfill.runIfNeeded(in: ctx)
+        lines = BackfillLog.collector ?? []; BackfillLog.collector = nil
+        XCTAssertEqual(BackfillLog.result(from: lines), "not needed")
+    }
+}
