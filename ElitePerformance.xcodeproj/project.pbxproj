@@ -698,6 +698,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D5E293402EC4102900034D78 /* Build configuration list for PBXNativeTarget "ElitePerformance" */;
 			buildPhases = (
+				D50757B03067467600C79BFC /* Refuse Dirty Archive */,
 				D5E293192EC4102800034D78 /* Sources */,
 				D5E2931A2EC4102800034D78 /* Frameworks */,
 				D5E2931B2EC4102800034D78 /* Resources */,
@@ -806,6 +807,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		D50757B03067467600C79BFC /* Refuse Dirty Archive */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Refuse Dirty Archive";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/scripts/refuse_dirty_archive.sh\"\n";
+		};
 		D50757AF3067467600C79BFC /* Stamp Build Info */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

@@ -22,7 +22,7 @@ grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"
 
 REL_START=$SECONDS
 xcodebuild build -configuration Release -project ElitePerformance.xcodeproj -scheme ElitePerformance \
-  -destination "generic/platform=iOS" -derivedDataPath "$OUT_DIR/rel" CODE_SIGNING_ALLOWED=NO > "$OUT_DIR/rel.log" 2>&1
+  -destination "generic/platform=iOS" -derivedDataPath "$OUT_DIR/rel" CODE_SIGNING_ALLOWED=NO EP_ALLOW_DIRTY=1 > "$OUT_DIR/rel.log" 2>&1
 RC=$?
 echo "[phase] release build $((SECONDS - REL_START))s (exit $RC)"
 
