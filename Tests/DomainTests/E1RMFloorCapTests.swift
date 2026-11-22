@@ -744,7 +744,7 @@ final class FixedLoadExemptTests: XCTestCase {
         XCTAssertEqual(try msg(byName["in range, not top"]!),
             "On target and in range — hold 50.0. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["off-target RIR"]!),
-            "Performance didn't clearly support an increase. Hold this load and look for more consistent output next session before moving up. Next Week A: 50, same load, reps-first.")
+            "27 of 36 at your planned effort — hold. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness+disruption"]!),
             "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness"]!),

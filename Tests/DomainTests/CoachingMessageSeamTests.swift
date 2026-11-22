@@ -509,17 +509,18 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         XCTAssertEqual(low?.nextTopLoad, 315)
         XCTAssertTrue(low?.message.contains("under the range (4–6)") ?? false, low?.message ?? "nil")
         let hard = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
-        XCTAssertEqual(hard?.nextTopLoad, 315, "harder than the target RIR holds even at the top of the range")
-        XCTAssertTrue(hard?.message.contains("harder than the target RIR") ?? false, hard?.message ?? "nil")
-        // Simple speaks in words ("planned"); Off cannot reach this rule (decisionRIR is nil), so it never prints.
+        XCTAssertEqual(hard?.nextTopLoad, 315, "6 reps at RIR 0 against a top RIR of 2 is 4 adjusted reps: short of the top of 6, so it holds")
+        XCTAssertTrue(hard?.message.contains("4 at your planned effort against a top of 6") ?? false, hard?.message ?? "nil")
+        // Simple speaks the same words (no RIR numbers); Off adjusts nothing, so the same logged reps earn the increase on reps alone.
         EffortTracking.mode = .simple
         defer { EffortTracking.clearMirror() }
         let simple = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
-        XCTAssertTrue(simple?.message.contains("harder than planned") ?? false, simple?.message ?? "nil")
+        XCTAssertTrue(simple?.message.contains("at your planned effort") ?? false, simple?.message ?? "nil")
         XCTAssertFalse(simple?.message.contains("RIR") ?? true, simple?.message ?? "nil")
         EffortTracking.mode = .off
         let off = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
-        XCTAssertFalse(off?.message.contains("harder than") ?? true, "Off ignores effort entirely: \(off?.message ?? "nil")")
+        XCTAssertEqual(off?.nextTopLoad, 320, "Off: no adjustment, the reps alone earn it")
+        XCTAssertTrue(off?.message.contains("top of the range — increase earned") ?? false, off?.message ?? "nil")
     }
 
     /// A skipped back-off with the top logged: back-off evidence is insufficient and the top load never
@@ -894,7 +895,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_4a_benchTopSetPattern_backOffsMidRange_holdsAtThirdBackOffLoad() {
         let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [7, 7, 7, 5], loads: [290, 290, 290, 315]))
         XCTAssertEqual(r?.nextSuggestedLoad, 290, "baseLoad is the 3rd working set (a back-off), not the 315 top set")
-        XCTAssertTrue(r?.message.contains("21/24 — hold, climb reps") ?? false, r?.message ?? "nil")   // compound: total reps
+        XCTAssertTrue(r?.message.contains("21 of 24 at your planned effort — hold") ?? false, r?.message ?? "nil")   // compound: RIR-adjusted total reps
         // The 315 row is the 4th set, so it is not a primary set: it neither earns a bump nor
         // appears in baseLoad. Primary reps (7,7,7) are below repMax 8, so the outcome is a hold.
     }

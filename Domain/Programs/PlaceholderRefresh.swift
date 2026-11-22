@@ -516,7 +516,7 @@ enum PlaceholderRefresh {
             for r in rows.reversed() {                                      // the last set of the most recent session first
                 let sourceRIR = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
                 let spend = max(0, item.targetRIR - sourceRIR)
-                guard r.load > 0, r.reps - spend >= repMin else { continue }
+                guard r.load > 0, CoachingEngine.adjustedReps(r.reps, targetRIR: item.targetRIR, recordedRIR: sourceRIR) >= repMin else { continue }
                 if current > 0, abs(current - r.load) > 0.001 { return nil }       // a planned load is not replaced (the held value itself is: idempotent)
                 let math = "\(r.reps) reps - max(0, target RIR \(item.targetRIR) - set RIR \(sourceRIR)) = \(r.reps - spend) >= repMin \(repMin): hold \(f(r.load))"
                 let note: String

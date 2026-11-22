@@ -1665,3 +1665,53 @@ final class PlannedSetRepairDryRunTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dry run: the coach's decision for every completed compound item of the active blocks (report only)
+
+@MainActor
+final class ProgressionDecisionDryRunTests: XCTestCase {
+
+    struct Row: Codable {
+        var key: String, date: String, day: String, wave: String, name: String, sets: Int, planned: String
+        var reps: [Int], loads: [Double], rirs: [Int]
+        var baseLoad: Double, kind: String, next: Double?, nextTop: Double?, message: String
+    }
+
+    /// Writes one JSON array per backup to EP_PROG_OUT (a path prefix); the old and the new code each write theirs, and a diff lists the changes.
+    func test_dump_everyCompletedCompoundItemDecision() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_PROG_BACKUPS"], !list.isEmpty,
+              let outPrefix = ProcessInfo.processInfo.environment["EP_PROG_OUT"], !outPrefix.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_PROG_BACKUPS (comma-separated) and TEST_RUNNER_EP_PROG_OUT (output path prefix)")
+        }
+        EffortTracking.mode = .detailed
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        for (n, path) in list.split(separator: ",").map(String.init).enumerated() {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            var rows: [Row] = []
+            for s in sessions where s.status == .completed && s.meso?.status == .active && s.meso?.isMaintenance != true {
+                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                    let working = CoachingEngine.workingSetIndices(for: i)
+                    guard !working.isEmpty else { continue }
+                    let rec = CoachingEngine.recommend(for: i, profile: profile)
+                    let base = working.map { i.actualLoads[$0] }.last ?? 0
+                    let kind: String
+                    if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad {
+                        kind = next > base + 0.001 ? "increase" : (next < base - 0.001 ? "lower" : "hold")
+                    } else { kind = rec == nil ? "none" : "no-write" }
+                    rows.append(Row(key: "\(f.string(from: s.date))|\(s.dayLabel ?? "?")|\(i.exerciseId)|\(i.waveRaw ?? "-")", date: f.string(from: s.date), day: s.dayLabel ?? "?",
+                                    wave: (i.waveRaw ?? "-").uppercased(), name: i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId), sets: i.targetSets,
+                                    planned: "\(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps) @ \(i.targetRIR) RIR",
+                                    reps: working.map { i.actualReps[$0] }, loads: working.map { i.actualLoads[$0] }, rirs: working.map { i.actualRIRs.indices.contains($0) ? i.actualRIRs[$0] : -1 },
+                                    baseLoad: base, kind: kind, next: rec?.nextSuggestedLoad, nextTop: rec?.nextTopLoad, message: rec?.message ?? ""))
+                }
+            }
+            let data = try JSONEncoder().encode(rows)
+            try data.write(to: URL(fileURLWithPath: "\(outPrefix)_\(n).json"))
+            print("PROG| \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) rows")
+        }
+    }
+}
