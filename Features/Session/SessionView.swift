@@ -2038,7 +2038,7 @@ final class SessionScreenViewModel: ObservableObject {
         // A wave block: the slot's wave letter and prescription (same-letter template or previous exposure), not the
         // waveless defaults. The screen below is built from what the item ended up with.
         let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
-        let restoredWave = !isMaintenanceSession && WaveSlotRestore.restore(newItem, in: session, allSessions: allSessions)
+        let restoredWave = !isMaintenanceSession && WaveSlotRestore.restore(newItem, in: session, allSessions: allSessions, entry: "Today")
         let shownSets = restoredWave ? newItem.targetSets : defaultSets
         let shownReps = restoredWave ? newItem.targetReps : defaultReps
         let shownRIR = restoredWave ? newItem.targetRIR : defaultRIR

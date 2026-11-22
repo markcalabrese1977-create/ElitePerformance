@@ -894,3 +894,106 @@ final class ScheduledDeloadFillTests: XCTestCase {
         XCTAssertTrue(s.week.flatMap(\.items).allSatisfy { $0.suggestedLoad == 0 }, "nothing to size from: stays 0")
     }
 }
+
+
+// MARK: - Re-add stress: remove -> re-add on a real seeded wave block, both entry points' sequences
+
+@MainActor
+final class WaveRestoreReAddStressTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    private func seeded() throws -> (ModelContainer, ModelContext) {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        let cal = Calendar.current
+        let start = cal.date(byAdding: .day, value: -7, to: cal.startOfDay(for: Date()))!
+        let weekday = cal.component(.weekday, from: start)
+        try DUPProgramSeeder.seed(startDate: start, trainingWeekdays: (0..<4).map { ((weekday - 1 + $0) % 7) + 1 }, context: ctx,
+                                  template: UpperLower4DayTemplate.template, mesoName: "UL", mesoStatus: .active)
+        try ctx.save()
+        return (c, ctx)
+    }
+
+    /// Week 2, first day: a B week.
+    private func target(_ ctx: ModelContext) throws -> Session {
+        let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+        return try XCTUnwrap(all.first { $0.weekIndex == 2 })
+    }
+
+    private func generic(_ id: String, order: Int) -> SessionItem {
+        let i = SessionItem(order: order, exerciseId: id, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        i.plannedRepsBySet = Array(repeating: 10, count: 3); i.plannedLoadsBySet = Array(repeating: 0, count: 3)
+        i.plannedRIRsBySet = Array(repeating: 2, count: 3); i.actualReps = Array(repeating: 0, count: 3)
+        i.actualLoads = Array(repeating: 0, count: 3); i.actualRIRs = RIREntry.unsetArray(count: 3)
+        return i
+    }
+
+    /// The Program tab's performDelete: out of session.items, the object kept (for Undo), saved.
+    private func programRemove(_ item: SessionItem, from s: Session, _ ctx: ModelContext) throws {
+        let idx = try XCTUnwrap(s.items.firstIndex { $0.id == item.id })
+        let order = s.items[idx].order
+        s.items.remove(at: idx)
+        for o in s.items where o.order > order { o.order -= 1 }
+        try ctx.save()
+    }
+
+    private func assertRestored(_ item: SessionItem, expected: (sets: Int, repMin: Int, repMax: Int, letter: String), _ note: String) {
+        XCTAssertEqual(item.waveRaw, expected.letter, note)
+        XCTAssertEqual([item.targetSets, item.repMin ?? -1, item.repMax ?? -1], [expected.sets, expected.repMin, expected.repMax], note)
+    }
+
+    func test_removeThenReAdd_tenTimes_everyVariant_alwaysComesBackAsTheSlotsPrescription() throws {
+        let (container, ctx) = try seeded()
+        let s = try target(ctx)
+        let original = try XCTUnwrap(s.items.first { $0.exerciseId == "bench_press" })
+        let want = (sets: original.targetSets, repMin: original.repMin ?? -1, repMax: original.repMax ?? -1, letter: original.waveRaw ?? "")
+        XCTAssertEqual(want.letter, "b")
+
+        // Variants: 0 Program tab, same context, immediately after the remove. 1 Program tab, fresh context (relationships not yet
+        // faulted in). 2 Today, same context, the item inserted after restore. 3 Today with a fresh context. 4 hard delete (no Undo object
+        // kept) then add. 5 the add happens before the remove's save is flushed (autosave off, no save between).
+        for variant in 0...5 {
+            for round in 1...10 {
+                let note = "variant \(variant) round \(round)"
+                let work = (variant == 1 || variant == 3) ? ModelContext(container) : ctx
+                let session = try XCTUnwrap(try work.fetch(FetchDescriptor<Session>()).first { $0.persistentModelID == s.persistentModelID })
+                guard let current = session.items.first(where: { $0.exerciseId == "bench_press" }) else { return XCTFail("bench missing \(note)") }
+                if variant == 4 { session.items.removeAll { $0.id == current.id }; work.delete(current); try work.save() }
+                else if variant == 5 { session.items.removeAll { $0.id == current.id } }          // not saved yet
+                else { try programRemove(current, from: session, work) }
+                XCTAssertNil(session.items.first { $0.exerciseId == "bench_press" }, note)
+
+                let new = generic("bench_press", order: (session.items.map(\.order).max() ?? 0) + 1)
+                let all = (try? work.fetch(FetchDescriptor<Session>())) ?? []
+                XCTAssertTrue(WaveSlotRestore.restore(new, in: session, allSessions: all, entry: "stress v\(variant) r\(round)"), note)
+                session.items.append(new)
+                if variant == 2 || variant == 3 { work.insert(new) }
+                try work.save()
+                assertRestored(new, expected: want, note)
+                // Re-read from the store: what was saved is what was restored.
+                let reread = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<SessionItem>()).first { $0.id == new.id })
+                assertRestored(reread, expected: want, note + " (re-read)")
+            }
+        }
+    }
+
+    func test_restoreOnASessionWithNoLoadedItems_orNoMeso_degradesToNothingWrongRatherThanTheGenericItemPassingAsRestored() throws {
+        let (_, ctx) = try seeded()
+        let s = try target(ctx)
+        let all = try ctx.fetch(FetchDescriptor<Session>())
+        // Wave context unavailable: every item gone (nothing to read the letter from) -> not restored, and it says so.
+        let emptyCopy = Session(date: s.date, status: .planned, weekIndex: s.weekIndex, dayLabel: s.dayLabel, items: [])
+        let new = generic("bench_press", order: 1)
+        XCTAssertFalse(WaveSlotRestore.restore(new, in: emptyCopy, allSessions: all, entry: "stress no-context"))
+        XCTAssertNil(new.waveRaw)
+        // A session whose only remaining item is the one being re-added still reads the letter from the block.
+        let only = try XCTUnwrap(s.items.first { $0.exerciseId == "bench_press" })
+        for i in s.items where i !== only { s.items.removeAll { $0.id == i.id } }
+        let again = generic("bench_press", order: 2)
+        XCTAssertTrue(WaveSlotRestore.restore(again, in: s, allSessions: all, entry: "stress one-item"))
+        XCTAssertEqual(again.waveRaw, "b")
+    }
+}

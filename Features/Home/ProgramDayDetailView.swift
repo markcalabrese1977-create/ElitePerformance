@@ -397,7 +397,7 @@ struct ProgramDayDetailView: View {
 
         if !isMaintenanceSession {
             let all = (try? modelContext.fetch(FetchDescriptor<Session>())) ?? []
-            WaveSlotRestore.restore(newItem, in: session, allSessions: all)
+            WaveSlotRestore.restore(newItem, in: session, allSessions: all, entry: "Program tab")
         }
         session.items.append(newItem)
 

@@ -11,6 +11,21 @@ import SwiftData
 /// a load, a logged value, a top set or a coach note.
 enum WaveSlotRestore {
 
+    /// Debug builds only: one line per restore says what it found, to the console and to
+    /// Application Support/WaveSlotRestore.log (capped), so a re-add that came back as the generic 3 x 10 can be explained afterwards.
+    static func log(_ line: @autoclosure () -> String) {
+        #if DEBUG
+        let text = "WaveSlotRestore| \(Date().formatted(.iso8601)) \(line())"
+        print(text)
+        guard let dir = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return }
+        let url = dir.appendingPathComponent("WaveSlotRestore.log")
+        var body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        body += text + "\n"
+        if body.count > 40_000 { body = String(body.suffix(30_000)) }
+        try? body.write(to: url, atomically: true, encoding: .utf8)
+        #endif
+    }
+
     /// The wave letter (or "deload") most of the session's items carry. Nil when none has a wave.
     static func sessionWave(_ session: Session) -> String? {
         let waves = session.items.compactMap { $0.waveRaw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }
@@ -45,10 +60,16 @@ enum WaveSlotRestore {
     /// Gives `item` (just built, unlogged) the slot's wave letter and prescription. Returns false when the block is not wave
     /// based or the session has no wave, leaving the item exactly as it was.
     @discardableResult
-    static func restore(_ item: SessionItem, in session: Session, allSessions: [Session]) -> Bool {
-        guard WavePrescriptionGuard.isWaveBasedBlock(session), let wave = sessionWave(session) else { return false }
+    static func restore(_ item: SessionItem, in session: Session, allSessions: [Session], entry: String = "?") -> Bool {
+        let waveBlock = WavePrescriptionGuard.isWaveBasedBlock(session)
+        let sessionLetter = sessionWave(session)
+        let head = "[\(entry)] \(item.exerciseId) -> W\(session.weekIndex) \(session.dayLabel ?? "-") status \(session.status.rawValue) meso \(session.meso?.name ?? "NIL") items \(session.items.count) sessions \(allSessions.count) waveBlock \(waveBlock) sessionWave \(sessionLetter ?? "nil")"
+        guard waveBlock, let wave = sessionLetter else { log("\(head): NOT RESTORED (no wave context); item keeps its defaults"); return false }
         item.waveRaw = wave
-        guard let src = source(for: item.exerciseId, wave: wave, in: session, allSessions: allSessions) else { return true }
+        guard let src = source(for: item.exerciseId, wave: wave, in: session, allSessions: allSessions) else {
+            log("\(head): NO SOURCE for letter \(wave); letter only, defaults kept"); return true
+        }
+        log("\(head): source found \(src.setMin ?? -1)-\(src.setMax ?? -1) x \(src.repMin ?? -1)-\(src.repMax ?? -1) RIR \(src.targetRIRMin ?? -1)-\(src.targetRIRMax ?? -1) letter \(letter(src))")
 
         item.priorityRaw = src.priorityRaw
         item.setMin = src.setMin; item.setMax = src.setMax
