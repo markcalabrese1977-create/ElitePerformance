@@ -91,6 +91,9 @@ struct PlanMemoryEngine {
                 after: session,
                 in: allSessions
             ) else { continue }
+            // Whatever this iteration writes onto the target, it stamps (`updatedAt`, and `loadEverWritten` when a planned load moved).
+            let targetFingerprint = targetItem.writeFingerprint()
+            defer { targetItem.stampIfChanged(since: targetFingerprint) }
 
             // A write that exists only because of the adopted baseline never lands on a target the lifter edited by hand
             // (an edited plan with no load is a choice, not a gap).
@@ -379,8 +382,10 @@ struct PlanMemoryEngine {
               !item.setFeedbackBySet.contains(SetFeedback.pain.rawValue),
               !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),
               let held = CoachingEngine.heldLoad(for: item), held > 0 else { return false }
+        let fingerprint = item.writeFingerprint()
         item.suggestedLoad = held
         PlaceholderRefresh.clearStaleNoHistoryNote(item)
+        item.stampIfChanged(since: fingerprint)
         return true
     }
 

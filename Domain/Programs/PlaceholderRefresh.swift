@@ -251,7 +251,7 @@ enum PlaceholderRefresh {
                 let current = currentLoad(item)
                 if holdsLoad(item, value) { continue }                      // idempotent
                 if value < current - 0.001,
-                   performedAgainst(load: current, minReps: item.repMin ?? item.targetReps, canonical: canonical, since: item.updatedAt, in: completed) { continue }
+                   performedAgainst(load: current, minReps: item.repMin ?? item.targetReps, canonical: canonical, since: meso.createdAt, in: completed) { continue }
                 changes.append(Change(session: target, item: item, oldLoad: current, newLoad: value, reason: decision.reason, note: decision.note))
             }
         }
@@ -262,6 +262,8 @@ enum PlaceholderRefresh {
 
     static func apply(_ changes: [Change], ctx: Context) {
         for c in changes {
+            let fingerprint = c.item.writeFingerprint()
+            defer { c.item.stampIfChanged(since: fingerprint) }
             if c.noteOnly {
                 switch c.noteField {
                 case .prescription:
@@ -443,11 +445,10 @@ enum PlaceholderRefresh {
         return .leave
     }
 
-    /// Whether the item was written after its block was created (a minute's grace for the block's own creation).
-    /// nil when either date is unknown.
+    /// Whether a planned load was ever written onto the item after block setup (`SessionItem.loadEverWritten`), not read off a timestamp.
     private static func writtenSinceCreation(_ item: SessionItem, _ meso: MesoBlock) -> Bool? {
-        guard let created = meso.createdAt, let updated = item.updatedAt else { return nil }
-        return updated > created.addingTimeInterval(60)
+        guard meso.createdAt != nil else { return nil }       // a block with no creation date: nothing to compare setup against
+        return item.loadEverWritten == true
     }
 
     /// The estimate, else the hold, over `candidates` (most recent first). nil when neither found a source (the caller goes on to
@@ -576,5 +577,32 @@ enum PlaceholderRefreshBackfill {
             context.rollback()
             BackfillLog.note("⚠️ placeholder refresh save failed: \(error)")
         }
+    }
+}
+
+/// One-time carry-over for items that predate `SessionItem.loadEverWritten`: the old reading of "was a load written after setup?" was
+/// `item.updatedAt` later than the block's `createdAt` plus a minute (or either date unknown, which counted as written). Every item still
+/// at nil (existing stores, old backups) gets that reading once, as true or false; items created from now on start at false and are
+/// never nil, so a later launch finds nothing to do. After this the refresh never reads `updatedAt`.
+enum LoadEverWrittenBackfill {
+    static func carriedValue(_ item: SessionItem, meso: MesoBlock?) -> Bool {
+        guard let created = meso?.createdAt, let updated = item.updatedAt else { return true }
+        return updated > created.addingTimeInterval(60)
+    }
+
+    static func run(in context: ModelContext) -> Int {
+        guard let sessions = try? context.fetch(FetchDescriptor<Session>()) else { return 0 }
+        var n = 0
+        for s in sessions {
+            for i in s.items where i.loadEverWritten == nil { i.loadEverWritten = carriedValue(i, meso: s.meso); n += 1 }
+        }
+        return n
+    }
+
+    static func runIfNeeded(in context: ModelContext) {
+        let n = run(in: context)
+        guard n > 0 else { BackfillLog.note("ℹ️ load-ever-written carry-over not needed."); return }
+        do { try context.save(); BackfillLog.note("✅ load-ever-written carry-over completed. Carried the reading over for \(n) items.") }
+        catch { context.rollback(); BackfillLog.note("⚠️ load-ever-written carry-over save failed: \(error)") }
     }
 }

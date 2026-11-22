@@ -98,6 +98,8 @@ struct ProgramPlanPropagationService {
                 // 2) Update matched items — plan fields only, never exerciseId
                 for src in sourceItems {
                     if let dst = future.items.first(where: { $0.exerciseId == src.exerciseId }), !dst.planEdited {
+                        let fingerprint = dst.writeFingerprint()
+                        defer { dst.stampIfChanged(since: fingerprint) }
                         dst.order           = src.order
                         dst.targetReps      = src.targetReps
                         dst.targetSets      = src.effectivePrescribedSets
@@ -217,6 +219,8 @@ extension ProgramPlanPropagationService {
             for (idx, src) in sourceItems.enumerated() where idx < aligned.count {
                 let dst = aligned[idx]
                 guard !dst.planEdited else { continue }
+                let fingerprint = dst.writeFingerprint()
+                defer { dst.stampIfChanged(since: fingerprint) }
                 dst.order = idx + 1
                 dst.exerciseId = src.exerciseId
                 dst.exerciseNameSnapshot = src.exerciseNameSnapshot

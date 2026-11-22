@@ -221,6 +221,7 @@ enum PopulatedStoreBuilder {
             loadOverrideReasonRaw: "jointTenderness", prescribedSets: 4
         )
         item.planEdited = true
+        item.loadEverWritten = true
         item.setRolesBySet = ["", "", "top"]
         item.topRepMin = 3
         item.topRepMax = 5

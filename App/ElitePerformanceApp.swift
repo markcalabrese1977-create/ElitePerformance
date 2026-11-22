@@ -150,6 +150,7 @@ enum StartupBackfills {
         (String(describing: CustomExerciseCompoundBackfill.self), { CustomExerciseCompoundBackfill.runIfNeeded(in: $0) }),
         (String(describing: RIRUnsetBackfill.self), { RIRUnsetBackfill.runIfNeeded(in: $0) }),
         (String(describing: MesoStartDateResync.self), { MesoStartDateResync.runIfNeeded(in: $0) }),
+        (String(describing: LoadEverWrittenBackfill.self), { LoadEverWrittenBackfill.runIfNeeded(in: $0) }),
         (String(describing: PlannedSetRepairBackfill.self), { PlannedSetRepairBackfill.runIfNeeded(in: $0) }),
         (String(describing: PlaceholderRefreshBackfill.self), { PlaceholderRefreshBackfill.runIfNeeded(in: $0) }),
     ]

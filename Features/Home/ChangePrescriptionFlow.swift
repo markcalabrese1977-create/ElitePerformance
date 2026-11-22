@@ -13,6 +13,8 @@ enum PlanStepperEdits {
     /// Work-set stepper: this session's set count. The wave's set band (`setMin`/`setMax`) widens to
     /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
     static func setSets(_ item: SessionItem, to value: Int) {
+        let fingerprint = item.writeFingerprint()
+        defer { item.stampIfChanged(since: fingerprint) }
         item.planEdited = true
         let old = item.targetSets
         if item.hasTopSet {
@@ -26,6 +28,8 @@ enum PlanStepperEdits {
 
     /// RIR stepper: the lifter picked one number, so the displayed range collapses to it as well. A hand-set RIR.
     static func setRIR(_ item: SessionItem, to value: Int) {
+        let fingerprint = item.writeFingerprint()
+        defer { item.stampIfChanged(since: fingerprint) }
         item.targetRIR = value
         item.targetRIRMin = value
         item.targetRIRMax = value
@@ -40,6 +44,8 @@ enum PlanStepperEdits {
 
     /// Per-set load field: marks the plan as hand-set.
     static func setPlannedLoad(_ item: SessionItem, at index: Int, to value: Double) {
+        let fingerprint = item.writeFingerprint()
+        defer { item.stampIfChanged(since: fingerprint) }
         if index >= item.plannedLoadsBySet.count {
             item.plannedLoadsBySet.append(contentsOf: repeatElement(0.0, count: index + 1 - item.plannedLoadsBySet.count))
         }
@@ -49,6 +55,8 @@ enum PlanStepperEdits {
 
     /// Per-set reps field: marks the plan as hand-set.
     static func setPlannedReps(_ item: SessionItem, at index: Int, to value: Int) {
+        let fingerprint = item.writeFingerprint()
+        defer { item.stampIfChanged(since: fingerprint) }
         if index >= item.plannedRepsBySet.count {
             item.plannedRepsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRepsBySet.count))
         }
@@ -58,6 +66,8 @@ enum PlanStepperEdits {
 
     /// Per-set RIR field: marks the plan as hand-set.
     static func setPlannedRIR(_ item: SessionItem, at index: Int, to value: Int) {
+        let fingerprint = item.writeFingerprint()
+        defer { item.stampIfChanged(since: fingerprint) }
         if index >= item.plannedRIRsBySet.count {
             item.plannedRIRsBySet.append(contentsOf: repeatElement(0, count: index + 1 - item.plannedRIRsBySet.count))
         }

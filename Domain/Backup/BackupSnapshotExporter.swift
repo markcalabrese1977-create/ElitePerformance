@@ -196,7 +196,8 @@ enum BackupSnapshotExporter {
                                 topRepMin: item.topRepMin,
                                 topRepMax: item.topRepMax,
                                 topRIR: item.topRIR,
-                                prescribedSets: item.prescribedSets
+                                prescribedSets: item.prescribedSets,
+                                loadEverWritten: item.loadEverWritten
                             )
                         }
                 )

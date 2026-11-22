@@ -232,6 +232,7 @@ enum BackupSnapshotImporter {
                 item.topRIR = itemDTO.topRIR
                 // nil for a backup from before the key existed (the init default would invent a value).
                 item.prescribedSets = itemDTO.prescribedSets
+                item.loadEverWritten = itemDTO.loadEverWritten
 
                 modelContext.insert(item)
                 session.items.append(item)

@@ -2212,6 +2212,9 @@ final class SessionScreenViewModel: ObservableObject {
                         continue
                     }
 
+            let fingerprint = item.writeFingerprint()
+            defer { item.stampIfChanged(since: fingerprint) }
+
             // Sync basic exercise info (including swaps)
             item.exerciseId = uiExercise.exerciseId
             item.exerciseNameSnapshot = uiExercise.name

@@ -3356,6 +3356,8 @@ final class PlaceholderRefreshTests: XCTestCase {
     @discardableResult
     private func session(_ ctx: ModelContext, _ meso: MesoBlock, _ date: Date, _ status: SessionStatus, week: Int, label: String, _ items: [SessionItem]) -> Session {
         let s = Session(date: date, status: status, weekIndex: week, dayLabel: label, items: items)
+        // These fixtures say "written since the block was created" through the item's updatedAt: the carry-over reading, as an explicit fact.
+        for i in items { i.loadEverWritten = LoadEverWrittenBackfill.carriedValue(i, meso: meso) }
         s.meso = meso; ctx.insert(s); meso.sessions.append(s)
         return s
     }
@@ -3596,7 +3598,7 @@ final class PlaceholderRefreshTests: XCTestCase {
 
         // Written AFTER the last performance, the same estimate may lower it - but the floor (repMax 10 <= the 12 reps done at 175)
         // holds it at 175, so nothing is lowered here either.
-        target.updatedAt = day(11, 18)
+        target.updatedAt = day(11, 18); target.loadEverWritten = true
         XCTAssertTrue(PlaceholderRefresh.run(in: ctx, now: now).isEmpty)
         XCTAssertEqual(target.suggestedLoad, 175)
     }
@@ -4708,6 +4710,8 @@ final class PlaceholderRefreshHoldAndCrossDayTests: XCTestCase {
     @discardableResult
     private func session(_ ctx: ModelContext, _ meso: MesoBlock, _ date: Date, _ status: SessionStatus, week: Int, label: String, _ items: [SessionItem]) -> Session {
         let s = Session(date: date, status: status, weekIndex: week, dayLabel: label, items: items)
+        // These fixtures say "written since the block was created" through the item's updatedAt: the carry-over reading, as an explicit fact.
+        for i in items { i.loadEverWritten = LoadEverWrittenBackfill.carriedValue(i, meso: meso) }
         s.meso = meso; ctx.insert(s); meso.sessions.append(s)
         return s
     }

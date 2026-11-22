@@ -1202,3 +1202,122 @@ final class NewPlannedSetAndReAddLoadTests: XCTestCase {
         XCTAssertEqual(stale.suggestedLoad, 0, "the startup pass's other candidates are not touched by the single-item pass")
     }
 }
+
+
+// MARK: - The refresh reads explicit facts, and every write stamps updatedAt
+
+@MainActor
+final class LoadEverWrittenAndStampTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+    private func ctx() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c); return ModelContext(c)
+    }
+    private let old = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func item(load: Double = 100, sets: Int = 3) -> SessionItem {
+        SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: sets, targetRIR: 2, suggestedLoad: load, waveRaw: "a",
+                    priorityRaw: "anchor", repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 2,
+                    plannedRepsBySet: Array(repeating: 8, count: sets), plannedLoadsBySet: Array(repeating: load, count: sets), plannedRIRsBySet: Array(repeating: 2, count: sets))
+    }
+
+    func test_newItemsStartAtFalse_andAnyLoadWriteSetsTrue_whileOtherWritesOnlyStamp() {
+        let i = item()
+        XCTAssertEqual(i.loadEverWritten, false)
+        i.updatedAt = old
+        var fp = i.writeFingerprint()
+        i.coachNote = "a note"
+        XCTAssertTrue(i.stampIfChanged(since: fp))
+        XCTAssertGreaterThan(i.updatedAt ?? old, old, "a note is a write: updatedAt moves")
+        XCTAssertEqual(i.loadEverWritten, false, "but no load was written")
+        fp = i.writeFingerprint(); i.updatedAt = old
+        XCTAssertFalse(i.stampIfChanged(since: fp), "nothing changed: nothing stamped")
+        XCTAssertEqual(i.updatedAt, old)
+        fp = i.writeFingerprint()
+        i.plannedLoadsBySet = [105, 105, 105]
+        XCTAssertTrue(i.stampIfChanged(since: fp))
+        XCTAssertEqual(i.loadEverWritten, true)
+    }
+
+    func test_everyWritePath_stamps() throws {
+        // The lifter's steppers.
+        let a = item(); a.updatedAt = old
+        PlanStepperEdits.setPlannedLoad(a, at: 0, to: 110)
+        XCTAssertGreaterThan(a.updatedAt ?? old, old); XCTAssertEqual(a.loadEverWritten, true)
+        let b = item(); b.updatedAt = old
+        PlanStepperEdits.setRIR(b, to: 1)
+        XCTAssertGreaterThan(b.updatedAt ?? old, old); XCTAssertEqual(b.loadEverWritten, false, "an RIR edit is not a load write")
+    }
+
+    func test_refresh_stampsItsOwnWrites() throws {
+        let c = try ctx()
+        let meso = MesoBlock(name: "M", startDate: cal.date(byAdding: .day, value: -30, to: Date())!, status: .active, totalWeeks: 12)
+        meso.createdAt = cal.date(byAdding: .day, value: -40, to: Date()); c.insert(meso)
+        let done = item(load: 100); done.actualReps = [8, 8, 8]; done.actualLoads = [100, 100, 100]; done.actualRIRs = [2, 2, 2]; done.loadEverWritten = true
+        let target = item(load: 0); target.updatedAt = old
+        let s1 = Session(date: cal.date(byAdding: .day, value: -7, to: Date())!, status: .completed, weekIndex: 1, dayLabel: "Push A", items: [done])
+        let s2 = Session(date: cal.date(byAdding: .day, value: 7, to: Date())!, status: .planned, weekIndex: 4, dayLabel: "Push A", items: [target])
+        for s in [s1, s2] { s.meso = meso; meso.sessions.append(s); c.insert(s) }
+        XCTAssertEqual(target.loadEverWritten, false)
+        let changes = PlaceholderRefresh.run(in: c)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(target.suggestedLoad, 100)
+        XCTAssertGreaterThan(target.updatedAt ?? old, old, "the refresh stamps what it writes")
+        XCTAssertEqual(target.loadEverWritten, true)
+    }
+
+    func test_theRefreshNoLongerReadsUpdatedAt() throws {
+        // A target still at its block-setup value, a source that cannot give a load: the one-time placeholder note comes from
+        // loadEverWritten == false, whatever updatedAt says. Flip the explicit fact and the note goes; moving updatedAt changes nothing.
+        func run(written: Bool, updatedAt: Date?) throws -> String? {
+            let c = try ctx()
+            let meso = MesoBlock(name: "M", startDate: cal.date(byAdding: .day, value: -30, to: Date())!, status: .active, totalWeeks: 12)
+            meso.createdAt = cal.date(byAdding: .day, value: -40, to: Date()); c.insert(meso)
+            let dayLabel = "Push A"
+            let high = item(load: 30); high.exerciseId = "dumbbell_lateral_raise"; high.waveRaw = "c"
+            high.actualReps = [18, 18, 18]; high.actualLoads = [30, 30, 30]; high.actualRIRs = [2, 2, 2]; high.repMin = 15; high.repMax = 20; high.targetReps = 15
+            let done = Session(date: cal.date(byAdding: .day, value: -7, to: Date())!, status: .completed, weekIndex: 1, dayLabel: dayLabel, items: [high])
+            let t = item(load: 33); t.exerciseId = "dumbbell_lateral_raise"; t.waveRaw = "a"; t.repMin = 10; t.repMax = 12; t.targetReps = 10
+            t.updatedAt = updatedAt; t.loadEverWritten = written
+            let planned = Session(date: cal.date(byAdding: .day, value: 7, to: Date())!, status: .planned, weekIndex: 4, dayLabel: dayLabel, items: [t])
+            for s in [done, planned] { s.meso = meso; meso.sessions.append(s); c.insert(s) }
+            PlaceholderRefresh.run(in: c)
+            return t.coachNote
+        }
+        let never = try run(written: false, updatedAt: nil)
+        XCTAssertEqual(never, PlaceholderRefresh.placeholderNote, "not written since setup: the one-time note")
+        XCTAssertEqual(try run(written: false, updatedAt: Date()), PlaceholderRefresh.placeholderNote, "a fresh updatedAt does not make it 'written'")
+        XCTAssertNil(try run(written: true, updatedAt: old), "written: no note, whatever the timestamp")
+    }
+
+    func test_carryOverBackfill_readsTheOldUpdatedAtRuleOnce_andIsIdempotent() throws {
+        let c = try ctx()
+        let meso = MesoBlock(name: "M", startDate: old, status: .active, totalWeeks: 12)
+        meso.createdAt = old; c.insert(meso)
+        let written = item(); written.updatedAt = old.addingTimeInterval(3600); written.loadEverWritten = nil
+        let notWritten = item(); notWritten.updatedAt = old.addingTimeInterval(30); notWritten.loadEverWritten = nil     // within the minute's grace
+        let unknown = item(); unknown.updatedAt = nil; unknown.loadEverWritten = nil                                      // no date: counted as written
+        let already = item(); already.loadEverWritten = false; already.updatedAt = old.addingTimeInterval(9999)
+        let s = Session(date: Date(), status: .planned, weekIndex: 1, dayLabel: "D", items: [written, notWritten, unknown, already])
+        s.meso = meso; meso.sessions.append(s); c.insert(s)
+        XCTAssertEqual(LoadEverWrittenBackfill.run(in: c), 3, "only the three nil items")
+        XCTAssertEqual([written.loadEverWritten, notWritten.loadEverWritten, unknown.loadEverWritten, already.loadEverWritten], [true, false, true, false])
+        XCTAssertEqual(LoadEverWrittenBackfill.run(in: c), 0, "idempotent: nothing is nil now")
+    }
+
+    func test_theFlagRoundTripsThroughABackup() throws {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let ctx = ModelContext(c)
+        let on = item(), off = item(), unknown = item()
+        on.loadEverWritten = true; off.loadEverWritten = false; unknown.loadEverWritten = nil
+        for (n, i) in [on, off, unknown].enumerated() { i.order = n + 1 }
+        let s = Session(date: Date(), status: .planned, weekIndex: 1, dayLabel: "D", items: [on, off, unknown]); ctx.insert(s)
+        try ctx.save()
+        let target = try BackupTestSupport.makeContainer()
+        _ = try BackupTestSupport.restore(from: ctx, into: target)
+        let restored = try ModelContext(target).fetch(FetchDescriptor<SessionItem>()).sorted { $0.order < $1.order }
+        XCTAssertEqual(restored.map(\.loadEverWritten), [true, false, nil])
+    }
+}

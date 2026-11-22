@@ -793,6 +793,8 @@ extension SessionItemEditService {
         for target in live.targets {
             let item = target.item
             let sets = target.after.sets
+            let fingerprint = item.writeFingerprint()
+            defer { item.stampIfChanged(since: fingerprint) }
 
             if !item.hasTopSet && target.after.top == nil {
                 applyBackOffsOnly(item, sets: sets, change: change)

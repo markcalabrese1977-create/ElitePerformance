@@ -274,6 +274,12 @@ final class SessionItem {
     /// version bump needed (same pattern as MesoBlock.isMaintenance).
     var planEdited: Bool = false
 
+    /// True once any write (carry-forward, a refresh, a prescription change, the lifter) has put a planned load on this item after
+    /// block setup. `PlaceholderRefresh` reads it to tell a load still at its block-setup value from one that has been written. nil and
+    /// false both mean "not written since setup"; `LoadEverWrittenBackfill` carries the old `updatedAt` reading over for existing items.
+    /// Optional, so it is additive (lightweight migration) and absent in old backups.
+    var loadEverWritten: Bool?
+
     // Simple inline logging (what you’re using now)
     var actualReps: [Int] = []
     var actualLoads: [Double] = []
@@ -374,6 +380,7 @@ final class SessionItem {
         self.order = order
         self.exerciseId = exerciseId
         self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.loadEverWritten = false
 
         self.targetReps = targetReps
         self.targetSets = targetSets
@@ -437,6 +444,32 @@ extension SessionItem {
     func setPrescribedSets(_ n: Int) {
         targetSets = n
         prescribedSets = n
+    }
+
+    /// What a write to an item can change: the plan, the logged sets and the notes. Taken before a write, compared after it.
+    struct WriteFingerprint: Equatable {
+        let load: [Double], reps: [Int], rirs: [Int], suggested: Double, rest: [String]
+        let actualReps: [Int], actualLoads: [Double], actualRIRs: [Int]
+        let targetSets: Int, targetReps: Int, targetRIR: Int, planEdited: Bool
+        let coachNote: String?, prescriptionNotes: String?
+    }
+
+    func writeFingerprint() -> WriteFingerprint {
+        WriteFingerprint(load: plannedLoadsBySet, reps: plannedRepsBySet, rirs: plannedRIRsBySet, suggested: suggestedLoad,
+                         rest: [waveRaw ?? "", priorityRaw ?? "", "\(setMin ?? -1)-\(setMax ?? -1)", "\(repMin ?? -1)-\(repMax ?? -1)", "\(targetRIRMin ?? -1)-\(targetRIRMax ?? -1)"],
+                         actualReps: actualReps, actualLoads: actualLoads, actualRIRs: actualRIRs,
+                         targetSets: targetSets, targetReps: targetReps, targetRIR: targetRIR, planEdited: planEdited,
+                         coachNote: coachNote, prescriptionNotes: prescriptionNotes)
+    }
+
+    /// Stamps `updatedAt` (and `loadEverWritten`, when a planned load moved) if anything changed since `before`. True when it stamped.
+    @discardableResult
+    func stampIfChanged(since before: WriteFingerprint, now: Date = Date()) -> Bool {
+        let after = writeFingerprint()
+        guard after != before else { return false }
+        updatedAt = now
+        if after.load != before.load || after.suggested != before.suggested { loadEverWritten = true }
+        return true
     }
 
     func isTopRow(_ index: Int) -> Bool {

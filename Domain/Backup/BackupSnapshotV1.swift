@@ -267,6 +267,9 @@ struct SessionItemBackupDTO: Codable {
 
     // Added (prescribed set count). Optional so OLD backups decode with nil: effectivePrescribedSets == targetSets.
     var prescribedSets: Int? = nil
+
+    // Added (1.4): a planned load has been written since block setup. Optional so OLD backups decode with nil.
+    var loadEverWritten: Bool? = nil
 }
 
 // MARK: - SetLog

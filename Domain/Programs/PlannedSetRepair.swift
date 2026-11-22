@@ -54,6 +54,8 @@ enum PlannedSetRepair {
 
     static func apply(_ fixes: [Fix]) {
         for f in fixes {
+            let fingerprint = f.item.writeFingerprint()
+            defer { f.item.stampIfChanged(since: fingerprint) }
             func put<T>(_ a: inout [T], _ v: T, _ zero: T) { while a.count <= f.index { a.append(zero) }; a[f.index] = v }
             put(&f.item.plannedLoadsBySet, f.newLoad, 0.0)
             put(&f.item.plannedRepsBySet, f.newReps, 0)

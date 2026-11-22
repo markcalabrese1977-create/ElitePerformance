@@ -693,8 +693,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
             "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
             "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
-            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
-        XCTAssertEqual(registered.count, 19)
+            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "LoadEverWrittenBackfill", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 20)
         for launch in [firstLaunch, secondLaunch] {
             XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
             for (line, name) in zip(launch, registered) {
@@ -1746,6 +1746,39 @@ final class MesoVerdictDryRunTests: XCTestCase {
             }
             try JSONEncoder().encode(rows).write(to: URL(fileURLWithPath: "\(outPrefix)_\(n).json"))
             print("VERDICT| \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) rows")
+        }
+    }
+}
+
+// MARK: - Dry run: what the placeholder refresh would change on a first launch (report only; compiles on the code before and after 1.4)
+
+@MainActor
+final class RefreshChangesDryRunTests: XCTestCase {
+
+    struct Row: Codable { var item: String, date: String, day: String, wave: String, name: String, oldLoad: Double, newLoad: Double, noteOnly: Bool, reason: String, note: String }
+
+    func test_dump_theRefreshPlanAfterEveryOtherStartupBackfill() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_REFRESH_BACKUPS"], !list.isEmpty,
+              let outPrefix = ProcessInfo.processInfo.environment["EP_REFRESH_OUT"], !outPrefix.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_REFRESH_BACKUPS and TEST_RUNNER_EP_REFRESH_OUT")
+        }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        for (n, path) in list.split(separator: ",").map(String.init).enumerated() {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            var saved: [String: Any] = [:]
+            for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v; UserDefaults.standard.removeObject(forKey: k) }
+            defer { for (k, v) in saved { UserDefaults.standard.set(v, forKey: k) } }
+            for b in StartupBackfills.registered where !b.name.contains("PlaceholderRefresh") { b.run(ctx) }
+            let changes = PlaceholderRefresh.plan(in: ctx)
+            let rows = changes.map { c in
+                Row(item: c.item.id?.uuidString ?? "\(c.item.persistentModelID)", date: f.string(from: c.session.date), day: c.session.dayLabel ?? "?", wave: (c.item.waveRaw ?? "-").uppercased(),
+                    name: c.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: c.item.exerciseId), oldLoad: c.oldLoad, newLoad: c.newLoad, noteOnly: c.noteOnly,
+                    reason: c.reason.text, note: c.note ?? "")
+            }.sorted { ($0.date, $0.day, $0.name, $0.item) < ($1.date, $1.day, $1.name, $1.item) }
+            try JSONEncoder().encode(rows).write(to: URL(fileURLWithPath: "\(outPrefix)_\(n).json"))
+            print("REFRESH| \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) planned changes")
         }
     }
 }
