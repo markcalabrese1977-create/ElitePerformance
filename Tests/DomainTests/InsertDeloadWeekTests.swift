@@ -652,3 +652,105 @@ final class DeloadRuleTests: XCTestCase {
         XCTAssertEqual(z.basis, .noHistory)
     }
 }
+
+// MARK: - WaveSlotRestore (re-adding an exercise to a wave session)
+
+final class WaveSlotRestoreTests: XCTestCase {
+
+    private func ctx() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    private func item(_ id: String, wave: String?, sets: Int = 3, reps: ClosedRange<Int> = 10...12, rir: Int = 3) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: reps.lowerBound, targetSets: sets, targetRIR: rir, suggestedLoad: 0,
+                            waveRaw: wave, priorityRaw: "standard", setMin: sets, setMax: sets, repMin: reps.lowerBound, repMax: reps.upperBound,
+                            targetRIRMin: rir, targetRIRMax: rir)
+        i.plannedRepsBySet = Array(repeating: reps.lowerBound, count: 4)
+        i.plannedLoadsBySet = Array(repeating: 0, count: 4)
+        return i
+    }
+
+    /// The generic item the add flows build: waveless, 3 x 10, RIR 2, four array slots.
+    private func fresh(_ id: String) -> SessionItem {
+        let i = SessionItem(order: 9, exerciseId: id, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        i.plannedRepsBySet = [10, 10, 10, 10]; i.plannedLoadsBySet = [0, 0, 0, 0]; i.plannedRIRsBySet = [2, 2, 2, 2]
+        i.actualReps = [0, 0, 0, 0]; i.actualLoads = [0, 0, 0, 0]; i.actualRIRs = RIREntry.unsetArray(count: 4)
+        return i
+    }
+
+    private func block(_ c: ModelContext, weeks: [(Int, String, [SessionItem])]) -> (MesoBlock, [Session]) {
+        let meso = MesoBlock(name: "12-Week DUP Meso", startDate: Date(timeIntervalSince1970: 1_800_000_000), status: .active, totalWeeks: 12)
+        c.insert(meso)
+        var out: [Session] = []
+        for (w, _, items) in weeks {
+            let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(w) * 7 * 86_400), status: .planned,
+                            weekIndex: w, dayLabel: "Push A", items: items)
+            s.meso = meso; meso.sessions.append(s); c.insert(s); out.append(s)
+        }
+        return (meso, out)
+    }
+
+    func test_reAdd_takesTheSessionsLetterAndTheSameLetterTemplate_notTheOtherLetters() throws {
+        let c = try ctx()
+        // Week 1 (a): curl 3 x 12-15 RIR 3. Week 2 (b), where it is re-added. Week 5 (b): curl 4 x 8-10 RIR 2. Week 3 (c): curl 4 x 6-8.
+        let (_, ss) = block(c, weeks: [
+            (1, "a", [item("ez_bar_curl", wave: "a", sets: 3, reps: 12...15, rir: 3), item("bench_press", wave: "a")]),
+            (2, "b", [item("bench_press", wave: "b")]),
+            (3, "c", [item("ez_bar_curl", wave: "c", sets: 4, reps: 6...8, rir: 1)]),
+            (5, "b", [item("ez_bar_curl", wave: "b", sets: 4, reps: 8...10, rir: 2)])])
+        let new = fresh("ez_bar_curl")
+        let restored = WaveSlotRestore.restore(new, in: ss[1], allSessions: ss)
+        XCTAssertTrue(restored)
+        XCTAssertEqual(new.waveRaw, "b")
+        XCTAssertEqual([new.repMin, new.repMax, new.targetRIRMin, new.targetRIRMax], [8, 10, 2, 2])
+        XCTAssertEqual([new.targetSets, new.effectivePrescribedSets, new.targetReps, new.targetRIR], [4, 4, 8, 2])
+        XCTAssertEqual(new.plannedRepsBySet, [8, 8, 8, 8])
+        XCTAssertEqual(new.plannedRIRsBySet, [2, 2, 2, 2])
+        XCTAssertEqual(new.plannedLoadsBySet.count, 4)
+        XCTAssertEqual(new.actualReps, [0, 0, 0, 0])
+    }
+
+    func test_reAdd_withNoTemplateInTheBlock_usesThePreviousExposureOnThatLetter() throws {
+        let c = try ctx()
+        let (_, ss) = block(c, weeks: [(2, "b", [item("bench_press", wave: "b")])])
+        let old = Session(date: Date(timeIntervalSince1970: 1_700_000_000), status: .completed, weekIndex: 2, dayLabel: "Push A",
+                          items: [item("ez_bar_curl", wave: "b", sets: 2, reps: 9...11, rir: 2)])
+        c.insert(old)
+        let new = fresh("ez_bar_curl")
+        XCTAssertTrue(WaveSlotRestore.restore(new, in: ss[0], allSessions: ss + [old]))
+        XCTAssertEqual(new.waveRaw, "b")
+        XCTAssertEqual([new.repMin, new.repMax, new.targetSets], [9, 11, 2])
+    }
+
+    func test_reAdd_withNoSource_onlyTakesTheLetter() throws {
+        let c = try ctx()
+        let (_, ss) = block(c, weeks: [(2, "b", [item("bench_press", wave: "b")])])
+        let new = fresh("ez_bar_curl")
+        XCTAssertTrue(WaveSlotRestore.restore(new, in: ss[0], allSessions: ss))
+        XCTAssertEqual(new.waveRaw, "b")
+        XCTAssertEqual([new.targetReps, new.targetSets, new.targetRIR], [10, 3, 2], "defaults stay")
+        XCTAssertNil(new.repMin)
+    }
+
+    func test_reAdd_toAWaveBlock_neverCopiesALoadOrALoggedValue() throws {
+        let c = try ctx()
+        let tpl = item("ez_bar_curl", wave: "b", sets: 3, reps: 10...12, rir: 2)
+        tpl.suggestedLoad = 80; tpl.plannedLoadsBySet = [80, 80, 80, 80]; tpl.actualLoads = [80, 80, 80, 80]; tpl.actualReps = [10, 10, 10, 10]
+        let (_, ss) = block(c, weeks: [(2, "b", [item("bench_press", wave: "b")]), (5, "b", [tpl])])
+        let new = fresh("ez_bar_curl"); new.suggestedLoad = 42; new.plannedLoadsBySet = [42, 42, 42, 42]
+        WaveSlotRestore.restore(new, in: ss[0], allSessions: ss)
+        XCTAssertEqual(new.suggestedLoad, 42)
+        XCTAssertEqual(new.plannedLoadsBySet, [42, 42, 42, 42])
+        XCTAssertEqual(new.actualLoads, [0, 0, 0, 0])
+    }
+
+    func test_reAdd_toANonWaveBlock_changesNothing() throws {
+        let c = try ctx()
+        let (_, ss) = block(c, weeks: [(2, "none", [item("bench_press", wave: nil)])])
+        let new = fresh("ez_bar_curl")
+        XCTAssertFalse(WaveSlotRestore.restore(new, in: ss[0], allSessions: ss))
+        XCTAssertNil(new.waveRaw)
+        XCTAssertEqual(new.targetSets, 3)
+    }
+}

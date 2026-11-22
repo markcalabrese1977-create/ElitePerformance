@@ -2031,6 +2031,14 @@ final class SessionScreenViewModel: ObservableObject {
             )
         }
 
+        // A wave block: the slot's wave letter and prescription (same-letter template or previous exposure), not the
+        // waveless defaults. The screen below is built from what the item ended up with.
+        let allSessions = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        let restoredWave = !isMaintenanceSession && WaveSlotRestore.restore(newItem, in: session, allSessions: allSessions)
+        let shownSets = restoredWave ? newItem.targetSets : defaultSets
+        let shownReps = restoredWave ? newItem.targetReps : defaultReps
+        let shownRIR = restoredWave ? newItem.targetRIR : defaultRIR
+
         // Attach to session + persist
         session.items.append(newItem)
         context.insert(newItem)
@@ -2042,13 +2050,13 @@ final class SessionScreenViewModel: ObservableObject {
         }
 
         // Build UI model immediately so it appears instantly (no backing out).
-        let uiSets: [UISessionSet] = (1...4).map { idx in
+        let uiSets: [UISessionSet] = (1...max(4, newItem.plannedRepsBySet.count)).map { idx in
             UISessionSet(
                 index: idx,
                 exerciseId: catalogExercise.id,
-                plannedLoad: (idx <= defaultSets) ? defaultLoad : 0,
-                plannedReps: defaultReps,
-                plannedRIR: defaultRIR,
+                plannedLoad: (idx <= shownSets) ? defaultLoad : 0,
+                plannedReps: shownReps,
+                plannedRIR: shownRIR,
                 actualLoad: nil,
                 actualReps: nil,
                 actualRIR: nil,
@@ -2057,7 +2065,7 @@ final class SessionScreenViewModel: ObservableObject {
             )
         }
 
-        let detail = EffortTracking.joined(["Week \(session.weekIndex)", catalogExercise.primaryMuscle.rawValue.capitalized, "\(defaultSets) sets", "\(defaultReps) reps", EffortTracking.plannedText(defaultRIR)])
+        let detail = EffortTracking.joined(["Week \(session.weekIndex)", catalogExercise.primaryMuscle.rawValue.capitalized, "\(shownSets) sets", "\(shownReps) reps", EffortTracking.plannedText(shownRIR)])
 
         let uiExercise = UISessionExercise(
             exerciseId: catalogExercise.id,
@@ -2065,19 +2073,19 @@ final class SessionScreenViewModel: ObservableObject {
             detail: detail,
             weekInMeso: session.weekIndex,
 
-            waveRaw: nil,
-            priorityRaw: nil,
-            setMin: nil,
-            setMax: nil,
-            repMin: nil,
-            repMax: nil,
-            targetRIRMin: nil,
-            targetRIRMax: nil,
-            intensifierRaw: nil,
-            intensifierNotes: nil,
-            prescriptionNotes: nil,
+            waveRaw: restoredWave ? newItem.waveRaw : nil,
+            priorityRaw: restoredWave ? newItem.priorityRaw : nil,
+            setMin: restoredWave ? newItem.setMin : nil,
+            setMax: restoredWave ? newItem.setMax : nil,
+            repMin: restoredWave ? newItem.repMin : nil,
+            repMax: restoredWave ? newItem.repMax : nil,
+            targetRIRMin: restoredWave ? newItem.targetRIRMin : nil,
+            targetRIRMax: restoredWave ? newItem.targetRIRMax : nil,
+            intensifierRaw: restoredWave ? newItem.intensifierRaw : nil,
+            intensifierNotes: restoredWave ? newItem.intensifierNotes : nil,
+            prescriptionNotes: restoredWave ? newItem.prescriptionNotes : nil,
 
-            targetSets: defaultSets,
+            targetSets: shownSets,
             sets: uiSets,
             coachMessage: "",
             itemID: newItem.id

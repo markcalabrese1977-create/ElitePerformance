@@ -395,6 +395,10 @@ struct ProgramDayDetailView: View {
         newItem.usedRestPauseFlags     = Array(repeating: false,             count: setCount)
         newItem.restPausePatternsBySet = Array(repeating: "",                count: setCount)
 
+        if !isMaintenanceSession {
+            let all = (try? modelContext.fetch(FetchDescriptor<Session>())) ?? []
+            WaveSlotRestore.restore(newItem, in: session, allSessions: all)
+        }
         session.items.append(newItem)
 
         if propagatesToFutureSessions {
