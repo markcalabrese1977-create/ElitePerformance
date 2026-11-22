@@ -409,28 +409,46 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(a.weeklyVolume.map(\.completedSets), [4, 4])
     }
 
-    func test_verdictChip_isTheFirstToLastE1RMChange_withPlusMinus3PercentBands() throws {
-        func verdict(first: Double, last: Double) throws -> (ExerciseVerdict, Double?) {
+    func test_verdictChip_isTheTrendAcrossAllSessions_withPlusMinus3PercentBands() throws {
+        func verdict(_ loads: [Double]) throws -> (ExerciseVerdict, Double?) {
             let ctx = ModelContext(try BackupTestSupport.makeContainer())
-            let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 4)
+            let meso = MesoBlock(id: UUID(), name: "M", startDate: day(0), status: .active, totalWeeks: 8)
             ctx.insert(meso)
-            // the MIDDLE session is far higher than both ends: the verdict must ignore it (first -> last, not best or recent)
-            for (i, load) in [first, first * 1.5, last].enumerated() {
+            for (i, load) in loads.enumerated() {
                 let s = Session(date: day(i * 7), status: .completed, weekIndex: i + 1, dayLabel: "D", items: [item("bench_press", reps: [5, 5], loads: [load, load])])
                 s.meso = meso; meso.sessions.append(s); ctx.insert(s)
             }
             let e = try XCTUnwrap(MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: [])?.exerciseSummaries.first)
             return (e.verdict, e.trendChange)
         }
-        let up = try verdict(first: 200, last: 206.2)
+        // Two sessions: the line is the two points, so it is first -> last as before (+-3% bands).
+        let up = try verdict([200, 206.2])
         XCTAssertEqual(up.0, .progressing, "+3.1% on e1RM")
         XCTAssertEqual(up.1 ?? 0, 0.031, accuracy: 1e-9)
-        XCTAssertEqual(try verdict(first: 200, last: 205).0, .plateaued, "+2.5%")
-        XCTAssertEqual(try verdict(first: 200, last: 194).0, .declining, "-3%")
-        XCTAssertEqual(try verdict(first: 200, last: 195).0, .plateaued, "-2.5%")
+        XCTAssertEqual(try verdict([200, 205]).0, .plateaued, "+2.5%")
+        XCTAssertEqual(try verdict([200, 194]).0, .declining, "-3%")
+        XCTAssertEqual(try verdict([200, 195]).0, .plateaued, "-2.5%")
+        // Many sessions: every one counts. A steady climb is progressing; one bad closing session no longer flips it to declining
+        // (200 -> 193 is -3.5% first -> last, but the line through all five is -0.8%).
+        XCTAssertEqual(try verdict([200, 204, 208, 212, 216]).0, .progressing)
+        let noisyEnd = try verdict([200, 205, 210, 215, 193])
+        XCTAssertEqual(noisyEnd.0, .plateaued)
+        XCTAssertEqual(noisyEnd.1 ?? 0, -0.0078, accuracy: 0.0005)
+        // And one great opening session cannot make a flat block look like a decline.
+        XCTAssertEqual(try verdict([204, 200, 201, 200, 201]).0, .plateaued)
         // the one caption under the header says exactly this
-        XCTAssertTrue(MesoSummaryView.trendCaption.contains("first → last"))
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("across the block"))
         XCTAssertTrue(MesoSummaryView.trendCaption.contains("±3%"))
+    }
+
+    func test_trendChange_isTheFittedLineFirstToLast() {
+        XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: []))
+        XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: [100]))
+        XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 110]) ?? 0, 0.10, accuracy: 1e-12, "two points: first -> last")
+        XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 105, 110, 115, 120]) ?? 0, 0.20, accuracy: 1e-12, "a straight line")
+        XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 100, 100]) ?? 1, 0, accuracy: 1e-12)
+        XCTAssertLessThan(MesoPerformanceAnalyzer.trendChange(of: [120, 110, 100]) ?? 0, 0)
+        XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: [-10, 0, 10]), "a line that starts at or below zero says nothing")
     }
 
     func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {

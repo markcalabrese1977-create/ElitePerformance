@@ -891,13 +891,14 @@ struct MesoSummaryView: View {
     }
 
     /// What every number on a By-exercise row measures, as the code computes it (MesoPerformanceAnalyzer):
-    /// - the chip and the % are the SAME comparison: this lift's e1RM in the block's first session vs its last session
-    ///   (each session's best set of 12 reps or fewer, warm-ups out; deload weeks excluded). Progressing / Declining at
+    /// - the chip and the % are the SAME measure: the trend of this lift's e1RM across ALL of the block's sessions (a fitted line through
+    ///   each session's best set of 12 reps or fewer, warm-ups out; deload weeks excluded), as its change from the first session to
+    ///   the last. Progressing / Declining at
     ///   +/-3% or more, else Holding. With no set of 12 reps or fewer it is the best load at matched reps instead;
     ///   a bodyweight lift with no body weight set uses reps per set.
     /// - "best" is the block's best single set of that lift (highest e1RM among sets of 12 reps or fewer).
     /// - sets and volume count the block's working sets (WorkingSetFilter: no warm-ups), load x reps.
-    static let trendCaption = "Trend and % = this lift's e1RM, first → last session of the block (±3% = Holding). Best = top set of the block, load × reps. Sets · volume = working sets of the block (no warm-ups)."
+    static let trendCaption = "Trend and % = the trend of this lift's e1RM across the block's sessions (±3% = Holding). Best = top set of the block, load × reps. Sets · volume = working sets of the block (no warm-ups)."
 
     /// The chip is one word. What it measures is stated once, in `trendCaption`, under the "By exercise" header.
     private func verdictBadge(_ verdict: ExerciseVerdict) -> some View {

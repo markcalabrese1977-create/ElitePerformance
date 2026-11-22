@@ -1715,3 +1715,37 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dry run: the meso verdict per exercise (report only)
+
+@MainActor
+final class MesoVerdictDryRunTests: XCTestCase {
+
+    struct Row: Codable { var meso: String, status: String, exercise: String, verdict: String, change: Double?, basis: String, exposures: Int, series: [Double] }
+
+    func test_dump_everyExerciseVerdictOfEveryBlock() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_VERDICT_BACKUPS"], !list.isEmpty,
+              let outPrefix = ProcessInfo.processInfo.environment["EP_VERDICT_OUT"], !outPrefix.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_VERDICT_BACKUPS and TEST_RUNNER_EP_VERDICT_OUT")
+        }
+        for (n, path) in list.split(separator: ",").map(String.init).enumerated() {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let sessions = try ctx.fetch(FetchDescriptor<Session>())
+            var rows: [Row] = []
+            for meso in try ctx.fetch(FetchDescriptor<MesoBlock>()) {
+                let prior = sessions.filter { $0.meso?.persistentModelID != meso.persistentModelID }
+                guard let a = MesoPerformanceAnalyzer.analyze(meso: meso, allPriorSessions: prior, bodyWeight: profile?.bodyWeight) else { continue }
+                for e in a.exerciseSummaries {
+                    rows.append(Row(meso: meso.name, status: meso.status.rawValue, exercise: e.exerciseName, verdict: "\(e.verdict)", change: e.trendChange,
+                                    basis: "\(e.trendBasis)", exposures: e.e1rmBySession.count, series: e.e1rmBySession.map { ($0.e1rm * 10).rounded() / 10 }))
+                }
+                rows.append(Row(meso: meso.name, status: meso.status.rawValue, exercise: "** OVERALL **", verdict: "\(a.overallVerdict)", change: nil, basis: "", exposures: a.exerciseSummaries.count, series: []))
+            }
+            try JSONEncoder().encode(rows).write(to: URL(fileURLWithPath: "\(outPrefix)_\(n).json"))
+            print("VERDICT| \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) rows")
+        }
+    }
+}

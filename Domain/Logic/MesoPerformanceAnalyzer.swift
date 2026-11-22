@@ -49,7 +49,7 @@ struct ExercisePerformanceSummary {
     /// The block's best set, load x reps (a lift is only ever compared with itself, never ranked against another).
     let bestSet: BestSet?
 
-    /// What the trend (and the verdict) was measured on, and its change first -> last session within this lift.
+    /// What the trend (and the verdict) was measured on, and its change across the block's sessions within this lift (the fitted line, first -> last exposure).
     let trendBasis: ExerciseTrendBasis
     let trendChange: Double?
 
@@ -159,6 +159,26 @@ enum MesoPerformanceAnalyzer {
         if let back = logged.first(where: { !item.isTopRow($0) }) { return item.actualLoads[back] }
         return logged.first.map { item.actualLoads[$0] }
     }
+
+    /// The trend of a series across a block's exposures: the least-squares line through (exposure number, value), and the change it
+    /// makes from the first exposure to the last, as a share of where the line starts. Every exposure counts, so one noisy opening
+    /// or closing session no longer decides the chip. With two exposures the line is the two points (first vs last, as before).
+    /// Nil with fewer than two values or a line that starts at or below 0.
+    static func trendChange(of values: [Double]) -> Double? {
+        let n = values.count
+        guard n >= 2 else { return nil }
+        let xs = (0..<n).map(Double.init)
+        let meanX = xs.reduce(0, +) / Double(n), meanY = values.reduce(0, +) / Double(n)
+        let sxx = xs.reduce(0) { $0 + ($1 - meanX) * ($1 - meanX) }
+        let sxy = zip(xs, values).reduce(0) { $0 + ($1.0 - meanX) * ($1.1 - meanY) }
+        let slope = sxy / sxx
+        let start = meanY - slope * meanX
+        guard start > 0 else { return nil }
+        return slope * Double(n - 1) / start
+    }
+
+    /// Progressing / Declining at +/-3% or more of trend, else Holding. Nil change: not enough to say.
+    static let verdictThreshold = 0.03
 
     /// Analyze a completed or near-complete meso block.
     ///
@@ -295,11 +315,11 @@ enum MesoPerformanceAnalyzer {
             var trendChange: Double? = nil
             if !e1rmBySession.isEmpty {
                 trendBasis = .e1RM
-                if e1rmBySession.count >= 2, let f = e1rmBySession.first?.e1rm, let l = e1rmBySession.last?.e1rm, f > 0 { trendChange = (l - f) / f }
+                trendChange = Self.trendChange(of: e1rmBySession.map(\.e1rm))
             } else if let closing = rowsBySession.last?.rows.max(by: { ($0.load, $0.reps) < ($1.load, $1.reps) }) {
                 trendBasis = .loadAtReps(closing.reps)
                 let series = rowsBySession.map { BestSetRule.bestLoad(atLeast: closing.reps, in: $0.rows.map { (load: $0.load, reps: $0.reps) }) }.filter { $0 > 0 }
-                if series.count >= 2, let f = series.first, let l = series.last, f > 0 { trendChange = (l - f) / f }
+                trendChange = Self.trendChange(of: series)
             }
 
 
@@ -324,21 +344,13 @@ enum MesoPerformanceAnalyzer {
             }
             let repSeries = repsBased ? sessionsWithExercise.compactMap { meanReps($0.item) } : []
             let openingReps = repSeries.first, closingReps = repSeries.last
-            let repsChange: Double? = {
-                guard repSeries.count >= 2, let f = repSeries.first, let l = repSeries.last, f > 0 else { return nil }
-                return (l - f) / f
-            }()
+            let repsChange: Double? = Self.trendChange(of: repSeries)
 
-            // Verdict (the trend between the first and the last session of the block, +-3%)
+            // Verdict: the trend across every session of the block (`trendChange(of:)`), +-3%.
             let verdict: ExerciseVerdict = {
-                if repsBased {
-                    guard repSeries.count >= 2, let f = repSeries.first, let l = repSeries.last, f > 0 else { return .insufficient }
-                    let d = (l - f) / f
-                    return d >= 0.03 ? .progressing : (d <= -0.03 ? .declining : .plateaued)
-                }
-                guard let delta = trendChange else { return .insufficient }
-                if delta >= 0.03 { return .progressing }   // 3%+ gain
-                if delta <= -0.03 { return .declining }     // 3%+ drop
+                guard let delta = repsBased ? repsChange : trendChange else { return .insufficient }
+                if delta >= Self.verdictThreshold { return .progressing }
+                if delta <= -Self.verdictThreshold { return .declining }
                 return .plateaued
             }()
 
