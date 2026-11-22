@@ -160,19 +160,22 @@ enum MesoPerformanceAnalyzer {
         return logged.first.map { item.actualLoads[$0] }
     }
 
-    /// The trend of a series across a block's exposures: the least-squares line through (exposure number, value), and the change it
-    /// makes from the first exposure to the last, as a share of where the line starts. Every exposure counts, so one noisy opening
-    /// or closing session no longer decides the chip. With two exposures the line is the two points (first vs last, as before).
+    /// The trend of a series across a block's exposures: the Theil-Sen line (the slope is the MEDIAN of the slopes between every pair of
+    /// exposures, the intercept the median of value - slope x exposure number), and the change it makes from the first exposure to the
+    /// last, as a share of where the line starts. Every exposure counts and a stray session barely moves the median, so one noisy opening,
+    /// middle or closing session no longer decides the chip. With two exposures the line is the two points (first vs last, as before).
     /// Nil with fewer than two values or a line that starts at or below 0.
     static func trendChange(of values: [Double]) -> Double? {
         let n = values.count
         guard n >= 2 else { return nil }
-        let xs = (0..<n).map(Double.init)
-        let meanX = xs.reduce(0, +) / Double(n), meanY = values.reduce(0, +) / Double(n)
-        let sxx = xs.reduce(0) { $0 + ($1 - meanX) * ($1 - meanX) }
-        let sxy = zip(xs, values).reduce(0) { $0 + ($1.0 - meanX) * ($1.1 - meanY) }
-        let slope = sxy / sxx
-        let start = meanY - slope * meanX
+        func median(_ xs: [Double]) -> Double {
+            let s = xs.sorted(), m = s.count / 2
+            return s.count % 2 == 1 ? s[m] : (s[m - 1] + s[m]) / 2
+        }
+        var slopes: [Double] = []
+        for i in 0..<n { for j in (i + 1)..<n { slopes.append((values[j] - values[i]) / Double(j - i)) } }
+        let slope = median(slopes)
+        let start = median(values.enumerated().map { $0.element - slope * Double($0.offset) })
         guard start > 0 else { return nil }
         return slope * Double(n - 1) / start
     }

@@ -428,12 +428,14 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(try verdict([200, 205]).0, .plateaued, "+2.5%")
         XCTAssertEqual(try verdict([200, 194]).0, .declining, "-3%")
         XCTAssertEqual(try verdict([200, 195]).0, .plateaued, "-2.5%")
-        // Many sessions: every one counts. A steady climb is progressing; one bad closing session no longer flips it to declining
-        // (200 -> 193 is -3.5% first -> last, but the line through all five is -0.8%).
+        // Many sessions: the median of the pairwise slopes decides. A steady climb is progressing; one bad closing session no longer flips
+        // it to declining (200 -> 193 is -3.5% first -> last, but the median slope of all five is +5 a session: +10%).
         XCTAssertEqual(try verdict([200, 204, 208, 212, 216]).0, .progressing)
         let noisyEnd = try verdict([200, 205, 210, 215, 193])
-        XCTAssertEqual(noisyEnd.0, .plateaued)
-        XCTAssertEqual(noisyEnd.1 ?? 0, -0.0078, accuracy: 0.0005)
+        XCTAssertEqual(noisyEnd.0, .progressing)
+        XCTAssertEqual(noisyEnd.1 ?? 0, 0.10, accuracy: 1e-9)
+        // A single spike in the middle of a flat block does not make it progress (the median ignores it).
+        XCTAssertEqual(try verdict([49, 49, 49, 56, 49]).0, .plateaued)
         // And one great opening session cannot make a flat block look like a decline.
         XCTAssertEqual(try verdict([204, 200, 201, 200, 201]).0, .plateaued)
         // the one caption under the header says exactly this
@@ -441,7 +443,7 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertTrue(MesoSummaryView.trendCaption.contains("±3%"))
     }
 
-    func test_trendChange_isTheFittedLineFirstToLast() {
+    func test_trendChange_isTheTheilSenLineFirstToLast() {
         XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: []))
         XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: [100]))
         XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 110]) ?? 0, 0.10, accuracy: 1e-12, "two points: first -> last")
@@ -449,6 +451,7 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 100, 100]) ?? 1, 0, accuracy: 1e-12)
         XCTAssertLessThan(MesoPerformanceAnalyzer.trendChange(of: [120, 110, 100]) ?? 0, 0)
         XCTAssertNil(MesoPerformanceAnalyzer.trendChange(of: [-10, 0, 10]), "a line that starts at or below zero says nothing")
+        XCTAssertEqual(MesoPerformanceAnalyzer.trendChange(of: [100, 100, 100, 100, 400]) ?? 1, 0, accuracy: 1e-12, "one wild exposure moves the median slope not at all")
     }
 
     func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {
