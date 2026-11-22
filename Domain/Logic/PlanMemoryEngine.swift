@@ -291,6 +291,18 @@ struct PlanMemoryEngine {
                 targetItem.plannedLoadsBySet = Self.propagatedPlan(nil, top: topLoad, for: targetItem)
             }
 
+            // Incomplete evidence (fewer working sets than planned, capped at three): the seed is the last load lifted,
+            // never a bump. The floor projection and the coach can each step above it from a partial session (60 x 20 on one
+            // of three sets seeded 65), so whatever they wrote is held at that load. A hold or a reduce stands.
+            if !CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) {
+                let logged = CoachingEngine.workingSetIndices(for: sourceItem).map { sourceItem.actualLoads[$0] }.max() ?? 0
+                let lastLifted = logged > 0 ? logged : sourceItem.suggestedLoad
+                if lastLifted > 0, targetItem.suggestedLoad > lastLifted {
+                    targetItem.suggestedLoad = lastLifted
+                    targetItem.plannedLoadsBySet = Self.propagatedPlan(lastLifted, for: targetItem)
+                }
+            }
+
             // A note left by an earlier pass that cites a load this plan no longer has is dropped here, so the
             // progression note below can be regenerated for the load just written.
             CoachNoteHygiene.clearIfStale(targetItem, unit: unit)

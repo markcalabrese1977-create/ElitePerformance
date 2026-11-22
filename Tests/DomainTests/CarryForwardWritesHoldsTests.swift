@@ -445,3 +445,63 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         XCTAssertFalse(msg.contains("same load, reps-first"), msg)
     }
 }
+
+// MARK: - Empty-target seeding on incomplete evidence
+
+extension CarryForwardWritesHoldsTests {
+
+    /// An empty target: no plan, no load.
+    private func emptyTarget(wave: String? = "b", sets: Int = 3) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "leg_extension", targetReps: 12, targetSets: sets, targetRIR: 2,
+                            suggestedLoad: 0, waveRaw: wave, repMin: 10, repMax: 12)
+        i.plannedLoadsBySet = Array(repeating: 0, count: sets)
+        return i
+    }
+
+    private func loggedSource(load: Double, reps: [Int], planned: Int, rir: Int = 1) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "leg_extension", targetReps: 12, targetSets: planned,
+                            targetRIR: 2, suggestedLoad: load, waveRaw: "b", repMin: 10, repMax: 12)
+        i.actualReps = reps + Array(repeating: 0, count: planned - reps.count)
+        i.actualLoads = Array(repeating: load, count: reps.count) + Array(repeating: 0, count: planned - reps.count)
+        i.actualRIRs = Array(repeating: rir, count: planned)
+        i.plannedLoadsBySet = Array(repeating: load, count: planned)
+        i.setFeedbackBySet = Array(repeating: "", count: planned)
+        return i
+    }
+
+    private func seed(_ src: SessionItem, into tgt: SessionItem) throws {
+        let context = try makeContextForSeedTests()
+        let s = Session(date: Calendar.current.date(byAdding: .day, value: -1, to: Date())!, status: .completed, weekIndex: 2, dayLabel: "Legs A", items: [src])
+        let t = Session(date: Calendar.current.date(byAdding: .day, value: 20, to: Date())!, status: .planned, weekIndex: 5, dayLabel: "Legs A", items: [tgt])
+        context.insert(s); context.insert(t)
+        try context.save()
+        PlanMemoryEngine(context: context).carryForwardPlans(from: s)
+    }
+
+    private func makeContextForSeedTests() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        return ModelContext(try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+    }
+
+    /// The DB row: 60 x 20, one of three sets logged, a huge e1RM from the 20 reps -> 65 was seeded into the empty target.
+    func test_emptyTarget_incompleteEvidence_seedsTheLastLoadWithoutABump() throws {
+        let tgt = emptyTarget()
+        try seed(loggedSource(load: 60, reps: [20], planned: 3), into: tgt)
+        XCTAssertEqual(tgt.suggestedLoad, 60, accuracy: 0.001, "last load, no bump")
+        XCTAssertEqual(tgt.plannedLoadsBySet, [60, 60, 60])
+    }
+
+    func test_emptyTarget_incompleteEvidence_twoOfThree_doesNotBump() throws {
+        let tgt = emptyTarget()
+        try seed(loggedSource(load: 60, reps: [20, 20], planned: 3), into: tgt)
+        XCTAssertLessThanOrEqual(tgt.suggestedLoad, 60)
+        XCTAssertGreaterThan(tgt.suggestedLoad, 0)
+    }
+
+    /// Complete evidence still seeds as before (the guard is for incomplete sessions only).
+    func test_emptyTarget_completeEvidence_isNotHeldBackByTheGuard() throws {
+        let tgt = emptyTarget()
+        try seed(loggedSource(load: 60, reps: [20, 20, 20], planned: 3, rir: 3), into: tgt)
+        XCTAssertGreaterThanOrEqual(tgt.suggestedLoad, 60)
+    }
+}
