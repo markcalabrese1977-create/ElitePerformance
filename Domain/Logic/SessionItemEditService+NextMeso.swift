@@ -19,8 +19,27 @@ import SwiftData
 /// legacy) has one template per day type: its latest session.
 extension SessionItemEditService {
 
-    /// Peak-based seed scale (the "95" in peak95). Phase 4.4 gating can pass a different factor.
+    /// Peak-based seed scale when a lift has no verdict to gate on (the "95" in peak95), and for a Progressing lift.
     static let nextMesoPeakFactor = 0.95
+    /// 4.4, performance-gated starts: each lift starts from its peak at a share set by its Theil-Sen verdict over the old block.
+    static let nextMesoHoldingFactor = 0.90
+    static let nextMesoDecliningFactor = 0.85
+
+    /// The share of its peak a lift starts at, and the reason the preview gives. `insufficient` (or no verdict) keeps `fallback`, no reason.
+    static func nextMesoGate(verdict: ExerciseVerdict?, flatForLast: Int, fallback: Double) -> (factor: Double, reason: String?) {
+        func pct(_ f: Double) -> Int { Int((f * 100).rounded()) }
+        switch verdict {
+        case .progressing?:
+            return (nextMesoPeakFactor, "Progressing: starting at \(pct(nextMesoPeakFactor))% of your best.")
+        case .plateaued?:
+            let held = flatForLast >= 2 ? "Holding for \(flatForLast) sessions" : "Holding"
+            return (nextMesoHoldingFactor, "\(held): starting at \(pct(nextMesoHoldingFactor))% to climb past it.")
+        case .declining?:
+            return (nextMesoDecliningFactor, "Declining: starting at \(pct(nextMesoDecliningFactor))% to rebuild.")
+        case .insufficient?, nil:
+            return (fallback, nil)
+        }
+    }
 
     enum NextMesoRefusal: Equatable {
         /// The meso has no sessions to copy from.
@@ -72,6 +91,9 @@ extension SessionItemEditService {
         let plannedRIRs: [Int]
         let seed: Double
         let seedSource: HistorySeedLoad.SeedSource
+        /// For a peak seed: the share of the peak it starts at (set by the lift's verdict) and the reason shown in the preview.
+        var seedFactor: Double? = nil
+        var seedReason: String? = nil
         /// Top set inherited from the latest week of this lift (0 = none). The top load is seeded
         /// separately, from top reps/RIR.
         let topCount: Int
@@ -114,6 +136,8 @@ extension SessionItemEditService {
         let startDate: Date
         let endOldMesoNow: Bool
         let peakFactor: Double
+        /// 4.4: seed each lift at a share of its peak chosen by its verdict (`peakFactor` is then only the fallback). False = one factor for every lift.
+        var verdictGated: Bool = true
         let now: Date
         let sessions: [NextMesoSession]
         let weeks: Int
@@ -139,7 +163,7 @@ extension SessionItemEditService {
             var out: [String] = []
             func day(_ d: Date?) -> String { d.map(SessionItemEditService.isoDay) ?? "-" }
             out.append("NEXT MESO \"\(name)\": \(weeks) weeks, \(sessions.count) sessions, \(day(startDate)) -> \(day(endDate)); "
-                       + "from \"\(oldMeso.name)\"; peak factor \(peakFactor)")
+                       + "from \"\(oldMeso.name)\"; peak factor \(verdictGated ? "by verdict (95 progressing, 90 holding, 85 declining)" : "\(peakFactor)")")
             if endOldMesoNow {
                 out.append("old meso ends now: \(sessionsToDelete.count) remaining planned sessions removed")
             }
@@ -150,7 +174,8 @@ extension SessionItemEditService {
                 out.append("  \(s.dayLabel ?? "?") / \(s.letter.isEmpty ? "-" : s.letter.uppercased()) (first week \(s.weekIndex), \(day(s.date)))")
                 for i in s.items {
                     out.append("    \(ExerciseCatalog.displayName(for: i.exerciseId)): \(i.prescription), seed "
-                               + "\(LoadFormatter(unit: unit).number(i.seed)) [\(i.seedSource.label(factor: peakFactor))]"
+                               + "\(LoadFormatter(unit: unit).number(i.seed)) [\(i.seedSource.label(factor: i.seedFactor ?? peakFactor))]"
+                               + (i.seedReason.map { " \($0)" } ?? "")
                                + (SessionItemEditService.noteText(i).map { " — \($0)" } ?? ""))
                 }
             }
@@ -216,6 +241,7 @@ extension SessionItemEditService {
         startDate: Date? = nil,
         endOldMesoNow: Bool,
         peakFactor: Double = nextMesoPeakFactor,
+        verdictGated: Bool = true,
         context: ModelContext,
         now: Date = Date(),
         calendar cal: Calendar = .current,
@@ -234,6 +260,7 @@ extension SessionItemEditService {
                                      now: now, sessions: sessions, weeks: weeks, endDate: sessions.map(\.date).max(),
                                      sessionsToDelete: toDelete, remainingOldSessions: remaining, collisions: collisions,
                                      refusals: refusals)
+            built.verdictGated = verdictGated
             built.unit = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
             return built
         }
@@ -313,6 +340,17 @@ extension SessionItemEditService {
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         let unit = profile?.loadUnit ?? .lb
+        // 4.4: the verdict of every lift over the old block (Theil-Sen trend, `MesoPerformanceAnalyzer`).
+        let verdicts: [String: ExercisePerformanceSummary] = verdictGated
+            ? Dictionary(MesoPerformanceAnalyzer.analyze(
+                meso: meso, allPriorSessions: allSessions.filter { $0.meso?.persistentModelID != meso.persistentModelID }, bodyWeight: profile?.bodyWeight)?
+                .exerciseSummaries.map { ($0.exerciseId, $0) } ?? [], uniquingKeysWith: { a, _ in a })
+            : [:]
+        func gate(_ exerciseId: String) -> (factor: Double, reason: String?) {
+            guard verdictGated else { return (peakFactor, nil) }
+            let v = verdicts[ExerciseCatalog.canonicalExerciseId(for: exerciseId)]
+            return nextMesoGate(verdict: v?.verdict, flatForLast: v?.flatForLast ?? 0, fallback: peakFactor)
+        }
         var seedCache: [String: (load: Double, source: HistorySeedLoad.SeedSource)] = [:]
         func seed(_ exerciseId: String, reps: Int, rir: Int) -> (load: Double, source: HistorySeedLoad.SeedSource) {
             let key = "\(ExerciseCatalog.canonicalExerciseId(for: exerciseId))|\(reps)|\(rir)"
@@ -321,7 +359,7 @@ extension SessionItemEditService {
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
                 loadIncrement: UserProfile.loadStep(for: exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
-                factor: peakFactor, customExercises: custom, referenceDate: now, creditRIR: creditRIR
+                factor: gate(exerciseId).factor, customExercises: custom, referenceDate: now, creditRIR: creditRIR
             )
             // A max load caps the seed (a fixed-load exercise or one without a max is unchanged).
             let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
@@ -336,7 +374,7 @@ extension SessionItemEditService {
                 for: exerciseId, goalReps: reps, targetRIR: rir, previousMeso: all, allSessions: allSessions,
                 loadIncrement: UserProfile.loadStep(for: exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight,
                 isFixedLoad: UserProfile.isProgressionExempt(exerciseId: exerciseId, profile: profile),
-                factor: peakFactor, customExercises: custom, referenceDate: now, role: .top, creditRIR: creditRIR
+                factor: gate(exerciseId).factor, customExercises: custom, referenceDate: now, role: .top, creditRIR: creditRIR
             )
             let capped = (UserProfile.clampedLoad(r.load, exerciseId: exerciseId, profile: profile, customExercises: custom), r.source)
             seedCache[key] = capped
@@ -409,6 +447,8 @@ extension SessionItemEditService {
                     plannedRIRs: resized(t.backOffValues(t.plannedRIRsBySet), to: sets, fallback: t.targetRIR)
                         + Array(repeating: topRIRValue, count: topN),
                     seed: r.load, seedSource: r.source,
+                    seedFactor: r.source == .peak ? gate(t.exerciseId).factor : nil,
+                    seedReason: r.source == .peak ? gate(t.exerciseId).reason : nil,
                     topCount: topN, topRepMin: topSource?.topRepMin, topRepMax: topSource?.topRepMax, topRIR: topSource?.topRIR,
                     topSeed: topN > 0 && !isBW ? topSeedLoad(t.exerciseId, reps: topReps, rir: topRIRValue) : 0,
                     isBodyweight: isBW,
@@ -473,7 +513,7 @@ extension SessionItemEditService {
         for s in plan.sessions {
             parts.append("\(s.date.timeIntervalSince1970)|\(s.dayLabel ?? "-")|\(s.weekIndex)|\(s.programIndex)|\(s.letter)|\(s.sessionNotes)")
             for i in s.items {
-                parts.append("  \(i.order)|\(i.exerciseId)|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.waveRaw ?? "-")|\(i.seed)|\(i.seedSource.rawValue)|top\(i.topCount),\(i.topRepMin ?? -1),\(i.topRepMax ?? -1),\(i.topRIR ?? -1),\(i.topSeed)|\(i.intensifierNotes ?? "-")|\(i.prescriptionNotes ?? "-")")
+                parts.append("  \(i.order)|\(i.exerciseId)|\(i.targetSets)|\(i.targetReps)|\(i.targetRIR)|\(i.waveRaw ?? "-")|\(i.seed)|\(i.seedSource.rawValue)|\(i.seedFactor ?? -1)|top\(i.topCount),\(i.topRepMin ?? -1),\(i.topRepMax ?? -1),\(i.topRIR ?? -1),\(i.topSeed)|\(i.intensifierNotes ?? "-")|\(i.prescriptionNotes ?? "-")")
             }
         }
         return parts.joined(separator: "\n")
@@ -495,7 +535,7 @@ extension SessionItemEditService {
 
         // The plan is a preview; trust only live state.
         let live = planNextMeso(meso: old, name: plan.name, startDate: plan.startDate, endOldMesoNow: plan.endOldMesoNow,
-                                peakFactor: plan.peakFactor, context: context, now: plan.now)
+                                peakFactor: plan.peakFactor, verdictGated: plan.verdictGated, context: context, now: plan.now)
         guard live.refusals.isEmpty, live.isApplicable else { throw NextMesoError.refused(live.refusals.isEmpty ? [.nothingToCopy] : live.refusals) }
         guard signature(live) == signature(plan) else { throw NextMesoError.planStale }
 

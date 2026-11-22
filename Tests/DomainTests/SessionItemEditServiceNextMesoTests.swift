@@ -803,3 +803,80 @@ final class SessionItemEditServiceNextMesoTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(seed(nextPlan(block, ctx, now: now))), 150)
     }
 }
+
+// MARK: - 4.4 performance-gated starts
+
+@MainActor
+final class NextMesoVerdictGateTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+
+    func test_gate_mapsVerdictToTheFactorAndTheReason() {
+        typealias S = SessionItemEditService
+        XCTAssertEqual(S.nextMesoGate(verdict: .progressing, flatForLast: 0, fallback: 0.95).factor, 0.95)
+        XCTAssertEqual(S.nextMesoGate(verdict: .progressing, flatForLast: 0, fallback: 0.95).reason, "Progressing: starting at 95% of your best.")
+        let hold = S.nextMesoGate(verdict: .plateaued, flatForLast: 5, fallback: 0.95)
+        XCTAssertEqual(hold.factor, 0.90)
+        XCTAssertEqual(hold.reason, "Holding for 5 sessions: starting at 90% to climb past it.")
+        XCTAssertEqual(S.nextMesoGate(verdict: .plateaued, flatForLast: 1, fallback: 0.95).reason, "Holding: starting at 90% to climb past it.")
+        let down = S.nextMesoGate(verdict: .declining, flatForLast: 0, fallback: 0.95)
+        XCTAssertEqual(down.factor, 0.85)
+        XCTAssertEqual(down.reason, "Declining: starting at 85% to rebuild.")
+        XCTAssertEqual(S.nextMesoGate(verdict: .insufficient, flatForLast: 0, fallback: 0.95).factor, 0.95)
+        XCTAssertNil(S.nextMesoGate(verdict: .insufficient, flatForLast: 0, fallback: 0.95).reason)
+        XCTAssertEqual(S.nextMesoGate(verdict: nil, flatForLast: 0, fallback: 0.95).factor, 0.95)
+    }
+
+    /// A block of 5 weekly sessions: bench flat at 200 (Holding), row climbing 100 -> 120 (Progressing), pulldown dropping (Declining).
+    private func plans() throws -> (gated: SessionItemEditService.NextMesoPlan, ungated: SessionItemEditService.NextMesoPlan) {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        let ctx = ModelContext(c)
+        let cal = Calendar.current
+        let meso = MesoBlock(name: "Old", startDate: cal.date(byAdding: .day, value: -40, to: Date())!, status: .active, totalWeeks: 5)
+        meso.createdAt = cal.date(byAdding: .day, value: -41, to: Date()); ctx.insert(meso)
+        func item(_ id: String, load: Double) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: id, targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: load, waveRaw: "a", priorityRaw: "anchor",
+                                setMin: 3, setMax: 3, repMin: 6, repMax: 8, targetRIRMin: 2, targetRIRMax: 2,
+                                plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [load, load, load], plannedRIRsBySet: [2, 2, 2])
+            i.actualLoads = [load, load, load]; i.actualReps = [8, 8, 8]; i.actualRIRs = [2, 2, 2]; return i
+        }
+        for w in 0..<5 {
+            let items = [item("bench_press", load: 200), item("seated_cable_row", load: 100 + Double(w) * 5), item("wide_grip_pulldown", load: 150 - Double(w) * 5)]
+            for (n, i) in items.enumerated() { i.order = n + 1 }
+            let s = Session(date: cal.date(byAdding: .day, value: w * 7 - 40, to: cal.startOfDay(for: Date()))!, status: .completed, weekIndex: w + 1, dayLabel: "Upper A", items: items)
+            s.meso = meso; meso.sessions.append(s); ctx.insert(s)
+        }
+        try ctx.save()
+        let start = cal.date(byAdding: .day, value: 30, to: cal.startOfDay(for: Date()))!
+        typealias Svc = SessionItemEditService
+        let g = Svc.planNextMeso(meso: meso, name: "Next", startDate: start, endOldMesoNow: true, context: ctx)
+        let u = Svc.planNextMeso(meso: meso, name: "Next", startDate: start, endOldMesoNow: true, verdictGated: false, context: ctx)
+        return (g, u)
+    }
+
+    func test_theSeedFollowsTheVerdict_roundedDownToTheStep() throws {
+        let (g, u) = try plans()
+        func item(_ plan: SessionItemEditService.NextMesoPlan, _ id: String) throws -> SessionItemEditService.NextMesoItem {
+            try XCTUnwrap(plan.sessions.first?.items.first { $0.exerciseId == id })
+        }
+        let benchG = try item(g, "bench_press"), benchU = try item(u, "bench_press")
+        XCTAssertEqual(benchG.seedSource, .peak)
+        XCTAssertEqual(benchG.seedFactor, 0.90)
+        XCTAssertLessThan(benchG.seed, benchU.seed, "Holding starts lower than the flat 95%")
+        XCTAssertEqual(benchG.seed / benchU.seed, 0.90 / 0.95, accuracy: 0.03)
+        XCTAssertTrue(benchG.seedReason?.hasPrefix("Holding for 5 sessions: starting at 90% to climb past it.") == true, benchG.seedReason ?? "nil")
+        let rowG = try item(g, "seated_cable_row"), rowU = try item(u, "seated_cable_row")
+        XCTAssertEqual(rowG.seed, rowU.seed, "Progressing keeps 95%")
+        XCTAssertEqual(rowG.seedReason, "Progressing: starting at 95% of your best.")
+        let pullG = try item(g, "wide_grip_pulldown"), pullU = try item(u, "wide_grip_pulldown")
+        XCTAssertEqual(pullG.seedFactor, 0.85)
+        XCTAssertLessThan(pullG.seed, pullU.seed)
+        XCTAssertEqual(pullG.seedReason, "Declining: starting at 85% to rebuild.")
+        XCTAssertEqual(benchU.seedReason, nil, "the ungated plan has no per-lift reason")
+        XCTAssertEqual(StartNextMesoModel.sourceText(benchG, factor: g.peakFactor), benchG.seedReason, "the preview shows the reason")
+        XCTAssertTrue(g.previewLines().contains { $0.contains("Holding for 5 sessions") })
+        // A whole step: the seed is a multiple of the lift's step.
+        XCTAssertEqual(benchG.seed.truncatingRemainder(dividingBy: 2.5), 0, accuracy: 1e-9)
+    }
+}

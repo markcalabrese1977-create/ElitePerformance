@@ -1866,3 +1866,49 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dry run: the next-meso preview, old single 95% against the verdict-gated start (report only)
+
+@MainActor
+final class NextMesoGateDryRunTests: XCTestCase {
+    func test_report_everyLiftOldVersusNew() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_GATE_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_GATE_BACKUPS (comma-separated); optional TEST_RUNNER_EP_GATE_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("GATE| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_GATE_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>())
+            guard let old = blocks.filter({ $0.status == .active }).max(by: { $0.sessions.count < $1.sessions.count }) ?? blocks.max(by: { $0.sessions.count < $1.sessions.count }) else { out("(no meso)"); continue }
+            let now = Date(), start = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now))!
+            typealias Svc = SessionItemEditService
+            let before = Svc.planNextMeso(meso: old, name: "Next", startDate: start, endOldMesoNow: true, verdictGated: false, context: ctx, now: now)
+            let after = Svc.planNextMeso(meso: old, name: "Next", startDate: start, endOldMesoNow: true, context: ctx, now: now)
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent): next meso from \"\(old.name)\" (\(old.status.rawValue), \(old.sessions.count) sessions)")
+            out("refusals: \(after.refusals)")
+            // One line per lift and wave letter (first appearance).
+            var rows: [(name: String, letter: String, oldSeed: Double, newSeed: Double, src: String, factor: Double?, reason: String?)] = []
+            var seen = Set<String>()
+            let oldItems = Dictionary(before.sessions.flatMap { s in s.items.map { ("\(s.letter)|\(s.dayLabel ?? "")|\($0.order)", $0) } }, uniquingKeysWith: { first, _ in first })
+            for s in after.sessions {
+                for i in s.items {
+                    let key = "\(ExerciseCatalog.canonicalExerciseId(for: i.exerciseId))|\(s.letter)"
+                    guard seen.insert(key).inserted, let o = oldItems["\(s.letter)|\(s.dayLabel ?? "")|\(i.order)"] else { continue }
+                    rows.append((ExerciseCatalog.displayName(for: i.exerciseId), s.letter.isEmpty ? "-" : s.letter.uppercased(), o.seed, i.seed, i.seedSource.rawValue, i.seedFactor, i.seedReason))
+                }
+            }
+            var changed = 0
+            for r in rows.sorted(by: { ($0.name, $0.letter) < ($1.name, $1.letter) }) {
+                if r.oldSeed != r.newSeed { changed += 1 }
+                let pct = r.newSeed > 0 && r.oldSeed > 0 ? String(format: " (%+.1f%%)", (r.newSeed / r.oldSeed - 1) * 100) : ""
+                out("\(r.name) [\(r.letter)]: old \(n(r.oldSeed)) -> new \(n(r.newSeed))\(pct)  [\(r.src)\(r.factor.map { " \(Int(($0 * 100).rounded()))%" } ?? "")]  \(r.reason ?? "")")
+            }
+            out("-- \(rows.count) lift/letter seeds, \(changed) change; peak seeds: \(rows.filter { $0.src == "peak" }.count)")
+        }
+    }
+}

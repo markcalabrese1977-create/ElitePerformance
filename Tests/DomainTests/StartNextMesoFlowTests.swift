@@ -115,7 +115,7 @@ final class StartNextMesoFlowTests: XCTestCase {
         let item = try XCTUnwrap(plan.sessions.first?.items.first { $0.exerciseId == bench.exerciseId })
         XCTAssertEqual(Model.sourceText(item, factor: plan.peakFactor), "95% of your best")
         XCTAssertTrue(Model.loadText(item).hasSuffix(LoadFormatter.unitLabel))
-        XCTAssertEqual(Model.sourceText(item, factor: 0.9), "90% of your best")
+        XCTAssertEqual(Model.sourceText(item, factor: 0.9), "95% of your best", "the item carries its own factor (set by its verdict); the plan factor is only the fallback")
     }
 
     func test_refusalText_coversEveryCase() {

@@ -120,7 +120,7 @@ struct StartNextMesoModel {
 
     static func sourceText(_ item: Service.NextMesoItem, factor: Double) -> String {
         switch item.seedSource {
-        case .peak: return "\(Int((factor * 100).rounded()))% of your best"
+        case .peak: return item.seedReason ?? "\(Int(((item.seedFactor ?? factor) * 100).rounded()))% of your best"
         case .history: return "from your history"
         case .fixed: return "last lifted"
         case .bodyweight: return ""
