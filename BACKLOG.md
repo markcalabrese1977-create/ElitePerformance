@@ -47,7 +47,7 @@ One line per item; dates are 2026. Open items first; shipped items are under "Do
   custom into the built-in (move history, canonical id) or rename. ExerciseTraitsCoverageTests tracks it as a known
   collision. Low priority.
 - 2-Day Full Body template is ~99 min untrimmed; trim its content (pre-launch).
-- Program selection ignores equipment/injury flags (6-day dumbbell-only user gets machines/cables). Part of Phase 3.1 onboarding; pre-launch.
+- CLOSED in 1.3.3: program selection does honor equipment (ProgramFitter substitutes or drops by gear tag). DumbbellBenchProgramTests proves a dumbbell + bench user never gets a machine, cable, smith, barbell, EZ bar or rack exercise at 1-7 days, every goal, experience and session length, and that no slot is left untagged.
 - Notes UX (pre-launch): two note types look alike. Label them in the UI: "Exercise
   note — applies everywhere" (ExerciseNoteSheet) vs "Session cue — this session"
   (executionNoteLine, editable via Change prescription…). From the exercise

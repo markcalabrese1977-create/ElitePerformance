@@ -1325,3 +1325,45 @@ final class KeyboardDismissalTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dumbbells + bench: never a machine or a cable
+
+/// A lifter whose gear is dumbbells and a bench (the preset, or the same two ticked on the checklist) is given only exercises
+/// that need nothing else, at every training-day count, goal, experience and session length. A slot that cannot be done on
+/// that gear is substituted or dropped, never kept; and no slot is left unevaluated (an untagged exercise would pass unchecked).
+final class DumbbellBenchProgramTests: XCTestCase {
+
+    func test_dumbbellBench_neverGetsGearItDoesNotHave_atAnyDayCount() throws {
+        let gear: Set<GearTag> = [.dumbbell, .bench]
+        let notGear: Set<GearTag> = [.machine, .cable, .smith, .barbell, .ezBar, .rack]
+        var checked = 0
+        for days in 1...7 {
+            for goal in Goal.allCases {
+                for exp in TrainingExperience.allCases {
+                    for minutes: Int? in [nil, 45, 60, 120] {
+                        for checklist in [[GearTag](), [.dumbbell, .bench]] {
+                            let profile = ProgramApplicationService.fitProfile(
+                                preset: .dumbbellsBench, checklist: checklist, injuries: [], sessionMinutes: minutes,
+                                experience: exp, goal: goal)
+                            XCTAssertEqual(profile.equipment, gear)
+                            let template = ProgramApplicationService.selectTemplate(goal: goal, daysPerWeek: days)
+                            let fitted = ProgramFitter.fit(template, profile: profile).template
+                            for day in fitted.dayTemplates {
+                                for ex in day.exerciseTemplates {
+                                    let label = "\(days)d \(goal) \(exp) \(minutes.map(String.init) ?? "nil")min \(template.name) \(day.title): \(ex.exerciseId)"
+                                    guard let traits = ExerciseTraits.traits(for: ex.exerciseId) else {
+                                        XCTFail("untagged exercise passed through unchecked: \(label)"); continue
+                                    }
+                                    XCTAssertTrue(traits.isAvailable(with: gear), "needs gear the lifter lacks: \(label) \(traits.equipment)")
+                                    XCTAssertTrue(traits.equipment.isDisjoint(with: notGear), label)
+                                    checked += 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(checked, 1000)
+    }
+}
