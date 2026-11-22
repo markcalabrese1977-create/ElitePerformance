@@ -1782,3 +1782,69 @@ final class RefreshChangesDryRunTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Dry run: compound holds caused ONLY by the RIR adjustment (report only)
+
+@MainActor
+final class RIRAdjustmentHoldReportTests: XCTestCase {
+
+    func test_report_everyCompoundHoldThatRepsAloneWouldHaveIncreased() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_RIRHOLD_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_RIRHOLD_BACKUPS (comma-separated); optional TEST_RUNNER_EP_RIRHOLD_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("RIRH| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_RIRHOLD_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        defer { EffortTracking.clearMirror() }
+
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)")
+            var count = 0, compoundItems = 0
+            for s in sessions where s.status == .completed && s.meso?.isMaintenance != true {
+                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                    let working = CoachingEngine.workingSetIndices(for: i)
+                    guard !working.isEmpty else { continue }
+                    compoundItems += 1
+                    let base = working.map { i.actualLoads[$0] }.last ?? 0
+                    func kind(_ mode: EffortMode) -> String {
+                        EffortTracking.mode = mode
+                        guard let rec = CoachingEngine.recommend(for: i, profile: profile), let next = rec.nextSuggestedLoad ?? rec.nextTopLoad else { return "none" }
+                        return next > base + 0.001 ? "increase" : (next < base - 0.001 ? "lower" : "hold")
+                    }
+                    let repsOnly = kind(.off), withEffort = kind(.detailed)
+                    guard repsOnly == "increase", withEffort != "increase" else { continue }
+                    EffortTracking.mode = .detailed
+                    let rec = CoachingEngine.recommend(for: i, profile: profile)
+                    count += 1
+                    let letter = (i.waveRaw ?? "-").uppercased()
+                    out("\(f.string(from: s.date)) \(s.dayLabel ?? "?") (\(s.meso?.name ?? "-"), wk \(s.weekIndex), \(letter)) \(i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId))  [\(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps) @ \(i.targetRIR) RIR]")
+                    out("   done   \(n(base)) x \(working.map { String(i.actualReps[$0]) }.joined(separator: ","))  RIR \(working.map { i.actualRIRs.indices.contains($0) ? (i.actualRIRs[$0] >= 0 ? String(i.actualRIRs[$0]) : "-") : "-" }.joined(separator: ","))  -> \(withEffort) (reps-only: \(repsOnly))")
+                    out("   coach  \(rec?.message ?? "-")")
+                    // The next exposure of the same lift on the same letter, same block and day type.
+                    let canonical = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                    let next = sessions.first { t in
+                        t.date > s.date && t.meso?.persistentModelID == s.meso?.persistentModelID && SessionDayLabelMatcher.matches(t.dayLabel, s.dayLabel)
+                            && t.items.contains { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && $0.waveRaw?.lowercased() == i.waveRaw?.lowercased() }
+                    }
+                    if let t = next, let ni = t.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && $0.waveRaw?.lowercased() == i.waveRaw?.lowercased() }) {
+                        let nw = CoachingEngine.workingSetIndices(for: ni)
+                        if t.status == .completed, !nw.isEmpty {
+                            let nb = nw.map { ni.actualLoads[$0] }.last ?? 0
+                            out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)): \(n(nb)) x \(nw.map { String(ni.actualReps[$0]) }.joined(separator: ","))  RIR \(nw.map { ni.actualRIRs.indices.contains($0) ? (ni.actualRIRs[$0] >= 0 ? String(ni.actualRIRs[$0]) : "-") : "-" }.joined(separator: ","))  (\(nb > base + 0.001 ? "load up" : (nb < base - 0.001 ? "load down" : "same load")))")
+                        } else {
+                            out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)) \(t.status.rawValue): planned \(n(ni.suggestedLoad)) x \(ni.plannedRepsBySet.first.map(String.init) ?? "-") @ \(ni.targetRIR) RIR")
+                        }
+                    } else { out("   next   (no later exposure of this lift on this letter in the block)") }
+                }
+            }
+            out("-- \(count) of \(compoundItems) completed compound items are holds caused only by the RIR adjustment")
+        }
+    }
+}

@@ -971,6 +971,8 @@ private struct SessionSetRowView: View {
         switch effortMode {
         case .off:
             EmptyView()
+        case .simple where !isCompoundLift:
+            EmptyView()     // isolation lifts are judged on reps alone: no effort input (an old logged value is kept, not shown as a choice)
         case .simple:
             VStack(alignment: .leading, spacing: 2) {
                 Text("How hard was it?")
