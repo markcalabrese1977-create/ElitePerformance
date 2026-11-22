@@ -159,7 +159,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
 
         XCTAssertEqual(row4.plannedLoad, 0, "SURPRISING: visible 4th row planned load is 0")
         XCTAssertEqual(row5.plannedLoad, 100, "SURPRISING: the set-3 seed (load 100) landed on the HIDDEN 5th row")
-        XCTAssertEqual(item.plannedLoadsBySet, [100, 100, 100, 0, 100])
+        XCTAssertEqual(item.plannedLoadsBySet, [100, 100, 100, 0, 0], "the hidden 5th row is past targetSets: its UI seed is not written, the padding stays 0")
         XCTAssertEqual(item.actualLoads[3], 105)
         XCTAssertEqual(item.actualReps[3], 8)
         XCTAssertEqual(item.actualReps.count, 5, "arrays are sized to UI rows (5), not targetSets (4)")
@@ -480,20 +480,20 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     /// Device repro: the top set is logged FIRST (tail row), then the back-offs one by one.
     func test_B2_deviceRepro_topLoggedFirst_thenBackOffs() {
         let a = CoachingEngine.recommend(for: topSetItem(reps: [0, 0, 0, 5], loads: [0, 0, 0, 315]))
-        XCTAssertEqual(a?.message, "Top set: 315 x 5, on target — hold.")
+        XCTAssertEqual(a?.message, "Top set: 315 x 5, needed 6 — hold.")
         XCTAssertEqual(a?.nextTopLoad, 315)
         XCTAssertNil(a?.nextSuggestedLoad, "no back-off logged: nothing to say about the back-off load")
 
         let b = CoachingEngine.recommend(for: topSetItem(reps: [7, 0, 0, 5], loads: [290, 0, 0, 315]))
-        XCTAssertEqual(b?.message, "Top set: 315 x 5, on target — hold.", "one on-target back-off: nothing to add yet")
+        XCTAssertEqual(b?.message, "Top set: 315 x 5, needed 6 — hold.", "one on-target back-off: nothing to add yet")
 
         let c = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 0, 5], loads: [290, 290, 0, 315]))
-        XCTAssertEqual(c?.message, "Top set: 315 x 5, on target — hold. Back-offs: 2 of 3 logged.")
+        XCTAssertEqual(c?.message, "Top set: 315 x 5, needed 6 — hold. Back-offs: 2 of 3 logged.")
         XCTAssertEqual(c?.nextSuggestedLoad, 290, "the back-off base is a back-off, never the 315 top set")
         XCTAssertEqual(c?.nextTopLoad, 315)
 
         let d = CoachingEngine.recommend(for: topSetItem(reps: [8, 8, 8, 5], loads: [290, 290, 290, 315]))
-        XCTAssertTrue(d?.message.hasPrefix("Top set: 315 x 5, on target — hold.") ?? false, d?.message ?? "nil")
+        XCTAssertTrue(d?.message.hasPrefix("Top set: 315 x 5, needed 6 — hold.") ?? false, d?.message ?? "nil")
         XCTAssertTrue(d?.message.contains("increase earned") ?? false, d?.message ?? "nil")
         XCTAssertEqual(d?.nextSuggestedLoad, 295, "back-off bump is one step off 290")
         XCTAssertEqual(d?.nextTopLoad, 315, "top set at 5 of 4-6 holds")
@@ -504,23 +504,23 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         defer { EffortTracking.clearMirror() }
         let up = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315]))
         XCTAssertEqual(up?.nextTopLoad, 320)
-        XCTAssertTrue(up?.message.contains("Top set: 315 x 6, top of the range — increase earned. Next top set: 320.") ?? false, up?.message ?? "nil")
+        XCTAssertTrue(up?.message.contains("Top set: 315 x 6, needed 6 — increase earned. Next top set: 320.") ?? false, up?.message ?? "nil")
         let low = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 3], loads: [290, 290, 290, 315]))
         XCTAssertEqual(low?.nextTopLoad, 315)
         XCTAssertTrue(low?.message.contains("under the range (4–6)") ?? false, low?.message ?? "nil")
         let hard = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
         XCTAssertEqual(hard?.nextTopLoad, 315, "6 reps at RIR 0 against a top RIR of 2 is 4 adjusted reps: short of the top of 6, so it holds")
-        XCTAssertTrue(hard?.message.contains("4 at your planned effort against a top of 6") ?? false, hard?.message ?? "nil")
+        XCTAssertTrue(hard?.message.contains("counted as 4: the top set was 2 reps harder than planned (RIR 0 vs 2). Needed 6 — hold this load.") ?? false, hard?.message ?? "nil")
         // Simple speaks the same words (no RIR numbers); Off adjusts nothing, so the same logged reps earn the increase on reps alone.
         EffortTracking.mode = .simple
         defer { EffortTracking.clearMirror() }
         let simple = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
-        XCTAssertTrue(simple?.message.contains("at your planned effort") ?? false, simple?.message ?? "nil")
+        XCTAssertTrue(simple?.message.contains("counted as 4: the top set was All out, plan Solid. Needed 6 — hold this load.") ?? false, simple?.message ?? "nil")
         XCTAssertFalse(simple?.message.contains("RIR") ?? true, simple?.message ?? "nil")
         EffortTracking.mode = .off
         let off = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
         XCTAssertEqual(off?.nextTopLoad, 320, "Off: no adjustment, the reps alone earn it")
-        XCTAssertTrue(off?.message.contains("top of the range — increase earned") ?? false, off?.message ?? "nil")
+        XCTAssertTrue(off?.message.contains("Top set: 315 x 6, needed 6 — increase earned.") ?? false, off?.message ?? "nil")
     }
 
     /// A skipped back-off with the top logged: back-off evidence is insufficient and the top load never
@@ -768,12 +768,12 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let (session, item) = topSession(in: ctx)
         let vm = SessionScreenViewModel(session: session)
         log(vm, ctx, set: 4, load: "315", reps: "5")
-        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, on target — hold.")
+        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, needed 6 — hold.")
         XCTAssertEqual(item.actualLoads, [0, 0, 0, 315])
         XCTAssertEqual(item.setRolesBySet, ["", "", "", "top"], "role persisted from the row")
         log(vm, ctx, set: 1, load: "290", reps: "7")
         log(vm, ctx, set: 2, load: "290", reps: "7")
-        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, on target — hold. Back-offs: 2 of 3 logged.")
+        XCTAssertEqual(vm.exercises[0].coachMessage, "Top set: 315 x 5, needed 6 — hold. Back-offs: 2 of 3 logged.")
         XCTAssertFalse(vm.exercises[0].isComplete)
         log(vm, ctx, set: 3, load: "290", reps: "7")
         XCTAssertTrue(vm.exercises[0].isComplete)
@@ -895,7 +895,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_4a_benchTopSetPattern_backOffsMidRange_holdsAtThirdBackOffLoad() {
         let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [7, 7, 7, 5], loads: [290, 290, 290, 315]))
         XCTAssertEqual(r?.nextSuggestedLoad, 290, "baseLoad is the 3rd working set (a back-off), not the 315 top set")
-        XCTAssertTrue(r?.message.contains("21 of 24 at your planned effort — hold") ?? false, r?.message ?? "nil")   // compound: RIR-adjusted total reps
+        XCTAssertTrue(r?.message.contains("21 reps, needed 23 — hold") ?? false, r?.message ?? "nil")   // compound: RIR-adjusted total reps
         // The 315 row is the 4th set, so it is not a primary set: it neither earns a bump nor
         // appears in baseLoad. Primary reps (7,7,7) are below repMax 8, so the outcome is a hold.
     }

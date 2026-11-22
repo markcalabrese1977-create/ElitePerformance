@@ -2265,10 +2265,13 @@ final class SessionScreenViewModel: ObservableObject {
                 let idx = uiSet.index - 1
                 guard idx >= 0 && idx < setCount else { continue }
 
-                // Planned
-                item.plannedRepsBySet[idx]  = uiSet.plannedReps
-                item.plannedLoadsBySet[idx] = uiSet.plannedLoad
-                item.plannedRIRsBySet[idx]  = uiSet.plannedRIR ?? item.targetRIR
+                // Planned: only the rows the plan has (the planned sets and the top rows). The logger's extra row past targetSets is shown with
+                // the base reps / RIR, but that is not a prescription: it stays at the array padding (0) in the store.
+                if idx < item.targetSets || uiSet.isTop {
+                    item.plannedRepsBySet[idx]  = uiSet.plannedReps
+                    item.plannedLoadsBySet[idx] = uiSet.plannedLoad
+                    item.plannedRIRsBySet[idx]  = uiSet.plannedRIR ?? item.targetRIR
+                }
 
                 // Actuals (only persist meaningful values)
                 if let reps = uiSet.actualReps, reps > 0 {

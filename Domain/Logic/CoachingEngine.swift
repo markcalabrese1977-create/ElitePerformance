@@ -227,6 +227,37 @@ struct CoachingEngine {
         return increases(recommend(for: item, ignoreEffort: true)) && !increases(recommend(for: item))
     }
 
+    /// "set 3 was 1 rep harder than planned (RIR 1 vs 2)" / "sets 2–3 were 1 rep harder than planned (RIR 1 vs 2)" (Detailed) or
+    /// "set 3 was Hard, plan Solid" (Simple): which sets the RIR adjustment took reps from, and by how much. Sets with the same shortfall
+    /// (Detailed) or the same effort word (Simple) are listed together, consecutive numbers as a range. Nil when nothing was adjusted.
+    /// `noun` names a row ("set", "top set"); `sole` says there is only one row of that kind ("the top set").
+    static func adjustmentClause(_ adjusted: [(number: Int, rir: Int)], targetRIR: Int, noun: String = "set", sole: Bool = false,
+                                 mode: EffortMode = EffortTracking.mode) -> String? {
+        guard !adjusted.isEmpty, mode != .off else { return nil }
+        var groups: [(key: String, nums: [Int], rir: Int, shortfall: Int)] = []
+        for a in adjusted.sorted(by: { $0.number < $1.number }) {
+            let shortfall = max(0, targetRIR - a.rir)
+            let key = mode == .simple ? (EffortTracking.simpleLabel(for: a.rir) ?? EffortTracking.plannedWord(a.rir)) : "\(shortfall)|\(a.rir)"
+            if let i = groups.firstIndex(where: { $0.key == key }) { groups[i].nums.append(a.number) }
+            else { groups.append((key, [a.number], a.rir, shortfall)) }
+        }
+        func list(_ nums: [Int]) -> String {
+            if nums.count == 1 { return sole ? "the \(noun)" : "\(noun) \(nums[0])" }
+            var ranges: [String] = []
+            var start = nums[0], prev = nums[0]
+            func close() { ranges.append(start == prev ? "\(start)" : "\(start)–\(prev)") }
+            for n in nums.dropFirst() { if n == prev + 1 { prev = n } else { close(); start = n; prev = n } }
+            close()
+            return "\(noun)s " + ranges.joined(separator: ", ")
+        }
+        let parts = groups.map { g -> String in
+            let verb = g.nums.count == 1 ? "was" : "were"
+            if mode == .simple { return "\(list(g.nums)) \(verb) \(g.key), plan \(EffortTracking.plannedWord(targetRIR))" }
+            return "\(list(g.nums)) \(verb) \(g.shortfall) rep\(g.shortfall == 1 ? "" : "s") harder than planned (RIR \(g.rir) vs \(targetRIR))"
+        }
+        return parts.joined(separator: "; ")
+    }
+
     /// Back-off working sets = any back-off set with both load and reps > 0, minus warmups (< 50% of
     /// the max back-off load). Top rows are never part of this: they are read separately. Shared with
     /// PlanMemoryEngine's incomplete-evidence guard.
@@ -346,6 +377,12 @@ struct CoachingEngine {
         let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
         let targetRIR = item.topRIR ?? item.targetRIR
         let adjusted = rows.map { adjustedReps(item.actualReps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
+        // Top rows the RIR adjustment took reps from, numbered among the top rows.
+        let adjustedTops: [(number: Int, rir: Int)] = rows.enumerated().compactMap { n, idx in
+            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), targetRIR - r > 0 else { return nil }
+            return (n + 1, r)
+        }
+        let neededText = rows.count == 1 ? "\(hi)" : "\(hi) on each"
         let what = "Top set: \(compactLoad(load, unit: unit)) x \(reps.map(String.init).joined(separator: ", "))"
         let range = lo == hi ? "\(lo)" : "\(lo)–\(hi)"
 
@@ -372,13 +409,15 @@ struct CoachingEngine {
                 // The earned increase would pass the max: hold at the max.
                 return TopRead(message: "\(what), top of the range. \(cap.message(streakHint: false, unit: unit))", nextTopLoad: cap.max)
             }
-            return TopRead(message: "\(what), top of the range — increase earned. Next top set: \(compactLoad(next, unit: unit)).", nextTopLoad: next)
+            let counted = adjustedTops.isEmpty ? "" : ", counted as \(adjusted.map(String.init).joined(separator: ", ")): \(adjustmentClause(adjustedTops, targetRIR: targetRIR, noun: "top set", sole: rows.count == 1) ?? "")."
+            let needed = adjustedTops.isEmpty ? ", needed \(neededText) — increase earned." : " Needed \(neededText) — increase earned."
+            return TopRead(message: "\(what)\(counted)\(needed) Next top set: \(compactLoad(next, unit: unit)).", nextTopLoad: next)
         }
-        if reps.allSatisfy({ $0 >= hi }) {
-            // At the top on the bar, but not at your planned effort: the adjusted count is what falls short.
-            return TopRead(message: "\(what), \(adjusted.min() ?? 0) at your planned effort against a top of \(hi) — hold this load.", nextTopLoad: load)
+        if reps.allSatisfy({ $0 >= hi }), let clause = adjustmentClause(adjustedTops, targetRIR: targetRIR, noun: "top set", sole: rows.count == 1) {
+            // At the top on the bar, but not at the planned effort: the adjusted count is what falls short.
+            return TopRead(message: "\(what), counted as \(adjusted.map(String.init).joined(separator: ", ")): \(clause). Needed \(neededText) — hold this load.", nextTopLoad: load)
         }
-        return TopRead(message: "\(what), on target — hold.", nextTopLoad: load)
+        return TopRead(message: "\(what), needed \(neededText) — hold.", nextTopLoad: load)
     }
 
     private static func recommendBackOffs(
@@ -511,6 +550,11 @@ struct CoachingEngine {
         }
 
         let minRIR: Int? = primaryRIRs.min()
+        // The primary sets the RIR adjustment took reps from (1-based set numbers), for the coach line.
+        let adjustedSets: [(number: Int, rir: Int)] = primaryIndices.compactMap { idx in
+            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), targetRIR - r > 0 else { return nil }
+            return (idx + 1, r)
+        }
         // RIR-adjusted reps of the primary sets (no adjustment where RIR is unset, Off, or an isolation lift).
         let primaryAdjusted = primaryIndices.map { adjustedReps(reps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
 
@@ -661,7 +705,6 @@ struct CoachingEngine {
         let repMin = plannedBottomReps
         // No separate RIR gate: effort is folded into the reps themselves (RIR-adjusted reps, `adjustedReps`), so a set that cost more
         // than planned counts for fewer reps and everything below reads the adjusted counts.
-        let effortRecorded = !primaryRIRs.isEmpty
         // Double-progression trigger (decision B): EVERY primary working set at/above
         // the top of the range — not the best set. Uses the warmup-culled primary sets.
         let allSetsAtTop = primaryReps.count >= growthSetTarget && primaryAdjusted.allSatisfy { $0 >= repMax }
@@ -673,8 +716,15 @@ struct CoachingEngine {
         let adjustedTotal = primaryAdjusted.reduce(0, +)
         let totalGoal = primaryReps.count * repMax
         let totalRepsEarned = adjustedTotal >= totalGoal - 1
-        // What the coach note counts: the adjusted reps when the lifter recorded effort ("27 of 29 at your planned effort"), else plain reps.
-        let repsCount = effortRecorded ? "\(adjustedTotal) of \(totalGoal) at your planned effort" : "\(totalReps)/\(totalGoal) reps"
+        // The compound coach line: the raw reps, what they count as when effort took some off, which sets and by how much, and the
+        // threshold actually needed (sets x top - 1).
+        func totalsLine(_ verdict: String) -> String {
+            let needed = totalGoal - 1
+            if let clause = Self.adjustmentClause(adjustedSets, targetRIR: targetRIR) {
+                return "\(totalReps) reps, counted as \(adjustedTotal): \(clause). Needed \(needed) — \(verdict)."
+            }
+            return "\(totalReps) reps, needed \(needed) — \(verdict)."
+        }
         let earnedByAdjustedReps = isCompoundLift ? totalRepsEarned : allSetsAtTop
         // Repeat-performance valve: the previous exposure of this lift (same letter) was held only because effort took reps off its count, and
         // this one again has EVERY set at the top of the range with no recorded set more than 1 RIR below target: the same reps at about the
@@ -824,7 +874,7 @@ struct CoachingEngine {
             let lead = repeatPerformance
                 ? "Same reps again at about planned effort — increase earned."
                 : isCompoundLift
-                ? "\(repsCount) — increase earned."
+                ? totalsLine("increase earned")
                 : "Every working set hit the top of your range — increase earned."
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
@@ -845,8 +895,7 @@ struct CoachingEngine {
         //     the key behavior change — partial progress no longer bumps [was path 5].
         if bestReps >= repMin {
             if isCompoundLift && !isProgressionExempt {
-                let text = effortRecorded ? "\(repsCount) — hold." : "\(totalReps)/\(totalGoal) — hold, climb reps."
-                return CoachingRecommendation(message: text + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
+                return CoachingRecommendation(message: totalsLine("hold") + holdLanding(baseLoad), nextSuggestedLoad: baseLoad)
             }
             let msg = isProgressionExempt
                 ? "In range at the target effort. Load is fixed on this exercise: keep it where it is, and change it yourself when you're ready."
