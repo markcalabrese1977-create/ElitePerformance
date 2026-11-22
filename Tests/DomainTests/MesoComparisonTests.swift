@@ -473,11 +473,21 @@ final class MesoComparisonTests: XCTestCase {
                                        trendChange: 0, blockChange: change, flatForLast: flat, openingLoad: nil, closingLoad: nil, verdict: verdict, repsBased: false,
                                        openingReps: nil, closingReps: nil, isPR: false, isNew: false, totalSets: 0, totalReps: 0, totalVolume: 0)
         }
-        XCTAssertEqual(summary(.plateaued, change: 0.171, flat: 5).changeLine(basisLabel: "e1RM"), "+17.1% this block · flat for the last 5 sessions")
-        XCTAssertEqual(summary(.progressing, change: 0.171, flat: 5).changeLine(basisLabel: "e1RM"), "+17.1% e1RM", "only a Holding verdict gets the flat wording")
-        XCTAssertEqual(summary(.plateaued, change: 0.02, flat: 5).changeLine(basisLabel: "e1RM"), "+2.0% e1RM", "a % within the band is just the %")
-        XCTAssertEqual(summary(.plateaued, change: 0.10, flat: 1).changeLine(basisLabel: "e1RM"), "+10.0% e1RM", "a single flat session is not 'flat for the last 1'")
-        XCTAssertNil(summary(.insufficient, change: nil, flat: 0).changeLine(basisLabel: "e1RM"))
+        // trend 0.046 = the Theil-Sen %, change = the level change (first vs median of the last three).
+        func line(_ verdict: ExerciseVerdict, trend: Double?, change: Double?, flat: Int) -> String? {
+            let sm = summary(verdict, change: change, flat: flat)
+            return ExercisePerformanceSummary(exerciseId: "x", exerciseName: "X", primaryMuscle: nil, e1rmBySession: [], peakE1RM: nil, bestSet: nil, trendBasis: .e1RM,
+                                              trendChange: trend, blockChange: sm.blockChange, flatForLast: flat, openingLoad: nil, closingLoad: nil, verdict: verdict,
+                                              repsBased: false, openingReps: nil, closingReps: nil, isPR: false, isNew: false, totalSets: 0, totalReps: 0,
+                                              totalVolume: 0).changeLine(basisLabel: "e1RM")
+        }
+        XCTAssertEqual(line(.plateaued, trend: 0, change: 0.171, flat: 5), "+17.1% this block · flat for the last 5 sessions", "Holding, level change above +3%")
+        XCTAssertEqual(line(.progressing, trend: 0.046, change: 0.013, flat: 1), "+4.6% e1RM", "Progressing: the Theil-Sen %, whatever the level change says")
+        XCTAssertEqual(line(.progressing, trend: 0.08, change: 0.171, flat: 5), "+8.0% e1RM", "only a Holding chip gets the flat wording")
+        XCTAssertEqual(line(.declining, trend: -0.075, change: 0.20, flat: 5), "-7.5% e1RM", "Declining: the Theil-Sen %")
+        XCTAssertEqual(line(.plateaued, trend: 0.025, change: 0.02, flat: 5), "+2.5% e1RM", "Holding, level change within the band: the Theil-Sen %")
+        XCTAssertEqual(line(.plateaued, trend: 0.0, change: 0.10, flat: 1), "+0.0% e1RM", "a single flat session is not 'flat for the last 1'")
+        XCTAssertNil(line(.insufficient, trend: nil, change: nil, flat: 0))
     }
 
     func test_theChipStaysOnTheTrend_whileThePercentIsTheBlockChange() throws {
@@ -494,6 +504,7 @@ final class MesoComparisonTests: XCTestCase {
         XCTAssertEqual(e.blockChange ?? 0, 913.0 / 780 - 1, accuracy: 1e-9)
         XCTAssertEqual(e.flatForLast, 5)
         XCTAssertEqual(e.changeLine(basisLabel: "e1RM"), "+17.1% this block · flat for the last 5 sessions")
+        XCTAssertTrue(MesoSummaryView.trendCaption.contains("Chip and %"))
     }
 
     func test_mesoMuscleSection_emptyState_noCompleteWeek_andUnmappedSets() {

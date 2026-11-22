@@ -627,7 +627,7 @@ struct MesoSummaryView: View {
                                                     .foregroundStyle(.secondary)
                                             }
 
-                                            if let change = summary.blockChange, let line = summary.changeLine(basisLabel: trendBasisLabel(summary.trendBasis)) {
+                                            if let change = summary.shownChange, let line = summary.changeLine(basisLabel: trendBasisLabel(summary.trendBasis)) {
                                                 Text(line)
                                                     .font(.caption2)
                                                     .foregroundStyle(change > 0.005 ? Color.green : (change < -0.005 ? Color.orange : Color.secondary))
@@ -891,13 +891,14 @@ struct MesoSummaryView: View {
     }
 
     /// What every number on a By-exercise row measures, as the code computes it (MesoPerformanceAnalyzer):
-    /// - the chip is the Theil-Sen trend of this lift's e1RM across ALL of the block's sessions (each session's best set of 12 reps or
-    ///   fewer, warm-ups out; deload weeks excluded). The % is the first session against the median of the last three. Progressing / Declining at
+    /// - the chip and the % are the SAME measure: the Theil-Sen trend of this lift's e1RM across ALL of the block's sessions (each session's
+    ///   best set of 12 reps or fewer, warm-ups out; deload weeks excluded). The one exception: a Holding lift that rose more than 3% from its
+    ///   first session (first vs the median of the last three) reads "+N% this block · flat for the last K sessions". Progressing / Declining at
     ///   +/-3% or more, else Holding. With no set of 12 reps or fewer it is the best load at matched reps instead;
     ///   a bodyweight lift with no body weight set uses reps per set.
     /// - "best" is the block's best single set of that lift (highest e1RM among sets of 12 reps or fewer).
     /// - sets and volume count the block's working sets (WorkingSetFilter: no warm-ups), load x reps.
-    static let trendCaption = "Chip = the trend of this lift's e1RM across the block's sessions (±3% = Holding). % = first session vs the median of the last three. Best = top set of the block, load × reps. Sets · volume = working sets of the block (no warm-ups)."
+    static let trendCaption = "Chip and % = the trend of this lift's e1RM across the block's sessions (±3% = Holding). A Holding lift that rose more than 3% from its first session (first vs the median of the last three) reads \"+N% this block · flat for the last K sessions\". Best = top set of the block, load × reps. Sets · volume = working sets of the block (no warm-ups)."
 
     /// The chip is one word. What it measures is stated once, in `trendCaption`, under the "By exercise" header.
     private func verdictBadge(_ verdict: ExerciseVerdict) -> some View {

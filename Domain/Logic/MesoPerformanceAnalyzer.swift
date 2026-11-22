@@ -463,14 +463,22 @@ enum MesoPerformanceAnalyzer {
 
 
 extension ExercisePerformanceSummary {
-    /// The % line of a By-exercise row. Normally "+6.2% e1RM". When the verdict is Holding but the block moved more than +3% (an early
-    /// step, then a plateau): "+17.1% this block · flat for the last 5 sessions".
+
+    /// The row shows the same measure as its chip: the Theil-Sen trend. The one exception is a Holding chip whose level change (the first
+    /// exposure against the median of the last three) is above +3%: an early step, then a plateau.
+    var showsFlatAfterRise: Bool {
+        verdict == .plateaued && (blockChange ?? 0) > MesoPerformanceAnalyzer.verdictThreshold && flatForLast >= 2
+    }
+
+    /// The number the row's % line displays: the level change for the flat-after-rise form, else the Theil-Sen trend.
+    var shownChange: Double? { showsFlatAfterRise ? blockChange : trendChange }
+
+    /// The % line of a By-exercise row. Progressing / Declining (and any other case): the Theil-Sen %, "+6.2% e1RM", in step with the chip.
+    /// Holding with a level change above +3%: "+17.1% this block · flat for the last 5 sessions".
     func changeLine(basisLabel: String) -> String? {
-        guard let change = blockChange else { return nil }
+        guard let change = shownChange else { return nil }
         let pct = String(format: "%+.1f%%", change * 100)
-        if verdict == .plateaued, change > MesoPerformanceAnalyzer.verdictThreshold, flatForLast >= 2 {
-            return "\(pct) this block · flat for the last \(flatForLast) sessions"
-        }
+        if showsFlatAfterRise { return "\(pct) this block · flat for the last \(flatForLast) sessions" }
         return "\(pct) \(basisLabel)"
     }
 }
