@@ -693,8 +693,8 @@ final class OtherUsersStoreStartupTests: XCTestCase {
             "ExerciseNameSnapshotBackfill", "CanonicalExerciseIdMigration", "CustomExerciseDedupMigration", "SessionHistoryBlockBackfill",
             "MechanicalLoadRecoveryMigration", "CustomExerciseStoreMigration", "CustomExerciseUserDefaultsSyncRepair",
             "MesoBlockIsMaintenanceBackfill", "BodyweightPhantomLoadMigration", "PrescribedSetsBackfill", "PlannedDateBackfill",
-            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "PlaceholderRefreshBackfill"], "the registered list, in order")
-        XCTAssertEqual(registered.count, 18)
+            "PRIndexRuleBackfill", "LegacyExerciseNotesBackfill", "SessionHistoryExerciseOrderBackfill", "CustomExerciseCompoundBackfill", "RIRUnsetBackfill", "MesoStartDateResync", "PlannedSetRepairBackfill", "PlaceholderRefreshBackfill"], "the registered list, in order")
+        XCTAssertEqual(registered.count, 19)
         for launch in [firstLaunch, secondLaunch] {
             XCTAssertEqual(launch.count, registered.count, "exactly one line per backfill")
             for (line, name) in zip(launch, registered) {
@@ -1616,6 +1616,52 @@ final class ScheduledDeloadDryRunTests: XCTestCase {
                 }
             }
             _ = unit
+        }
+    }
+}
+
+// MARK: - Dry run: planned-set repair and the re-add load (report only)
+
+@MainActor
+final class PlannedSetRepairDryRunTests: XCTestCase {
+    func test_dryRun_everyItemTheRepairWouldChange_andTheReAddExample() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_REPAIR_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_REPAIR_BACKUPS to comma-separated backup paths")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("PSR| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_REPAIR_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            let custom = try ctx.fetch(FetchDescriptor<CustomExercise>())
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)")
+            let fixes = PlannedSetRepair.plan(sessions: all, customExercises: custom)
+            out("-- planned-set repair: \(fixes.count) empty planned set(s) on \(Set(fixes.map { $0.item.persistentModelID }).count) item(s)")
+            for fx in fixes {
+                let name = fx.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: fx.item.exerciseId)
+                out("\(f.string(from: fx.session.date)) \(fx.session.dayLabel ?? "?") (wk \(fx.session.weekIndex), \((fx.item.waveRaw ?? "-").uppercased())) \(name): set \(fx.index + 1) of \(fx.item.targetSets)  load \(n(fx.oldLoad)) -> \(n(fx.newLoad))  reps \(fx.oldReps) -> \(fx.newReps)  RIR \(fx.oldRIR) -> \(fx.newRIR)  planEdited \(fx.item.planEdited)")
+            }
+
+            // The re-add example: Nov 23 Push B Cable Tricep Rope Pushdown, removed and re-added the way the Program tab does it.
+            guard let s = all.first(where: { f.string(from: $0.date) == "Nov 23" && $0.dayLabel == "Push B" && $0.status == .planned }),
+                  let old = s.items.first(where: { $0.exerciseId == "cable_tricep_rope_pushdown" }) else { out("(example session not in this backup)"); continue }
+            out("-- re-add example: Nov 23 Push B Cable Tricep Rope Pushdown (week \(s.weekIndex), \((old.waveRaw ?? "-").uppercased()))")
+            out("before (as in the backup): suggested \(n(old.suggestedLoad)) planned \(old.plannedLoadsBySet.map(n)) sets \(old.targetSets) reps \(old.repMin ?? 0)-\(old.repMax ?? 0)")
+            s.items.removeAll { $0.persistentModelID == old.persistentModelID }
+            let new = SessionItem(order: (s.items.map(\.order).max() ?? 0) + 1, exerciseId: old.exerciseId, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+            new.plannedRepsBySet = [10, 10, 10, 10]; new.plannedLoadsBySet = [0, 0, 0, 0]; new.plannedRIRsBySet = [2, 2, 2, 2]
+            new.actualReps = [0, 0, 0, 0]; new.actualLoads = [0, 0, 0, 0]; new.actualRIRs = RIREntry.unsetArray(count: 4)
+            let restored = WaveSlotRestore.restore(new, in: s, allSessions: all, entry: "dry run")
+            s.items.append(new); ctx.insert(new)
+            out("after restore: restored \(restored) letter \((new.waveRaw ?? "-").uppercased()) sets \(new.targetSets) reps \(new.repMin ?? 0)-\(new.repMax ?? 0) suggested \(n(new.suggestedLoad))")
+            let ch = PlaceholderRefresh.refreshNewItem(new, in: ctx)
+            out("after refresh (\(ch.count) change): suggested \(n(new.suggestedLoad)) planned \(new.plannedLoadsBySet.map(n))  note: \(new.coachNote ?? "-") | \(new.prescriptionNotes ?? "-")")
+            for c in ch { out("   reason: \(c.reason.text)") }
         }
     }
 }

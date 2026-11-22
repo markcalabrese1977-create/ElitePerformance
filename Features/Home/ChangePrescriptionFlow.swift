@@ -14,10 +14,12 @@ enum PlanStepperEdits {
     /// include it and never narrows, so the "3–4 sets" label cannot exclude the real count.
     static func setSets(_ item: SessionItem, to value: Int) {
         item.planEdited = true
+        let old = item.targetSets
         if item.hasTopSet {
             item.resizeBackOffs(to: value)   // the top tail and the roles move with the back-off count
         } else {
             item.setPrescribedSets(value)
+            item.seedNewPlannedSets(from: old)   // a new set copies the set before it
         }
         widenSetBand(item, toInclude: value)
     }

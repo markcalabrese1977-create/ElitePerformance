@@ -997,3 +997,208 @@ final class WaveRestoreReAddStressTests: XCTestCase {
         XCTAssertEqual(again.waveRaw, "b")
     }
 }
+
+
+// MARK: - New planned sets copy the set before them; a re-added exercise takes its load at once
+
+@MainActor
+final class NewPlannedSetAndReAddLoadTests: XCTestCase {
+
+    private var parked: [ModelContainer] = []
+    private let cal = Calendar.current
+
+    private func ctx() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        parked.append(c)
+        return ModelContext(c)
+    }
+
+    /// A 2-set item with the four array slots the Program editor keeps: the third and fourth are empty padding.
+    private func twoSetItem(_ id: String = "lying_leg_curl", load: Double = 115, reps: Int = 12, rir: Int = 2, wave: String = "c") -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: reps, targetSets: 2, targetRIR: rir, suggestedLoad: load,
+                            waveRaw: wave, priorityRaw: "standard", setMin: 2, setMax: 2, repMin: reps, repMax: reps, targetRIRMin: rir, targetRIRMax: rir,
+                            plannedRepsBySet: [reps, reps, 0, 0], plannedLoadsBySet: [load, load, 0, 0], plannedRIRsBySet: [rir, rir, 0, 0])
+        return i
+    }
+
+    private func block(_ c: ModelContext, items: [[SessionItem]], statuses: [SessionStatus]? = nil, label: String = "Legs A") -> (MesoBlock, [Session]) {
+        let meso = MesoBlock(name: "12-Week DUP Meso", startDate: cal.date(byAdding: .day, value: -30, to: Date())!, status: .active, totalWeeks: 12)
+        meso.createdAt = cal.date(byAdding: .day, value: -40, to: Date())
+        c.insert(meso)
+        var out: [Session] = []
+        for (n, its) in items.enumerated() {
+            let status = statuses?[n] ?? .planned
+            // Past sessions are completed, future ones planned, one a week.
+            let date = cal.date(byAdding: .day, value: (n - items.count + 2) * 7, to: cal.startOfDay(for: Date()))!
+            let s = Session(date: date, status: status, weekIndex: n + 1, dayLabel: label, items: its)
+            s.meso = meso; meso.sessions.append(s); c.insert(s); out.append(s)
+        }
+        try? c.save()
+        return (meso, out)
+    }
+
+    // MARK: sets increase
+
+    func test_programEditorStepper_aNewSetCopiesThePreviousSet() throws {
+        let item = twoSetItem()
+        PlanStepperEdits.setSets(item, to: 3)
+        XCTAssertEqual(item.targetSets, 3)
+        XCTAssertEqual(Array(item.plannedLoadsBySet.prefix(3)), [115, 115, 115])
+        XCTAssertEqual(Array(item.plannedRepsBySet.prefix(3)), [12, 12, 12])
+        XCTAssertEqual(Array(item.plannedRIRsBySet.prefix(3)), [2, 2, 2])
+        PlanStepperEdits.setSets(item, to: 4)
+        XCTAssertEqual(Array(item.plannedLoadsBySet.prefix(4)), [115, 115, 115, 115])
+        // Down and up again never resurrects a padding zero.
+        PlanStepperEdits.setSets(item, to: 2); PlanStepperEdits.setSets(item, to: 3)
+        XCTAssertEqual(Array(item.plannedLoadsBySet.prefix(3)), [115, 115, 115])
+    }
+
+    func test_programEditorStepper_aGrownSetAfterAHandEditCopiesTheEditedPreviousSet() throws {
+        let item = twoSetItem()
+        item.plannedLoadsBySet[1] = 125; item.plannedRepsBySet[1] = 10; item.plannedRIRsBySet[1] = 1
+        PlanStepperEdits.setSets(item, to: 3)
+        XCTAssertEqual([item.plannedLoadsBySet[2], Double(item.plannedRepsBySet[2]), Double(item.plannedRIRsBySet[2])], [125, 10, 1])
+    }
+
+    func test_changePrescription_setDeltaPlusOne_copiesTheLastPlannedSet_notAPaddingSlot() throws {
+        let c = try ctx()
+        let (meso, ss) = block(c, items: [[twoSetItem()], [twoSetItem()]])
+        let plan = SessionItemEditService.planChangePrescription(meso: meso, dayLabel: "Legs A", exerciseId: "lying_leg_curl", scope: .allRemaining,
+                                                                 change: PrescriptionChange(setDelta: 1), now: Date(timeIntervalSince1970: 0))
+        try SessionItemEditService.applyChange(plan, in: c)
+        for s in ss {
+            let i = s.items[0]
+            XCTAssertEqual(i.targetSets, 3)
+            XCTAssertEqual(i.plannedLoadsBySet, [115, 115, 115])
+            XCTAssertEqual(i.plannedRepsBySet, [12, 12, 12])
+            XCTAssertEqual(i.plannedRIRsBySet, [2, 2, 2])
+        }
+    }
+
+    func test_itemWithATopSet_growsItsBackOffsFromThePlannedRows_andKeepsTheTop() throws {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 2, targetRIR: 2, suggestedLoad: 200,
+                            plannedRepsBySet: [8, 8, 4], plannedLoadsBySet: [200, 200, 240], plannedRIRsBySet: [2, 2, 1])
+        i.setRolesBySet = SessionItem.roles(backOffs: 2, tops: 1); i.topRepMin = 4; i.topRepMax = 4; i.topRIR = 1
+        PlanStepperEdits.setSets(i, to: 3)
+        XCTAssertEqual(i.plannedLoadsBySet, [200, 200, 200, 240])
+        XCTAssertEqual(i.plannedRepsBySet, [8, 8, 8, 4])
+        XCTAssertEqual(i.plannedRIRsBySet, [2, 2, 2, 1])
+    }
+
+    // MARK: the startup repair
+
+    func test_repair_fillsAnEmptyNewSetFromTheOneBefore_andIsIdempotent() throws {
+        let c = try ctx()
+        // The Dec 12 shape: targetSets 3, planned 3rd set empty.
+        let lc = twoSetItem(); lc.targetSets = 3; lc.setMax = 3; lc.planEdited = true
+        let ext = twoSetItem("leg_extension", load: 195); ext.targetSets = 3
+        let ok = twoSetItem("hack_squat", load: 300); ok.targetSets = 3; ok.plannedLoadsBySet = [300, 300, 300, 0]; ok.plannedRepsBySet = [12, 12, 12, 0]; ok.plannedRIRsBySet = [2, 2, 2, 0]
+        let none = twoSetItem("leg_press", load: 0); none.targetSets = 3; none.plannedLoadsBySet = [0, 0, 0, 0]
+        let (_, ss) = block(c, items: [[lc, ext, ok, none]])
+        let fixes = PlannedSetRepair.run(in: c)
+        XCTAssertEqual(fixes.count, 2)
+        XCTAssertEqual(Array(lc.plannedLoadsBySet.prefix(3)), [115, 115, 115]); XCTAssertEqual(Array(lc.plannedRepsBySet.prefix(3)), [12, 12, 12])
+        XCTAssertEqual(Array(lc.plannedRIRsBySet.prefix(3)), [2, 2, 2]); XCTAssertEqual(lc.plannedLoadsBySet.count, 4, "the padding slot stays")
+        XCTAssertEqual(Array(ext.plannedLoadsBySet.prefix(3)), [195, 195, 195])
+        XCTAssertTrue(lc.planEdited, "the repair is not a lifter edit and does not touch the flag")
+        XCTAssertEqual(ok.plannedLoadsBySet, [300, 300, 300, 0], "a complete item, and its padding slot, are untouched")
+        XCTAssertEqual(none.plannedLoadsBySet, [0, 0, 0, 0], "no earlier load to copy")
+        XCTAssertTrue(PlannedSetRepair.plan(sessions: ss).isEmpty, "a second pass changes nothing")
+    }
+
+    func test_repair_neverTouchesLoggedCompletedBodyweightOrTopRows() throws {
+        let c = try ctx()
+        let done = twoSetItem("lying_leg_curl", load: 115); done.targetSets = 3
+        let logged = twoSetItem("seated_leg_curl", load: 100); logged.targetSets = 3; logged.actualReps = [12, 12, 0, 0]; logged.actualLoads = [100, 100, 0, 0]
+        let bw = twoSetItem("pull_up", load: 0); bw.targetSets = 3; bw.plannedLoadsBySet = [10, 10, 0, 0]
+        let top = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 2, targetRIR: 2, suggestedLoad: 200,
+                              plannedRepsBySet: [8, 8, 4], plannedLoadsBySet: [200, 200, 0], plannedRIRsBySet: [2, 2, 1])
+        top.setRolesBySet = SessionItem.roles(backOffs: 2, tops: 1); top.topRepMin = 4; top.topRepMax = 4; top.topRIR = 1
+        _ = block(c, items: [[done], [logged, bw, top]], statuses: [.completed, .planned])
+        let before = (done.plannedLoadsBySet, logged.plannedLoadsBySet, bw.plannedLoadsBySet, top.plannedLoadsBySet)
+        XCTAssertTrue(PlannedSetRepair.run(in: c).isEmpty)
+        XCTAssertEqual(done.plannedLoadsBySet, before.0); XCTAssertEqual(logged.plannedLoadsBySet, before.1)
+        XCTAssertEqual(bw.plannedLoadsBySet, before.2); XCTAssertEqual(top.plannedLoadsBySet, before.3, "an empty top row is not a back-off row")
+    }
+
+    // MARK: a re-added exercise takes its load
+
+    private func generic(_ id: String, order: Int = 9) -> SessionItem {
+        let i = SessionItem(order: order, exerciseId: id, targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 0)
+        i.plannedRepsBySet = [10, 10, 10]; i.plannedLoadsBySet = [0, 0, 0]; i.plannedRIRsBySet = [2, 2, 2]
+        i.actualReps = [0, 0, 0]; i.actualLoads = [0, 0, 0]; i.actualRIRs = RIREntry.unsetArray(count: 3)
+        return i
+    }
+
+    private func performed(_ id: String, wave: String, load: Double, reps: Int = 12, sets: Int = 3) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: reps, targetSets: sets, targetRIR: 2, suggestedLoad: load, waveRaw: wave,
+                            priorityRaw: "standard", setMin: sets, setMax: sets, repMin: reps, repMax: reps + 2, targetRIRMin: 2, targetRIRMax: 2,
+                            plannedRepsBySet: Array(repeating: reps, count: sets), plannedLoadsBySet: Array(repeating: load, count: sets),
+                            plannedRIRsBySet: Array(repeating: 2, count: sets),
+                            actualReps: Array(repeating: reps, count: sets), actualLoads: Array(repeating: load, count: sets), actualRIRs: Array(repeating: 2, count: sets))
+        return i
+    }
+
+    private func template(_ id: String, wave: String) -> SessionItem {
+        let i = performed(id, wave: wave, load: 0)
+        i.actualReps = []; i.actualLoads = []; i.actualRIRs = []
+        return i
+    }
+
+    func test_reAdd_sameLetterPerformed_holdsThePerformedLoad_withTheNote_atOnce() throws {
+        let c = try ctx()
+        let id = "cable_tricep_rope_pushdown"
+        // Week 1 (completed, letter c, 85 x 12 x 3), week 2 (planned, letter c; the other exercise keeps the wave readable) where it is re-added.
+        let (_, ss) = block(c, items: [[performed(id, wave: "c", load: 85), performed("bench_press", wave: "c", load: 200)],
+                                       [template("bench_press", wave: "c")]], statuses: [.completed, .planned], label: "Push B")
+        let target = ss[1]
+        let new = generic(id)
+        XCTAssertTrue(WaveSlotRestore.restore(new, in: target, allSessions: ss))
+        target.items.append(new); c.insert(new)
+        XCTAssertEqual(new.suggestedLoad, 0)
+        let changes = PlaceholderRefresh.refreshNewItem(new, in: c)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(new.suggestedLoad, 85)
+        XCTAssertEqual(new.plannedLoadsBySet, [85, 85, 85])
+        XCTAssertTrue(new.coachNote?.contains("Held at 85") == true, new.coachNote ?? "nil")
+        XCTAssertFalse(new.planEdited, "an automatic write")
+    }
+
+    func test_reAdd_otherLetterOnly_isEstimated_andNoHistoryGetsTheNote() throws {
+        let c = try ctx()
+        let id = "cable_tricep_rope_pushdown"
+        // Only a B-letter session of the day has performed it: the cross-letter estimate applies to the C-letter re-add.
+        let (_, ss) = block(c, items: [[performed(id, wave: "b", load: 100, reps: 10), performed("bench_press", wave: "b", load: 200)],
+                                       [template("bench_press", wave: "c")]], statuses: [.completed, .planned], label: "Push B")
+        let new = generic(id)
+        XCTAssertTrue(WaveSlotRestore.restore(new, in: ss[1], allSessions: ss)); ss[1].items.append(new); c.insert(new)
+        PlaceholderRefresh.refreshNewItem(new, in: c)
+        XCTAssertGreaterThan(new.suggestedLoad, 0, "estimated from the B-week sets")
+        XCTAssertTrue(new.coachNote?.contains("Estimated from your recent B-week sets") == true, new.coachNote ?? "nil")
+
+        // Nothing performed anywhere: stays 0 with the one-time note.
+        let c2 = try ctx()
+        let (_, s2) = block(c2, items: [[template("bench_press", wave: "c")]], label: "Push B")
+        let lone = generic("lying_leg_curl")
+        XCTAssertTrue(WaveSlotRestore.restore(lone, in: s2[0], allSessions: s2)); s2[0].items.append(lone); c2.insert(lone)
+        PlaceholderRefresh.refreshNewItem(lone, in: c2)
+        XCTAssertEqual(lone.suggestedLoad, 0)
+        XCTAssertTrue(lone.prescriptionNotes?.contains(PlaceholderRefresh.noRecentHistoryNote) == true)
+    }
+
+    func test_refreshNewItem_isOnlyThatItem_andRespectsTheSwitch() throws {
+        let c = try ctx()
+        let id = "cable_tricep_rope_pushdown"
+        let stale = template("bench_press", wave: "c"); stale.suggestedLoad = 0; stale.plannedLoadsBySet = [0, 0, 0]
+        let (_, ss) = block(c, items: [[performed(id, wave: "c", load: 85), performed("bench_press", wave: "c", load: 200)], [stale]],
+                            statuses: [.completed, .planned], label: "Push B")
+        let new = generic(id)
+        XCTAssertTrue(WaveSlotRestore.restore(new, in: ss[1], allSessions: ss)); ss[1].items.append(new); c.insert(new)
+        PlaceholderRefresh.isEnabled = false
+        XCTAssertTrue(PlaceholderRefresh.refreshNewItem(new, in: c).isEmpty); XCTAssertEqual(new.suggestedLoad, 0)
+        PlaceholderRefresh.isEnabled = true
+        PlaceholderRefresh.refreshNewItem(new, in: c)
+        XCTAssertEqual(new.suggestedLoad, 85)
+        XCTAssertEqual(stale.suggestedLoad, 0, "the startup pass's other candidates are not touched by the single-item pass")
+    }
+}

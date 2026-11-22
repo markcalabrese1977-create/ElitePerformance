@@ -461,10 +461,14 @@ extension SessionItem {
     /// With no top set it only sets targetSets-many loads, as carry-forward always did.
     func resizeBackOffs(to count: Int, backOffLoad: Double? = nil) {
         let n = max(0, count)
+        let old = targetSets
         func fit<T>(_ values: [T], fallback: T) -> [T] {
-            if values.count >= n { return Array(values.prefix(n)) }
-            let pad = values.last ?? fallback
-            return values + Array(repeating: pad, count: n - values.count)
+            // The arrays carry empty padding slots past the planned sets (the Program editor keeps four). Growing repeats the last
+            // PLANNED set, never a padding slot, so a new set copies the set before it.
+            let base = old > 0 && values.count > old ? Array(values.prefix(old)) : values
+            if base.count >= n { return Array(base.prefix(n)) }
+            let pad = base.last ?? fallback
+            return base + Array(repeating: pad, count: n - base.count)
         }
         let topLoads = topValues(plannedLoadsBySet, fallback: 0.0)
         let topReps = topValues(plannedRepsBySet, fallback: topRepMin ?? targetReps)
@@ -480,6 +484,23 @@ extension SessionItem {
             plannedRIRsBySet = backRIRs + topRIRs
             setRolesBySet = Self.roles(backOffs: n, tops: tops)
         }
+    }
+
+    /// A set count that just grew from `oldCount` (an item with no top set): every new planned row copies the planned load, reps and RIR
+    /// of the last row that existed before it. Arrays shorter than the new count are extended. Nothing changes when the count did not grow.
+    func seedNewPlannedSets(from oldCount: Int) {
+        let n = targetSets
+        guard oldCount >= 1, n > oldCount else { return }
+        func grow<T>(_ a: [T]) -> [T] {
+            guard a.count >= oldCount else { return a }
+            var out = a
+            while out.count < n { out.append(a[oldCount - 1]) }
+            for i in oldCount..<n { out[i] = a[oldCount - 1] }
+            return out
+        }
+        plannedLoadsBySet = grow(plannedLoadsBySet)
+        plannedRepsBySet = grow(plannedRepsBySet)
+        plannedRIRsBySet = grow(plannedRIRsBySet)
     }
 
     /// Role array for `targetSets` back-off rows followed by `topCount` top rows.

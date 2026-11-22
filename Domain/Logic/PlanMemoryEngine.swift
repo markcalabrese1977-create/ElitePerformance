@@ -338,7 +338,9 @@ struct PlanMemoryEngine {
                 if targetItem.hasTopSet {
                     targetItem.resizeBackOffs(to: newCount, backOffLoad: fill)   // keeps the top tail and roles
                 } else {
+                    let oldCount = targetItem.targetSets
                     targetItem.setPrescribedSets(newCount)
+                    targetItem.seedNewPlannedSets(from: oldCount)   // a new set's reps and RIR copy the set before it
                     targetItem.plannedLoadsBySet = Array(repeating: fill, count: targetItem.targetSets)
                 }
             }

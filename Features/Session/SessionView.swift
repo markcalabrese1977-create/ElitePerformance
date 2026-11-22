@@ -2047,6 +2047,9 @@ final class SessionScreenViewModel: ObservableObject {
         session.items.append(newItem)
         context.insert(newItem)
 
+        // The new item takes its load now by the startup rules (held, estimated, cross-day), not at the next launch.
+        let refreshed = !isMaintenanceSession && !PlaceholderRefresh.refreshNewItem(newItem, in: context).isEmpty
+
         do {
             try context.save()
         } catch {
@@ -2058,7 +2061,7 @@ final class SessionScreenViewModel: ObservableObject {
             UISessionSet(
                 index: idx,
                 exerciseId: catalogExercise.id,
-                plannedLoad: (idx <= shownSets) ? defaultLoad : 0,
+                plannedLoad: (idx <= shownSets) ? ((refreshed && idx - 1 < newItem.plannedLoadsBySet.count) ? newItem.plannedLoadsBySet[idx - 1] : defaultLoad) : 0,
                 plannedReps: shownReps,
                 plannedRIR: shownRIR,
                 actualLoad: nil,

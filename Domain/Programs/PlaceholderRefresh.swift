@@ -163,15 +163,18 @@ enum PlaceholderRefresh {
         return plan(sessions: all, ctx: Context(profile: profile, customExercises: custom), now: now)
     }
 
-    static func plan(sessions all: [Session], ctx: Context, now: Date = Date()) -> [Change] {
+    /// `only`: restrict the pass to one item (the same rules, nothing else): an exercise just added to a planned or in-progress session.
+    /// Without it every planned session from today on is covered, as at startup.
+    static func plan(sessions all: [Session], ctx: Context, now: Date = Date(), only: SessionItem? = nil) -> [Change] {
         let today = Calendar.current.startOfDay(for: now)
         let completed = all.filter { $0.status == .completed }
         var changes: [Change] = []
 
-        for target in all where target.status == .planned && target.date >= today {
+        for target in all where (target.status == .planned || (only != nil && target.status == .inProgress)) && target.date >= today {
+            if let only, !target.items.contains(where: { $0 === only }) { continue }
             guard let meso = target.meso, meso.status == .active, !meso.isMaintenance else { continue }
             let weekLogged = deloadWeekHasLoggedSet(target, meso: meso, in: all)
-            for item in target.items {
+            for item in target.items where only == nil || item === only {
                 if let change = scheduledDeloadChange(item, in: target, weekLogged: weekLogged, sessions: all, ctx: ctx, now: now) {
                     changes.append(change)
                     continue
@@ -286,6 +289,20 @@ enum PlaceholderRefresh {
         let ctx = Context(profile: profile, customExercises: custom)
         guard let all = try? context.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])) else { return [] }
         let changes = plan(sessions: all, ctx: ctx, now: now)
+        apply(changes, ctx: ctx)
+        return changes
+    }
+
+    /// A just-added item of a planned or in-progress session gets its load now, by the same rules as the startup pass (held load,
+    /// cross-letter estimate, hold from a high-rep set, cross-day), instead of waiting for the next launch. The caller saves.
+    @discardableResult
+    static func refreshNewItem(_ item: SessionItem, in context: ModelContext, now: Date = Date()) -> [Change] {
+        guard isEnabled else { return [] }
+        let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
+        let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+        let ctx = Context(profile: profile, customExercises: custom)
+        guard let all = try? context.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])) else { return [] }
+        let changes = plan(sessions: all, ctx: ctx, now: now, only: item)
         apply(changes, ctx: ctx)
         return changes
     }

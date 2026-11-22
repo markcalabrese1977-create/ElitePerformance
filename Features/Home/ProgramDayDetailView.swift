@@ -400,6 +400,8 @@ struct ProgramDayDetailView: View {
             WaveSlotRestore.restore(newItem, in: session, allSessions: all, entry: "Program tab")
         }
         session.items.append(newItem)
+        // The new item takes its load now by the startup rules (held, estimated, cross-day), not at the next launch.
+        if !isMaintenanceSession { PlaceholderRefresh.refreshNewItem(newItem, in: modelContext) }
 
         if propagatesToFutureSessions {
                     requestPropagation()

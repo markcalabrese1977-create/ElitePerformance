@@ -842,27 +842,30 @@ extension SessionItemEditService {
 
     /// The back-off-only write (an item with no top set before or after): exactly what changePrescription always did.
     private static func applyBackOffsOnly(_ item: SessionItem, sets: Int, change: PrescriptionChange) {
+        // The planned arrays keep empty padding slots past the planned sets; a grown count repeats the last PLANNED set (loads, reps, RIR).
+        let oldSets = item.targetSets
+        func planned<T>(_ a: [T]) -> [T] { oldSets > 0 && a.count > oldSets ? Array(a.prefix(oldSets)) : a }
         if change.setDelta != nil {
             item.setPrescribedSets(sets)
             // The wave's set band widens to include the new count and never narrows.
             if let lo = item.setMin { item.setMin = min(lo, sets) }
             if let hi = item.setMax { item.setMax = max(hi, sets) }
             // Grow = repeat the last set's load, shrink = first N, empty = zeros (as carry-forward does).
-            item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: sets, fallback: 0)
+            item.plannedLoadsBySet = resized(planned(item.plannedLoadsBySet), to: sets, fallback: 0)
         }
         if let reps = change.repRange {
             item.repMin = reps.lowerBound; item.repMax = reps.upperBound
             item.targetReps = reps.lowerBound
             item.plannedRepsBySet = Array(repeating: item.targetReps, count: sets)
         } else if change.setDelta != nil {
-            item.plannedRepsBySet = resized(item.plannedRepsBySet, to: sets, fallback: item.targetReps)
+            item.plannedRepsBySet = resized(planned(item.plannedRepsBySet), to: sets, fallback: item.targetReps)
         }
         if let rir = change.rirRange {
             item.targetRIRMin = rir.lowerBound; item.targetRIRMax = rir.upperBound
             item.targetRIR = rir.upperBound
             item.plannedRIRsBySet = Array(repeating: item.targetRIR, count: sets)
         } else if change.setDelta != nil {
-            item.plannedRIRsBySet = resized(item.plannedRIRsBySet, to: sets, fallback: item.targetRIR)
+            item.plannedRIRsBySet = resized(planned(item.plannedRIRsBySet), to: sets, fallback: item.targetRIR)
         }
     }
 
@@ -971,7 +974,8 @@ extension SessionItemEditService {
         check("setMax", widenSets ? b.setMax.map { max($0, newSets) } : b.setMax, i.setMax)
         // Load values: the surviving prefix is unchanged, and the array is sized to the new set count when sets changed.
         if b.roles == nil && target.after.top == nil {
-            let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count)
+            // Only the PLANNED rows survive unchanged: a padding slot past the old set count is where a grown set lands (it copies the row before).
+            let kept = min(b.plannedLoads.count, i.plannedLoadsBySet.count, target.after.sets != target.before.sets ? target.before.sets : Int.max)
             check("plannedLoads prefix", Array(b.plannedLoads.prefix(kept)), Array(i.plannedLoadsBySet.prefix(kept)))
             if target.after.sets != target.before.sets {
                 check("plannedLoads count", target.after.sets, i.plannedLoadsBySet.count)
