@@ -1493,3 +1493,82 @@ extension TopSetBackupTests {
         return c
     }
 }
+
+// MARK: - Deload rule dry run (report only)
+
+/// For each backup in EP_DELOAD_BACKUPS (comma-separated paths): every deload item already in the plan (scheduled) and the
+/// items an Insert deload would write at the first eligible week, with the load before and after `DeloadRule`, the working
+/// load, and which side of the min the new load landed on. Skips without the variable; writes EP_DELOAD_REPORT when set.
+final class DeloadRuleDryRunTests: XCTestCase {
+
+    func test_dryRun_everyDeloadItemBeforeAndAfter() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_DELOAD_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_DELOAD_BACKUPS to comma-separated backup paths")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("DLD| \(s)") }
+        defer {
+            if let p = ProcessInfo.processInfo.environment["EP_DELOAD_REPORT"], !p.isEmpty {
+                try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8)
+            }
+        }
+        func pad(_ x: String, _ n: Int) -> String { x.padding(toLength: n, withPad: " ", startingAt: 0) }
+        func pct(_ a: Double, _ b: Double?) -> String { guard let b, b > 0 else { return "-" }; return String(format: "%.0f%%", a / b * 100) }
+
+        for path in list.split(separator: ",").map(String.init) {
+            let schema = Schema([User.self, ProgramState.self, Session.self, SessionItem.self, SetLog.self, PRIndex.self,
+                                 SessionHistory.self, SessionHistoryExercise.self, ExerciseNote.self, AppState.self,
+                                 MesoBlock.self, UserProfile.self, CustomExercise.self])
+            let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let all = try ctx.fetch(FetchDescriptor<Session>())
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let custom = try ctx.fetch(FetchDescriptor<CustomExercise>())
+            let unit = profile?.loadUnit ?? .lb
+            let now = Date()
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)  (unit \(unit), \(all.count) sessions)")
+
+            // 1. Deload items already in the plan.
+            out("-- scheduled deload items (waveRaw == deload, not logged)")
+            let scheduled = all.filter { $0.status != .completed }.sorted { $0.date < $1.date }
+            var n = 0
+            for s in scheduled {
+                for i in s.items.sorted(by: { $0.order < $1.order }) where i.waveRaw?.lowercased() == "deload" {
+                    n += 1
+                    let repMin = i.repMin ?? i.targetReps
+                    let z = DeloadRule.sizing(exerciseId: i.exerciseId, repMin: repMin, in: all, profile: profile, unit: unit, customExercises: custom, referenceDate: now)
+                    let flat = z.workingLoad.map { UnitAwareRounding.round($0 * 0.6, increment: UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit), unit: unit) }
+                    out(pad("W\(s.weekIndex) \(s.dayLabel ?? "?") \(s.insertedDeload == true ? "(inserted)" : "")", 22) + pad(ExerciseCatalog.displayName(for: i.exerciseId), 34)
+                        + "reps \(repMin)-\(i.repMax ?? i.targetReps) sets \(i.targetSets)  stored \(LoadFormatter.number(i.suggestedLoad))  0.6x-branch \(flat.map { LoadFormatter.number($0) } ?? "-")  -> NEW \(LoadFormatter.number(z.load))"
+                        + "  working \(z.workingLoad.map { LoadFormatter.number($0) } ?? "-")  new/working \(pct(z.load, z.workingLoad))  stored/working \(pct(i.suggestedLoad, z.workingLoad))  rir@repMin \(z.rirLoad.map { LoadFormatter.number($0) } ?? "-") cap \(z.capLoad.map { LoadFormatter.number($0) } ?? "-")  [\(z.basis.rawValue)]")
+                }
+            }
+            if n == 0 { out("(none)") }
+
+            // 2. The deload an Insert deload would write now.
+            for block in try ctx.fetch(FetchDescriptor<MesoBlock>()).filter({ $0.status == .active }) {
+                let plan = SessionItemEditService.planInsertDeloadWeek(meso: block, context: ctx, now: now)
+                out("-- Insert deload into \"\(block.name)\": week \(plan.weekIndex.map(String.init) ?? "-"), refusal \(plan.refusal.map { "\($0)" } ?? "none")")
+                for s in plan.deloadSessions {
+                    for ip in s.items {
+                        let old: Double
+                        if ExerciseCatalog.isBodyweight(exerciseId: ip.exerciseId, customExercises: custom) { old = 0 }
+                        else if UserProfile.isProgressionExempt(exerciseId: ip.exerciseId, profile: profile) { old = SessionItemEditService.lastCompletedLoad(for: ip.exerciseId, in: all) ?? 0 }
+                        else {
+                            old = UserProfile.clampedLoad(HistorySeedLoad.load(
+                                for: ip.exerciseId, goalReps: ip.repMax, targetRIR: 4, in: all,
+                                loadIncrement: UserProfile.loadStep(for: ip.exerciseId, profile: profile, unit: unit), unit: unit,
+                                bodyWeight: profile?.bodyWeight, customExercises: custom, referenceDate: now) ?? 0,
+                                exerciseId: ip.exerciseId, profile: profile, customExercises: custom)
+                        }
+                        let z = ip.sizing
+                        out(pad("\(s.dayLabel ?? "?")", 18) + pad(ExerciseCatalog.displayName(for: ip.exerciseId), 34)
+                            + "\(ip.sets)x\(ip.repMin)-\(ip.repMax)  OLD(repMax) \(LoadFormatter.number(old)) \(pct(old, z.workingLoad)) -> NEW \(LoadFormatter.number(ip.load)) \(pct(ip.load, z.workingLoad))"
+                            + "  working \(z.workingLoad.map { LoadFormatter.number($0) } ?? "-")  rir@repMin \(z.rirLoad.map { LoadFormatter.number($0) } ?? "-") cap \(z.capLoad.map { LoadFormatter.number($0) } ?? "-")  [\(z.basis.rawValue)]")
+                    }
+                }
+            }
+        }
+    }
+}

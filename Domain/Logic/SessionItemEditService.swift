@@ -1011,8 +1011,8 @@ extension SessionItemEditService {
 /// carry-forward chains and the shifted schedule, and saves once (or restores every field and throws).
 extension SessionItemEditService {
 
-    /// Deload prescription: half the sets (at least one), the same rep range, 3-4 RIR.
-    static let deloadRIRRange = 3...4
+    /// Deload prescription: half the sets (at least one), the same rep range, 3-4 RIR (the target is RIR 4; see `DeloadRule`).
+    static let deloadRIRRange = 3...DeloadRule.rir
     static let deloadWaveRaw = "deload"
 
     enum InsertDeloadRefusal: Equatable {
@@ -1046,6 +1046,8 @@ extension SessionItemEditService {
         let repMin: Int
         let repMax: Int
         let load: Double
+        /// Which side of the min the load landed on, and the numbers behind it (`DeloadRule.sizing`).
+        let sizing: DeloadRule.Sizing
         /// "2 x 8-10 @ RIR 3-4"
         var prescription: String {
             "\(sets) x \(repMin == repMax ? "\(repMin)" : "\(repMin)-\(repMax)") @ RIR \(deloadRIRRange.lowerBound)-\(deloadRIRRange.upperBound)"
@@ -1158,29 +1160,19 @@ extension SessionItemEditService {
         // The deload week: W's sessions, same dates, half the volume.
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
-        let increment = profile?.minLoadIncrement ?? UnitAwareRounding.defaultIncrement(unit: profile?.loadUnit ?? .lb)
         let unit = profile?.loadUnit ?? .lb
         let sources = (byWeek[week] ?? []).sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
         let deloadSessions: [DeloadSessionPlan] = sources.map { s in
             let items: [DeloadItemPlan] = s.items.sorted { $0.order < $1.order }.map { i in
                 let repMin = i.repMin ?? i.targetReps
                 let repMax = i.repMax ?? i.targetReps
-                let load: Double
-                if ExerciseCatalog.isBodyweight(exerciseId: i.exerciseId, customExercises: custom) {
-                    load = 0
-                } else if UserProfile.isProgressionExempt(exerciseId: i.exerciseId, profile: profile) {
-                    load = lastCompletedLoad(for: i.exerciseId, in: allSessions) ?? 0
-                } else {
-                    load = UserProfile.clampedLoad(HistorySeedLoad.load(
-                        for: i.exerciseId, goalReps: repMax, targetRIR: deloadRIRRange.upperBound, in: allSessions,
-                        loadIncrement: UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit), unit: unit, bodyWeight: profile?.bodyWeight, customExercises: custom,
-                        referenceDate: now
-                    ) ?? 0, exerciseId: i.exerciseId, profile: profile, customExercises: custom)
-                }
+                let sizing = DeloadRule.sizing(exerciseId: i.exerciseId, repMin: repMin, in: allSessions, profile: profile,
+                                               unit: unit, customExercises: custom, referenceDate: now)
                 // A deload is straight sets: the top set is dropped (the new items carry no roles) and the
                 // sets and the load come from the back-offs only.
                 return DeloadItemPlan(source: i, order: i.order, exerciseId: i.exerciseId,
-                                      sets: max(1, (i.targetSets + 1) / 2), repMin: repMin, repMax: repMax, load: load)
+                                      sets: DeloadRule.sets(forPlanned: i.targetSets), repMin: repMin, repMax: repMax,
+                                      load: sizing.load, sizing: sizing)
             }
             return DeloadSessionPlan(source: s, date: s.date, dayLabel: s.dayLabel, items: items)
         }

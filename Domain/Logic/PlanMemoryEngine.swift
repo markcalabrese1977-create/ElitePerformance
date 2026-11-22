@@ -17,10 +17,6 @@ struct PlanMemoryEngine {
 
     let context: ModelContext
 
-    // Flat 60% reduction for deload weeks. TODO (Phase 1.2 roadmap): replace with RIR-derived
-    // reduction via LoadProjectionService once deload-week RIR targets are reliably seeded.
-    private let deloadLoadReductionFactor: Double = 0.6
-
     /// The profile / user settings every load decision reads. Shared by carry-forward and the
     /// one-time catch-up so both resolve exactly the same inputs.
     struct LoadPolicyInputs {
@@ -167,12 +163,17 @@ struct PlanMemoryEngine {
             // isMaintenanceSession check, but via waveRaw since this runs automatically
             // on every session completion, not just when the user taps Auto+.
             if targetItem.waveRaw?.lowercased() == "deload" {
-                targetItem.suggestedLoad = E1RMCalculator.rounded(
-                    targetItem.suggestedLoad * deloadLoadReductionFactor,
-                    increment: loadIncrement, unit: unit
-                )
-                targetItem.plannedLoadsBySet = targetItem.plannedLoadsBySet.map {
-                    E1RMCalculator.rounded($0 * deloadLoadReductionFactor, increment: loadIncrement, unit: unit)
+                // The one shared deload rule (DeloadRule): min(RIR-4 sizing at repMin, 0.95 x the latest non-deload
+                // working load). Sets, RIR and the rep band stay as the template wrote them.
+                let sizing = DeloadRule.sizing(
+                    exerciseId: targetItem.exerciseId, repMin: targetItem.repMin ?? targetItem.targetReps,
+                    in: allSessions, profile: profile, unit: unit, customExercises: customExercises,
+                    referenceDate: session.date)
+                // No logged non-deload working set to size from (a block that is deload-wave from its first session, such
+                // as a maintenance program): the carried-forward load stands, already at deload level. It is never scaled again.
+                if sizing.basis != .noHistory || isBodyweight {
+                    targetItem.suggestedLoad = isBodyweight ? 0 : sizing.load
+                    targetItem.plannedLoadsBySet = Array(repeating: targetItem.suggestedLoad, count: targetItem.plannedLoadsBySet.count)
                 }
                 continue
             }

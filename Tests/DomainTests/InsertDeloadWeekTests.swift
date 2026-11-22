@@ -208,10 +208,12 @@ final class InsertDeloadWeekTests: XCTestCase {
                     XCTAssertEqual(d.suggestedLoad, 0)
                 } else {
                     XCTAssertGreaterThan(d.suggestedLoad, 0, "history at 100 -> a positive seed")
-                    let expected = HistorySeedLoad.load(
-                        for: d.exerciseId, goalReps: d.repMax ?? d.targetReps, targetRIR: 4,
-                        in: sorted(block).filter { $0.status == .completed }, loadIncrement: 2.5, referenceDate: now)
-                    XCTAssertEqual(d.suggestedLoad, expected, "the seed is HistorySeedLoad at (top of the rep range, RIR 4)")
+                    let done = sorted(block).filter { $0.status == .completed }
+                    let rirAtRepMin = try XCTUnwrap(HistorySeedLoad.load(
+                        for: d.exerciseId, goalReps: d.repMin ?? d.targetReps, targetRIR: 4,
+                        in: done, loadIncrement: 2.5, referenceDate: now))
+                    XCTAssertEqual(d.suggestedLoad, min(rirAtRepMin, 95), "min(RIR-4 sizing at repMin, 0.95 x the working load of 100)")
+                    XCTAssertLessThanOrEqual(d.suggestedLoad, 95)
                     XCTAssertEqual(d.suggestedLoad.truncatingRemainder(dividingBy: 2.5), 0, accuracy: 1e-9, "rounded down to the increment")
                 }
                 XCTAssertFalse(d.planEdited)
@@ -547,5 +549,106 @@ final class InsertDeloadWeekTests: XCTestCase {
         try ctx.save()
         let capped = loads(Service.planInsertDeloadWeek(meso: block, context: ctx, now: now))
         XCTAssertTrue(capped.allSatisfy { $0 == 40 }, "\(capped)")
+    }
+}
+
+// MARK: - DeloadRule
+
+/// The one deload rule: half the sets, RIR 4, planned reps = repMin, load = min(RIR-4 sizing at repMin,
+/// 0.95 x the latest non-deload working load), rounded down to the step.
+final class DeloadRuleTests: XCTestCase {
+
+    private func day(_ n: Int) -> Date { Date(timeIntervalSince1970: 1_700_000_000 + Double(n) * 86_400) }
+
+    private func session(_ n: Int, _ id: String = "bench_press", load: Double, reps: Int, rir: Int = 1, sets: Int = 3,
+                         wave: String? = "a", inserted: Bool = false) -> Session {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: reps, targetSets: sets, targetRIR: 2, suggestedLoad: load, waveRaw: wave)
+        i.actualLoads = Array(repeating: load, count: sets)
+        i.actualReps = Array(repeating: reps, count: sets)
+        i.actualRIRs = Array(repeating: rir, count: sets)
+        let s = Session(date: day(n), status: .completed, weekIndex: n, items: [i])
+        s.insertedDeload = inserted ? true : nil
+        return s
+    }
+
+    private func sizing(_ id: String = "bench_press", repMin: Int, _ sessions: [Session], step: Double = 2.5,
+                        exempt: [String]? = nil) -> DeloadRule.Sizing {
+        let profile = UserProfile()
+        profile.minLoadIncrement = step
+        if let exempt { profile.exemptExerciseIds = exempt }
+        return DeloadRule.sizing(exerciseId: id, repMin: repMin, in: sessions, profile: profile, unit: .lb,
+                                 customExercises: [], referenceDate: day(100))
+    }
+
+    func test_sets_halfRoundedUp_atLeastOne() {
+        XCTAssertEqual([1, 2, 3, 4, 5, 6].map(DeloadRule.sets(forPlanned:)), [1, 1, 2, 2, 3, 3])
+    }
+
+    func test_load_isNeverAboveNinetyFivePercentOfWorkingLoad_acrossTheRepBands() {
+        for band in [(6, 8), (8, 10), (10, 12), (12, 15)] {
+            for working in [20.0, 45, 100, 135, 225, 315] {
+                // Trained at the top of the band, hard (RIR 0): the e1RM points high.
+                let z = sizing(repMin: band.0, [session(1, load: working, reps: band.1, rir: 0)])
+                XCTAssertLessThanOrEqual(z.load, working * 0.95 + 1e-9, "\(band) @ \(working): \(z)")
+                XCTAssertGreaterThan(z.load, working * 0.5, "\(band) @ \(working): a deload is light, not absent: \(z)")
+                XCTAssertEqual(z.load.truncatingRemainder(dividingBy: 2.5), 0, accuracy: 1e-9, "rounded to the step")
+                XCTAssertEqual(z.load, min(z.rirLoad ?? .infinity, z.capLoad ?? .infinity), "load is the min of the two sides")
+                XCTAssertEqual(z.workingLoad, working)
+            }
+        }
+    }
+
+    func test_capSide_whenTheEstimatePointsAboveTheLastWorkingLoad() {
+        // 100 x 15 at RIR 0 estimates about 150; RIR-4 sizing at 6 reps is ~112, above 0.95 x 100.
+        let z = sizing(repMin: 6, [session(1, load: 100, reps: 15, rir: 0)])
+        XCTAssertEqual(z.basis, .cap)
+        XCTAssertEqual(z.load, 95)
+        XCTAssertGreaterThan(z.rirLoad ?? 0, 95)
+    }
+
+    func test_rirSide_whenTheEstimateIsBelowTheCap() {
+        // 100 x 3 at RIR 0 estimates about 110; RIR-4 sizing at 8 reps is ~78.
+        let z = sizing(repMin: 8, [session(1, load: 100, reps: 3, rir: 0)])
+        XCTAssertEqual(z.basis, .rir)
+        XCTAssertLessThan(z.load, 95)
+        XCTAssertEqual(z.load, z.rirLoad)
+    }
+
+    func test_cap_roundsDownToTheStep() {
+        // 0.95 x 100 = 95 on a 5 lb step is exactly 95; 0.95 x 101 = 95.95 -> 95; 0.95 x 120 = 114 -> 110.
+        XCTAssertEqual(sizing(repMin: 6, [session(1, load: 120, reps: 15, rir: 0)], step: 5).load, 110)
+        XCTAssertEqual(sizing(repMin: 6, [session(1, load: 100, reps: 15, rir: 0)], step: 5).load, 95)
+    }
+
+    func test_workingLoad_isTheLatestNonDeloadSession_notTheHeaviest() {
+        let older = session(1, load: 200, reps: 8)
+        let newer = session(5, load: 150, reps: 8)
+        let deload = session(6, load: 90, reps: 8, wave: "deload")
+        let insertedDeload = session(7, load: 80, reps: 8, wave: "a", inserted: true)
+        XCTAssertEqual(DeloadRule.latestWorkingLoad(for: "bench_press", in: [older, newer, deload, insertedDeload]), 150)
+    }
+
+    func test_bodyweight_carriesNoLoad() {
+        let z = sizing("pull_up", repMin: 8, [session(1, "pull_up", load: 0, reps: 8)])
+        XCTAssertEqual(z.basis, .bodyweight)
+        XCTAssertEqual(z.load, 0)
+    }
+
+    func test_fixedLoadLift_holdsItsLastLoad() {
+        let z = sizing("bench_press", repMin: 8, [session(1, load: 120, reps: 8)], exempt: ["bench_press"])
+        XCTAssertEqual(z.basis, .exempt)
+        XCTAssertEqual(z.load, 120)
+    }
+
+    func test_noHistory_isZeroAndSaysSo() {
+        let z = sizing(repMin: 8, [])
+        XCTAssertEqual(z.basis, .noHistory)
+        XCTAssertEqual(z.load, 0)
+        XCTAssertNil(z.workingLoad)
+    }
+
+    func test_deloadItemsAreNotHistory() {
+        let z = sizing(repMin: 8, [session(1, load: 100, reps: 8, wave: "deload")])
+        XCTAssertEqual(z.basis, .noHistory)
     }
 }

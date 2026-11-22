@@ -373,8 +373,38 @@ final class InvariantTests: XCTestCase {
 
         PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
 
-        // 100 * 0.6 deload reduction factor (PlanMemoryEngine.deloadLoadReductionFactor)
-        XCTAssertEqual(futureItem.suggestedLoad, 60, "deload target item must hold the carried-forward load (reduced), never progress past it")
+        // Every logged session here is deload-wave, so DeloadRule has no working load to size from: the carried-forward
+        // load (100) stands as it is. It is held, never scaled again (the old flat 0.6 compounded week on week).
+        XCTAssertEqual(futureItem.suggestedLoad, 100, "deload target item must hold the carried-forward load, never progress past it")
+    }
+
+    /// The scheduled-deload branch uses the shared rule: min(RIR-4 sizing at repMin, 0.95 x the latest non-deload working
+    /// load), not a flat 0.6 of whatever was carried.
+    func test_N10b_scheduledDeloadTargetUsesTheSharedDeloadRule() throws {
+        let context = try makeContext()
+        let cal = Calendar.current
+        let threeDaysAgo = cal.date(byAdding: .day, value: -3, to: Date())!
+        let yesterday = cal.date(byAdding: .day, value: -1, to: Date())!
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date())!
+
+        let working = item(exerciseId: "bench", reps: [10, 10, 10], loads: [100, 100, 100], rirs: [1, 1, 1], suggestedLoad: 100, waveRaw: "a", repMin: 8, repMax: 12)
+        let s0 = Session(date: threeDaysAgo, status: .completed, weekIndex: 1, items: [working])
+        let source = item(exerciseId: "bench", reps: [10, 10], loads: [60, 60], rirs: [4, 4], suggestedLoad: 60, waveRaw: "deload", repMin: 8, repMax: 12)
+        let sourceSession = Session(date: yesterday, status: .completed, weekIndex: 2, items: [source])
+        let target = item(exerciseId: "bench", reps: [0, 0], loads: [0, 0], rirs: [0, 0], suggestedLoad: 0, waveRaw: "deload", repMin: 8, repMax: 12)
+        target.plannedLoadsBySet = [0, 0]
+        let targetSession = Session(date: tomorrow, status: .planned, weekIndex: 3, items: [target])
+        context.insert(s0); context.insert(sourceSession); context.insert(targetSession)
+        try context.save()
+
+        PlanMemoryEngine(context: context).carryForwardPlans(from: sourceSession)
+
+        let expected = DeloadRule.sizing(exerciseId: "bench", repMin: 8, in: [s0, sourceSession], profile: nil, unit: .lb,
+                                         customExercises: [], referenceDate: yesterday)
+        XCTAssertGreaterThan(expected.load, 0)
+        XCTAssertLessThanOrEqual(expected.load, 95, "never above 0.95 x the 100 working load")
+        XCTAssertEqual(target.suggestedLoad, expected.load)
+        XCTAssertEqual(target.plannedLoadsBySet, [expected.load, expected.load])
     }
 
     // MARK: - T-N.11: Every seeding path moves MesoLifecycle.activeStartDate
