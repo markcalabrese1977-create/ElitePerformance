@@ -3192,8 +3192,8 @@ final class SetRowLayoutTests: XCTestCase {
 
     func test_actionsLiveUnderTheInputs_notInAColumnBesideThem() {
         let s = source
-        let inputs = try? XCTUnwrap(s.range(of: "ViewThatFits(in: .horizontal) {\n                HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField"))
-        let actions = try? XCTUnwrap(s.range(of: "                actionBar\n                VStack(alignment: .leading, spacing: 8) { actionBar }"))
+        let inputs = try? XCTUnwrap(s.range(of: "HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField"))
+        let actions = try? XCTUnwrap(s.range(of: "                    actionBar(stacked: false)\n                    actionBar(stacked: true)"))
         XCTAssertNotNil(inputs); XCTAssertNotNil(actions)
         if let i = inputs, let a = actions { XCTAssertLessThan(i.lowerBound, a.lowerBound, "actions come after the inputs") }
         XCTAssertFalse(s.contains("// Log / Skip / Edit\n                VStack(spacing: 4)"), "the narrow right-hand column is gone")
@@ -3201,7 +3201,7 @@ final class SetRowLayoutTests: XCTestCase {
 
     func test_everyActionLabelIsSingleLineAndFixedSize() {
         let s = source
-        guard let start = s.range(of: "@ViewBuilder private var actionBar: some View {"),
+        guard let start = s.range(of: "@ViewBuilder private func actionBar(stacked: Bool) -> some View {"),
               let end = s.range(of: "    // MARK: - Swap Sheet") ?? s.range(of: "// MARK: - Swap Sheet") else { return XCTFail("actionBar not found") }
         let bar = String(s[start.lowerBound..<end.lowerBound])
         for label in ["Text(\"Log\")", "Text(\"Done\")", "Text(\"Skip\")", "Text(uiSet.pumpRating == .none ? \"Pump\" : uiSet.pumpRating.label)"] {
