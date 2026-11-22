@@ -649,93 +649,113 @@ private struct SessionExerciseCardView: View {
         return hasActualWork || wasSkipped
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(exercise.name)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-                    Text(todayDetailLine)
+    private var headerText: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(exercise.name)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(todayDetailLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let lastLetterCaption {
+                    Text(lastLetterCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    if let lastLetterCaption {
-                        Text(lastLetterCaption)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if UserProfile.isProgressionExempt(exerciseId: exercise.exerciseId, profile: profiles.first) {
-                        Text("Fixed load")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.orange)
-                    }
-
-                    if let executionNoteLine {
-                        Text(executionNoteLine)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .italic()
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer()
+                if UserProfile.isProgressionExempt(exerciseId: exercise.exerciseId, profile: profiles.first) {
+                    Text("Fixed load")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.orange)
+                }
 
-                HStack(spacing: 8) {
-                    Text("\(exercise.targetSets) sets")
+                if let executionNoteLine {
+                    Text(executionNoteLine)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .italic()
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+    }
+
+    /// The small controls cap at XXXL so the cluster is never wider than the narrowest phone's card.
+    private var headerControls: some View {
+            HStack(spacing: 8) {
+                Text("\(exercise.targetSets) sets")
+                    .font(.caption)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Button(action: onNoteTapped) {
+                    Image(systemName: noteIconName)
                         .font(.caption)
+                        .padding(6)
+                }
+                .buttonStyle(.plain)
+                .background(Color.black.opacity(0.05))
+                .clipShape(Circle())
+                .accessibilityLabel(hasExerciseNote ? "View note" : "Add note")
+
+                Button(action: onHistoryTapped) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption)
+                        .padding(6)
+                }
+                .buttonStyle(.plain)
+                .background(Color.black.opacity(0.05))
+                .clipShape(Circle())
+
+                Button(action: onSwapTapped) {
+                    Text("Swap")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    Button(action: onNoteTapped) {
-                        Image(systemName: noteIconName)
-                            .font(.caption)
-                            .padding(6)
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color.black.opacity(0.05))
-                    .clipShape(Circle())
-                    .accessibilityLabel(hasExerciseNote ? "View note" : "Add note")
-
-                    Button(action: onHistoryTapped) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.caption)
-                            .padding(6)
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color.black.opacity(0.05))
-                    .clipShape(Circle())
-
-                    Button(action: onSwapTapped) {
-                        Text("Swap")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.12))
-                            .foregroundColor(.blue)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
                 }
-                .fixedSize(horizontal: true, vertical: false)
+                .buttonStyle(.plain)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // The title column and the controls (sets / note / history / Swap) are laid out by Dynamic Type, never by content:
+            // from XXXL up the controls drop BELOW the title, so the card can never be pushed wider than the screen.
+            if dynamicTypeSize >= .xxxLarge {
+                VStack(alignment: .leading, spacing: 8) {
+                    headerText
+                    headerControls
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    headerText
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer()
+                    headerControls
+                }
             }
 
             HStack {
@@ -844,6 +864,10 @@ private struct SessionExerciseCardView: View {
 
 private struct SessionSetRowView: View {
     @Environment(\.loadUnit) private var unit
+    /// The layout of a set row is picked from the text size (and, for the one-line-or-two cases, the width), never from what a
+    /// row contains, so every row on a screen lays out the same way and logging a set never shifts the next one.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var isAccessibilityText: Bool { dynamicTypeSize.isAccessibilitySize }
     let uiSet: UISessionSet
     let repRange: RepRange
     /// A row past the planned set count: shown as an extra set, with no suggested load.
@@ -912,8 +936,7 @@ private struct SessionSetRowView: View {
                         ))
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: loadFieldWidth)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(width: loadFieldWidth)
                         .disabled(isLocked)
                         .opacity(isLocked ? 0.6 : 1.0)
                     }
@@ -931,7 +954,7 @@ private struct SessionSetRowView: View {
                     ))
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 52)
+                    .frame(width: repsFieldWidth)
                     .disabled(isLocked)
                     .opacity(isLocked ? 0.6 : 1.0)
                 }
@@ -949,12 +972,19 @@ private struct SessionSetRowView: View {
                 Text("How hard was it?")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 4) { simpleButtons }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 4) { simpleButtons(range: 0..<2) }
-                        HStack(spacing: 4) { simpleButtons(range: 2..<4) }
+                Group {
+                if isAccessibilityText {
+                    VStack(alignment: .leading, spacing: 4) { simpleButtons }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 4) { simpleButtons }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) { simpleButtons(range: 0..<2) }
+                            HStack(spacing: 4) { simpleButtons(range: 2..<4) }
+                        }
+                        VStack(alignment: .leading, spacing: 4) { simpleButtons }
                     }
+                }
                 }
                 .opacity(isLocked ? 0.6 : 1.0)
             }
@@ -1005,7 +1035,7 @@ private struct SessionSetRowView: View {
                                 } label: {
                                     Text("\(value)")
                                         .font(.callout.weight(.semibold))
-                                        .frame(width: chipSize, height: chipSize)
+                                        .frame(width: min(chipSize, 52), height: min(chipSize, 52))
                                         .background(selected ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
                                         .foregroundStyle(selected ? Color.white : Color.primary)
                                 }
@@ -1044,9 +1074,16 @@ private struct SessionSetRowView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    @ViewBuilder private var actionBar: some View {
+    /// Log / Pump / Skip (or Save / Cancel): one line when it fits, one under another when it does not. `AnyLayout` swaps the
+    /// container, so the SAME buttons stack (wrapping the whole HStack in a VStack never did).
+    private func actionLayout(_ stacked: Bool) -> AnyLayout {
+        stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
+    }
+
+    @ViewBuilder private func actionBar(stacked: Bool) -> some View {
+        let layout = actionLayout(stacked)
                 if uiSet.isEditing {
-                    HStack(spacing: 16) {
+                    layout {
                         Button("Save") { onEditSave() }
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -1059,7 +1096,7 @@ private struct SessionSetRowView: View {
                             .buttonStyle(.plain)
                     }
                 } else {
-                HStack(spacing: 16) {
+                layout {
                     Button(action: {
                         guard !isLocked else { return }
                         onLog()
@@ -1173,6 +1210,37 @@ private struct SessionSetRowView: View {
 
 
 
+    private var restPauseToggle: some View {
+        HStack(spacing: 6) {
+            Toggle("", isOn: Binding(get: { uiSet.usedRestPause }, set: { onRPToggled($0) }))
+                .labelsHidden()
+                .scaleEffect(0.85)
+            Text("Rest-pause")
+                .font(.caption2)
+                .foregroundStyle(uiSet.usedRestPause ? Color.primary : Color.secondary)
+        }
+    }
+
+    private var dropSetToggle: some View {
+        HStack(spacing: 6) {
+            Toggle("", isOn: Binding(get: { uiSet.usedDropSet }, set: { onDropSetToggled($0) }))
+                .labelsHidden()
+                .scaleEffect(0.85)
+            Text("Drop set")
+                .font(.caption2)
+                .foregroundStyle(uiSet.usedDropSet ? Color.primary : Color.secondary)
+        }
+    }
+
+    @ViewBuilder private func intensifierToggles(stacked: Bool) -> some View {
+        if stacked {
+            VStack(alignment: .leading, spacing: 6) { restPauseToggle; dropSetToggle }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 20) { restPauseToggle; dropSetToggle; Spacer() }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
 
@@ -1225,7 +1293,8 @@ private struct SessionSetRowView: View {
                         .opacity(0)
                         .accessibilityHidden(true)
                 }
-            }
+            }            // Set label and status chip are small chrome: capped at XXXL so the chip can never push the row wider than the card.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
             // PLAN / SUGGESTED line
             Text(isExtraSet
@@ -1237,11 +1306,21 @@ private struct SessionSetRowView: View {
                 .minimumScaleFactor(0.8)
 
             // ACTUAL inputs row: the three inputs get the whole width; at the largest text sizes RIR drops under Load/Reps.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField; Spacer(minLength: 0) }
+            // Every input has a fixed (Dynamic-Type-scaled) width, so which layout fits depends only on the text size and the
+            // screen width, never on a row's contents: all rows on a screen pick the same one.
+            if isAccessibilityText {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .bottom, spacing: 8) { loadField; repsField; Spacer(minLength: 0) }
+                    loadField
+                    repsField
                     rirField
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom, spacing: 8) { loadField; repsField; rirField; Spacer(minLength: 0) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .bottom, spacing: 8) { loadField; repsField; Spacer(minLength: 0) }
+                        rirField
+                    }
                 }
             }
 
@@ -1249,38 +1328,27 @@ private struct SessionSetRowView: View {
 
             // Log / Skip / Pump / Edit live on their own line UNDER the inputs, so no label is squeezed into a narrow column.
             // Labels never wrap mid-word (fixedSize); if the line cannot fit, the actions stack vertically instead.
-            ViewThatFits(in: .horizontal) {
-                actionBar
-                VStack(alignment: .leading, spacing: 8) { actionBar }
+            if isAccessibilityText {
+                actionBar(stacked: true)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    actionBar(stacked: false)
+                    actionBar(stacked: true)
+                }
             }
 
             // Intensifier toggles row. When the set is logged it is hidden but KEEPS ITS SPACE, so logging a set never moves
             // the rows below it (the next set's Log button stays where the thumb is).
             do {
-                HStack(spacing: 20) {
-                    HStack(spacing: 6) {
-                        Toggle("", isOn: Binding(
-                            get: { uiSet.usedRestPause },
-                            set: { onRPToggled($0) }
-                        ))
-                        .labelsHidden()
-                        .scaleEffect(0.85)
-                        Text("Rest-pause")
-                            .font(.caption2)
-                            .foregroundStyle(uiSet.usedRestPause ? Color.primary : Color.secondary)
+                Group {
+                    if isAccessibilityText {
+                        intensifierToggles(stacked: true)
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            intensifierToggles(stacked: false)
+                            intensifierToggles(stacked: true)
+                        }
                     }
-                    HStack(spacing: 6) {
-                        Toggle("", isOn: Binding(
-                            get: { uiSet.usedDropSet },
-                            set: { onDropSetToggled($0) }
-                        ))
-                        .labelsHidden()
-                        .scaleEffect(0.85)
-                        Text("Drop set")
-                            .font(.caption2)
-                            .foregroundStyle(uiSet.usedDropSet ? Color.primary : Color.secondary)
-                    }
-                    Spacer()
                 }
                 .padding(.top, 2)
                 .opacity(isLocked ? 0 : 1)
