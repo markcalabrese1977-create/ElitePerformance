@@ -1869,6 +1869,76 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
     }
 }
 
+// MARK: - Dry run: what the lifter-level rule changes on a real backup (report only)
+
+@MainActor
+final class LifterLevelDiffReportTests: XCTestCase {
+    /// Old = the rule before 1.4 (28) (ratings always read); new = shipped. Two places read ratings: the progression decision and the startup
+    /// refresh (cross-letter estimate, hold from a high-rep set). Both are listed, with the reason the engine gives.
+    func test_report_everyChangeTheLifterLevelRuleMakes() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_LL_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_LL_BACKUPS (comma-separated); optional TEST_RUNNER_EP_LL_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("LLD| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_LL_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        defer { EffortTracking.clearMirror() }
+        EffortTracking.mode = .detailed
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        let old = CoachingPolicy(uninformativeRule: .off)
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let custom = (try? ctx.fetch(FetchDescriptor<CustomExercise>())) ?? []
+            let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)")
+            // 1. Progression decisions on every completed compound item.
+            var checked = 0, changed = 0
+            for s in all where s.status == .completed && s.meso?.isMaintenance != true {
+                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                    let working = CoachingEngine.workingSetIndices(for: i)
+                    guard !working.isEmpty else { continue }
+                    checked += 1
+                    let un = CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: all, policy: .shipped)
+                    let a = CoachingEngine.recommend(for: i, profile: profile, policy: old)
+                    let b = CoachingEngine.recommend(for: i, profile: profile, policy: .shipped, ratingsUninformative: un)
+                    guard (a?.nextSuggestedLoad, a?.nextTopLoad, a?.message ?? "") != (b?.nextSuggestedLoad, b?.nextTopLoad, b?.message ?? "") else { continue }
+                    changed += 1
+                    let base = working.map { i.actualLoads[$0] }.last ?? 0
+                    out("DECISION \(f.string(from: s.date)) \(s.dayLabel ?? "?") (\((i.waveRaw ?? "-").uppercased())) \(i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId)): done \(n(base)) x \(working.map { String(i.actualReps[$0]) }.joined(separator: ",")) RIR \(working.map { String(RIREntry.recorded(i, at: $0) ?? -1) }.joined(separator: ","))")
+                    out("    next load: \((a?.nextSuggestedLoad ?? a?.nextTopLoad).map { n($0) } ?? "-") -> \((b?.nextSuggestedLoad ?? b?.nextTopLoad).map { n($0) } ?? "-")")
+                    out("    was: \(a?.message ?? "-")")
+                    out("    now: \(b?.message ?? "-")")
+                }
+            }
+            out("-- decisions: \(changed) of \(checked) completed compound items change")
+            // 2. The startup refresh (read-only plan), at the backup's own export time.
+            let now = FixtureClock.exportedAt(path) ?? Date()
+            func plan(_ policy: CoachingPolicy) -> [String: PlaceholderRefresh.Change] {
+                var c = PlaceholderRefresh.Context(profile: profile, customExercises: custom); c.policy = policy
+                var d: [String: PlaceholderRefresh.Change] = [:]
+                for ch in PlaceholderRefresh.plan(sessions: all, ctx: c, now: now) where !ch.noteOnly { d[ch.item.id?.uuidString ?? "\(ch.item.persistentModelID)"] = ch }
+                return d
+            }
+            let before = plan(old), after = plan(.shipped)
+            var rchanged = 0
+            for k in Set(before.keys).union(after.keys).sorted() {
+                let a = before[k], b = after[k]
+                guard a?.newLoad != b?.newLoad || a?.reason.text != b?.reason.text else { continue }
+                rchanged += 1
+                let ch = (b ?? a)!
+                out("REFRESH  \(f.string(from: ch.session.date)) \(ch.session.dayLabel ?? "?") (\((ch.item.waveRaw ?? "-").uppercased())) \(ch.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: ch.item.exerciseId)): \(a.map { n($0.newLoad) } ?? "no write") -> \(b.map { n($0.newLoad) } ?? "no write")")
+                out("    was: \(a?.reason.text ?? "-")")
+                out("    now: \(b?.reason.text ?? "-")")
+            }
+            out("-- refresh: \(rchanged) of \(Set(before.keys).union(after.keys).count) planned writes change")
+        }
+    }
+}
+
 // MARK: - Dry run: the next-meso preview, old single 95% against the verdict-gated start (report only)
 
 @MainActor
