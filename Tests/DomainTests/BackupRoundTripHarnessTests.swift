@@ -2102,3 +2102,330 @@ final class CoachingPolicyTests: XCTestCase {
         XCTAssertEqual(offenders, [])
     }
 }
+
+// MARK: - Lifter simulation (report-only; test target only)
+//
+// A model lifter trains a full block of a template through the REAL CoachingEngine / PlanMemoryEngine / PlaceholderRefresh, then starts the
+// next meso through the real next-meso planner (4.4). Everything random is a pure function of (template, lifter, exercise, session, set), so the
+// same lifter meets the same noise under every profile and every rule variant. Writes one JSON line per run to TEST_RUNNER_EP_SIM_OUT.
+
+enum SimRNG {
+    static func mix(_ x: UInt64) -> UInt64 {
+        var z = x &+ 0x9E37_79B9_7F4A_7C15
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+    static func key(_ parts: [UInt64]) -> UInt64 { parts.reduce(UInt64(0x51_7CC1)) { mix($0 ^ mix($1)) } }
+    static func unit(_ parts: [UInt64]) -> Double { Double(key(parts) >> 11) / Double(UInt64(1) << 53) }
+    static func normal(_ parts: [UInt64]) -> Double {
+        let u1 = max(unit(parts + [1]), 1e-12), u2 = unit(parts + [2])
+        return (-2 * log(u1)).squareRoot() * cos(2 * Double.pi * u2)
+    }
+    static func hash(_ s: String) -> UInt64 { s.utf8.reduce(UInt64(0xcbf2_9ce4_8422_2325)) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 } }
+}
+
+struct SimProfile {
+    let name: String
+    let bias: Double, sd: Double
+    let allZero: Bool, effortOff: Bool
+    static let all: [SimProfile] = [
+        SimProfile(name: "accurate", bias: 0, sd: 0.5, allZero: false, effortOff: false),
+        SimProfile(name: "typical", bias: 1, sd: 1, allZero: false, effortOff: false),
+        SimProfile(name: "all-zero", bias: 0, sd: 0, allZero: true, effortOff: false),
+        SimProfile(name: "effort-off", bias: 0, sd: 0, allZero: false, effortOff: true),
+    ]
+}
+
+struct SimVariant {
+    let name: String
+    let policy: CoachingPolicy
+    static let all: [SimVariant] = [
+        SimVariant(name: "shipped", policy: .shipped),
+        SimVariant(name: "valve-total", policy: CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne)),
+        SimVariant(name: "count-first3", policy: CoachingPolicy(countCap: .firstThree)),
+        SimVariant(name: "rir-tol1", policy: CoachingPolicy(rirTolerance: .oneRIRPerSet)),
+    ]
+}
+
+struct SimTemplate {
+    let name: String
+    let days: Int
+    let weekdays: [Int]
+    let to12Weeks: Bool
+    static let all: [SimTemplate] = [
+        SimTemplate(name: "dup12", days: 6, weekdays: [2, 3, 4, 6, 7, 1], to12Weeks: true),
+        SimTemplate(name: "ul5", days: 5, weekdays: [2, 3, 4, 5, 6], to12Weeks: false),
+    ]
+}
+
+/// The fitted lifter constants (see the report): session noise and the within-session drop per set at the same load.
+enum SimModel {
+    static let sessionNoiseSD = 0.0395      // log e1RM, per exercise-session (median of per-exercise residual SD on the backup)
+    static let setDropPerSet = 0.003        // fraction of e1RM lost per set at the same load (reps lost vs set 1: 0.09, 0.38 at sets 2, 3)
+    static let gainRange = (0.0025, 0.01)   // weekly gain, uniform
+    static let minLoadStep = 5.0
+}
+
+@MainActor
+final class LifterSimulationTests: XCTestCase {
+
+    // MARK: results
+
+    struct Acc: Codable {
+        var track_n = 0, track_sum = 0.0, track_sumsq = 0.0, fp_n = 0
+        var q_n = [0, 0, 0, 0], q_sum = [0.0, 0.0, 0.0, 0.0], q_fp = [0, 0, 0, 0]
+        var decisions = 0, increases = 0, lowers = 0
+        var holds = 0, hold_rirAdj = 0, hold_repsShort = 0, hold_other = 0
+        var valve = 0
+        var h2i_n = 0, h2i_sum = 0, h2i_censored = 0
+        var final_n = 0, final_ratio = 0.0, final_vs_ideal = 0.0
+        var start_n = 0, start_vs_ideal = 0.0, start_fp = 0, start_e1_ratio = 0.0, start_ideal_ratio = 0.0
+        var failed: String? = nil
+        var seconds = 0.0
+    }
+    struct Line: Codable { var template: String, profile: String, variant: String, lifter: Int, acc: Acc }
+
+    // MARK: lifter
+
+    struct Lifter {
+        let t: UInt64, n: UInt64
+        func e0(_ ex: String, compound: Bool) -> Double {
+            let base = compound ? 110 + 140 * SimRNG.unit([SimRNG.hash(ex), 77]) : 30 + 40 * SimRNG.unit([SimRNG.hash(ex), 78])
+            return base * exp(0.25 * SimRNG.normal([t, n, SimRNG.hash(ex), 1]))
+        }
+        func gain(_ ex: String) -> Double { SimModel.gainRange.0 + (SimModel.gainRange.1 - SimModel.gainRange.0) * SimRNG.unit([t, n, SimRNG.hash(ex), 2]) }
+        /// True e1RM of the lifter on this exercise `days` after the block started, on session number `sessionIdx`.
+        func e1(_ ex: String, compound: Bool, days: Double, sessionIdx: Int) -> Double {
+            let trend = e0(ex, compound: compound) * pow(1 + gain(ex), days / 7)
+            return trend * exp(SimModel.sessionNoiseSD * SimRNG.normal([t, n, SimRNG.hash(ex), 3, UInt64(sessionIdx)]))
+        }
+        /// The smooth strength (no session noise), for end-of-block comparisons.
+        func trend(_ ex: String, compound: Bool, days: Double) -> Double { e0(ex, compound: compound) * pow(1 + gain(ex), days / 7) }
+    }
+
+    static func idealLoad(e1: Double, reps: Int, rir: Int) -> Double { e1 / (1 + Double(reps + rir) / 30) }
+    static func roundDown(_ x: Double, step: Double) -> Double { max(step, (x / step).rounded(.down) * step) }
+
+    // MARK: one lifter, one block, one next-meso start
+
+    func run(template: SimTemplate, lifterIndex: Int, profile: SimProfile, variant: SimVariant, realNow: Date) throws -> Acc {
+        var acc = Acc()
+        let began = Date()
+        let lifter = Lifter(t: SimRNG.hash(template.name), n: UInt64(lifterIndex))
+        EffortTracking.mode = profile.effortOff ? .off : .detailed
+        defer { EffortTracking.clearMirror() }
+
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let ctx = ModelContext(container); ctx.autosaveEnabled = false
+        let cal = Calendar.current
+        let start = cal.nextDate(after: cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: realNow))!, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime)!   // a Monday
+        let result = OnboardingResult(goal: .hypertrophy, experience: .intermediate, daysPerWeek: template.days, trainingDaysOfWeek: template.weekdays,
+                                      equipmentProfile: .commercial, sessionLengthMinutes: nil, injuryFlags: [], minLoadIncrement: SimModel.minLoadStep, startDate: start)
+        guard case .success = ProgramApplicationService.apply(result, context: ctx, startDate: start) else { acc.failed = "apply"; return acc }
+        try ctx.save()
+        guard var block = try ctx.fetch(FetchDescriptor<MesoBlock>()).first(where: { $0.status == .active }) else { acc.failed = "no block"; return acc }
+        if template.to12Weeks {
+            do { try DUPMesoLengthConversion.apply(block: block, context: ctx) } catch { acc.failed = "convert: \(error)"; return acc }
+            try ctx.save()
+            block = try ctx.fetch(FetchDescriptor<MesoBlock>()).first(where: { $0.status == .active }) ?? block
+        }
+        let engine = PlanMemoryEngine(context: ctx, policy: variant.policy)
+
+        // The sim's own clock: the ORIGINAL date of each session (the store's dates are slid to keep "today" meaningful, see `slide`).
+        var simDate: [PersistentIdentifier: Date] = [:]
+        for s in block.sessions { simDate[s.persistentModelID] = s.date }
+        guard let blockStart = block.sessions.map({ simDate[$0.persistentModelID]! }).min() else { acc.failed = "no sessions"; return acc }
+        func days(_ d: Date) -> Double { d.timeIntervalSince(blockStart) / 86400 }
+
+        /// The engine reads "today" from the real clock (history is sessions BEFORE today), so after each session the whole store slides in
+        /// time until that session sits yesterday. Spacing, weekdays-of-the-pattern and every ordering are preserved; the sim's own clock
+        /// (`simDate`, the original dates) is what the lifter's strength follows.
+        func slide(finished session: Session) {
+            let target = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: realNow))!
+            let delta = cal.dateComponents([.day], from: cal.startOfDay(for: session.date), to: target).day ?? 0
+            guard delta != 0 else { return }
+            func moved(_ d: Date) -> Date { cal.date(byAdding: .day, value: delta, to: d) ?? d }
+            for s in (try? ctx.fetch(FetchDescriptor<Session>())) ?? [] {
+                s.date = moved(s.date); s.plannedDate = s.plannedDate.map(moved); s.completedAt = s.completedAt.map(moved); s.startedAt = s.startedAt.map(moved)
+            }
+            for m in (try? ctx.fetch(FetchDescriptor<MesoBlock>())) ?? [] { m.startDate = moved(m.startDate) }
+        }
+
+        var chains: [String: [String]] = [:]       // exerciseId|letter -> decision kinds in order
+        var sessionIdx = 0
+        let loadStepFor: (String) -> Double = { _ in SimModel.minLoadStep }
+
+        while let session = block.sessions.filter({ $0.status != .completed }).sorted(by: { $0.date < $1.date }).first {
+            sessionIdx += 1
+            let sd = simDate[session.persistentModelID] ?? session.date
+            let d = days(sd)
+            for item in session.items.sorted(by: { $0.order < $1.order }) {
+                let rows = max(1, item.targetSets)
+                item.actualReps = Array(repeating: 0, count: rows); item.actualLoads = Array(repeating: 0, count: rows)
+                item.actualRIRs = RIREntry.unsetArray(count: rows)
+                item.usedRestPauseFlags = Array(repeating: false, count: rows); item.restPausePatternsBySet = Array(repeating: "", count: rows)
+                item.dropSetPatternsBySet = Array(repeating: "", count: rows); item.setFeedbackBySet = Array(repeating: "", count: rows)
+                item.pumpRatingsBySet = Array(repeating: 0, count: rows)
+                item.isCompleted = true
+                if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId) { continue }
+                let compound = RIREntry.isCompound(item.exerciseId)
+                let repMin = item.repMin ?? item.targetReps, repMax = item.repMax ?? item.targetReps, t = item.targetRIR
+                let e1s = lifter.e1(item.exerciseId, compound: compound, days: d, sessionIdx: sessionIdx)
+                let isDeload = item.waveRaw?.lowercased() == "deload"
+                let ideal = Self.idealLoad(e1: e1s, reps: repMax, rir: t)
+                let capMin = Self.idealLoad(e1: e1s, reps: repMin, rir: t)
+                func planned(_ k: Int) -> Double {
+                    if item.plannedLoadsBySet.indices.contains(k), item.plannedLoadsBySet[k] > 0 { return item.plannedLoadsBySet[k] }
+                    return item.suggestedLoad
+                }
+                let hadPlan = planned(0) > 0
+                // tracking (compound, non-deload, a planned load existed)
+                if compound, !isDeload, hadPlan {
+                    let err = planned(0) / ideal - 1
+                    acc.track_n += 1; acc.track_sum += err; acc.track_sumsq += err * err
+                    let fp = planned(0) > capMin + 1e-9
+                    if fp { acc.fp_n += 1 }
+                    let q = min(3, Int((d / 7) / (12.0 / 4.0)))
+                    acc.q_n[q] += 1; acc.q_sum[q] += err; if fp { acc.q_fp[q] += 1 }
+                }
+                for k in 0..<rows {
+                    var load = planned(k)
+                    if load <= 0 { load = Self.roundDown(ideal * 0.92, step: loadStepFor(item.exerciseId)) }   // first exposure: the lifter picks a cautious load
+                    let e1set = e1s * (1 - SimModel.setDropPerSet * Double(k))
+                    let capacity = max(0, Int((30 * (e1set / load - 1)).rounded(.down)))
+                    var reps = 0
+                    if capacity >= 1 { reps = min(repMax, max(1, capacity - t)) }
+                    let trueRIR = max(0, capacity - reps)
+                    item.actualReps[k] = reps; item.actualLoads[k] = load
+                    if profile.effortOff { RIREntry.setRecorded(item, at: k, to: RIREntry.unset) }
+                    else if profile.allZero { RIREntry.setRecorded(item, at: k, to: 0) }
+                    else {
+                        let z = SimRNG.normal([lifter.t, lifter.n, SimRNG.hash(item.exerciseId), 4, UInt64(sessionIdx), UInt64(k)])
+                        let rated = Int((Double(trueRIR) - profile.bias + profile.sd * z).rounded())
+                        RIREntry.setRecorded(item, at: k, to: min(4, max(0, rated)))
+                    }
+                }
+                // the decision this exposure produces (classified before carry-forward writes it)
+                if compound, !isDeload {
+                    let rec = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep)
+                    let base = CoachingEngine.heldLoad(for: item, policy: variant.policy) ?? 0
+                    var kind = "none"
+                    if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad, base > 0 {
+                        kind = next > base + 0.001 ? "inc" : (next < base - 0.001 ? "low" : "hold")
+                    }
+                    if kind != "none" {
+                        acc.decisions += 1
+                        switch kind {
+                        case "inc":
+                            acc.increases += 1
+                            if rec?.message.contains("Same reps again at about planned effort") == true { acc.valve += 1 }
+                        case "low": acc.lowers += 1
+                        default:
+                            acc.holds += 1
+                            if CoachingEngine.isRIRAdjustmentHold(item, policy: variant.policy) { acc.hold_rirAdj += 1 }
+                            else {
+                                let repsOnly = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep, ignoreEffort: true)
+                                let up = (repsOnly?.nextSuggestedLoad ?? repsOnly?.nextTopLoad ?? 0) > base + 0.001
+                                if up { acc.hold_other += 1 } else { acc.hold_repsShort += 1 }
+                            }
+                        }
+                        chains["\(item.exerciseId)|\(item.waveRaw ?? "-")", default: []].append(kind)
+                    }
+                }
+            }
+            session.status = .completed
+            session.completedAt = session.date
+            slide(finished: session)
+            try ctx.save()
+            engine.carryForwardPlans(from: session)
+            PlaceholderRefresh.afterCompletion(in: ctx, now: session.date.addingTimeInterval(3600))
+            try ctx.save()
+        }
+
+        // hold -> next increase (same lift, same letter)
+        for (_, kinds) in chains {
+            var i = 0
+            while i < kinds.count {
+                if kinds[i] == "hold" {
+                    var j = i + 1
+                    while j < kinds.count, kinds[j] != "inc" { j += 1 }
+                    if j < kinds.count { acc.h2i_n += 1; acc.h2i_sum += j - i } else { acc.h2i_censored += 1 }
+                    i = j
+                } else { i += 1 }
+            }
+        }
+
+        // final load vs true strength: the last non-deload exposure of each compound lift
+        let lastDay = days(block.sessions.compactMap { simDate[$0.persistentModelID] }.max() ?? blockStart)
+        var lastNonDeload: [String: (SessionItem, Double)] = [:]
+        for s in block.sessions.sorted(by: { $0.date < $1.date }) {
+            for it in s.items where RIREntry.isCompound(it.exerciseId) && it.waveRaw?.lowercased() != "deload" && !ExerciseCatalog.isBodyweight(exerciseId: it.exerciseId) {
+                lastNonDeload[it.exerciseId] = (it, days(simDate[s.persistentModelID] ?? s.date))
+            }
+        }
+        for (ex, pair) in lastNonDeload {
+            let (it, d) = pair
+            guard let load = it.actualLoads.first(where: { $0 > 0 }) else { continue }
+            let tr = lifter.trend(ex, compound: true, days: d)
+            let idealRatio = 1 / (1 + Double((it.repMax ?? it.targetReps) + it.targetRIR) / 30)
+            acc.final_n += 1; acc.final_ratio += load / tr; acc.final_vs_ideal += (load / tr) / idealRatio
+        }
+
+        // 4.4: the next meso's start, through the real planner
+        let nextNow = realNow
+        let plan = SessionItemEditService.planNextMeso(meso: block, name: "Next", startDate: nil, endOldMesoNow: false, context: ctx, now: nextNow)
+        if plan.isApplicable, (try? SessionItemEditService.startNextMeso(plan, in: ctx)) != nil {
+            let all = try ctx.fetch(FetchDescriptor<MesoBlock>())
+            if let next = all.first(where: { $0.status == .active && $0.persistentModelID != block.persistentModelID }) ?? all.first(where: { $0.persistentModelID != block.persistentModelID }) {
+                var seen = Set<String>()
+                let gap = 2.0   // days between the last session and the first of the next meso (as scheduled)
+                for s in next.sessions.sorted(by: { $0.date < $1.date }) {
+                    for it in s.items where RIREntry.isCompound(it.exerciseId) && !ExerciseCatalog.isBodyweight(exerciseId: it.exerciseId) && it.waveRaw?.lowercased() != "deload" {
+                        guard seen.insert(it.exerciseId).inserted else { continue }
+                        let load = it.plannedLoadsBySet.first(where: { $0 > 0 }) ?? it.suggestedLoad
+                        guard load > 0 else { continue }
+                        let tr = lifter.trend(it.exerciseId, compound: true, days: lastDay + gap)
+                        let repMax = it.repMax ?? it.targetReps, repMin = it.repMin ?? it.targetReps
+                        let ideal = Self.idealLoad(e1: tr, reps: repMax, rir: it.targetRIR)
+                        let capMin = Self.idealLoad(e1: tr, reps: repMin, rir: it.targetRIR)
+                        acc.start_n += 1; acc.start_vs_ideal += load / ideal - 1; acc.start_e1_ratio += load / tr
+                        acc.start_ideal_ratio += ideal / tr
+                        if load > capMin + 1e-9 { acc.start_fp += 1 }
+                    }
+                }
+            }
+        } else { acc.failed = (acc.failed ?? "") + "nextmeso:\(plan.refusals)" }
+        acc.seconds = Date().timeIntervalSince(began)
+        return acc
+    }
+
+    // MARK: driver
+
+    func test_simulate() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let out = env["EP_SIM_OUT"], !out.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_SIM_OUT (and optionally EP_SIM_LIFTERS, EP_SIM_SHARD, EP_SIM_SHARDS, EP_SIM_TEMPLATES, EP_SIM_PROFILES, EP_SIM_VARIANTS)") }
+        let lifters = Int(env["EP_SIM_LIFTERS"] ?? "") ?? 200
+        let shard = Int(env["EP_SIM_SHARD"] ?? "") ?? 0, shards = max(1, Int(env["EP_SIM_SHARDS"] ?? "") ?? 1)
+        func pick<T>(_ all: [T], _ key: String, _ name: (T) -> String) -> [T] {
+            guard let list = env[key], !list.isEmpty else { return all }
+            let want = Set(list.split(separator: ",").map(String.init)); return all.filter { want.contains(name($0)) }
+        }
+        let templates = pick(SimTemplate.all, "EP_SIM_TEMPLATES") { $0.name }
+        let profiles = pick(SimProfile.all, "EP_SIM_PROFILES") { $0.name }
+        let variants = pick(SimVariant.all, "EP_SIM_VARIANTS") { $0.name }
+        let realNow = Date()
+        var jobs: [(SimTemplate, SimProfile, SimVariant, Int)] = []
+        for n in 0..<lifters { for t in templates { for p in profiles { for v in variants { jobs.append((t, p, v, n)) } } } }   // lifters outermost: a partial run still covers every cell evenly
+        FileManager.default.createFile(atPath: out, contents: nil)
+        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: out))
+        defer { try? handle.close() }
+        let encoder = JSONEncoder()
+        for (i, job) in jobs.enumerated() where i % shards == shard {
+            let acc = try run(template: job.0, lifterIndex: job.3, profile: job.1, variant: job.2, realNow: realNow)
+            let line = Line(template: job.0.name, profile: job.1.name, variant: job.2.name, lifter: job.3, acc: acc)
+            handle.write(try encoder.encode(line)); handle.write(Data("\n".utf8))
+            print("SIM| \(job.0.name) \(job.1.name) \(job.2.name) #\(job.3) \(String(format: "%.1f", acc.seconds))s \(acc.failed ?? "ok")")
+        }
+    }
+}
