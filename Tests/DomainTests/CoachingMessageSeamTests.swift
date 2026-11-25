@@ -263,12 +263,12 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
 
     func test_2c_fourSetTarget_fourthFivePercentLower_noChange() {
         let r = rec(4, [8, 8, 8, 8], [100, 100, 100, 95], "2c")
-        XCTAssertEqual(r?.nextSuggestedLoad, 105.0, "below the 10% threshold: same outcome as the control")
+        XCTAssertEqual(r?.nextSuggestedLoad, 100.0, "the 4th set is a prescribed set and counts: every set at the top, steps from the last counted load (95)")
     }
 
     func test_2d_fourSetTarget_fourthFewerReps_noChange() {
         let r = rec(4, [8, 8, 8, 5], [100, 100, 100, 100], "2d")
-        XCTAssertEqual(r?.nextSuggestedLoad, 105.0, "4th-set reps are not primary: same outcome as the control")
+        XCTAssertEqual(r?.nextSuggestedLoad, 100.0, "4th-set reps count (29 of 32, needed 31): hold")
     }
 
     // targetSets = 3 plus one extra logged set
@@ -895,9 +895,9 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
     func test_4a_benchTopSetPattern_backOffsMidRange_holdsAtThirdBackOffLoad() {
         let r = CoachingEngine.recommend(for: benchTopSetItem(reps: [7, 7, 7, 5], loads: [290, 290, 290, 315]))
         XCTAssertEqual(r?.nextSuggestedLoad, 290, "baseLoad is the 3rd working set (a back-off), not the 315 top set")
-        XCTAssertTrue(r?.message.contains("21 reps on the first 3 sets (+1 more set: 5), needed 23 — hold") ?? false, r?.message ?? "nil")   // compound: RIR-adjusted total reps
-        // The 315 row is the 4th set, so it is not a primary set: it neither earns a bump nor
-        // appears in baseLoad. Primary reps (7,7,7) are below repMax 8, so the outcome is a hold.
+        XCTAssertTrue(r?.message.contains("21 reps on 3 prescribed sets (set 4 at 315 counted as a top set, not a working set), needed 23 — hold") ?? false, r?.message ?? "nil")   // compound: RIR-adjusted total reps
+        // The 315 row is one row heavier than three flat 290s: a top set, not a working set. It neither earns a bump nor
+        // appears in baseLoad. The counted reps (7,7,7) are below repMax 8, so the outcome is a hold.
     }
 
     /// 4b. Same, but the back-offs top the range.

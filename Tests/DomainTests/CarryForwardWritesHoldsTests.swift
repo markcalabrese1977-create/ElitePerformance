@@ -261,10 +261,11 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
         XCTAssertEqual(tgt.suggestedLoad, 317.5, accuracy: 0.001)
     }
 
-    func test_fourSetItem_withThreePrimarySetsLogged_stillWrites() throws {
+    /// Every prescribed set is evidence (no cap at 3): a 4-set item with 3 logged is incomplete and writes nothing.
+    func test_fourSetItem_withThreeSetsLogged_isIncompleteEvidence() throws {
         let tgt = target(sets: 4)
         try run(source(reps: [12, 12, 10], targetSets: 4), tgt)
-        XCTAssertEqual(tgt.suggestedLoad, 300, accuracy: 0.001)
+        XCTAssertEqual(tgt.suggestedLoad, 317.5, accuracy: 0.001)
     }
 
     func test_threeOfThreeSets_writes() throws {
@@ -310,9 +311,12 @@ final class CarryForwardWritesHoldsTests: XCTestCase {
     func test_primaryEvidenceHelper_matchesTheRule() {
         XCTAssertEqual(CoachingEngine.requiredPrimarySets(for: source(reps: [1], targetSets: 1)), 1)
         XCTAssertEqual(CoachingEngine.requiredPrimarySets(for: source(reps: [1], targetSets: 3)), 3)
-        XCTAssertEqual(CoachingEngine.requiredPrimarySets(for: source(reps: [1], targetSets: 5)), 3)
+        XCTAssertEqual(CoachingEngine.requiredPrimarySets(for: source(reps: [1], targetSets: 5)), 5, "every prescribed set")
         XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(source(reps: [12, 12], targetSets: 3)))
-        XCTAssertTrue(CoachingEngine.hasSufficientPrimaryEvidence(source(reps: [12, 12, 12], targetSets: 5)))
+        XCTAssertFalse(CoachingEngine.hasSufficientPrimaryEvidence(source(reps: [12, 12, 12], targetSets: 5)))
+        let added = source(reps: [12, 12, 12], targetSets: 5); added.prescribedSets = 3   // two sets the lifter added
+        XCTAssertEqual(CoachingEngine.requiredPrimarySets(for: added), 3)
+        XCTAssertTrue(CoachingEngine.hasSufficientPrimaryEvidence(added))
     }
 
     // MARK: - Message == stored value
