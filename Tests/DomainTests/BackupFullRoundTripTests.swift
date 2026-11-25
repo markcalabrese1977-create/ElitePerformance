@@ -4628,7 +4628,7 @@ final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
         }
         let deloadWrites = differing.filter { $0.value.wave == "DELOAD" }
         XCTAssertEqual(deloadWrites.count, 10, "week 10's deload items with a working load to size from (item 7)")
-        XCTAssertEqual(differing.count - noteOnly.count - deloadWrites.count, 12, "the rest are the hold / cross-day load writes")
+        XCTAssertEqual(differing.count - noteOnly.count - deloadWrites.count, 13, "the rest are the hold / cross-day load writes (13 since 1.4 (28): the lifter-level rule reads Angela's all-0 ratings as unset, which raises one cross-letter estimate, Nov 27 Bulgarian Split Squat 15 -> 17.5)")
         XCTAssertTrue(PlaceholderRefresh.plan(in: ctx).isEmpty, "a second pass changes nothing")
     }
 
@@ -4638,7 +4638,7 @@ final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
         let r = try launch122()
         let actual = try rows(try importStore(try path("EP_ANGELA_130")))
         let differing = r.rows.filter { actual[$0.key] != nil && actual[$0.key] != $0.value }
-        XCTAssertEqual(differing.count, 24, "every difference from the 1.3.0 backup is one of the writes pinned below: 14 hold / cross-day, 10 scheduled-deload")
+        XCTAssertEqual(differing.count, 25, "every difference from the 1.3.0 backup is one of the writes pinned below: 15 hold / cross-day (one of them, Nov 27 Bulgarian Split Squat 15 -> 17.5, only since 1.4 (28)), 10 scheduled-deload")
 
         // Scheduled deload week (week 10, Jan 22-28): DeloadRule from the Nov 20 Lower A working loads, min(RIR-4 sizing at repMin, 0.95 x working).
         let deload = r.rows.values.filter { $0.wave == "DELOAD" && $0.load != "0" }
