@@ -273,7 +273,6 @@ struct PlanMemoryEngine {
                 // this keeps the message correct for any future caller of it.
                 carryForwardTarget: .exists,
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
-                releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
@@ -296,7 +295,6 @@ struct PlanMemoryEngine {
                 lastKnownLoad: projection?.lastLoad,
                 carryForwardTarget: .exists,
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
-                releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
@@ -608,7 +606,6 @@ struct PlanMemoryEngine {
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
-                releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
@@ -698,7 +695,6 @@ struct PlanMemoryEngine {
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
-                releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(

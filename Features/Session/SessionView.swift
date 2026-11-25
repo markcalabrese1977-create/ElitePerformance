@@ -1612,11 +1612,14 @@ final class SessionScreenViewModel: ObservableObject {
                     let recUnit = recProfile?.loadUnit ?? .lb
                     let recLoadIncrement = UserProfile.loadStep(for: matchingItem.exerciseId, profile: recProfile, unit: recUnit)
                     let recCustomExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
+                    // The lifter-level "ratings not informative" mark, the same one the write-back reads, so the line and the plan agree.
+                    let recRatingsUninformative = CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessionsForRec, policy: .shipped)
                     let cleanCount = LoadProjectionService.consecutiveCleanCount(
                         exerciseId: matchingItem.exerciseId,
                         waveRaw: matchingItem.waveRaw,
                         repMin: matchingItem.repMin ?? matchingItem.targetReps,
-                        allSessions: allSessionsForRec
+                        allSessions: allSessionsForRec,
+                        ratingsUninformative: recRatingsUninformative
                     )
                     // Project the SAME next session the write-back writes to, so the
                     // message's floor/peak/lastKnownLoad come from the TARGET wave —
@@ -1652,7 +1655,8 @@ final class SessionScreenViewModel: ObservableObject {
                         loadIncrement: recLoadIncrement,
                         unit: recUnit,
                         bodyWeight: recProfile?.bodyWeight,
-                        customExercises: recCustomExercises
+                        customExercises: recCustomExercises,
+                        ratingsUninformative: recRatingsUninformative
                     )
                     if let recommendation = CoachingEngine.recommend(
                         for: matchingItem,
@@ -1665,6 +1669,7 @@ final class SessionScreenViewModel: ObservableObject {
                         lastKnownLoad: recProjection?.lastLoad,
                         carryForwardTarget: recCarryForwardTarget,
                         priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: matchingItem, in: session, allSessions: allSessionsForRec),
+                        ratingsUninformative: recRatingsUninformative,
                         isProgressionExempt: UserProfile.isProgressionExempt(
                             exerciseId: matchingItem.exerciseId,
                             profile: recProfile
@@ -2532,7 +2537,7 @@ final class SessionScreenViewModel: ObservableObject {
         )
     }
 
-    /// The recap's one-time effort note: only under the lifter-level rule, which the app does not use yet (shipped is off), so nil.
+    /// The recap's one-time effort note: only at the session where the lifter-level mark first holds (every compound rating in the last 2 sessions is 0).
     func lifterEffortNote(using context: ModelContext) -> String? {
         CoachingEngine.lifterNoteDue(asOf: session, allSessions: (try? context.fetch(FetchDescriptor<Session>())) ?? [], policy: .shipped)
     }
@@ -3255,7 +3260,7 @@ struct UISessionSet: Identifiable {
         let title: String
         let subtitle: String
         let exercises: [SessionRecapExercise]
-        /// The one-time lifter-level effort note (nil unless that rule is on, which the app never does yet).
+        /// The one-time lifter-level effort note (nil unless the lifter's ratings are all 0).
         var effortNote: String? = nil
         
         var exerciseCount: Int {

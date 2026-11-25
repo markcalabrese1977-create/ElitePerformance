@@ -25,7 +25,7 @@ def main():
     for a in args:
         name, g = a.split("=", 1); data[name] = agg(glob.glob(g))
     profiles = sorted({k[0] for d in data.values() for k in d[0]}, key=lambda p: ["accurate", "typical", "all-zero", "effort-off"].index(p))
-    variants = ["shipped", "valve-total", "repeat-top2", "top2-lifter", "count-first3", "rir-tol1"]
+    variants = ["shipped", "no-lifter-rule", "valve-total", "count-first3", "rir-tol1"]
     if weekly:
         print("| profile | " + " | ".join(f"wk{i+1}" for i in range(13)) + " |\n|---|" + "---|" * 13)
         for p in profiles:
