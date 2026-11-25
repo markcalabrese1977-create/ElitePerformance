@@ -660,7 +660,7 @@ private struct HistoryDayDetailView: View {
                         if !ex.sets.isEmpty {
                             VStack(alignment: .leading, spacing: 2) {
                                                             ForEach(ex.sets) { set in
-                                                                Text(set.lineText)
+                                                                EffortTracking.styledText(set.lineText)
                                                                     .font(.caption2)
                                                                     .foregroundStyle(set.displayColor)
                                                                     .strikethrough(set.isSkipped)

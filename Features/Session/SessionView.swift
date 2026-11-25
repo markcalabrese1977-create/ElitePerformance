@@ -627,9 +627,9 @@ private struct SessionExerciseCardView: View {
         let rirText: String? = {
             if let rir = exercise.sets.first(where: { $0.index == 1 })?.plannedRIR
                 ?? exercise.sets.first?.plannedRIR {
-                return EffortTracking.plannedText(rir)
+                return EffortTracking.aimText(rir)
             }
-            return EffortTracking.mode == .detailed ? "— RIR" : nil
+            return EffortTracking.mode == .detailed ? "aim: — RIR" : nil
         }()
 
         return EffortTracking.joined([weekText, muscleText, setsText, repsText, rirText])
@@ -667,7 +667,7 @@ private struct SessionExerciseCardView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(todayDetailLine)
+                EffortTracking.styledText(todayDetailLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -1314,6 +1314,7 @@ private struct SessionSetRowView: View {
                  ? UISessionSet.extraSetLabel(repRange: repRange, rir: uiSet.plannedRIR)
                  : "\(uiSet.isTop ? "TOP SET" : (uiSet.plannedLoad > 0 ? "SUGGESTED" : "PLAN")) \(uiSet.plannedDescription(with: repRange, isBodyweight: isBodyweightExercise))")
                 .font(.caption)
+                .italic()   // the plan reads differently from what was logged
                 .foregroundStyle(!isExtraSet && uiSet.plannedLoad > 0 ? Color.blue.opacity(0.8) : Color.secondary)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
@@ -1904,7 +1905,7 @@ final class SessionScreenViewModel: ObservableObject {
         let weekText = parts.indices.contains(0) ? parts[0] : "Week \(exercise.weekIndex)"
         let muscleText = parts.indices.contains(1) ? parts[1] : nil
         let repsText = "\(plannedReps) reps"
-        let rirText = EffortTracking.plannedText(plannedRIR)
+        let rirText = EffortTracking.aimText(plannedRIR)
         let setsText = "\(exercise.targetSets) sets"
 
         exercise.detail = EffortTracking.joined([weekText, muscleText, setsText, repsText, rirText])
@@ -2817,7 +2818,7 @@ extension SessionScreenViewModel {
 
             let setsText = "\(item.targetSets) sets"
             let repsText = "\(baseReps) reps"
-            let rirText = EffortTracking.plannedText(baseRIR)
+            let rirText = EffortTracking.aimText(baseRIR)
 
             detail = EffortTracking.joined(["Week \(session.weekIndex)", catalogExercise?.primaryMuscle.rawValue.capitalized, setsText, repsText, rirText])
 
@@ -2965,9 +2966,9 @@ struct UISessionExercise: Identifiable {
 
     /// The planned effort as text for the current mode: "2–3 RIR" (Detailed), "Easy–Solid" (Simple), nil (Off).
     var rirText: String? {
-        if let min = targetRIRMin, let max = targetRIRMax { return EffortTracking.plannedRangeText(min, max) }
-        if let first = sets.first, let rir = first.plannedRIR { return EffortTracking.plannedText(rir) }
-        return EffortTracking.mode == .detailed ? "—" : nil
+        if let min = targetRIRMin, let max = targetRIRMax { return EffortTracking.aimRangeText(min, max) }
+        if let first = sets.first, let rir = first.plannedRIR { return EffortTracking.aimText(rir) }
+        return EffortTracking.mode == .detailed ? "aim: —" : nil
     }
 
     var prescriptionDetailLine: String {
@@ -3210,14 +3211,11 @@ struct UISessionSet: Identifiable {
             return "—"
         }
         
+        let base = "\(LoadFormatter(unit: unit).number(plannedLoad)) × \(plannedReps)"
         if let plannedRIR, EffortTracking.mode != .off {
-            return String(format: "%.1f × %d", plannedLoad, plannedReps) + EffortTracking.plannedSuffix(plannedRIR)
+            return base + EffortTracking.plannedSuffix(plannedRIR)
         } else {
-            return String(
-                format: "%.1f × %d",
-                plannedLoad,
-                plannedReps
-            )
+            return base
         }
     }
     /// "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR": the line for the spare row past the planned set count (no load).

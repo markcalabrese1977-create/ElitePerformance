@@ -61,6 +61,9 @@ struct TodayTabView: View {
     @Query(sort: \Session.date, order: .forward) private var sessions: [Session]
 
     @State private var showRestToday = false
+    // A session missed in the last two days: Do today / Move / Skip.
+    @State private var placing: OverdueRequest?
+    @State private var skipping: Session?
     // Shown once, when the lifter never chose an effort mode and every RIR they recorded is 0.
     @State private var showEffortPrompt = false
     @State private var effortPromptShown = false
@@ -121,6 +124,8 @@ struct TodayTabView: View {
         })
     }
 
+    private var recentlyMissed: [Session] { SessionItemEditService.recentlyMissed(in: sessions) }
+
     /// True when today has a planned (not started) session that can be pushed.
     private var canRestToday: Bool {
         guard let session = todaySession else { return false }
@@ -168,6 +173,14 @@ struct TodayTabView: View {
                     }
                 }
 
+                if !recentlyMissed.isEmpty {
+                    Section(header: Text("Missed")) {
+                        ForEach(recentlyMissed) { session in
+                            OverdueSessionCard(session: session, onPlace: { placing = $0 }, onSkip: { skipping = $0 })
+                        }
+                    }
+                }
+
                 Section {
                     headerCard
                 }
@@ -202,6 +215,18 @@ struct TodayTabView: View {
                 if let meso = todaySession?.meso {
                     RestTodayFlow(meso: meso, onFinish: { showRestToday = false })
                 }
+            }
+            .sheet(item: $placing) { request in
+                OverdueMoveFlow(request: request, onFinish: { placing = nil })
+            }
+            .alert("Skip this session?", isPresented: Binding(get: { skipping != nil }, set: { if !$0 { skipping = nil } })) {
+                Button("Skip", role: .destructive) {
+                    if let s = skipping { try? SessionItemEditService.skip(s, in: context) }
+                    skipping = nil
+                }
+                Button("Cancel", role: .cancel) { skipping = nil }
+            } message: {
+                Text("It stays in your history as missed, and still counts toward the missed-session check.")
             }
         }
     }
@@ -447,5 +472,189 @@ struct SessionSummaryRow: View {
         case .inProgress: return .blue
         case .completed:  return .green
         }
+    }
+}
+
+// MARK: - Overdue (missed) planned sessions
+
+/// What the lifter asked to do with a missed session; opens `OverdueMoveFlow`.
+struct OverdueRequest: Identifiable {
+    let session: Session
+    let toToday: Bool
+    var id: PersistentIdentifier { session.persistentModelID }
+}
+
+/// Text for the overdue surfaces. Pure, so the tests read the same strings the screens show.
+enum OverdueText {
+    static func weekday(_ d: Date) -> String { d.formatted(.dateTime.weekday(.abbreviated)) }
+    static func day(_ d: Date) -> String { d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
+
+    /// "Missed Tue" (Today card) - the W#D# label rides along as the subtitle.
+    static func title(_ s: Session) -> String { "Missed \(weekday(s.date))" }
+    static func subtitle(_ s: Session) -> String { "\(s.dayLabel ?? "Session") · \(s.weekDayLabel)" }
+    static let prompt = "Do today, move, or skip"
+    static func rowTitle(_ s: Session) -> String { "\(day(s.date)) · \(s.dayLabel ?? "Session") · \(s.weekDayLabel)" }
+    static func missedRow(_ n: Int) -> String { "Missed (\(n))" }
+    static let footer = "Only dates change: loads, weeks, exercises and logged work stay as they are, and the W#D# label stays with the session. A skipped session still counts as missed."
+
+    static func moveLines(_ plan: SessionItemEditService.PlaceOverduePlan) -> [String] {
+        var lines = ["\(plan.session.dayLabel ?? "Session")  \(day(plan.oldDate)) -> \(day(plan.newDate))"]
+        func line(_ m: SessionItemEditService.ShiftedSession) -> String { "\(m.session.dayLabel ?? "Session")  \(day(m.oldDate)) -> \(day(m.newDate))" }
+        // A long push (every later session moves a day) is summarised: the first two, then a count and where the last one lands.
+        if plan.moves.count <= 3 { return lines + plan.moves.map(line) }
+        lines += plan.moves.prefix(2).map(line)
+        if let last = plan.moves.last {
+            lines.append("and \(plan.moves.count - 2) more, each one day later (the last, \(last.session.dayLabel ?? "Session"), lands \(day(last.newDate)))")
+        }
+        return lines
+    }
+
+    static func refusalText(_ refusal: SessionItemEditService.PlaceRefusal) -> String {
+        switch refusal {
+        case .notOverdue: return "This session is no longer waiting to be done."
+        case .sessionInProgress: return "A session in this block is in progress. Finish it, then try again."
+        case .targetInPast: return "Pick today or a later day."
+        case .unsafeSession: return "A session that would move already has logged work."
+        case .dateCollision: return "That day is already taken by another session."
+        }
+    }
+
+    static func errorText(_ error: SessionItemEditService.PlaceError) -> String {
+        switch error {
+        case .refused(let r): return refusalText(r) + " Nothing was changed."
+        case .planStale: return "The schedule changed since the preview. Nothing was changed - review the updated preview."
+        case .verificationFailed: return "The change would alter this lift's history order, so nothing was written."
+        case .saveFailed: return "The change couldn't be saved, so nothing was written."
+        }
+    }
+}
+
+/// Three ways out of a missed session. Compact enough for a 375-pt screen: the buttons wrap under each other when they do not fit.
+struct OverdueActions: View {
+    let session: Session
+    let onPlace: (OverdueRequest) -> Void
+    let onSkip: (Session) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { buttons }
+            VStack(alignment: .leading, spacing: 8) { buttons }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    @ViewBuilder private var buttons: some View {
+        Button("Do today") { onPlace(OverdueRequest(session: session, toToday: true)) }
+            .buttonStyle(.borderedProminent)
+        Button("Move") { onPlace(OverdueRequest(session: session, toToday: false)) }
+        Button("Skip", role: .destructive) { onSkip(session) }
+    }
+}
+
+/// The card on Today for a session missed in the last two days.
+struct OverdueSessionCard: View {
+    let session: Session
+    let onPlace: (OverdueRequest) -> Void
+    let onSkip: (Session) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(OverdueText.title(session))
+                .font(.caption).fontWeight(.semibold).foregroundStyle(.orange)
+            Text(OverdueText.subtitle(session))
+                .font(.headline)
+            Text(OverdueText.prompt)
+                .font(.subheadline).foregroundStyle(.secondary)
+            OverdueActions(session: session, onPlace: onPlace, onSkip: onSkip)
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("overdueCard")
+    }
+}
+
+/// Preview and confirm for Do today / Move: the same shape as the Rest-today screen.
+struct OverdueMoveFlow: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let request: OverdueRequest
+    let onFinish: () -> Void
+
+    @State private var date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var errorMessage: String?
+
+    private var target: Date { request.toToday ? Date() : date }
+
+    var body: some View {
+        let plan = SessionItemEditService.planPlaceOverdue(request.session, on: target, context: modelContext)
+        NavigationStack {
+            Form {
+                if !request.toToday {
+                    Section {
+                        DatePicker("Move to", selection: $date, in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
+                    }
+                }
+                if let refusal = plan.refusal {
+                    Section { Text(OverdueText.refusalText(refusal)).foregroundStyle(.secondary) }
+                } else {
+                    Section {
+                        ForEach(Array(OverdueText.moveLines(plan).enumerated()), id: \.offset) { _, l in Text(l) }
+                    } header: {
+                        Text(request.toToday ? "Do it today" : "Move it")
+                    } footer: {
+                        Text(OverdueText.footer)
+                    }
+                    if !plan.warnings.isEmpty {
+                        Section("Heads up") {
+                            ForEach(Array(plan.warnings.enumerated()), id: \.offset) { _, w in
+                                if case .pastNextMesoStart(let d, let next) = w {
+                                    Text("A session lands on \(OverdueText.day(d)), on or after the next block's scheduled start (\(OverdueText.day(next))).")
+                                        .font(.callout).foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                    }
+                }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle(request.toToday ? "Do today" : "Move session")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onFinish) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(request.toToday ? "Do today" : "Move") {
+                        do {
+                            try SessionItemEditService.placeOverdue(plan, in: modelContext)
+                            onFinish()
+                        } catch let e as SessionItemEditService.PlaceError {
+                            errorMessage = OverdueText.errorText(e)
+                        } catch {
+                            errorMessage = "The change couldn't be saved, so nothing was written."
+                        }
+                    }
+                    .disabled(!plan.isApplicable)
+                }
+            }
+        }
+    }
+}
+
+/// The Program tab's collapsed row for sessions missed more than two days ago.
+struct MissedSessionsRow: View {
+    let sessions: [Session]
+    let onPlace: (OverdueRequest) -> Void
+    let onSkip: (Session) -> Void
+
+    var body: some View {
+        DisclosureGroup(OverdueText.missedRow(sessions.count)) {
+            ForEach(sessions) { s in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(OverdueText.rowTitle(s)).font(.subheadline)
+                    OverdueActions(session: s, onPlace: onPlace, onSkip: onSkip)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .accessibilityIdentifier("missedRow")
     }
 }

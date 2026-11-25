@@ -87,7 +87,7 @@ struct ExerciseSessionDetailView: View {
                 if s.isEmpty { return nil }
                 return EffortTracking.mode == .simple ? String(s.dropFirst(3)) : "RIR \(recorded)"
             }
-            return EffortTracking.mode == .off ? nil : "plan RIR \(item.targetRIR)"
+            return EffortTracking.aimText(item.targetRIR)
         }()
 
         HStack {
@@ -102,8 +102,10 @@ struct ExerciseSessionDetailView: View {
                     .fontWeight(.semibold)
 
                 if let effortLine {
+                    // A planned (aim) line is italic; a logged one is not.
                     Text(effortLine)
                         .font(.caption)
+                        .italic(effortLine.hasPrefix("aim:"))
                         .foregroundStyle(.secondary)
                 }
             }

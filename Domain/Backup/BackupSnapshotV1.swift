@@ -174,6 +174,8 @@ struct SessionBackupDTO: Codable {
     // Added with plannedDate (analytics foundation). Optional so OLD backups decode with nil.
     var plannedDate: Date? = nil
     var plannedDateExact: Bool? = nil
+    // Added with the overdue-session Skip action. Optional so OLD backups decode with nil (not skipped).
+    var skippedAt: Date? = nil
     // Added with the recap duration. Optional so OLD backups decode with nil.
     var startedAt: Date? = nil
 

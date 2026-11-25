@@ -16,24 +16,20 @@ struct LoadFormatter {
         }
     }
 
-    // The pre-kg call sites each had their own lb format; these keep each one's lb output EXACTLY, and show a kg lifter
-    // the same value trimmed to at most 2 decimals (a 1.25 kg step needs them).
+    // Every LOAD (a weight on the bar, as entered or planned) is shown exactly as entered through `number`: 145 is "145", 22.5 is "22.5",
+    // 22.25 is "22.25"; never rounded and never with a trailing ".0". The names below are kept so every call site reads the same as before;
+    // they all delegate to `number`. COMPUTED values (e1RM, averages, volume) use `whole`, `wholeGrouped` or one decimal instead.
 
-    /// lb: "%.1f" ("132.5", "135.0"). Edit-field text and messages that always showed one decimal.
-    func oneDecimal(_ storedLb: Double) -> String {
-        unit == .lb ? String(format: "%.1f", storedLb) : Self.trimmed(unit.fromStoredLb(storedLb), maxDecimals: 2)
-    }
+    /// A load as entered (was "%.1f" in lb: "145.0", and 22.25 became "22.3").
+    func oneDecimal(_ storedLb: Double) -> String { number(storedLb) }
 
-    /// lb: whole numbers without a decimal, else "%.1f" ("135", "132.5").
-    func compact(_ storedLb: Double) -> String {
-        guard unit == .lb else { return Self.trimmed(unit.fromStoredLb(storedLb), maxDecimals: 2) }
-        return storedLb == storedLb.rounded() ? String(Int(storedLb)) : String(format: "%.1f", storedLb)
-    }
+    /// A load as entered (was "%.1f" for non-whole lb loads, which rounded 22.25 to "22.3").
+    func compact(_ storedLb: Double) -> String { number(storedLb) }
 
-    /// lb: "0" for zero, else "%.1f".
+    /// "0" for zero, else the load as entered.
     func zeroOrOneDecimal(_ storedLb: Double) -> String {
         if storedLb == 0 { return "0" }
-        return oneDecimal(storedLb)
+        return number(storedLb)
     }
 
     /// lb: "%.0f" (rounds). Volumes, e1RMs and peaks, which are shown whole.
@@ -47,16 +43,11 @@ struct LoadFormatter {
     /// "11k kg" / "11k lb".
     func volumeKText(_ k: Int) -> String { "\(k)k \(unit.label)" }
 
-    /// A logged set's load in a list: lb keeps the whole-number format it always had; kg keeps its decimals (a 1.25 kg
-    /// step would otherwise read as the wrong whole number).
-    func setLoad(_ storedLb: Double) -> String {
-        unit == .lb ? whole(storedLb) : compact(storedLb)
-    }
+    /// A logged set's load in a list: as entered (it used to round lb to a whole number, so a logged 22.5 read "22").
+    func setLoad(_ storedLb: Double) -> String { number(storedLb) }
 
-    /// lb: `String(Int(x))` (truncates). kg: trimmed.
-    func truncated(_ storedLb: Double) -> String {
-        unit == .lb ? String(Int(storedLb)) : Self.trimmed(unit.fromStoredLb(storedLb), maxDecimals: 2)
-    }
+    /// A load as entered (it used to truncate lb, so 22.5 read "22").
+    func truncated(_ storedLb: Double) -> String { number(storedLb) }
 
     /// lb: `String(Int(v))` of a volume (lb·reps), truncating. kg: the volume converted, truncated.
     func volumeInt(_ storedVolume: Double) -> String { String(Int(unit.fromStoredLb(storedVolume))) }

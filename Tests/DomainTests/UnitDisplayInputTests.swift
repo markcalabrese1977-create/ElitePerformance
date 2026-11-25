@@ -13,12 +13,12 @@ final class UnitDisplayInputTests: XCTestCase {
     // MARK: Formatter styles
 
     func test_lbStylesAreTheOldFormats() {
-        XCTAssertEqual(L.oneDecimal(132.5), "132.5");  XCTAssertEqual(L.oneDecimal(135), "135.0")
+        XCTAssertEqual(L.oneDecimal(132.5), "132.5");  XCTAssertEqual(L.oneDecimal(135), "135", "no trailing .0")
         XCTAssertEqual(L.compact(135), "135");         XCTAssertEqual(L.compact(132.5), "132.5")
-        XCTAssertEqual(L.compact(132.55), "132.6")     // the old "%.1f" rounding, kept
-        XCTAssertEqual(L.zeroOrOneDecimal(0), "0");    XCTAssertEqual(L.zeroOrOneDecimal(100), "100.0")
+        XCTAssertEqual(L.compact(132.55), "132.55")    // loads are never rounded
+        XCTAssertEqual(L.zeroOrOneDecimal(0), "0");    XCTAssertEqual(L.zeroOrOneDecimal(100), "100")
         XCTAssertEqual(L.whole(132.6), "133");         XCTAssertEqual(L.whole(0), "0")
-        XCTAssertEqual(L.truncated(132.9), "132")
+        XCTAssertEqual(L.truncated(132.9), "132.9", "a load is never truncated")
         XCTAssertEqual(L.volumeInt(12345.9), "12345")
         XCTAssertEqual(L.number(135), "135");          XCTAssertEqual(L.text(132.5), "132.5 lb")
     }
@@ -29,7 +29,7 @@ final class UnitDisplayInputTests: XCTestCase {
         XCTAssertEqual(K.whole(lb(100)), "100");       XCTAssertEqual(K.truncated(lb(80)), "80")
         XCTAssertEqual(K.volumeInt(lb(1000)), "1000"); XCTAssertEqual(K.text(lb(60)), "60 kg")
         XCTAssertEqual(K.compact(102.5), "46.49")
-        XCTAssertEqual(L.setLoad(211.6), "212", "lb set rows stay whole")
+        XCTAssertEqual(L.setLoad(211.6), "211.6", "a logged load shows as entered")
         XCTAssertEqual(K.setLoad(lb(91.25)), "91.25", "kg set rows keep their decimals")
     }
 
@@ -62,7 +62,7 @@ final class UnitDisplayInputTests: XCTestCase {
     func test_coachMessage_lbUnchanged_kgInKg() throws {
         let lbRec = try XCTUnwrap(CoachingEngine.recommend(for: item(kg: false, load: 150, reps: [12, 12, 12]), minLoadIncrement: 5))
         XCTAssertEqual(lbRec.nextSuggestedLoad, 155)
-        XCTAssertTrue(lbRec.message.contains("155.0"), lbRec.message)
+        XCTAssertTrue(lbRec.message.contains("155") && !lbRec.message.contains("155.0"), lbRec.message)
         let kgRec = try XCTUnwrap(CoachingEngine.recommend(for: item(kg: true, load: 100, reps: [12, 12, 12]), minLoadIncrement: 2.5, unit: .kg))
         XCTAssertEqual(LoadUnit.kg.fromStoredLb(try XCTUnwrap(kgRec.nextSuggestedLoad)), 102.5, accuracy: 1e-6)
         XCTAssertTrue(kgRec.message.contains("102.5"), kgRec.message)
@@ -197,7 +197,7 @@ final class UnitDisplayInputTests: XCTestCase {
 
     func test_recapBestSetAndDrops() {
         let i = item(kg: false, load: 225, reps: [8, 6])
-        XCTAssertEqual(i.bestSetDescription, "225.0 x 8")
+        XCTAssertEqual(i.bestSetDescription, "225 x 8")
         let k = item(kg: true, load: 100, reps: [8, 6])
         XCTAssertEqual(k.bestSetDescription(unit: .kg), "100 x 8")
         k.dropSetPatternsBySet = [DropSetEntry(loadText: "80", repsText: "10").serialized(unit: .kg), ""]

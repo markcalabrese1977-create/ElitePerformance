@@ -206,3 +206,104 @@ final class LoadUnitTests: XCTestCase {
         return floored
     }
 }
+
+// MARK: - Loads show exactly as entered (one test per formatter); computed values show at most one decimal
+
+final class LoadDisplayExactTests: XCTestCase {
+    private let lb = LoadFormatter(unit: .lb)
+    private let kg = LoadFormatter(unit: .kg)
+    /// Loads a lifter can type: whole, half, a 1.25-lb step, a quarter, a 2.5-kg step in lb.
+    private let entered: [(Double, String)] = [(145, "145"), (22.5, "22.5"), (22.25, "22.25"), (1.25, "1.25"), (100.5, "100.5"), (0, "0"), (315, "315"), (7.5, "7.5")]
+
+    func test_number_isExact() {
+        for (v, text) in entered { XCTAssertEqual(lb.number(v), text, "\(v)") }
+        XCTAssertEqual(LoadFormatter.number(22.25), "22.25")
+        XCTAssertEqual(kg.number(LoadUnit.kg.toStoredLb(22.5)), "22.5")
+        XCTAssertEqual(kg.number(LoadUnit.kg.toStoredLb(45)), "45")
+        XCTAssertEqual(kg.number(LoadUnit.kg.toStoredLb(1.25)), "1.25")
+    }
+    func test_oneDecimal_isExact_noTrailingZero_neverRounded() {
+        for (v, text) in entered { XCTAssertEqual(lb.oneDecimal(v), text, "\(v)") }
+        XCTAssertEqual(kg.oneDecimal(LoadUnit.kg.toStoredLb(22.5)), "22.5")
+    }
+    func test_compact_isExact_neverRounded() {
+        for (v, text) in entered { XCTAssertEqual(lb.compact(v), text, "\(v)") }
+        XCTAssertEqual(kg.compact(LoadUnit.kg.toStoredLb(62.5)), "62.5")
+    }
+    func test_zeroOrOneDecimal_isExact() {
+        for (v, text) in entered { XCTAssertEqual(lb.zeroOrOneDecimal(v), text, "\(v)") }
+    }
+    func test_setLoad_isExact_aLoggedTwentyTwoPointFiveIsNotTwentyTwo() {
+        for (v, text) in entered { XCTAssertEqual(lb.setLoad(v), text, "\(v)") }
+        XCTAssertEqual(kg.setLoad(LoadUnit.kg.toStoredLb(22.5)), "22.5")
+    }
+    func test_truncated_isExact_neverTruncates() {
+        for (v, text) in entered { XCTAssertEqual(lb.truncated(v), text, "\(v)") }
+    }
+    func test_text_and_numberInUnit_areExact() {
+        XCTAssertEqual(lb.text(22.5), "22.5 lb")
+        XCTAssertEqual(lb.text(145), "145 lb")
+        XCTAssertEqual(lb.numberInUnit(2.5), "2.5")
+        XCTAssertEqual(lb.numberInUnit(5), "5")
+    }
+    func test_computedValues_showAtMostOneDecimal() {
+        XCTAssertEqual(lb.whole(216.43), "216", "an e1RM is whole")
+        XCTAssertEqual(lb.wholeGrouped(1234.56), "1,235")
+        XCTAssertEqual(lb.volumeGrouped(905_432.2), "905,432")
+        XCTAssertEqual(String(format: "%.1f", 14.0 / 3.0), "4.7", "averages use one decimal")
+    }
+    func test_planLine_and_coachLines_showTheLoadAsEntered() {
+        EffortTracking.mode = .detailed
+        defer { EffortTracking.clearMirror() }
+        let it = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 140, repMin: 8, repMax: 10)
+        it.actualReps = [10, 10, 10]; it.actualLoads = [140, 140, 140]; it.actualRIRs = [2, 2, 2]
+        it.plannedRepsBySet = [10, 10, 10]
+        let msg = CoachingEngine.recommend(for: it, policy: .shipped, minLoadIncrement: 5)?.message ?? ""
+        XCTAssertFalse(msg.contains(".0"), msg)
+        XCTAssertTrue(msg.contains("145"), msg)
+        let half = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: 3, targetRIR: 2, suggestedLoad: 22.5, repMin: 8, repMax: 10)
+        half.actualReps = [10, 10, 10]; half.actualLoads = [22.5, 22.5, 22.5]; half.actualRIRs = [2, 2, 2]
+        half.plannedRepsBySet = [10, 10, 10]
+        let m2 = CoachingEngine.recommend(for: half, policy: .shipped, minLoadIncrement: 2.5)?.message ?? ""
+        XCTAssertTrue(m2.contains("25"), m2)
+        XCTAssertFalse(m2.contains("25.0"), m2)
+    }
+}
+
+// MARK: - Planned effort reads as an aim, never as a logged tap
+
+final class PlannedEffortLabelTests: XCTestCase {
+    override func tearDown() { EffortTracking.clearMirror(); super.tearDown() }
+
+    func test_aimText_followsTheMode() {
+        XCTAssertEqual(EffortTracking.aimText(0, mode: .detailed), "aim: 0 RIR")
+        XCTAssertEqual(EffortTracking.aimText(0, mode: .simple), "aim: All out")
+        XCTAssertEqual(EffortTracking.aimText(2, mode: .simple), "aim: Solid")
+        XCTAssertNil(EffortTracking.aimText(2, mode: .off))
+        XCTAssertEqual(EffortTracking.aimRangeText(1, 2, mode: .detailed), "aim: 1–2 RIR")
+        XCTAssertEqual(EffortTracking.aimRangeText(0, 1, mode: .simple), "aim: Hard–All out")
+        XCTAssertNil(EffortTracking.aimRangeText(1, 2, mode: .off))
+    }
+    func test_plannedSuffix_isAnAim_andLoggedSuffixIsNot() {
+        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .detailed), " · aim: 0 RIR")
+        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .simple), " · aim: All out")
+        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .off), "")
+        XCTAssertEqual(EffortTracking.loggedSuffix(0, mode: .detailed), " @ 0 RIR")
+        XCTAssertEqual(EffortTracking.loggedSuffix(0, mode: .simple), " · All out")
+        XCTAssertFalse(EffortTracking.plannedSuffix(0, mode: .detailed).contains("@"), "a plan never uses the logged form")
+    }
+    func test_extraSetAndPlanLines_carryTheAim() {
+        EffortTracking.mode = .detailed
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 0), "OPTIONAL EXTRA SET  6-8 reps · aim: 0 RIR")
+        EffortTracking.mode = .simple
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 0), "OPTIONAL EXTRA SET  6-8 reps · aim: All out")
+    }
+    func test_styledText_marksOnlyTheAim() {
+        // The aim chunk is the italic part: it starts at "aim:" and the text before it is untouched.
+        let line = "Week 9 · Chest · 4 sets · 8–10 reps · aim: 0 RIR"
+        let r = line.range(of: "aim:")
+        XCTAssertNotNil(r)
+        XCTAssertEqual(String(line[line.startIndex..<r!.lowerBound]), "Week 9 · Chest · 4 sets · 8–10 reps · ")
+        XCTAssertEqual(String(line[r!.lowerBound...]), "aim: 0 RIR")
+    }
+}

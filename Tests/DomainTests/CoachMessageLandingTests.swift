@@ -7,7 +7,7 @@ import SwiftData
 ///
 /// Under per-letter anchoring (PlanMemoryEngine.nextTargetItem) a bump earned in
 /// week 1's A wave lands in week 4's A wave, not in the literal next session — so
-/// "Next session: 105.0" was a promise about a session that keeps its own,
+/// "Next session: 105" was a promise about a session that keeps its own,
 /// different load. And at the end of a letter's chain (the last A week in a block)
 /// nothing in the block receives the load at all, so no number may be promised.
 ///
@@ -60,7 +60,7 @@ final class CoachMessageLandingTests: XCTestCase {
     /// Any number that looks like a promised load. Deliberately not "contains a
     /// digit" — an end-of-chain message may still quote what was observed.
     private func assertPromisesNoLoad(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
-        for fragment in ["105.0", "105", "Next session:", "Next Week"] {
+        for fragment in ["105", "105", "Next session:", "Next Week"] {
             XCTAssertFalse(
                 message.contains(fragment),
                 "end-of-chain message must not promise a load, found '\(fragment)' in: \(message)",
@@ -74,9 +74,9 @@ final class CoachMessageLandingTests: XCTestCase {
     func test_waveABump_withTarget_namesTheWeekNotTheNextSession() throws {
         let rec = try recommend(bumpEarningItem(waveRaw: "a"), target: .exists)
 
-        XCTAssertEqual(rec.nextSuggestedLoad, 105.0, "load logic must be untouched by the wording change")
+        XCTAssertEqual(rec.nextSuggestedLoad, 105, "load logic must be untouched by the wording change")
         XCTAssertTrue(
-            rec.message.contains("Next Week A: 105.0"),
+            rec.message.contains("Next Week A: 105"),
             "a wave-A bump lands in the next A week, and the message must say so: \(rec.message)"
         )
         XCTAssertFalse(
@@ -89,7 +89,7 @@ final class CoachMessageLandingTests: XCTestCase {
         for (raw, expected) in [("a", "Next Week A"), ("b", "Next Week B"), ("c", "Next Week C")] {
             let rec = try recommend(bumpEarningItem(waveRaw: raw), target: .exists)
             XCTAssertTrue(
-                rec.message.contains("\(expected): 105.0"),
+                rec.message.contains("\(expected): 105"),
                 "wave '\(raw)' should read '\(expected)': \(rec.message)"
             )
         }
@@ -101,7 +101,7 @@ final class CoachMessageLandingTests: XCTestCase {
         let rec = try recommend(bumpEarningItem(waveRaw: "a"), target: .endOfChain)
 
         XCTAssertEqual(
-            rec.nextSuggestedLoad, 105.0,
+            rec.nextSuggestedLoad, 105,
             "the load is still computed — only the MESSAGE withholds it, so no load logic changes"
         )
         assertPromisesNoLoad(rec.message)
@@ -158,9 +158,9 @@ final class CoachMessageLandingTests: XCTestCase {
     func test_waveNilBump_keepsNextSessionWording() throws {
         let rec = try recommend(bumpEarningItem(waveRaw: nil), target: .exists)
 
-        XCTAssertEqual(rec.nextSuggestedLoad, 105.0)
+        XCTAssertEqual(rec.nextSuggestedLoad, 105)
         XCTAssertTrue(
-            rec.message.contains("Next session: 105.0"),
+            rec.message.contains("Next session: 105"),
             "a wave-less item is not in a letter rotation and keeps the original wording: \(rec.message)"
         )
     }
@@ -170,12 +170,12 @@ final class CoachMessageLandingTests: XCTestCase {
         let rec = try XCTUnwrap(
             CoachingEngine.recommend(for: bumpEarningItem(waveRaw: nil), minLoadIncrement: 5)
         )
-        XCTAssertTrue(rec.message.contains("Next session: 105.0"), rec.message)
+        XCTAssertTrue(rec.message.contains("Next session: 105"), rec.message)
     }
 
     func test_emptyStringWave_keepsNextSessionWording() throws {
         let rec = try recommend(bumpEarningItem(waveRaw: ""), target: .exists)
-        XCTAssertTrue(rec.message.contains("Next session: 105.0"), rec.message)
+        XCTAssertTrue(rec.message.contains("Next session: 105"), rec.message)
     }
 
     /// "Wave-less items keep 'Next session'" governs the PHRASING when a target
@@ -186,7 +186,7 @@ final class CoachMessageLandingTests: XCTestCase {
     func test_waveNil_endOfChain_stillStatesNoNumber() throws {
         let rec = try recommend(bumpEarningItem(waveRaw: nil), target: .endOfChain)
 
-        XCTAssertEqual(rec.nextSuggestedLoad, 105.0, "load logic unchanged")
+        XCTAssertEqual(rec.nextSuggestedLoad, 105, "load logic unchanged")
         assertPromisesNoLoad(rec.message)
         XCTAssertTrue(rec.message.contains("next block"), rec.message)
     }

@@ -416,11 +416,11 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         let saved = EffortTracking.mode
         EffortTracking.mode = .detailed
         defer { EffortTracking.mode = saved }
-        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 2), "OPTIONAL EXTRA SET  6-8 reps @ 2 RIR")
-        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 8), rir: 1), "OPTIONAL EXTRA SET  8 reps @ 1 RIR")
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 6, max: 8), rir: 2), "OPTIONAL EXTRA SET  6-8 reps · aim: 2 RIR")
+        XCTAssertEqual(UISessionSet.extraSetLabel(repRange: RepRange(min: 8, max: 8), rir: 1), "OPTIONAL EXTRA SET  8 reps · aim: 1 RIR")
         let row = UISessionSet(index: 4, exerciseId: "bench_press", plannedLoad: 0, plannedReps: 6, plannedRIR: 2)
-        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8)), "— × 6–8 · goal 8 @ 2 RIR")
-        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8), isBodyweight: true), "BW × 6–8 · goal 8 @ 2 RIR")
+        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8)), "— × 6–8 · goal 8 · aim: 2 RIR")
+        XCTAssertEqual(row.plannedDescription(with: RepRange(min: 6, max: 8), isBodyweight: true), "BW × 6–8 · goal 8 · aim: 2 RIR")
     }
 
 
@@ -515,7 +515,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
         EffortTracking.mode = .simple
         defer { EffortTracking.clearMirror() }
         let simple = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
-        XCTAssertTrue(simple?.message.contains("counted as 4: the top set was All out, plan Solid. Needed 6 — hold this load.") ?? false, simple?.message ?? "nil")
+        XCTAssertTrue(simple?.message.contains("counted as 4: the top set was All out, aim: Solid. Needed 6 — hold this load.") ?? false, simple?.message ?? "nil")
         XCTAssertFalse(simple?.message.contains("RIR") ?? true, simple?.message ?? "nil")
         EffortTracking.mode = .off
         let off = CoachingEngine.recommend(for: topSetItem(reps: [7, 7, 7, 6], loads: [290, 290, 290, 315], rirs: [2, 2, 2, 0]))
@@ -933,7 +933,7 @@ final class EarnedVolumeCharacterizationTests: XCTestCase {
 
         XCTAssertEqual(vm.exercises[0].sets.count, 4, "no hidden 5th row: rows = max(4, targetSets)")
         XCTAssertEqual(vm.exercises[0].sets[3].plannedLoad, 100, "row 4 is a planned working set: planned load comes from the array")
-        XCTAssertEqual(vm.exercises[0].sets[3].actualLoadText, "100.0", "prefilled with the planned load, not 0")
+        XCTAssertEqual(vm.exercises[0].sets[3].actualLoadText, "100", "prefilled with the planned load, not 0")
         for s in 1...4 { log(vm, ctx, set: s, load: nil) }
 
         XCTAssertEqual(item.targetSets, 4)

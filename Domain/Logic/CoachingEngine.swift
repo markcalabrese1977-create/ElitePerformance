@@ -336,7 +336,7 @@ struct CoachingEngine {
         }
         let parts = groups.map { g -> String in
             let verb = g.nums.count == 1 ? "was" : "were"
-            if mode == .simple { return "\(list(g.nums)) \(verb) \(g.key), plan \(EffortTracking.plannedWord(targetRIR))" }
+            if mode == .simple { return "\(list(g.nums)) \(verb) \(g.key), aim: \(EffortTracking.plannedWord(targetRIR))" }
             return "\(list(g.nums)) \(verb) \(g.shortfall) rep\(g.shortfall == 1 ? "" : "s") harder than planned (RIR \(g.rir) vs \(targetRIR))"
         }
         return parts.joined(separator: "; ")

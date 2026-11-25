@@ -284,3 +284,260 @@ final class RestTodayTests: XCTestCase {
         XCTAssertEqual(RestTodayModel.refusalText(.dateCollision).isEmpty, false)
     }
 }
+
+// MARK: - Overdue planned sessions: Do today / Move / Skip, and the W#D# label that follows the session
+
+final class OverdueSessionTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private var container: ModelContainer!
+    private let scheduledKey = "meso.scheduledStartDateEpoch"
+    override func setUp() { super.setUp(); UserDefaults.standard.removeObject(forKey: scheduledKey) }
+    override func tearDown() { UserDefaults.standard.removeObject(forKey: scheduledKey); super.tearDown() }
+
+    private let cal = Calendar.current
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: 5))! }
+    private func plus(_ d: Date, _ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: d)! }
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        container = c
+        return ModelContext(c)
+    }
+
+    private func item(wave: String) -> SessionItem {
+        SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: wave,
+                    setMin: 3, setMax: 3, repMin: 8, repMax: 10, targetRIRMin: 1, targetRIRMax: 2,
+                    plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [100, 100, 100], plannedRIRsBySet: [2, 2, 2])
+    }
+
+    /// 3 weeks x 6 days (Push A, Legs A, Pull A, Push B, Legs B, Pull B), one a day from `start`, programIndex 1...18.
+    private func block(_ ctx: ModelContext, start: Date, status: MesoStatus = .active) -> MesoBlock {
+        let b = MesoBlock(name: "B", startDate: start, status: status, totalWeeks: 3)
+        ctx.insert(b)
+        let labels = ["Push A", "Legs A", "Pull A", "Push B", "Legs B", "Pull B"]
+        var pi = 1
+        for w in 1...3 {
+            for (k, l) in labels.enumerated() {
+                let s = Session(date: plus(start, 7 * (w - 1) + k), status: .planned, weekIndex: w, dayLabel: l,
+                                items: [item(wave: k < 3 ? "a" : "b")], programIndex: pi)
+                s.meso = b; ctx.insert(s); pi += 1
+            }
+        }
+        try? ctx.save()
+        return b
+    }
+
+    private func sorted(_ b: MesoBlock) -> [Session] { b.sessions.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) } }
+    private func s(_ b: MesoBlock, _ pi: Int) -> Session { sorted(b)[pi - 1] }
+    private func complete(_ x: Session) { x.status = .completed; x.items.forEach { $0.actualReps = [8, 8, 8]; $0.actualLoads = [100, 100, 100]; $0.actualRIRs = [2, 2, 2] } }
+
+    func test_overdueWindows_recentCardVersusOlderMissedRow_andWhoIsExcluded() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let archived = block(ctx, start: plus(start, -60), status: .archived)
+        let now = plus(start, 9)                            // Wed Nov 11 = week 2, day 3 (programIndex 9)
+        for pi in [1, 3] { complete(s(b, pi)) }             // done
+        s(b, 2).skippedAt = now                             // skipped
+        s(b, 4).items[0].actualReps = [8]; s(b, 4).items[0].actualLoads = [100]   // started: not offered
+        let all = sorted(b) + sorted(archived)
+        XCTAssertEqual(Service.recentlyMissed(in: all, now: now).compactMap(\.programIndex), [7, 8], "Nov 9 and Nov 10: the last two days")
+        XCTAssertEqual(Service.olderMissed(in: all, now: now).compactMap(\.programIndex), [5, 6], "Nov 6 and 7: the Program tab's Missed row")
+        XCTAssertTrue(Service.overdueSessions(in: all, now: now).allSatisfy { $0.meso === b }, "an archived block never")
+        XCTAssertEqual(Service.recentlyMissed(in: all, now: plus(start, 12)).compactMap(\.programIndex), [10, 11], "the window slides with the day")
+    }
+
+    func test_doToday_withASessionToday_pushesTodayAndEveryLaterOne_andTheLabelsStay() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)                            // Nov 11; today's session is programIndex 9
+        let missed = s(b, 7)                                // Push A, Nov 9 (W2D1)
+        XCTAssertEqual(missed.weekDayLabel, "W2D1")
+        let before = sorted(b).map { ($0.programIndex, $0.weekIndex, $0.dayLabel, $0.weekDayLabel) }
+        let oldDates = sorted(b).map(\.date)
+
+        let plan = Service.planPlaceOverdue(missed, on: now, context: ctx, now: now)
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, Array(9...18), "today's session and every later one")
+        let result = try Service.placeOverdue(plan, in: ctx)
+        XCTAssertEqual(result.sessionsMoved, 11)
+
+        XCTAssertEqual(cal.startOfDay(for: missed.date), cal.startOfDay(for: now))
+        for (pi, old) in zip(9...18, oldDates.dropFirst(8)) { XCTAssertEqual(s(b, pi).date, plus(old, 1), "programIndex \(pi)") }
+        for pi in 1...8 where pi != 7 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1], "earlier sessions stay") }
+        let after = sorted(b).map { ($0.programIndex, $0.weekIndex, $0.dayLabel, $0.weekDayLabel) }
+        XCTAssertTrue(zip(before, after).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 && $0.3 == $1.3 }, "program order, weeks, names and W#D# labels all stay")
+        XCTAssertEqual(missed.weekDayLabel, "W2D1", "the label follows the session even though it now sits after Legs A in date order")
+        XCTAssertEqual(s(b, 8).weekDayLabel, "W2D2")
+        XCTAssertEqual(missed.plannedDate, missed.date, "the schedule moved with it")
+    }
+
+    func test_doToday_whenTodayIsFree_movesOnlyThatSession() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)
+        complete(s(b, 9))                                   // today's slot was used for a different session
+        let oldDates = sorted(b).map(\.date)
+        let plan = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
+        XCTAssertNil(plan.refusal)
+        XCTAssertTrue(plan.moves.isEmpty, "nothing planned on today: nothing to push")
+        try Service.placeOverdue(plan, in: ctx)
+        XCTAssertEqual(cal.startOfDay(for: s(b, 7).date), cal.startOfDay(for: now))
+        for pi in 1...18 where pi != 7 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1]) }
+    }
+
+    func test_move_toAnOccupiedDay_pushesFromThatDay_andToAFarDayThatWouldReorderTheLift_isRefusedAndRestored() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)
+        let oldDates = sorted(b).map(\.date)
+        // Legs A (week 2, Nov 10) to Fri Nov 13, a day with Legs B on it: Legs B and everything after moves a day.
+        let legsA = s(b, 8)
+        let plan = Service.planPlaceOverdue(legsA, on: plus(start, 11), context: ctx, now: now)
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, Array(11...18))
+        try Service.placeOverdue(plan, in: ctx)
+        XCTAssertEqual(cal.startOfDay(for: legsA.date), cal.startOfDay(for: plus(start, 11)))
+        XCTAssertEqual(s(b, 9).date, oldDates[8], "the days before the chosen one are untouched")
+        XCTAssertEqual(legsA.weekDayLabel, "W2D2")
+
+        // A day after the lift's next same-letter session (Push A week 3 is Nov 16): the lift's history order would change.
+        let ctx2 = try makeContext()
+        let b2 = block(ctx2, start: start)
+        let push = s(b2, 7)
+        let far = Service.planPlaceOverdue(push, on: plus(start, 40), context: ctx2, now: now)
+        XCTAssertNil(far.refusal)
+        let dates = sorted(b2).map(\.date)
+        XCTAssertThrowsError(try Service.placeOverdue(far, in: ctx2)) { error in
+            guard case Service.PlaceError.verificationFailed = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertEqual(sorted(b2).map(\.date), dates, "nothing written")
+    }
+
+    func test_previewText_summarisesALongPush_andNamesEveryLineOfAShortOne() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)
+        let long = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
+        let lines = OverdueText.moveLines(long)
+        XCTAssertEqual(lines.count, 4, "the session, two pushes, and one summary line")
+        XCTAssertTrue(lines[3].hasPrefix("and 8 more, each one day later"), lines[3])
+        complete(s(b, 9))
+        let short = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
+        XCTAssertEqual(OverdueText.moveLines(short).count, 1, "today is free: just the session")
+        XCTAssertEqual(OverdueText.title(s(b, 7)), "Missed " + OverdueText.weekday(s(b, 7).date))
+        XCTAssertEqual(OverdueText.subtitle(s(b, 7)), "Push A · W2D1")
+        XCTAssertEqual(OverdueText.missedRow(6), "Missed (6)")
+    }
+
+    func test_refusals() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 7), on: plus(now, -1), context: ctx, now: now).refusal, .targetInPast)
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 12), on: now, context: ctx, now: now).refusal, .notOverdue, "a future session is not overdue")
+        s(b, 7).skippedAt = now
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now).refusal, .notOverdue, "a skipped one is closed")
+        s(b, 14).items[0].actualReps = [8]; s(b, 14).items[0].actualLoads = [100]    // a later session with logged work would have to move
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal, .unsafeSession)
+        s(b, 14).items[0].actualReps = []; s(b, 14).items[0].actualLoads = []
+        s(b, 10).status = .inProgress
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal, .sessionInProgress)
+    }
+
+    func test_skip_keepsItPlannedAndDated_leavesTheOverdueSurfaces_andStillCountsAsMissed() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        complete(s(b, 4))                                   // trained later, so the block is not abandoned
+        let now = plus(start, 9)
+        func missedSignals() -> Int {
+            let snap = SetRecordBuilder.build(sessions: sorted(b))
+            return FatigueMonitor.signals(in: snap, loadIncrementLb: 5, asOf: now).filter { $0.type == .missedSessions }.count
+        }
+        let before = missedSignals()
+        XCTAssertGreaterThan(before, 0, "pi 1-3 are missed (planned, past, a later session was done)")
+        let planned = [s(b, 1), s(b, 2), s(b, 3)].map(\.plannedDate)
+        for pi in 1...3 { try Service.skip(s(b, pi), now: now, in: ctx) }
+        XCTAssertEqual([s(b, 1), s(b, 2), s(b, 3)].map(\.skippedAt), [now, now, now])
+        XCTAssertEqual([s(b, 1), s(b, 2), s(b, 3)].map(\.status), [.planned, .planned, .planned])
+        XCTAssertEqual([s(b, 1), s(b, 2), s(b, 3)].map(\.plannedDate), planned)
+        XCTAssertFalse(Service.overdueSessions(in: sorted(b), now: now).contains { [1, 2, 3].contains($0.programIndex ?? 0) })
+        XCTAssertEqual(missedSignals(), before, "a skipped session still counts toward the missed-session signal")
+    }
+
+    func test_dayNumber_followsProgramOrder_andFallsBackToDateOrderForOldData() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        // A completion overwrites `date`: Push A (D1) done on the day of Pull A would sort after it by date.
+        s(b, 7).date = plus(start, 13)
+        XCTAssertEqual(s(b, 7).weekDayLabel, "W2D1")
+        XCTAssertEqual(sorted(b).filter { $0.weekIndex == 2 }.map(\.dayNumberInWeek), [1, 2, 3, 4, 5, 6])
+        // Old data without a programIndex: date order, as before.
+        let push = s(b, 7)
+        for x in sorted(b).filter({ $0.weekIndex == 2 }) { x.programIndex = nil }
+        XCTAssertEqual(push.dayNumberInWeek, 6, "date order when the program order is unknown")
+    }
+}
+
+
+// MARK: - Dry run: what the overdue surfaces would show on a real backup (report only)
+
+@MainActor
+final class OverdueDryRunTests: XCTestCase {
+    func test_report_overdueSurfacesOnTheBackups() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_OD_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_OD_BACKUPS (comma-separated); optional TEST_RUNNER_EP_OD_NOW (ISO date) and TEST_RUNNER_EP_OD_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("OD| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_OD_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        let now: Date = ProcessInfo.processInfo.environment["EP_OD_NOW"].flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+        func load(_ path: String) throws -> (ModelContext, [Session]) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            retained.append(container)
+            return (ctx, try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])))
+        }
+        typealias Service = SessionItemEditService
+        for path in list.split(separator: ",").map(String.init) {
+            let (_, sessions) = try load(path)
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)   (as of \(OverdueText.day(now)))")
+            let recent = Service.recentlyMissed(in: sessions, now: now), older = Service.olderMissed(in: sessions, now: now)
+            out("Today card: \(recent.count) missed in the last two days")
+            for s in recent { out("   \(OverdueText.title(s)) - \(OverdueText.subtitle(s))  [\(OverdueText.prompt)]") }
+            out("Program tab: \(OverdueText.missedRow(older.count))\(older.isEmpty ? "" : " (collapsed)")")
+            for s in older { out("   \(OverdueText.rowTitle(s))") }
+            let todays = sessions.filter { Calendar.current.startOfDay(for: $0.date) == Calendar.current.startOfDay(for: now) && $0.status == .planned }
+            out("Today's own session: \(todays.map { "\($0.dayLabel ?? "?") \($0.weekDayLabel)" }.joined(separator: ", ").nilIfEmpty ?? "none")")
+            // Every overdue session through "Do today", each on a fresh copy of the backup.
+            for target in recent + older {
+                let (ctx, fresh) = try load(path)
+                guard let s = fresh.first(where: { $0.id == target.id }) else { continue }
+                let labelBefore = s.weekDayLabel
+                let plan = Service.planPlaceOverdue(s, on: now, context: ctx, now: now)
+                if let refusal = plan.refusal { out("   Do today \(s.dayLabel ?? "?") (\(OverdueText.day(s.date))): refused - \(OverdueText.refusalText(refusal))"); continue }
+                let weekBefore = fresh.filter { $0.meso === s.meso && $0.weekIndex == s.weekIndex }.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }.map { "\($0.dayLabel ?? "?") \($0.weekDayLabel)" }
+                do {
+                    try Service.placeOverdue(plan, in: ctx)
+                    let weekAfter = fresh.filter { $0.meso === s.meso && $0.weekIndex == s.weekIndex }.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }.map { "\($0.dayLabel ?? "?") \($0.weekDayLabel)" }
+                    out("   Do today \(s.dayLabel ?? "?") (\(OverdueText.day(plan.oldDate)) -> \(OverdueText.day(plan.newDate))): pushes \(plan.moves.count) session(s) one day" + (plan.moves.first.map { " (\($0.session.dayLabel ?? "?") \(OverdueText.day($0.oldDate)) -> \(OverdueText.day($0.newDate)) ... last \(OverdueText.day(plan.moves.last!.newDate)))" } ?? ""))
+                    out("      label \(labelBefore) -> \(s.weekDayLabel); week \(s.weekIndex) labels before: \(weekBefore.joined(separator: ", "))")
+                    out("                                  after:  \(weekAfter.joined(separator: ", "))")
+                } catch { out("   Do today \(s.dayLabel ?? "?"): \(error)") }
+            }
+        }
+    }
+    private var retained: [ModelContainer] = []
+}
+
+private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }

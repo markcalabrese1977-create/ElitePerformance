@@ -82,7 +82,7 @@ final class E1RMFloorCapTests: XCTestCase {
             "a 180 session may earn one increment, not a jump to the 225 history"
         )
         XCTAssertTrue(
-            rec.message.contains("Next Week A: 185.0"),
+            rec.message.contains("Next Week A: 185"),
             "the message reads from the same number and must state the capped load: \(rec.message)"
         )
         XCTAssertFalse(
@@ -101,7 +101,7 @@ final class E1RMFloorCapTests: XCTestCase {
         let rec = try recommend(item, increment: 5, e1rmFloorLoad: 100)
 
         XCTAssertEqual(try XCTUnwrap(rec.nextSuggestedLoad), 55.0, accuracy: 0.001)
-        XCTAssertTrue(rec.message.contains("Next Week A: 55.0"), rec.message)
+        XCTAssertTrue(rec.message.contains("Next Week A: 55"), rec.message)
         XCTAssertFalse(rec.message.contains("95"), rec.message)
     }
 
@@ -208,7 +208,7 @@ final class E1RMFloorCapTests: XCTestCase {
         let rec = try recommend(item, increment: 5, e1rmFloorLoad: 100)
 
         XCTAssertEqual(try XCTUnwrap(rec.nextSuggestedLoad), 65.0, accuracy: 0.001)
-        XCTAssertTrue(rec.message.contains("Next Week A: 65.0"), rec.message)
+        XCTAssertTrue(rec.message.contains("Next Week A: 65"), rec.message)
     }
 
     /// A flagged source that UNDER-performs is untouched by RULE 4b — the normal
@@ -742,9 +742,9 @@ final class FixedLoadExemptTests: XCTestCase {
         }
         let byName = Dictionary(uniqueKeysWithValues: scenarios().map { ($0.name, $0.item) })
         XCTAssertEqual(try msg(byName["in range, not top"]!),
-            "On target and in range — hold 50.0. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session. Next Week A: 50, same load, reps-first.")
+            "On target and in range — hold 50. Hit the top of your range (12) on all working sets to earn the increase; climb your reps next session. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["off-target RIR"]!),
-            "36 reps, counted as 27: sets 1–3 were All out, plan Easy. Needed 35 — hold. Next Week A: 50, same load, reps-first.")
+            "36 reps, counted as 27: sets 1–3 were All out, aim: Easy. Needed 35 — hold. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness+disruption"]!),
             "Soreness and disruption were flagged this session. Hold this load and focus on quality before considering an increase. Next Week A: 50, same load, reps-first.")
         XCTAssertEqual(try msg(byName["soreness"]!),

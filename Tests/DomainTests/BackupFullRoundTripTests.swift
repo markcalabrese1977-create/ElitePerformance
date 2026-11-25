@@ -5577,12 +5577,12 @@ final class EffortTrackingTests: XCTestCase {
 
     func test_planLine_offHasNoRIR_simpleShowsTheWord_detailedTheNumber() {
         XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .off), "")
-        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .simple), " @ Solid")
-        XCTAssertEqual(EffortTracking.plannedSuffix(3, mode: .simple), " @ Easy")
-        XCTAssertEqual(EffortTracking.plannedSuffix(4, mode: .simple), " @ Easy", "3+ left")
-        XCTAssertEqual(EffortTracking.plannedSuffix(1, mode: .simple), " @ Hard")
-        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .simple), " @ All out")
-        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .detailed), " @ 2 RIR")
+        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .simple), " · aim: Solid")
+        XCTAssertEqual(EffortTracking.plannedSuffix(3, mode: .simple), " · aim: Easy")
+        XCTAssertEqual(EffortTracking.plannedSuffix(4, mode: .simple), " · aim: Easy", "3+ left")
+        XCTAssertEqual(EffortTracking.plannedSuffix(1, mode: .simple), " · aim: Hard")
+        XCTAssertEqual(EffortTracking.plannedSuffix(0, mode: .simple), " · aim: All out")
+        XCTAssertEqual(EffortTracking.plannedSuffix(2, mode: .detailed), " · aim: 2 RIR")
         XCTAssertEqual(EffortTracking.plannedSuffix(nil, mode: .detailed), "")
         for m in EffortMode.allCases {
             EffortTracking.mode = m
@@ -5847,10 +5847,10 @@ final class RIRAdjustedProgressionTests: XCTestCase {
     func test_coachLine_simpleModeUsesTheWords() throws {
         EffortTracking.mode = .simple
         let msg = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 9], rirs: [2, 2, 1], repMax: 10), minLoadIncrement: 5)).message
-        XCTAssertTrue(msg.hasPrefix("29 reps, counted as 28: set 3 was Hard, plan Solid. Needed 29 — hold."), msg)
+        XCTAssertTrue(msg.hasPrefix("29 reps, counted as 28: set 3 was Hard, aim: Solid. Needed 29 — hold."), msg)
         XCTAssertFalse(msg.contains("RIR"), msg)
         let several = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 10], rirs: [2, 1, 1], repMax: 10), minLoadIncrement: 5)).message
-        XCTAssertTrue(several.hasPrefix("30 reps, counted as 28: sets 2–3 were Hard, plan Solid. Needed 29 — hold."), several)
+        XCTAssertTrue(several.hasPrefix("30 reps, counted as 28: sets 2–3 were Hard, aim: Solid. Needed 29 — hold."), several)
         let removed = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [8], rirs: [0]), minLoadIncrement: 5))
         XCTAssertFalse(removed.message.contains("already harder"), "the single-set 'harder than the target' message is gone: \(removed.message)")
     }

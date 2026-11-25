@@ -13,6 +13,10 @@ struct ProgramPlanView: View {
     var onChangeProgram: (() -> Void)? = nil
     
 
+    // Sessions missed more than two days ago (the Missed row): Do today / Move / Skip.
+    @State private var placingMissed: OverdueRequest?
+    @State private var skippingMissed: Session?
+
     // Swipe delete (surgical)
     @State private var sessionPendingDelete: Session?
     @State private var showDeleteConfirm = false
@@ -129,10 +133,18 @@ struct ProgramPlanView: View {
             }
         }
     
+    private var olderMissed: [Session] { SessionItemEditService.olderMissed(in: sessions) }
+
     private var content: some View {
         List {
             if activeBlockName != nil {
                 activeBlockHeaderSection
+            }
+
+            if !olderMissed.isEmpty {
+                Section {
+                    MissedSessionsRow(sessions: olderMissed, onPlace: { placingMissed = $0 }, onSkip: { skippingMissed = $0 })
+                }
             }
 
             if visibleSessions.isEmpty {
@@ -192,6 +204,18 @@ struct ProgramPlanView: View {
                     Label("Add Session", systemImage: "plus")
                 }
             }
+        }
+        .sheet(item: $placingMissed) { request in
+            OverdueMoveFlow(request: request, onFinish: { placingMissed = nil })
+        }
+        .alert("Skip this session?", isPresented: Binding(get: { skippingMissed != nil }, set: { if !$0 { skippingMissed = nil } })) {
+            Button("Skip", role: .destructive) {
+                if let s = skippingMissed { try? SessionItemEditService.skip(s, in: modelContext) }
+                skippingMissed = nil
+            }
+            Button("Cancel", role: .cancel) { skippingMissed = nil }
+        } message: {
+            Text("It stays in your history as missed, and still counts toward the missed-session check.")
         }
         .sheet(isPresented: $showRemoveDeload) {
             if let block = activeMesoBlock {

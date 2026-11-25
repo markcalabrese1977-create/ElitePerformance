@@ -2304,3 +2304,214 @@ extension SessionItemEditService {
         return usable.count
     }
 }
+
+// MARK: - Overdue planned sessions (the Today card and the Program tab's Missed row)
+
+/// A planned session whose day passed without being trained (the lifter trained a different one, or none). Today and the Program tab used to
+/// show nothing for it. Now it is offered three ways out: Do today, Move to a date, or Skip. Do today and Move reuse the Rest-today shape:
+/// a pure plan for the preview, then an apply that re-plans, writes, verifies and saves once (restoring every date on failure). Only DATES change:
+/// weeks, program order (so the W#D# label), loads, exercises and logged work stay as they are.
+extension SessionItemEditService {
+
+    /// The card on Today covers the last two days; older ones go to the Program tab's collapsed Missed row.
+    static let overdueCardDays = 2
+
+    /// Planned (not started), not skipped, nothing logged, in an active block, dated before today. Oldest first.
+    static func overdueSessions(in sessions: [Session], now: Date = Date(), calendar: Calendar = .current) -> [Session] {
+        let today = calendar.startOfDay(for: now)
+        return sessions.filter { s in
+            s.status == .planned && s.skippedAt == nil && s.meso?.status == .active && s.meso?.isMaintenance != true
+                && calendar.startOfDay(for: s.date) < today && SessionEditSafety.isSafeToModify(s)
+        }.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+    }
+
+    /// Overdue by one or two days: the card on Today.
+    static func recentlyMissed(in sessions: [Session], now: Date = Date(), calendar: Calendar = .current) -> [Session] {
+        let cutoff = calendar.date(byAdding: .day, value: -overdueCardDays, to: calendar.startOfDay(for: now)) ?? now
+        return overdueSessions(in: sessions, now: now, calendar: calendar).filter { calendar.startOfDay(for: $0.date) >= cutoff }
+    }
+
+    /// Overdue by more than two days: the Program tab's Missed (N) row.
+    static func olderMissed(in sessions: [Session], now: Date = Date(), calendar: Calendar = .current) -> [Session] {
+        let cutoff = calendar.date(byAdding: .day, value: -overdueCardDays, to: calendar.startOfDay(for: now)) ?? now
+        return overdueSessions(in: sessions, now: now, calendar: calendar).filter { calendar.startOfDay(for: $0.date) < cutoff }
+    }
+
+    // MARK: Skip
+
+    /// "Skip": the lifter chose not to train it. It stays planned and dated where it was, so the missed-session and fatigue signals still
+    /// count it; `skippedAt` only takes it off the overdue surfaces.
+    static func skip(_ session: Session, now: Date = Date(), in context: ModelContext) throws {
+        guard session.status == .planned, SessionEditSafety.isSafeToModify(session) else { return }
+        session.skippedAt = now
+        try context.save()
+    }
+
+    // MARK: Do today / Move
+
+    enum PlaceRefusal: Equatable {
+        /// Not an overdue planned session of an active block (already done, skipped, started, or not past).
+        case notOverdue
+        case sessionInProgress
+        /// The chosen day is before today.
+        case targetInPast
+        /// A session that would move already has logged work.
+        case unsafeSession
+        /// A moved session would land on a day another session already occupies.
+        case dateCollision
+    }
+
+    enum PlaceError: Error, Equatable {
+        case refused(PlaceRefusal)
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    struct PlaceOverduePlan {
+        let session: Session
+        let meso: MesoBlock?
+        let now: Date
+        /// The chosen day (start of day).
+        let targetDay: Date
+        let oldDate: Date
+        let newDate: Date
+        /// Planned sessions pushed forward one day (empty when the chosen day is free): the chosen day's and every later one.
+        let moves: [ShiftedSession]
+        let collisions: [DateCollision]
+        let warnings: [RestTodayWarning]
+        let refusal: PlaceRefusal?
+
+        var isApplicable: Bool { refusal == nil }
+    }
+
+    struct PlaceOverdueResult {
+        let sessionsMoved: Int
+        let summary: [String]
+    }
+
+    private struct ForcedPlaceSaveFailure: Error {}
+
+    static func planPlaceOverdue(_ session: Session, on target: Date, context: ModelContext, now: Date = Date()) -> PlaceOverduePlan {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let targetDay = calendar.startOfDay(for: target)
+        func plan(_ new: Date, moves: [ShiftedSession] = [], collisions: [DateCollision] = [], warnings: [RestTodayWarning] = [], refusal: PlaceRefusal?) -> PlaceOverduePlan {
+            PlaceOverduePlan(session: session, meso: session.meso, now: now, targetDay: targetDay, oldDate: session.date, newDate: new,
+                             moves: moves, collisions: collisions, warnings: warnings, refusal: refusal)
+        }
+        guard let meso = session.meso, meso.status == .active, session.status == .planned, session.skippedAt == nil,
+              calendar.startOfDay(for: session.date) < today else { return plan(session.date, refusal: .notOverdue) }
+        if meso.sessions.contains(where: { $0.status == .inProgress }) { return plan(session.date, refusal: .sessionInProgress) }
+        guard targetDay >= today else { return plan(session.date, refusal: .targetInPast) }
+        guard SessionEditSafety.isSafeToModify(session) else { return plan(session.date, refusal: .unsafeSession) }
+
+        let daysToTarget = calendar.dateComponents([.day], from: calendar.startOfDay(for: session.date), to: targetDay).day ?? 0
+        let newDate = calendar.date(byAdding: .day, value: daysToTarget, to: session.date) ?? targetDay
+
+        let others = meso.sessions.filter { $0 !== session }
+        let dayTaken = others.contains { $0.status == .planned && calendar.startOfDay(for: $0.date) == targetDay }
+        let moving = dayTaken
+            ? others.filter { $0.status == .planned && calendar.startOfDay(for: $0.date) >= targetDay }
+                .sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+            : []
+        if moving.contains(where: { !SessionEditSafety.isSafeToModify($0) }) { return plan(newDate, refusal: .unsafeSession) }
+        let moves: [ShiftedSession] = moving.map { s in
+            ShiftedSession(session: s, oldDate: s.date, newDate: calendar.date(byAdding: .day, value: 1, to: s.date) ?? s.date,
+                           oldWeek: s.weekIndex, newWeek: s.weekIndex)
+        }
+        let everySession = (try? context.fetch(FetchDescriptor<Session>())) ?? []
+        var collisions = shiftCollisions(moves, among: everySession.filter { $0 !== session }, calendar: calendar)
+        // The chosen day itself: anything unfinished that stays there (another block's planned session, a session in progress) blocks it.
+        let movingIDs = Set(moves.map { $0.session.persistentModelID })
+        for occupant in everySession where occupant !== session && !movingIDs.contains(occupant.persistentModelID)
+            && occupant.status != .completed && calendar.startOfDay(for: occupant.date) == targetDay {
+            collisions.append(DateCollision(moved: session, occupant: occupant, date: newDate))
+        }
+        if !collisions.isEmpty { return plan(newDate, moves: moves, collisions: collisions, refusal: .dateCollision) }
+
+        var warnings: [RestTodayWarning] = []
+        if let next = MesoLifecycle.scheduledStartDate {
+            let nextDay = calendar.startOfDay(for: next)
+            for m in moves where calendar.startOfDay(for: m.newDate) >= nextDay { warnings.append(.pastNextMesoStart(date: m.newDate, nextStart: next)) }
+            if calendar.startOfDay(for: newDate) >= nextDay { warnings.append(.pastNextMesoStart(date: newDate, nextStart: next)) }
+        }
+        return plan(newDate, moves: moves, warnings: warnings, refusal: nil)
+    }
+
+    @discardableResult
+    static func placeOverdue(_ plan: PlaceOverduePlan, in context: ModelContext, hooks: ApplyHooks = ApplyHooks()) throws -> PlaceOverdueResult {
+        guard plan.isApplicable, let meso = plan.meso else { throw PlaceError.refused(plan.refusal ?? .notOverdue) }
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
+        let live = planPlaceOverdue(plan.session, on: plan.targetDay, context: context, now: plan.now)
+        guard live.isApplicable else { throw PlaceError.refused(live.refusal ?? .notOverdue) }
+        guard live.newDate == plan.newDate, live.moves.map({ $0.session.persistentModelID }) == plan.moves.map({ $0.session.persistentModelID })
+        else { throw PlaceError.planStale }
+        if context.hasChanges { try context.save() }
+
+        let calendar = Calendar.current
+        let session = live.session
+        func everySession() -> [Session] {
+            var seen = Set<PersistentIdentifier>()
+            return (((try? context.fetch(FetchDescriptor<Session>())) ?? []) + meso.sessions).filter { seen.insert($0.persistentModelID).inserted }
+        }
+        let chainSources: [(session: Session, item: SessionItem)] = meso.sessions.sorted { $0.date < $1.date }.flatMap { s in s.items.map { (s, $0) } }
+        func chainTargets() -> [PersistentIdentifier?] {
+            let all = everySession()
+            return chainSources.map { PlanMemoryEngine.nextTargetItem(for: $0.item, after: $0.session, in: all)?.persistentModelID }
+        }
+        let chainsBefore = chainTargets()
+
+        struct DateRestore {
+            let session: Session; let date: Date; let plannedDate: Date?; let week: Int?; let programIndex: Int?
+            init(_ s: Session) { session = s; date = s.date; plannedDate = s.plannedDate; week = s.weekInMeso; programIndex = s.programIndex }
+        }
+        let restores = ([session] + live.moves.map(\.session)).map { DateRestore($0) }
+        func abandon() {
+            for r in restores { r.session.date = r.date; r.session.plannedDate = r.plannedDate; r.session.weekInMeso = r.week; r.session.programIndex = r.programIndex }
+            context.rollback()
+        }
+
+        for move in live.moves {
+            move.session.date = move.newDate
+            if move.session.plannedDate != nil { move.session.plannedDate = move.newDate }   // unknown stays unknown
+        }
+        session.date = live.newDate
+        if session.plannedDate != nil { session.plannedDate = live.newDate }
+
+        var problems: [String] = []
+        for (move, r) in zip(live.moves, restores.dropFirst()) {
+            let tag = "\(isoDay(move.oldDate)) \(move.session.dayLabel ?? "?")"
+            if calendar.dateComponents([.day], from: calendar.startOfDay(for: r.date), to: calendar.startOfDay(for: move.session.date)).day != 1 {
+                problems.append("\(tag): did not move exactly one day")
+            }
+        }
+        if calendar.startOfDay(for: session.date) != live.targetDay { problems.append("the session is not on the chosen day") }
+        for r in restores where r.session.weekInMeso != r.week || r.session.programIndex != r.programIndex {
+            problems.append("\(r.session.dayLabel ?? "?"): week or index changed")
+        }
+        for (idx, (b, a)) in zip(chainsBefore, chainTargets()).enumerated() where b != a {
+            let src = chainSources[idx]
+            problems.append("carry-forward chain changed for \(src.item.exerciseId) \(isoDay(src.session.date)) \(src.session.dayLabel ?? "?")")
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+        guard problems.isEmpty else {
+            abandon()
+            throw PlaceError.verificationFailed(problems)
+        }
+        do {
+            if hooks.forceSaveFailure { throw ForcedPlaceSaveFailure() }
+            try context.save()
+        } catch {
+            abandon()
+            throw PlaceError.saveFailed("\(error)")
+        }
+        var summary = ["SessionItemEdit: overdue \(session.dayLabel ?? "?") \(isoDay(live.oldDate)) -> \(isoDay(live.newDate))"]
+        summary += live.moves.map { "SessionItemEdit: pushed \($0.session.dayLabel ?? "?") \(isoDay($0.oldDate)) -> \(isoDay($0.newDate))" }
+        summary.forEach { print($0) }
+        return PlaceOverdueResult(sessionsMoved: live.moves.count + 1, summary: summary)
+    }
+}

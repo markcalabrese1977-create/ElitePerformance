@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftUI
 
 /// How the lifter records effort (reps in reserve) on a set. A profile setting, stored as an optional raw string.
 ///
@@ -58,9 +59,25 @@ enum EffortTracking {
     /// " @ 2 RIR" (Detailed), " @ Solid" (Simple: the word whose scale contains the planned RIR, 3+ is Easy) or "" (Off) for the
     /// PLANNED RIR on a plan line. The plan line labels it as the plan (SUGGESTED / PLAN / OPTIONAL EXTRA SET).
     static func plannedSuffix(_ rir: Int?, mode: EffortMode = EffortTracking.mode) -> String {
-        guard let rir, mode != .off else { return "" }
-        if mode == .simple { return " @ \(simpleChoices.first { $0.rir == min(max(rir, 0), 3) }?.label ?? "Solid")" }
-        return " @ \(rir) RIR"
+        guard let rir, mode != .off, let aim = aimText(rir, mode: mode) else { return "" }
+        return " · \(aim)"
+    }
+
+    /// The label for a PLANNED / TARGET effort: "aim: 0 RIR" (Detailed), "aim: All out" (Simple), nil (Off). Planned effort never reads like a logged
+    /// one ("@ 0 RIR", "· All out"): a target of 0 once read as the lifter's own taps.
+    static func aimText(_ rir: Int, mode: EffortMode = EffortTracking.mode) -> String? {
+        plannedText(rir, mode: mode).map { "aim: \($0)" }
+    }
+
+    /// A line that may carry an aim chunk ("… · aim: 2 RIR"): the aim part is italic, the rest is not, so planned effort never looks like a logged one.
+    static func styledText(_ line: String) -> Text {
+        guard let r = line.range(of: "aim:") else { return Text(line) }
+        return Text(String(line[..<r.lowerBound])) + Text(String(line[r.lowerBound...])).italic()
+    }
+
+    /// The range form: "aim: 2–3 RIR" (Detailed), "aim: Easy–Solid" (Simple), nil (Off).
+    static func aimRangeText(_ lo: Int, _ hi: Int, mode: EffortMode = EffortTracking.mode) -> String? {
+        plannedRangeText(lo, hi, mode: mode).map { "aim: \($0)" }
     }
 
     // MARK: Planned / target RIR text (one rule for every screen)

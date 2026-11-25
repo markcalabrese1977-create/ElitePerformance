@@ -152,6 +152,8 @@ enum BackupSnapshotImporter {
             // Old backups predate this key → nil (unknown planned day). Overrides the init default (= date).
             session.plannedDate = sessionDTO.plannedDate
             session.plannedDateExact = sessionDTO.plannedDateExact
+            // Old backups predate this key → nil (not skipped).
+            session.skippedAt = sessionDTO.skippedAt
             // Old backups predate this key → nil (no app duration).
             session.startedAt = sessionDTO.startedAt
 

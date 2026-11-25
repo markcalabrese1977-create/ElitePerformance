@@ -501,7 +501,7 @@ enum PlaceholderRefresh {
                 // Floor: a target whose top rep count is no more than the reps already done in the source set is not
                 // an easier ask than that set, so it never writes below that set's load (the clamp to max load still applies).
                 if topReps <= top.reps, top.load > rounded { rounded = top.load; floored = ", floored to the source set's load" }
-                let math = "e1RM \(f(top.load)) x (1 + (\(top.reps) + \(top.rir))/30) = \(f(e1rm)); target \(topReps) reps at RIR \(f(rir)): \(f(e1rm)) / (1 + (\(topReps) + \(f(rir)))/30) x 0.95 = \(f(raw)), rounded down to \(f(step)) = \(f(rounded))\(floored)"
+                let math = "e1RM \(LoadFormatter.number(top.load)) x (1 + (\(top.reps) + \(top.rir))/30) = \(f(e1rm)); target \(topReps) reps at RIR \(f(rir)): \(f(e1rm)) / (1 + (\(topReps) + \(f(rir)))/30) x 0.95 = \(f(raw)), rounded down to \(f(step)) = \(LoadFormatter.number(rounded))\(floored)"
                 let note: String
                 if crossDay { note = "Estimated from your \(s.dayLabel ?? "other-day") sets — set 1 calibrates." }
                 else {
@@ -529,7 +529,7 @@ enum PlaceholderRefresh {
                 let spend = max(0, item.targetRIR - sourceRIR)
                 guard r.load > 0, CoachingEngine.adjustedReps(r.reps, targetRIR: item.targetRIR, recordedRIR: sourceRIR) >= repMin else { continue }
                 if current > 0, abs(current - r.load) > 0.001 { return nil }       // a planned load is not replaced (the held value itself is: idempotent)
-                let math = "\(r.reps) reps - max(0, target RIR \(item.targetRIR) - set RIR \(sourceRIR)) = \(r.reps - spend) >= repMin \(repMin): hold \(f(r.load))"
+                let math = "\(r.reps) reps - max(0, target RIR \(item.targetRIR) - set RIR \(sourceRIR)) = \(r.reps - spend) >= repMin \(repMin): hold \(LoadFormatter.number(r.load))"
                 let note: String
                 let reason: Reason
                 if crossDay {
