@@ -1869,6 +1869,103 @@ final class RIRAdjustmentHoldReportTests: XCTestCase {
     }
 }
 
+// MARK: - Dry run: what `.repeatTop2` would release on a real backup (report only)
+
+@MainActor
+final class RepeatTop2HoldReportTests: XCTestCase {
+    func test_report_holdsRepeatTop2WouldRelease() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_TOP2_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_TOP2_BACKUPS (comma-separated); optional TEST_RUNNER_EP_TOP2_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("TOP2| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_TOP2_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        defer { EffortTracking.clearMirror() }
+        EffortTracking.mode = .detailed
+        let top2 = CoachingPolicy(valveRule: .repeatTop2)
+        let lifterLevel = CoachingPolicy(uninformativeRule: .lifterLevel)
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let unit = profile?.loadUnit ?? .lb
+            let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent)")
+            var compoundItems = 0, rirHolds = 0, released = 0, releasedFirst = 0, releasedChain = 0
+            var otherChanges: [String] = [], holdLines: [String] = [], lifterLevelReleases: [String] = []
+            for s in sessions where s.status == .completed && s.meso?.isMaintenance != true {
+                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                    let working = CoachingEngine.workingSetIndices(for: i)
+                    guard !working.isEmpty else { continue }
+                    compoundItems += 1
+                    let base = working.map { i.actualLoads[$0] }.last ?? 0
+                    let step = UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit)
+                    func kind(_ p: CoachingPolicy) -> (String, CoachingRecommendation?) {
+                        let rec = CoachingEngine.recommend(for: i, policy: p, minLoadIncrement: step, unit: unit,
+                            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: i, in: s, allSessions: sessions, policy: p),
+                            releaseHintDue: CoachingEngine.releaseHintDue(for: i, in: s, allSessions: sessions, policy: p))
+                        guard let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad else { return ("none", rec) }
+                        return (next > base + 0.001 ? "increase" : (next < base - 0.001 ? "lower" : "hold"), rec)
+                    }
+                    let (ks, _) = kind(.shipped), (kt, rt) = kind(top2)
+                    // For comparison: the lifter-level rule (every compound rating in the last 2 sessions is 0 -> ratings ignored).
+                    if ks == "hold" {
+                        let un = CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: sessions, policy: lifterLevel)
+                        if un {
+                            let rec = CoachingEngine.recommend(for: i, policy: lifterLevel, minLoadIncrement: step, unit: unit, ratingsUninformative: true)
+                            if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad, next > base + 0.001 {
+                                lifterLevelReleases.append("\(f.string(from: s.date)) \(ExerciseCatalog.displayName(for: i.exerciseId)) (\((i.waveRaw ?? "-").uppercased())): hold at \(n(base)) -> \(n(next))")
+                            }
+                        }
+                    }
+                    if CoachingEngine.isRIRAdjustmentHold(i) {
+                        rirHolds += 1
+                        // Why .repeatTop2 does or does not release it: the run of RIR holds immediately before, and whether every counted set is at the top.
+                        let canon = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                        let earlier = sessions.filter { $0.status == .completed && $0.date < s.date && $0.meso?.persistentModelID == s.meso?.persistentModelID && SessionDayLabelMatcher.matches($0.dayLabel, s.dayLabel) }
+                            .sorted { $0.date > $1.date }
+                            .compactMap { e in e.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canon && $0.waveRaw?.lowercased() == i.waveRaw?.lowercased() } }
+                        var run = 0
+                        for e in earlier { if e.waveRaw?.lowercased() != "deload", CoachingEngine.isRIRAdjustmentHold(e) { run += 1 } else { break } }
+                        let top = CoachingEngine.everyCountedSetAtTop(i)
+                        holdLines.append("\(f.string(from: s.date)) \(ExerciseCatalog.displayName(for: i.exerciseId)) (\((i.waveRaw ?? "-").uppercased())): \(n(base)) x \(working.map { String(i.actualReps[$0]) }.joined(separator: ","))  RIR \(working.map { String(RIREntry.recorded(i, at: $0) ?? -1) }.joined(separator: ","))  | RIR holds in a row before: \(run); every counted set at the top: \(top)  -> \(run >= 2 && top ? "release expected" : (top ? "needs \(2 - run) more prior hold(s)" : "a set is short of the top"))")
+                    }
+                    guard ks != kt else { continue }
+                    guard ks == "hold", kt == "increase" else { otherChanges.append("\(f.string(from: s.date)) \(ExerciseCatalog.displayName(for: i.exerciseId)): shipped \(ks) -> repeatTop2 \(kt)"); continue }
+                    released += 1
+                    let state = CoachingEngine.ratingsState(for: i, in: s, allSessions: sessions, policy: top2)
+                    if state.flagged { releasedChain += 1 } else { releasedFirst += 1 }
+                    let letter = (i.waveRaw ?? "-").uppercased()
+                    out("\(f.string(from: s.date)) \(s.dayLabel ?? "?") (\(s.meso?.name ?? "-"), wk \(s.weekIndex), \(letter)) \(i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId))  [\(state.flagged ? "chained: mark already set" : "first release: two prior RIR holds")]")
+                    out("   done   \(n(base)) x \(working.map { String(i.actualReps[$0]) }.joined(separator: ","))  RIR \(working.map { String(RIREntry.recorded(i, at: $0) ?? -1) }.joined(separator: ","))  (target \(i.targetRIR))")
+                    out("   shipped: hold at \(n(base)); repeatTop2: \(rt?.nextSuggestedLoad.map { n($0) } ?? "-")  | \(rt?.message ?? "")")
+                    let canonical = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                    let nextSession = sessions.first { t in
+                        t.date > s.date && t.meso?.persistentModelID == s.meso?.persistentModelID && SessionDayLabelMatcher.matches(t.dayLabel, s.dayLabel)
+                            && t.items.contains { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && $0.waveRaw?.lowercased() == i.waveRaw?.lowercased() }
+                    }
+                    if let t = nextSession, let ni = t.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && $0.waveRaw?.lowercased() == i.waveRaw?.lowercased() }) {
+                        let nw = CoachingEngine.workingSetIndices(for: ni)
+                        if t.status == .completed, !nw.isEmpty {
+                            let nb = nw.map { ni.actualLoads[$0] }.last ?? 0
+                            out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)): did \(n(nb)) x \(nw.map { String(ni.actualReps[$0]) }.joined(separator: ","))  RIR \(nw.map { String(RIREntry.recorded(ni, at: $0) ?? -1) }.joined(separator: ","))  (it was planned \(n(ni.suggestedLoad)); the lift actually did \(nb > base + 0.001 ? "MORE" : (nb < base - 0.001 ? "LESS" : "the SAME")) load than this session)")
+                        } else {
+                            out("   next   \(f.string(from: t.date)) (wk \(t.weekIndex)) \(t.status.rawValue): planned \(n(ni.suggestedLoad))")
+                        }
+                    } else { out("   next   (no later exposure of this lift on this letter in the block)") }
+                }
+            }
+            out("-- \(compoundItems) completed compound items; \(rirHolds) are RIR-adjustment holds; .repeatTop2 releases \(released) (first releases \(releasedFirst), chained \(releasedChain))")
+            out("-- for comparison, the lifter-level rule would turn \(lifterLevelReleases.count) shipped holds into increases:"); lifterLevelReleases.forEach { out("   \($0)") }
+            out("-- the RIR-adjustment holds, and why .repeatTop2 would not release each:"); holdLines.forEach { out("   \($0)") }
+            if !otherChanges.isEmpty { out("-- other decision changes: \(otherChanges.count)"); otherChanges.forEach { out("   \($0)") } }
+        }
+    }
+}
+
 // MARK: - Dry run: the next-meso preview, old single 95% against the verdict-gated start (report only)
 
 @MainActor
@@ -2260,6 +2357,7 @@ struct SimVariant {
         SimVariant(name: "shipped", policy: .shipped),
         SimVariant(name: "valve-total", policy: CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne)),
         SimVariant(name: "repeat-top2", policy: CoachingPolicy(valveRule: .repeatTop2)),
+        SimVariant(name: "lifter-only", policy: CoachingPolicy(uninformativeRule: .lifterLevel)),
         SimVariant(name: "top2-lifter", policy: CoachingPolicy(valveRule: .repeatTop2, uninformativeRule: .lifterLevel)),
         SimVariant(name: "count-first3", policy: CoachingPolicy(countCap: .firstThree)),
         SimVariant(name: "rir-tol1", policy: CoachingPolicy(rirTolerance: .oneRIRPerSet)),
