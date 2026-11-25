@@ -1674,6 +1674,7 @@ final class SessionScreenViewModel: ObservableObject {
                 }
             }
 
+            if let note = exercise.shortItemNote { exercise.coachMessage = note }
             exercises[exerciseIdx] = exercise
             // onSetCompleted(exercise: exercise, set: set)
             persist(using: context)
@@ -1800,6 +1801,7 @@ final class SessionScreenViewModel: ObservableObject {
         exercises[exerciseIdx].sets[setIdx].dropSets = []
         exercises[exerciseIdx].sets[setIdx].actualLoadText = "0"
         exercises[exerciseIdx].sets[setIdx].actualRepsText = "\(exercises[exerciseIdx].sets[setIdx].plannedReps)"
+        if let note = exercises[exerciseIdx].shortItemNote { exercises[exerciseIdx].coachMessage = note }
 
         persist(using: context)
     }
@@ -2955,6 +2957,16 @@ struct UISessionExercise: Identifiable {
     /// Rows in display order: top rows first, then the back-offs and extras. Storage order (index)
     /// is unchanged; the role comes from the row, never from when it was logged.
     var displaySets: [UISessionSet] { sets.filter(\.isTop) + sets.filter { !$0.isTop } }
+
+    /// The note for a completed item that logged fewer sets than planned (nil otherwise).
+    var shortItemNote: String? {
+        guard isComplete else { return nil }
+        let planned = sets.filter { isPlannedRow($0) }
+        return CoachingEngine.shortItemNote(
+            planned: planned.count,
+            logged: planned.filter { $0.status == .completed }.count,
+            skips: planned.filter { $0.status.isAnySkip }.map { $0.status.feedbackValue })
+    }
 
     var isComplete: Bool {
         let workingSets = sets.filter { isPlannedRow($0) }

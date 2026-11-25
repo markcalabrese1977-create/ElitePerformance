@@ -258,6 +258,21 @@ struct CoachingEngine {
         return parts.joined(separator: "; ")
     }
 
+    /// The note on a COMPLETED item with fewer logged sets than planned: "1 of 3 planned sets logged (2 flagged disruption) — load held next
+    /// time." `skips` are the reasons of the skipped planned sets (`.none` = skipped with no reason). Nil when every planned set was logged.
+    /// It cites no load, so the stale-note hygiene never hides it.
+    static func shortItemNote(planned: Int, logged: Int, skips: [SetFeedback]) -> String? {
+        guard planned > 0, logged < planned else { return nil }
+        var order: [SetFeedback] = []
+        for s in skips where !order.contains(s) { order.append(s) }
+        let parts = order.map { reason -> String in
+            let n = skips.filter { $0 == reason }.count
+            return reason == .none ? "\(n) skipped" : "\(n) flagged \(reason.rawValue)"
+        }
+        let tail = parts.isEmpty ? "" : " (\(parts.joined(separator: ", ")))"
+        return "ℹ️ \(logged) of \(planned) planned sets logged\(tail) — load held next time."
+    }
+
     /// Back-off working sets = any back-off set with both load and reps > 0, minus warmups (< 50% of
     /// the max back-off load). Top rows are never part of this: they are read separately. Shared with
     /// PlanMemoryEngine's incomplete-evidence guard.
@@ -718,12 +733,25 @@ struct CoachingEngine {
         let totalRepsEarned = adjustedTotal >= totalGoal - 1
         // The compound coach line: the raw reps, what they count as when effort took some off, which sets and by how much, and the
         // threshold actually needed (sets x top - 1).
+        // Working sets the lifter did beyond the sets the verdict reads (the first up to 3): the line says so, with their reps, so the
+        // total is not mistaken for everything that was done ("30 reps on 3 prescribed sets (+1 extra set: 10)").
+        let extraReps: [Int] = workingIndices.filter { !primaryIndices.contains($0) }.map { reps[$0] }
+        let setsBasis: String = {
+            let n = primaryIndices.count
+            guard n > 0 else { return "" }
+            let prescribed = item.effectivePrescribedSets
+            guard !extraReps.isEmpty else { return "" }
+            let basis = prescribed == n ? "\(n) prescribed sets" : "the first \(n) sets"
+            let list = extraReps.map(String.init).joined(separator: ", ")
+            let noun = prescribed == n ? "extra" : "more"
+            return " on \(basis) (+\(extraReps.count) \(noun) set\(extraReps.count == 1 ? "" : "s"): \(list))"
+        }()
         func totalsLine(_ verdict: String) -> String {
             let needed = totalGoal - 1
             if let clause = Self.adjustmentClause(adjustedSets, targetRIR: targetRIR) {
-                return "\(totalReps) reps, counted as \(adjustedTotal): \(clause). Needed \(needed) — \(verdict)."
+                return "\(totalReps) reps\(setsBasis), counted as \(adjustedTotal): \(clause). Needed \(needed) — \(verdict)."
             }
-            return "\(totalReps) reps, needed \(needed) — \(verdict)."
+            return "\(totalReps) reps\(setsBasis), needed \(needed) — \(verdict)."
         }
         let earnedByAdjustedReps = isCompoundLift ? totalRepsEarned : allSetsAtTop
         // Repeat-performance valve: the previous exposure of this lift (same letter) was held only because effort took reps off its count, and

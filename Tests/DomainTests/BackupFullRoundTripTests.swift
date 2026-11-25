@@ -5760,6 +5760,41 @@ final class RIRAdjustedProgressionTests: XCTestCase {
         try check([10, 10, 10], [RIREntry.unset, RIREntry.unset, RIREntry.unset], "30 reps, needed 29 — increase earned.")
     }
 
+    func test_coachLine_saysWhenExtraSetsWereDone_theTotalStaysOnThePrescribedSets() throws {
+        EffortTracking.mode = .detailed
+        // Targets 4 sets, the program prescribes 3: the 4th set is extra and the line says so.
+        let i = item("bench_press", reps: [10, 10, 10, 10], rirs: [2, 2, 2, 2], repMax: 10)
+        i.targetSets = 4; i.prescribedSets = 3
+        let msg = try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5)).message
+        XCTAssertTrue(msg.hasPrefix("30 reps on 3 prescribed sets (+1 extra set: 10), needed 29 — increase earned."), msg)
+        // Adjusted: the extra-set clause comes before "counted as".
+        let j = item("bench_press", reps: [10, 10, 9, 9], rirs: [2, 2, 1, 2], repMax: 10)
+        j.targetSets = 4; j.prescribedSets = 3
+        let adj = try XCTUnwrap(CoachingEngine.recommend(for: j, minLoadIncrement: 5)).message
+        XCTAssertTrue(adj.hasPrefix("29 reps on 3 prescribed sets (+1 extra set: 9), counted as 28: set 3 was 1 rep harder than planned (RIR 1 vs 2). Needed 29 — hold."), adj)
+        // A prescription longer than the 3 sets the verdict reads: the 4th-5th are "more", not "extra".
+        let k = item("bench_press", reps: [10, 10, 10, 8, 8], rirs: [2, 2, 2, 2, 2], repMax: 10)
+        k.targetSets = 5; k.prescribedSets = 5
+        let more = try XCTUnwrap(CoachingEngine.recommend(for: k, minLoadIncrement: 5)).message
+        XCTAssertTrue(more.hasPrefix("30 reps on the first 3 sets (+2 more sets: 8, 8), needed 29 — increase earned."), more)
+        // No extra sets: unchanged short form.
+        let plain = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 10], rirs: [2, 2, 2], repMax: 10), minLoadIncrement: 5)).message
+        XCTAssertTrue(plain.hasPrefix("30 reps, needed 29 — increase earned."), plain)
+    }
+
+    func test_shortItemNote_loggedOfPlanned_withTheSkipReasons() {
+        XCTAssertEqual(CoachingEngine.shortItemNote(planned: 3, logged: 1, skips: [.disruption, .disruption]),
+                       "ℹ️ 1 of 3 planned sets logged (2 flagged disruption) — load held next time.")
+        XCTAssertEqual(CoachingEngine.shortItemNote(planned: 3, logged: 2, skips: [.none]),
+                       "ℹ️ 2 of 3 planned sets logged (1 skipped) — load held next time.")
+        XCTAssertEqual(CoachingEngine.shortItemNote(planned: 3, logged: 1, skips: [.pain, .none]),
+                       "ℹ️ 1 of 3 planned sets logged (1 flagged pain, 1 skipped) — load held next time.")
+        XCTAssertNil(CoachingEngine.shortItemNote(planned: 3, logged: 3, skips: []))
+        // It cites no load, so the stale-note hygiene never hides it.
+        let note = CoachingEngine.shortItemNote(planned: 3, logged: 1, skips: [.disruption, .disruption])!
+        XCTAssertNil(CoachNoteHygiene.citedLoad(in: note))
+    }
+
     func test_coachLine_simpleModeUsesTheWords() throws {
         EffortTracking.mode = .simple
         let msg = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 9], rirs: [2, 2, 1], repMax: 10), minLoadIncrement: 5)).message
