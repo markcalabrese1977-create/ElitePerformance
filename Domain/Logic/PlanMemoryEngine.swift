@@ -275,7 +275,6 @@ struct PlanMemoryEngine {
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
-                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
@@ -299,7 +298,6 @@ struct PlanMemoryEngine {
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
-                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let topLoad = recommendation.nextTopLoad {
@@ -612,7 +610,6 @@ struct PlanMemoryEngine {
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
-                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
@@ -703,7 +700,6 @@ struct PlanMemoryEngine {
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
-                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises

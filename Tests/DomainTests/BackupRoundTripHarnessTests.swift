@@ -2176,14 +2176,14 @@ final class CoachingPolicyTests: XCTestCase {
         let x = bench([10, 10, 10], [0, 0, 0])
         XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5)?.nextSuggestedLoad, 100)
         XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.nextSuggestedLoad, 105)
-        // One-time note: only when asked, once.
-        let noted = CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true, uninformativeNoteDue: true)
-        XCTAssertTrue(noted?.message.contains("If you had reps left, try Hard or Solid, or set effort to Off.") == true)
-        XCTAssertFalse(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.message.contains("Hard or Solid") == true)
-        XCTAssertTrue(CoachingEngine.uninformativeNoteDue(for: s1.items[0], in: s1, allSessions: [s1], policy: p))
+        // The one-time note is per LIFTER and session-level: due at the first session where the mark holds, never on a lift's line.
+        XCTAssertEqual(CoachingEngine.lifterNoteDue(asOf: s1, allSessions: [s1], policy: p), CoachingEngine.lifterNote)
+        XCTAssertTrue(CoachingEngine.lifterNote.contains("If you had reps left, try Hard or Solid, or set effort to Off."))
+        XCTAssertFalse(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.message.contains("Hard or Solid") == true, "not on a lift's coach line")
         let s2 = session(8, [bench([10, 10, 10], [0, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
         XCTAssertTrue(CoachingEngine.lifterRatingsUninformative(asOf: s2, allSessions: [s1, s2], policy: p))
-        XCTAssertFalse(CoachingEngine.uninformativeNoteDue(for: s2.items[0], in: s2, allSessions: [s1, s2], policy: p), "the lift already had its note")
+        XCTAssertNil(CoachingEngine.lifterNoteDue(asOf: s2, allSessions: [s1, s2], policy: p), "already shown once for the lifter")
+        XCTAssertNil(CoachingEngine.lifterNoteDue(asOf: s1, allSessions: [s1], policy: .shipped))
         // Any non-zero rating in the last 2 sessions clears it at once.
         let s3 = session(15, [bench([10, 10, 10], [1, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
         XCTAssertFalse(CoachingEngine.lifterRatingsUninformative(asOf: s3, allSessions: [s1, s2, s3], policy: p))

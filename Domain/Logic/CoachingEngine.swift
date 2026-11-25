@@ -291,15 +291,15 @@ struct CoachingEngine {
         return rated >= 6
     }
 
-    /// The one-time effort note: this exposure is the lift's first at which the lifter-level mark holds.
-    static func uninformativeNoteDue(for item: SessionItem, in session: Session?, allSessions: [Session], policy: CoachingPolicy) -> Bool {
-        guard lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy), let session else { return false }
-        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-        for s in allSessions where s !== session && s.status == .completed && s.date < session.date
-            && s.items.contains(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) {
-            if lifterRatingsUninformative(asOf: s, allSessions: allSessions, policy: policy) { return false }
+    /// The one-time effort note for `.lifterLevel`, once per LIFTER and shown at session level (recap / Today banner), never on a lift's coach
+    /// line: non-nil only for the session at which the mark first holds (no earlier completed session had it).
+    static let lifterNote = "Your ratings have all read 0, so progression is judged on reps. If you had reps left, try Hard or Solid, or set effort to Off."
+    static func lifterNoteDue(asOf session: Session?, allSessions: [Session], policy: CoachingPolicy) -> String? {
+        guard let session, lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy) else { return nil }
+        for s in allSessions where s !== session && s.status == .completed && s.date < session.date {
+            if lifterRatingsUninformative(asOf: s, allSessions: allSessions, policy: policy) { return nil }
         }
-        return true
+        return lifterNote
     }
 
     // MARK: - `.repeatTop2`: "ratings not informative"
@@ -502,21 +502,17 @@ struct CoachingEngine {
         priorExposureWasRIRHold: Bool = false,
         releaseHintDue: Bool = false,
         ratingsUninformative: Bool = false,
-        uninformativeNoteDue: Bool = false,
         isProgressionExempt: Bool = false,
         loadCap: LoadCap? = nil,
         ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
-        var rec = recommendRoles(
+        let rec = recommendRoles(
             for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
             priorExposureWasRIRHold: ratingsUninformative ? false : priorExposureWasRIRHold, releaseHintDue: releaseHintDue, ignoreEffort: ignoreEffort || ratingsUninformative
         )
-        if ratingsUninformative, uninformativeNoteDue, let r = rec {
-            rec = CoachingRecommendation(message: r.message + " If you had reps left, try Hard or Solid, or set effort to Off.", nextSuggestedLoad: r.nextSuggestedLoad, nextTopLoad: r.nextTopLoad)
-        }
         // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
         // is already turned into a hold at the cap, with its message, further down).
         guard let rec, let cap = loadCap, !isProgressionExempt else { return rec }
