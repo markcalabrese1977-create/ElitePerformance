@@ -1674,6 +1674,7 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
         var key: String, date: String, day: String, wave: String, name: String, sets: Int, planned: String
         var reps: [Int], loads: [Double], rirs: [Int]
         var baseLoad: Double, kind: String, next: Double?, nextTop: Double?, message: String
+        var presc: Int = 0, setMax: Int = 0, setMin: Int = 0, lastCounted: Double = 0
     }
 
     /// Writes one JSON array per backup to EP_PROG_OUT (a path prefix); the old and the new code each write theirs, and a diff lists the changes.
@@ -1683,6 +1684,7 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
             throw XCTSkip("set TEST_RUNNER_EP_PROG_BACKUPS (comma-separated) and TEST_RUNNER_EP_PROG_OUT (output path prefix)")
         }
         EffortTracking.mode = .detailed
+        let allHistory = ProcessInfo.processInfo.environment["EP_PROG_ALL"] == "1"
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         for (n, path) in list.split(separator: ",").map(String.init).enumerated() {
             let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
@@ -1691,7 +1693,7 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
             let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
             let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
             var rows: [Row] = []
-            for s in sessions where s.status == .completed && s.meso?.status == .active && s.meso?.isMaintenance != true {
+            for s in sessions where s.status == .completed && (allHistory || s.meso?.status == .active) && s.meso?.isMaintenance != true {
                 for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
                     let working = CoachingEngine.workingSetIndices(for: i)
                     guard !working.isEmpty else { continue }
@@ -1705,7 +1707,7 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
                                     wave: (i.waveRaw ?? "-").uppercased(), name: i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId), sets: i.targetSets,
                                     planned: "\(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps) @ \(i.targetRIR) RIR",
                                     reps: working.map { i.actualReps[$0] }, loads: working.map { i.actualLoads[$0] }, rirs: working.map { i.actualRIRs.indices.contains($0) ? i.actualRIRs[$0] : -1 },
-                                    baseLoad: base, kind: kind, next: rec?.nextSuggestedLoad, nextTop: rec?.nextTopLoad, message: rec?.message ?? ""))
+                                    baseLoad: base, kind: kind, next: rec?.nextSuggestedLoad, nextTop: rec?.nextTopLoad, message: rec?.message ?? "", presc: i.effectivePrescribedSets, setMax: i.setMax ?? 0, setMin: i.setMin ?? 0, lastCounted: CoachingEngine.countedSets(for: i, minLoadIncrement: profile.map { UserProfile.loadStep(for: i.exerciseId, profile: $0, unit: $0.loadUnit) } ?? nil, unit: profile?.loadUnit ?? .lb).rows.last.map { i.actualLoads[$0] } ?? 0))
                 }
             }
             let data = try JSONEncoder().encode(rows)

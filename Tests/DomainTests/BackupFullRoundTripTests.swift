@@ -5774,11 +5774,11 @@ final class RIRAdjustedProgressionTests: XCTestCase {
         j.targetSets = 4; j.prescribedSets = 3
         let adj = try XCTUnwrap(CoachingEngine.recommend(for: j, minLoadIncrement: 5)).message
         XCTAssertTrue(adj.hasPrefix("29 reps on 3 prescribed sets (+1 extra set: 9), counted as 28: set 3 was 1 rep harder than planned (RIR 1 vs 2). Needed 29 — hold."), adj)
-        // A prescription longer than the 3 sets the verdict reads: the 4th-5th are "more", not "extra".
-        let k = item("bench_press", reps: [10, 10, 10, 8, 8], rirs: [2, 2, 2, 2, 2], repMax: 10)
+        // A prescription of 5 counts all 5 sets (no cap at 3).
+        let k = item("bench_press", reps: [10, 10, 10, 10, 9], rirs: [2, 2, 2, 2, 2], repMax: 10)
         k.targetSets = 5; k.prescribedSets = 5
-        let more = try XCTUnwrap(CoachingEngine.recommend(for: k, minLoadIncrement: 5)).message
-        XCTAssertTrue(more.hasPrefix("30 reps on the first 3 sets (+2 more sets: 8, 8), needed 29 — increase earned."), more)
+        let all5 = try XCTUnwrap(CoachingEngine.recommend(for: k, minLoadIncrement: 5)).message
+        XCTAssertTrue(all5.hasPrefix("49 reps, needed 49 — increase earned."), all5)
         // No extra sets: unchanged short form.
         let plain = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 10], rirs: [2, 2, 2], repMax: 10), minLoadIncrement: 5)).message
         XCTAssertTrue(plain.hasPrefix("30 reps, needed 29 — increase earned."), plain)
@@ -5795,6 +5795,53 @@ final class RIRAdjustedProgressionTests: XCTestCase {
         // It cites no load, so the stale-note hygiene never hides it.
         let note = CoachingEngine.shortItemNote(planned: 3, logged: 1, skips: [.disruption, .disruption])!
         XCTAssertNil(CoachNoteHygiene.citedLoad(in: note))
+    }
+
+    // MARK: - Every prescribed set counts (no cap at 3); top-set / ramp handling for rows without roles
+
+    private func loaded(_ reps: [Int], loads: [Double], repMax: Int = 10) -> SessionItem {
+        let i = item("bench_press", reps: reps, rirs: Array(repeating: 2, count: reps.count), repMax: repMax)
+        i.actualLoads = loads
+        return i
+    }
+
+    func test_fourPrescribedSets_allCount_thresholdIsFourTimesTopMinusOne() throws {
+        EffortTracking.mode = .detailed
+        let earned = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 10, 9], rirs: [2, 2, 2, 2], repMax: 10), minLoadIncrement: 5))
+        XCTAssertTrue(earned.message.hasPrefix("39 reps, needed 39 — increase earned."), earned.message)
+        let short = try XCTUnwrap(CoachingEngine.recommend(for: item("bench_press", reps: [10, 10, 10, 8], rirs: [2, 2, 2, 2], repMax: 10), minLoadIncrement: 5))
+        XCTAssertTrue(short.message.hasPrefix("38 reps, needed 39 — hold."), short.message)
+    }
+
+    func test_oneHeavyRow_overFlatOthers_isATopSet_notAWorkingSet() throws {
+        EffortTracking.mode = .detailed
+        // 315 over three flat 305s: the 315 is a top set; the three 305 sets decide.
+        let top = loaded([6, 8, 8, 8], loads: [315, 305, 305, 305], repMax: 8)
+        let counted = CoachingEngine.countedSets(for: top, minLoadIncrement: 5)
+        XCTAssertEqual(counted.rows, [1, 2, 3]); XCTAssertEqual(counted.heavy, [0]); XCTAssertEqual(counted.required, 3)
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: top, minLoadIncrement: 5))
+        XCTAssertTrue(rec.message.contains("set 1 at 315 counted as a top set, not a working set"), rec.message)
+        XCTAssertEqual(rec.nextSuggestedLoad, 310)
+        // Within one load step it is not a top set.
+        XCTAssertTrue(CoachingEngine.countedSets(for: loaded([8, 8, 8], loads: [305, 305, 310]), minLoadIncrement: 5).heavy.isEmpty)
+    }
+
+    func test_aRamp_countsEverySet_heldAndSteppedFromTheLastWorkingLoad() throws {
+        // 250, 250, 265, 275: not "one heavy row over flat others" -> a ramp: all four count, the last counted load (275) is the base.
+        let ramp = loaded([6, 7, 6, 5], loads: [250, 250, 265, 275], repMax: 6)
+        let counted = CoachingEngine.countedSets(for: ramp, minLoadIncrement: 5)
+        XCTAssertEqual(counted.rows, [0, 1, 2, 3]); XCTAssertTrue(counted.heavy.isEmpty); XCTAssertEqual(counted.required, 4)
+        XCTAssertEqual(CoachingEngine.heldLoad(for: ramp), 275)
+        let rec = try XCTUnwrap(CoachingEngine.recommend(for: ramp, minLoadIncrement: 5))
+        XCTAssertGreaterThanOrEqual(rec.nextSuggestedLoad ?? 0, 275, "never plans below the last working load")
+        // A pyramid with two different heavier rows is a ramp too.
+        XCTAssertTrue(CoachingEngine.countedSets(for: loaded([8, 8, 8], loads: [65, 70, 80]), minLoadIncrement: 5).heavy.isEmpty)
+    }
+
+    func test_rowsWithRoles_neverUseTheHeavyRowRule() {
+        let i = loaded([6, 8, 8, 8], loads: [315, 305, 305, 305], repMax: 8)
+        i.setRolesBySet = ["", "", "", ""]
+        XCTAssertTrue(CoachingEngine.countedSets(for: i, minLoadIncrement: 5).heavy.isEmpty)
     }
 
     func test_coachLine_simpleModeUsesTheWords() throws {

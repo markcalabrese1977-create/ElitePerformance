@@ -143,8 +143,7 @@ struct CoachingEngine {
     /// The load the coach holds when it cannot call a progression: the last performed primary back-off set (the first up
     /// to 3 planned working sets, as every progression rule reads them). nil when nothing was performed.
     static func heldLoad(for item: SessionItem) -> Double? {
-        let rows = plannedWorkingSetIndices(for: item)
-        guard let last = Array(rows.prefix(min(max(1, item.targetSets), 3))).last else { return nil }
+        guard let last = countedSets(for: item).rows.last else { return nil }
         return item.actualLoads[last]
     }
 
@@ -295,15 +294,54 @@ struct CoachingEngine {
         return working.filter { $0 < limit }
     }
 
-    /// Primary working sets the progression decision needs: min(planned sets, 3).
+    /// The sets the progression decision reads: EVERY prescribed working set (`prescribedSets`, capped by the sets this session runs), except
+    ///   - top-set rows (never back-offs: they are read on their own),
+    ///   - rows beyond the prescribed sets (a set the lifter added, or one the program marks as earnable),
+    ///   - on an item without set roles, ONE row heavier than all the others by more than one load step when all the others share one
+    ///     load (a top set logged as a back-off row). Any other spread of loads is a ramp or pyramid: every prescribed set counts.
+    struct CountedSets {
+        /// The counted rows, in order.
+        let rows: [Int]
+        /// How many sets the decision needs: the prescribed sets, less the heavy rows taken out.
+        let required: Int
+        /// Rows logged heavier than the working load (no set roles): counted as top sets, not working sets.
+        let heavy: [Int]
+        /// Working rows beyond the prescribed sets.
+        let extras: [Int]
+    }
+
+    static func countedSets(for item: SessionItem, minLoadIncrement: Double? = nil, unit: LoadUnit = .lb) -> CountedSets {
+        let working = workingSetIndices(for: item)
+        let warmupRows = loggedRowIndices(for: item).count - working.count
+        let window = max(1, min(item.effectivePrescribedSets, max(1, item.targetSets)))
+        let limit = window + warmupRows
+        let inWindow = working.filter { $0 < limit }
+        let extras = working.filter { $0 >= limit }
+        var heavy: [Int] = []
+        if item.setRolesBySet == nil, inWindow.count >= 3 {
+            // One row is a top set only when every OTHER row shares one load and it is heavier than that load by more than a step.
+            // Anything else (an ascending ramp, a pyramid, mixed loads) is not a top set: every prescribed set counts.
+            if let heaviest = inWindow.max(by: { item.actualLoads[$0] < item.actualLoads[$1] }) {
+                let others = inWindow.filter { $0 != heaviest }.map { item.actualLoads[$0] }
+                if let flat = others.first, others.allSatisfy({ abs($0 - flat) < 0.0001 }) {
+                    let step = loadIncrement(for: item, base: flat, minLoadIncrement: minLoadIncrement, unit: unit)
+                    if item.actualLoads[heaviest] > flat + step + 0.0001 { heavy = [heaviest] }
+                }
+            }
+        }
+        return CountedSets(rows: inWindow.filter { !heavy.contains($0) }, required: max(1, window - heavy.count), heavy: heavy, extras: extras)
+    }
+
+    /// Primary working sets the progression decision needs (see `countedSets`).
     static func requiredPrimarySets(for item: SessionItem) -> Int {
-        min(max(1, item.targetSets), 3)
+        countedSets(for: item).required
     }
 
     /// True when enough primary working sets were logged for a load to be written onto a
     /// future plan. A 4-set item with 3 logged qualifies.
     static func hasSufficientPrimaryEvidence(_ item: SessionItem) -> Bool {
-        plannedWorkingSetIndices(for: item).count >= requiredPrimarySets(for: item)
+        let c = countedSets(for: item)
+        return c.rows.count >= c.required
     }
 
     /// What to say instead of a number when the chain has ended.
@@ -507,7 +545,8 @@ struct CoachingEngine {
         guard !workingIndices.isEmpty else { return nil }
 
         let plannedWorkingSetCount = max(1, item.targetSets)
-        let growthSetTarget = min(plannedWorkingSetCount, 3)
+        let counted = countedSets(for: item, minLoadIncrement: minLoadIncrement, unit: unit)
+        let growthSetTarget = counted.required
 
         // Only rows inside the planned set count are evidence for the prescription. An extra
         // row (index >= targetSets) was judged against the wrong range and counted toward
@@ -515,8 +554,8 @@ struct CoachingEngine {
         let plannedRows = plannedWorkingSetIndices(for: item)
         guard !plannedRows.isEmpty else { return nil }
 
-        // Progression evaluates only the first up to 3 planned working sets
-        let primaryIndices = Array(plannedRows.prefix(growthSetTarget))
+        // Progression evaluates every prescribed working set (see `countedSets`)
+        let primaryIndices = counted.rows
 
         // Will carry-forward actually write onto a materialized target? Not with incomplete
         // evidence (fewer than min(sets, 3) primary sets logged) or a flagged source whose
@@ -597,7 +636,8 @@ struct CoachingEngine {
             switch growthSetTarget {
             case 1: return "working set"
             case 2: return "first 2 working sets"
-            default: return "first 3 working sets"
+            case 3: return "first 3 working sets"
+            default: return "\(growthSetTarget) working sets"
             }
         }()
 
@@ -735,16 +775,15 @@ struct CoachingEngine {
         // threshold actually needed (sets x top - 1).
         // Working sets the lifter did beyond the sets the verdict reads (the first up to 3): the line says so, with their reps, so the
         // total is not mistaken for everything that was done ("30 reps on 3 prescribed sets (+1 extra set: 10)").
-        let extraReps: [Int] = workingIndices.filter { !primaryIndices.contains($0) }.map { reps[$0] }
+        let extraReps: [Int] = counted.extras.map { reps[$0] }
+        let heavyNotes: [String] = counted.heavy.map { "set \($0 + 1) at \(LoadFormatter(unit: unit).truncated(loads[$0])) counted as a top set, not a working set" }
         let setsBasis: String = {
             let n = primaryIndices.count
-            guard n > 0 else { return "" }
-            let prescribed = item.effectivePrescribedSets
-            guard !extraReps.isEmpty else { return "" }
-            let basis = prescribed == n ? "\(n) prescribed sets" : "the first \(n) sets"
-            let list = extraReps.map(String.init).joined(separator: ", ")
-            let noun = prescribed == n ? "extra" : "more"
-            return " on \(basis) (+\(extraReps.count) \(noun) set\(extraReps.count == 1 ? "" : "s"): \(list))"
+            guard n > 0, !(extraReps.isEmpty && heavyNotes.isEmpty) else { return "" }
+            var parts: [String] = []
+            if !extraReps.isEmpty { parts.append("+\(extraReps.count) extra set\(extraReps.count == 1 ? "" : "s"): \(extraReps.map(String.init).joined(separator: ", "))") }
+            parts += heavyNotes
+            return " on \(n) prescribed set\(n == 1 ? "" : "s") (\(parts.joined(separator: "; ")))"
         }()
         func totalsLine(_ verdict: String) -> String {
             let needed = totalGoal - 1
@@ -982,10 +1021,11 @@ extension CoachingEngine.LoadCap {
     /// kg display can hide (0.005 kg is 0.011 lb), so a logged "45.36" still counts as the cap.
     private static func toppedRangeAtCap(_ item: SessionItem, cap: Double, unit: LoadUnit = .lb) -> Bool {
         let tolerance = unit == .lb ? 0.001 : 0.012
-        let rows = CoachingEngine.plannedWorkingSetIndices(for: item)
-        guard rows.count >= CoachingEngine.requiredPrimarySets(for: item) else { return false }
+        let counted = CoachingEngine.countedSets(for: item, unit: unit)
+        let rows = counted.rows
+        guard rows.count >= counted.required else { return false }
         let topReps = item.repMax ?? item.targetReps
-        let primary = rows.prefix(min(Swift.max(1, item.targetSets), 3))
+        let primary = rows
         return primary.allSatisfy { item.actualReps[$0] >= topReps && item.actualLoads[$0] >= cap - tolerance }
     }
 }
