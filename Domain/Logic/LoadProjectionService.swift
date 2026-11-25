@@ -68,7 +68,7 @@ enum LoadProjectionService {
     /// Evaluate whether a single session item represents a clean performance.
     /// Clean = reps ≥ prescribedMin, RIR on target, no fatigue/pain flags,
     /// no compromising load override reason.
-    static func isCleanSession(_ item: SessionItem, prescribedMin: Int) -> Bool {
+    static func isCleanSession(_ item: SessionItem, prescribedMin: Int, ratingsUninformative: Bool = false) -> Bool {
         if let reason = item.loadOverrideReason {
             switch reason {
             case .jointTenderness, .generalFatigue: return false
@@ -90,7 +90,7 @@ enum LoadProjectionService {
 
         let validRIRs = (0..<item.actualRIRs.count).compactMap { idx -> Int? in
             guard !item.isTopRow(idx), idx < item.actualLoads.count, item.actualLoads[idx] > 0 else { return nil }
-            return RIREntry.decisionRIR(item, at: idx)   // recorded, compound lifts only
+            return ratingsUninformative ? nil : RIREntry.decisionRIR(item, at: idx)   // recorded, compound lifts only
         }
         if !validRIRs.isEmpty {
             let avgRIR = Double(validRIRs.reduce(0, +)) / Double(validRIRs.count)
@@ -106,7 +106,8 @@ enum LoadProjectionService {
         waveRaw: String?,
         repMin: Int,
         allSessions: [Session],
-        referenceDate: Date = Date()
+        referenceDate: Date = Date(),
+        ratingsUninformative: Bool = false
     ) -> Int {
         let canonicalId = ExerciseCatalog.canonicalExerciseId(for: exerciseId)
         let today = Calendar.current.startOfDay(for: referenceDate)
@@ -133,7 +134,7 @@ enum LoadProjectionService {
             guard let item = session.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
             }) else { break }
-            if isCleanSession(item, prescribedMin: repMin) {
+            if isCleanSession(item, prescribedMin: repMin, ratingsUninformative: ratingsUninformative) {
                 count += 1
             } else {
                 break
@@ -157,7 +158,8 @@ enum LoadProjectionService {
         unit: LoadUnit = .lb,
         referenceDate: Date = Date(),
         bodyWeight: Double? = nil,
-        customExercises: [CustomExercise] = []
+        customExercises: [CustomExercise] = [],
+        ratingsUninformative: Bool = false
     ) -> LoadProjection? {
 
         // Defense in depth: maintenance/deload items hold their load — never
@@ -220,7 +222,7 @@ enum LoadProjectionService {
                         bodyWeight: bodyWeight
                     )
                     guard load > 0, reps > 0 else { return nil }
-                    let rir = RIREntry.recorded(item, at: idx) ?? item.targetRIR
+                    let rir = ratingsUninformative ? item.targetRIR : (RIREntry.recorded(item, at: idx) ?? item.targetRIR)
                     return (load: load, reps: reps, actualRIR: rir)
                 }
 
@@ -333,7 +335,7 @@ enum LoadProjectionService {
             guard let item = session.items.first(where: {
                 ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonicalId
             }) else { break }
-            if isCleanSession(item, prescribedMin: prescribedMin) {
+            if isCleanSession(item, prescribedMin: prescribedMin, ratingsUninformative: ratingsUninformative) {
                 consecutiveClean += 1
             } else {
                 break
@@ -358,7 +360,7 @@ enum LoadProjectionService {
         // to increase than hitting target exactly. One clean session is sufficient.
         let lastValidRIRs = (0..<lastItem.actualRIRs.count).compactMap { idx -> Int? in
             guard idx < lastItem.actualLoads.count, lastItem.actualLoads[idx] > 0 else { return nil }
-            return RIREntry.decisionRIR(lastItem, at: idx)
+            return ratingsUninformative ? nil : RIREntry.decisionRIR(lastItem, at: idx)
         }
         let lastAvgRIR = lastValidRIRs.isEmpty ? Double(lastItem.targetRIR) :
             Double(lastValidRIRs.reduce(0, +)) / Double(lastValidRIRs.count)

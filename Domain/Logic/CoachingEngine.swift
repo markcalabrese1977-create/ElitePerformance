@@ -57,7 +57,16 @@ struct CoachingPolicy: Equatable {
         /// One RIR of slack per set: reps - max(0, target - recorded - 1).
         case oneRIRPerSet
     }
+    /// Whether a lifter whose recent ratings carry no information is judged on reps alone.
+    enum UninformativeRule: Equatable {
+        /// Ratings are always read. (shipped)
+        case off
+        /// Every compound rating in the last 2 completed sessions (at least 6 rated sets) is 0: RIR is treated as unset everywhere it is read
+        /// (progression, the e1RM estimates, the cross-letter and hold-from-high-rep estimates) until any non-zero rating is logged.
+        case lifterLevel
+    }
     var valveRule: ValveRule = .allSetsAtTop
+    var uninformativeRule: UninformativeRule = .off
     var countCap: CountCap = .allPrescribed
     var rirTolerance: RIRTolerance = .strict
 
@@ -260,6 +269,39 @@ struct CoachingEngine {
         return previous.allSatisfy { isRIRAdjustmentHold($0, policy: policy) }
     }
 
+    // MARK: - `.lifterLevel`: "ratings not informative" for the whole lifter
+
+    /// `.lifterLevel`: every compound rating in the last 2 completed sessions up to `session` (at least 6 rated working sets) is 0. Reads the RAW
+    /// ratings (so a non-zero one clears it at once); false when effort tracking is Off (nothing to ignore).
+    static func lifterRatingsUninformative(asOf session: Session?, allSessions: [Session], policy: CoachingPolicy) -> Bool {
+        guard policy.uninformativeRule == .lifterLevel, EffortTracking.mode != .off, let session else { return false }
+        let recent = allSessions
+            .filter { ($0 === session || $0.status == .completed) && $0.date <= session.date }
+            .sorted { $0.date > $1.date }.prefix(2)
+        var rated = 0
+        for s in recent {
+            for item in s.items where RIREntry.isCompound(item.exerciseId) && item.waveRaw?.lowercased() != "deload" {
+                for idx in workingSetIndices(for: item) {
+                    guard let r = RIREntry.recorded(item, at: idx) else { continue }
+                    if r != 0 { return false }
+                    rated += 1
+                }
+            }
+        }
+        return rated >= 6
+    }
+
+    /// The one-time effort note: this exposure is the lift's first at which the lifter-level mark holds.
+    static func uninformativeNoteDue(for item: SessionItem, in session: Session?, allSessions: [Session], policy: CoachingPolicy) -> Bool {
+        guard lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy), let session else { return false }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        for s in allSessions where s !== session && s.status == .completed && s.date < session.date
+            && s.items.contains(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }) {
+            if lifterRatingsUninformative(asOf: s, allSessions: allSessions, policy: policy) { return false }
+        }
+        return true
+    }
+
     // MARK: - `.repeatTop2`: "ratings not informative"
 
     /// A counted set was rated above 0 (an unset rating is no information either way).
@@ -459,17 +501,22 @@ struct CoachingEngine {
         carryForwardTarget: CarryForwardTarget = .unresolved,
         priorExposureWasRIRHold: Bool = false,
         releaseHintDue: Bool = false,
+        ratingsUninformative: Bool = false,
+        uninformativeNoteDue: Bool = false,
         isProgressionExempt: Bool = false,
         loadCap: LoadCap? = nil,
         ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
-        let rec = recommendRoles(
+        var rec = recommendRoles(
             for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
-            priorExposureWasRIRHold: priorExposureWasRIRHold, releaseHintDue: releaseHintDue, ignoreEffort: ignoreEffort
+            priorExposureWasRIRHold: ratingsUninformative ? false : priorExposureWasRIRHold, releaseHintDue: releaseHintDue, ignoreEffort: ignoreEffort || ratingsUninformative
         )
+        if ratingsUninformative, uninformativeNoteDue, let r = rec {
+            rec = CoachingRecommendation(message: r.message + " If you had reps left, try Hard or Solid, or set effort to Off.", nextSuggestedLoad: r.nextSuggestedLoad, nextTopLoad: r.nextTopLoad)
+        }
         // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
         // is already turned into a hold at the cap, with its message, further down).
         guard let rec, let cap = loadCap, !isProgressionExempt else { return rec }

@@ -197,7 +197,8 @@ struct PlanMemoryEngine {
                 loadIncrement: loadIncrement,
                 unit: unit,
                 bodyWeight: bodyWeight,
-                customExercises: customExercises
+                customExercises: customExercises,
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
             )
 
             // This is the EMPTY-TARGET SEED path: a target that already carried a
@@ -251,7 +252,8 @@ struct PlanMemoryEngine {
                 waveRaw: sourceItem.waveRaw,
                 repMin: sourceItem.repMin ?? sourceItem.targetReps,
                 allSessions: allSessions,
-                referenceDate: session.date
+                referenceDate: session.date,
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
             )
             if let recommendation = CoachingEngine.recommend(
                 for: sourceItem,
@@ -272,6 +274,8 @@ struct PlanMemoryEngine {
                 carryForwardTarget: .exists,
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
+                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
@@ -294,6 +298,8 @@ struct PlanMemoryEngine {
                 carryForwardTarget: .exists,
                 priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
+                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let topLoad = recommendation.nextTopLoad {
@@ -581,14 +587,16 @@ struct PlanMemoryEngine {
             loadIncrement: loadIncrement,
             unit: currentProfile()?.loadUnit ?? .lb,
             bodyWeight: bodyWeight,
-            customExercises: customExercises
+            customExercises: customExercises,
+            ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
         )
         let consecutiveCleanCount = LoadProjectionService.consecutiveCleanCount(
             exerciseId: sourceItem.exerciseId,
             waveRaw: sourceItem.waveRaw,
             repMin: sourceItem.repMin ?? sourceItem.targetReps,
             allSessions: allSessions,
-            referenceDate: session.date
+            referenceDate: session.date,
+            ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
         )
         guard let recommendation = CoachingEngine.recommend(
             for: sourceItem,
@@ -603,6 +611,8 @@ struct PlanMemoryEngine {
             carryForwardTarget: .exists,
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
+                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
@@ -666,7 +676,8 @@ struct PlanMemoryEngine {
             loadIncrement: loadIncrement,
             unit: currentProfile()?.loadUnit ?? .lb,
             bodyWeight: bodyWeight,
-            customExercises: customExercises
+            customExercises: customExercises,
+            ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
         )
 
         let consecutiveCleanCount = LoadProjectionService.consecutiveCleanCount(
@@ -674,7 +685,8 @@ struct PlanMemoryEngine {
             waveRaw: sourceItem.waveRaw,
             repMin: sourceItem.repMin ?? sourceItem.targetReps,
             allSessions: allSessions,
-            referenceDate: session.date
+            referenceDate: session.date,
+            ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy)
         )
 
         guard let recommendation = CoachingEngine.recommend(
@@ -690,6 +702,8 @@ struct PlanMemoryEngine {
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
             priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 releaseHintDue: CoachingEngine.releaseHintDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
+                ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy),
+                uninformativeNoteDue: CoachingEngine.uninformativeNoteDue(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises

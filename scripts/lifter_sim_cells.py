@@ -25,14 +25,15 @@ def main():
     for a in args:
         name, g = a.split("=", 1); data[name] = agg(glob.glob(g))
     profiles = sorted({k[0] for d in data.values() for k in d[0]}, key=lambda p: ["accurate", "typical", "all-zero", "effort-off"].index(p))
-    variants = ["shipped", "valve-total", "repeat-top2", "count-first3", "rir-tol1"]
+    variants = ["shipped", "valve-total", "repeat-top2", "top2-lifter", "count-first3", "rir-tol1"]
     if weekly:
         print("| profile | " + " | ".join(f"wk{i+1}" for i in range(13)) + " |\n|---|" + "---|" * 13)
         for p in profiles:
             for name, (cells, n, wk) in data.items():
-                if (p, "shipped") not in wk: continue
-                ns, ss = wk[(p, "shipped")]
-                print(f"| {p} ({name}) | " + " | ".join(pct(1 + div(ss[i], ns[i])) if ns[i] else "–" for i in range(13)) + " |")
+                for v in variants:
+                    if (p, v) not in wk: continue
+                    ns, ss = wk[(p, v)]
+                    print(f"| {p} / {v} ({name}) | " + " | ".join(pct(1 + div(ss[i], ns[i])) if ns[i] else "–" for i in range(13)) + " |")
         return
     for p in profiles:
         print(f"\n### {p}\n\n| cell | variant | blocks | false positive | increase | hold: RIR adj | hold: reps short | valve/block | hold->increase | final % ideal | final % true e1RM |\n|---|---|---|---|---|---|---|---|---|---|---|")

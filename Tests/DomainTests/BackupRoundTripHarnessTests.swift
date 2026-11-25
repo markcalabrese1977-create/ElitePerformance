@@ -2153,6 +2153,45 @@ final class CoachingPolicyTests: XCTestCase {
         XCTAssertFalse(CoachingEngine.ratingsState(for: s5.items[0], in: s5, allSessions: [s1, s2, s3, s4, s5], policy: p).flagged)
     }
 
+    /// `.lifterLevel`: every compound rating in the last 2 completed sessions (at least 6 rated sets) is 0 -> RIR is treated as unset; any non-zero rating clears it.
+    func test_lifterLevel_zerosEverywhereMeansRatingsAreIgnored_untilAnyNonZero() throws {
+        EffortTracking.mode = .detailed
+        let p = CoachingPolicy(uninformativeRule: .lifterLevel)
+        let day: (Int) -> Date = { Date(timeIntervalSince1970: 1_700_000_000 + Double($0) * 86_400) }
+        func bench(_ reps: [Int], _ rirs: [Int], _ id: String = "bench_press") -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: id, targetReps: 10, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100, repMin: 8, repMax: 10)
+            i.actualReps = reps; i.actualLoads = Array(repeating: 100, count: reps.count); i.actualRIRs = rirs
+            i.plannedRepsBySet = Array(repeating: 10, count: reps.count)
+            return i
+        }
+        func session(_ d: Int, _ items: [SessionItem], status: SessionStatus = .completed) -> Session { Session(date: day(d), status: status, weekIndex: d, dayLabel: "Push", items: items) }
+        // 3 + 3 rated zero sets in the last session alone is enough (>= 6): ratings unset.
+        let s1 = session(1, [bench([10, 10, 10], [0, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
+        XCTAssertTrue(CoachingEngine.lifterRatingsUninformative(asOf: s1, allSessions: [s1], policy: p))
+        XCTAssertFalse(CoachingEngine.lifterRatingsUninformative(asOf: s1, allSessions: [s1], policy: .shipped), "shipped never ignores ratings")
+        // Fewer than 6 rated sets: not enough information about the lifter's ratings.
+        let few = session(1, [bench([10, 10, 10], [0, 0, 0])])
+        XCTAssertFalse(CoachingEngine.lifterRatingsUninformative(asOf: few, allSessions: [few], policy: p))
+        // The decision: all at the top with rated 0s is held by shipped, earned when the ratings are ignored.
+        let x = bench([10, 10, 10], [0, 0, 0])
+        XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5)?.nextSuggestedLoad, 100)
+        XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.nextSuggestedLoad, 105)
+        // One-time note: only when asked, once.
+        let noted = CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true, uninformativeNoteDue: true)
+        XCTAssertTrue(noted?.message.contains("If you had reps left, try Hard or Solid, or set effort to Off.") == true)
+        XCTAssertFalse(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.message.contains("Hard or Solid") == true)
+        XCTAssertTrue(CoachingEngine.uninformativeNoteDue(for: s1.items[0], in: s1, allSessions: [s1], policy: p))
+        let s2 = session(8, [bench([10, 10, 10], [0, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
+        XCTAssertTrue(CoachingEngine.lifterRatingsUninformative(asOf: s2, allSessions: [s1, s2], policy: p))
+        XCTAssertFalse(CoachingEngine.uninformativeNoteDue(for: s2.items[0], in: s2, allSessions: [s1, s2], policy: p), "the lift already had its note")
+        // Any non-zero rating in the last 2 sessions clears it at once.
+        let s3 = session(15, [bench([10, 10, 10], [1, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
+        XCTAssertFalse(CoachingEngine.lifterRatingsUninformative(asOf: s3, allSessions: [s1, s2, s3], policy: p))
+        // Effort Off: nothing to ignore.
+        EffortTracking.mode = .off
+        XCTAssertFalse(CoachingEngine.lifterRatingsUninformative(asOf: s1, allSessions: [s1], policy: p))
+    }
+
     /// App code only ever uses `.shipped`: no variant is named, constructed, or passed anywhere outside the two engines.
     func test_appSourceOnlyEverUsesShipped() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -2163,8 +2202,8 @@ final class CoachingPolicyTests: XCTestCase {
             for case let url as URL in en where url.pathExtension == "swift" {
                 let name = url.lastPathComponent
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                let engines = ["CoachingEngine.swift", "PlanMemoryEngine.swift"]
-                for token in [".firstThree", ".oneRIRPerSet", ".totalAtThresholdNoSetBelowOne", ".repeatTop2", "CoachingPolicy(", "valveRule:", "countCap:", "rirTolerance:"] where text.contains(token) {
+                let engines = ["CoachingEngine.swift", "PlanMemoryEngine.swift", "PlaceholderRefresh.swift"]
+                for token in [".firstThree", ".oneRIRPerSet", ".totalAtThresholdNoSetBelowOne", ".repeatTop2", ".lifterLevel", "uninformativeRule:", "CoachingPolicy(", "valveRule:", "countCap:", "rirTolerance:"] where text.contains(token) {
                     if name != "CoachingEngine.swift" { offenders.append("\(name): \(token)") }
                 }
                 if !engines.contains(name), text.contains("CoachingPolicy") { offenders.append("\(name): CoachingPolicy") }
@@ -2217,6 +2256,7 @@ struct SimVariant {
         SimVariant(name: "shipped", policy: .shipped),
         SimVariant(name: "valve-total", policy: CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne)),
         SimVariant(name: "repeat-top2", policy: CoachingPolicy(valveRule: .repeatTop2)),
+        SimVariant(name: "top2-lifter", policy: CoachingPolicy(valveRule: .repeatTop2, uninformativeRule: .lifterLevel)),
         SimVariant(name: "count-first3", policy: CoachingPolicy(countCap: .firstThree)),
         SimVariant(name: "rir-tol1", policy: CoachingPolicy(rirTolerance: .oneRIRPerSet)),
     ]
@@ -2387,11 +2427,18 @@ final class LifterSimulationTests: XCTestCase {
                         RIREntry.setRecorded(item, at: k, to: min(4, max(0, rated)))
                     }
                 }
-                // the decision this exposure produces (classified before carry-forward writes it)
+            }
+            // The decisions this session produces (classified once every set is logged, before carry-forward writes them).
+            let allForDecisions = (try? ctx.fetch(FetchDescriptor<Session>())) ?? []
+            let lifterUninformative = CoachingEngine.lifterRatingsUninformative(asOf: session, allSessions: allForDecisions, policy: variant.policy)
+            for item in session.items.sorted(by: { $0.order < $1.order }) {
+                if ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId) { continue }
+                let compound = RIREntry.isCompound(item.exerciseId)
+                let isDeload = item.waveRaw?.lowercased() == "deload"
                 if compound, !isDeload {
                     // The valve precondition is what the carry-forward passes (PlanMemoryEngine): without it the sim would never see a release.
-                    let prior = CoachingEngine.priorExposureWasRIRHold(for: item, in: session, allSessions: (try? ctx.fetch(FetchDescriptor<Session>())) ?? [], policy: variant.policy)
-                    let rec = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep, priorExposureWasRIRHold: prior)
+                    let prior = CoachingEngine.priorExposureWasRIRHold(for: item, in: session, allSessions: allForDecisions, policy: variant.policy)
+                    let rec = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep, priorExposureWasRIRHold: prior, ratingsUninformative: lifterUninformative)
                     let base = CoachingEngine.heldLoad(for: item, policy: variant.policy) ?? 0
                     var kind = "none"
                     if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad, base > 0 {
@@ -2406,7 +2453,7 @@ final class LifterSimulationTests: XCTestCase {
                         case "low": acc.lowers += 1
                         default:
                             acc.holds += 1
-                            if CoachingEngine.isRIRAdjustmentHold(item, policy: variant.policy) {
+                            if !lifterUninformative, CoachingEngine.isRIRAdjustmentHold(item, policy: variant.policy) {
                                 acc.hold_rirAdj += 1
                                 if CoachingEngine.everyCountedSetAtTop(item, policy: variant.policy) { acc.hold_rir_noHistory += 1 } else { acc.hold_rir_notTop += 1 }
                             }
@@ -2425,7 +2472,7 @@ final class LifterSimulationTests: XCTestCase {
             slide(finished: session)
             try ctx.save()
             engine.carryForwardPlans(from: session)
-            PlaceholderRefresh.afterCompletion(in: ctx, now: session.date.addingTimeInterval(3600))
+            PlaceholderRefresh.afterCompletion(in: ctx, now: session.date.addingTimeInterval(3600), policy: variant.policy)
             try ctx.save()
         }
 

@@ -155,6 +155,10 @@ enum PlaceholderRefresh {
     struct Context {
         var profile: UserProfile?
         var customExercises: [CustomExercise] = []
+        /// The progression rules in force (the simulation's variants; the app always passes `.shipped`).
+        var policy: CoachingPolicy = .shipped
+        /// The lifter-level "ratings not informative" mark, set once per pass by `plan(sessions:ctx:)`: RIR is treated as unset in every estimate below.
+        var ratingsUninformative = false
         var unit: LoadUnit { profile?.loadUnit ?? .lb }
     }
 
@@ -172,6 +176,8 @@ enum PlaceholderRefresh {
     static func plan(sessions all: [Session], ctx: Context, now: Date = PlaceholderRefresh.clock(), only: SessionItem? = nil) -> [Change] {
         let today = Calendar.current.startOfDay(for: now)
         let completed = all.filter { $0.status == .completed }
+        var ctx = ctx
+        ctx.ratingsUninformative = CoachingEngine.lifterRatingsUninformative(asOf: completed.max(by: { $0.date < $1.date }), allSessions: all, policy: ctx.policy)
         var changes: [Change] = []
 
         for target in all where (target.status == .planned || (only != nil && target.status == .inProgress)) && target.date >= today {
@@ -289,10 +295,10 @@ enum PlaceholderRefresh {
     }
 
     @discardableResult
-    static func run(in context: ModelContext, now: Date = PlaceholderRefresh.clock()) -> [Change] {
+    static func run(in context: ModelContext, now: Date = PlaceholderRefresh.clock(), policy: CoachingPolicy = .shipped) -> [Change] {
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
-        let ctx = Context(profile: profile, customExercises: custom)
+        let ctx = Context(profile: profile, customExercises: custom, policy: policy)
         guard let all = try? context.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])) else { return [] }
         let changes = plan(sessions: all, ctx: ctx, now: now)
         apply(changes, ctx: ctx)
@@ -314,9 +320,9 @@ enum PlaceholderRefresh {
     }
 
     /// After a session is completed and carry-forward has written. The caller saves.
-    static func afterCompletion(in context: ModelContext, now: Date = PlaceholderRefresh.clock()) {
+    static func afterCompletion(in context: ModelContext, now: Date = PlaceholderRefresh.clock(), policy: CoachingPolicy = .shipped) {
         guard isEnabled else { return }
-        run(in: context, now: now)
+        run(in: context, now: now, policy: policy)
     }
 
     // MARK: - Scheduled deload
@@ -474,7 +480,7 @@ enum PlaceholderRefresh {
                 // The set that gives the estimate (the highest e1RM; the first on a tie).
                 var best: (e1rm: Double, load: Double, reps: Int, rir: Int)?
                 for r in rows {
-                    let rir = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
+                    let rir = ctx.ratingsUninformative ? src.targetRIR : (RIREntry.recorded(src, at: r.index) ?? src.targetRIR)
                     let e = r.load * (1.0 + Double(r.reps + rir) / 30.0)
                     if best == nil || e > best!.e1rm { best = (e, r.load, r.reps, rir) }
                 }
@@ -519,7 +525,7 @@ enum PlaceholderRefresh {
             guard !rows.isEmpty else { continue }
             if hasPain(src) { return .leave }                               // pain holds
             for r in rows.reversed() {                                      // the last set of the most recent session first
-                let sourceRIR = RIREntry.recorded(src, at: r.index) ?? src.targetRIR
+                let sourceRIR = ctx.ratingsUninformative ? src.targetRIR : (RIREntry.recorded(src, at: r.index) ?? src.targetRIR)
                 let spend = max(0, item.targetRIR - sourceRIR)
                 guard r.load > 0, CoachingEngine.adjustedReps(r.reps, targetRIR: item.targetRIR, recordedRIR: sourceRIR) >= repMin else { continue }
                 if current > 0, abs(current - r.load) > 0.001 { return nil }       // a planned load is not replaced (the held value itself is: idempotent)
