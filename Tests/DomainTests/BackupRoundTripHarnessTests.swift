@@ -2009,3 +2009,96 @@ final class PostMigrationRoundTripTests: XCTestCase {
         }
     }
 }
+
+// MARK: - CoachingPolicy: `.shipped` is today's behaviour, and only `.shipped` is ever used by the app
+
+@MainActor
+final class CoachingPolicyTests: XCTestCase {
+
+    /// `.shipped` reproduces every compound decision on the backups with zero differences from the golden dump taken at the commit that
+    /// introduced the policy (TEST_RUNNER_EP_POLICY_BACKUPS and _GOLDEN, comma-separated and in the same order; skipped when unset).
+    /// Regenerate the golden (ProgressionDecisionDryRunTests with EP_PROG_ALL=1) when a rule is changed ON PURPOSE.
+    func test_shipped_reproducesEveryDecisionOnTheBackups() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let backups = env["EP_POLICY_BACKUPS"], let golden = env["EP_POLICY_GOLDEN"], !backups.isEmpty, !golden.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_POLICY_BACKUPS and TEST_RUNNER_EP_POLICY_GOLDEN (comma-separated)")
+        }
+        EffortTracking.mode = .detailed
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        struct Row: Codable { var key: String, kind: String, message: String; var next: Double?, nextTop: Double? }
+        let paths = backups.split(separator: ",").map(String.init), goldens = golden.split(separator: ",").map(String.init)
+        XCTAssertEqual(paths.count, goldens.count)
+        for (path, goldenPath) in zip(paths, goldens) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
+            let expected = Dictionary(uniqueKeysWithValues: try JSONDecoder().decode([Row].self, from: Data(contentsOf: URL(fileURLWithPath: goldenPath))).map { ($0.key, $0) })
+            var checked = 0, diffs: [String] = []
+            for s in try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])) where s.status == .completed && s.meso?.isMaintenance != true {
+                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                    guard !CoachingEngine.workingSetIndices(for: i).isEmpty else { continue }
+                    let key = "\(f.string(from: s.date))|\(s.dayLabel ?? "?")|\(i.exerciseId)|\(i.waveRaw ?? "-")"
+                    guard let want = expected[key] else { continue }
+                    let rec = CoachingEngine.recommend(for: i, profile: profile, policy: .shipped)
+                    checked += 1
+                    if (rec?.nextSuggestedLoad, rec?.nextTopLoad, rec?.message ?? "") != (want.next, want.nextTop, want.message) { diffs.append(key) }
+                }
+            }
+            XCTAssertGreaterThan(checked, 0)
+            XCTAssertEqual(diffs, [], "\((path as NSString).lastPathComponent): \(diffs.count) of \(checked) decisions differ under .shipped")
+        }
+    }
+
+    /// Synthetic: `.shipped` is the default, and each variant differs from it exactly where it should.
+    func test_variantsDifferFromShipped_onlyWhereTheyShould() throws {
+        EffortTracking.mode = .detailed
+        XCTAssertEqual(CoachingPolicy(), CoachingPolicy.shipped)
+        func bench(_ reps: [Int], _ rirs: [Int], prior: Bool = false) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100, repMin: 8, repMax: 10)
+            i.actualReps = reps; i.actualLoads = Array(repeating: 100, count: reps.count); i.actualRIRs = rirs
+            i.plannedRepsBySet = Array(repeating: 10, count: reps.count)
+            return i
+        }
+        func next(_ i: SessionItem, _ p: CoachingPolicy, prior: Bool = false) -> Double? {
+            CoachingEngine.recommend(for: i, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: prior)?.nextSuggestedLoad
+        }
+        // Count cap: 4 prescribed sets, the 4th is short. All-prescribed holds; first-three earns.
+        let four = bench([10, 10, 10, 8], [2, 2, 2, 2])
+        XCTAssertEqual(next(four, .shipped), 100)
+        XCTAssertEqual(next(four, CoachingPolicy(countCap: .firstThree)), 105)
+        // RIR tolerance: sets 2-3 one RIR hard (RIR 1 vs 2): strict takes a rep each -> 28 of needed 29: hold; tolerance gives them back -> 30: earned.
+        let hard = bench([10, 10, 10], [2, 1, 1])
+        XCTAssertEqual(next(hard, .shipped), 100)
+        XCTAssertEqual(next(hard, CoachingPolicy(rirTolerance: .oneRIRPerSet)), 105)
+        // Valve: prior exposure was an RIR hold; this one has reps 10,10,9 (one set below the top) at RIR 2,2,2 ... reps-only earned already, so use a harder case:
+        // 10, 10, 9 at RIR 1,1,1 -> strict adjusted 26 (hold), raw 29 >= 29, no set more than 1 RIR below.
+        let near = bench([10, 10, 9], [1, 1, 1])
+        XCTAssertEqual(next(near, .shipped, prior: true), 100, "shipped valve needs every set at the top")
+        XCTAssertEqual(next(near, CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne), prior: true), 105)
+        // No prior hold: the valve variant never fires on a first exposure.
+        XCTAssertEqual(next(near, CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne), prior: false), 100)
+    }
+
+    /// App code only ever uses `.shipped`: no variant is named, constructed, or passed anywhere outside the two engines.
+    func test_appSourceOnlyEverUsesShipped() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var offenders: [String] = []
+        for dir in ["Domain", "Features", "App"] {
+            let base = root.appendingPathComponent(dir)
+            guard let en = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in en where url.pathExtension == "swift" {
+                let name = url.lastPathComponent
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                let engines = ["CoachingEngine.swift", "PlanMemoryEngine.swift"]
+                for token in [".firstThree", ".oneRIRPerSet", ".totalAtThresholdNoSetBelowOne", "CoachingPolicy(", "valveRule:", "countCap:", "rirTolerance:"] where text.contains(token) {
+                    if name != "CoachingEngine.swift" { offenders.append("\(name): \(token)") }
+                }
+                if !engines.contains(name), text.contains("CoachingPolicy") { offenders.append("\(name): CoachingPolicy") }
+                // inside the engines, a policy is only ever forwarded or defaulted to .shipped
+                if name == "PlanMemoryEngine.swift", text.contains("CoachingPolicy(") { offenders.append("\(name): constructs a policy") }
+            }
+        }
+        XCTAssertEqual(offenders, [])
+    }
+}

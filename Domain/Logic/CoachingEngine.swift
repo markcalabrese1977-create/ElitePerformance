@@ -29,6 +29,43 @@ struct CoachingRecommendation {
     }
 }
 
+/// The progression rules that are open to comparison in the lifter simulation. An injected VALUE (never process-wide state): every
+/// decision function takes one, defaulting to `.shipped`, which is today's behaviour. The app only ever uses `.shipped`
+/// (`CoachingPolicySourceGuardTests` fails on any other use in app code).
+struct CoachingPolicy: Equatable {
+    /// How the repeat-performance valve judges the repeat exposure.
+    enum ValveRule: Equatable {
+        /// Every counted set at the top of the range, no set more than 1 RIR below target. (shipped)
+        case allSetsAtTop
+        /// Raw total at the threshold (sets x top - 1), no set more than 1 RIR below target.
+        case totalAtThresholdNoSetBelowOne
+    }
+    /// How many prescribed sets the progression decision reads.
+    enum CountCap: Equatable {
+        /// Every prescribed working set. (shipped)
+        case allPrescribed
+        /// The first three (the rule before 1.4 (27)).
+        case firstThree
+    }
+    /// How a set logged harder than planned loses reps.
+    enum RIRTolerance: Equatable {
+        /// reps - max(0, target - recorded). (shipped)
+        case strict
+        /// One RIR of slack per set: reps - max(0, target - recorded - 1).
+        case oneRIRPerSet
+    }
+    var valveRule: ValveRule = .allSetsAtTop
+    var countCap: CountCap = .allPrescribed
+    var rirTolerance: RIRTolerance = .strict
+
+    static let shipped = CoachingPolicy()
+
+    /// Reps a set loses to effort under this policy's tolerance.
+    func shortfall(targetRIR: Int, recordedRIR: Int) -> Int {
+        max(0, targetRIR - recordedRIR - (rirTolerance == .oneRIRPerSet ? 1 : 0))
+    }
+}
+
 struct CoachingEngine {
 
     /// A per-exercise max load as the CALLER resolved it (`UserProfile.effectiveMaxLoad`): nil is passed for no
@@ -142,8 +179,8 @@ struct CoachingEngine {
 
     /// The load the coach holds when it cannot call a progression: the last performed primary back-off set (the first up
     /// to 3 planned working sets, as every progression rule reads them). nil when nothing was performed.
-    static func heldLoad(for item: SessionItem) -> Double? {
-        guard let last = countedSets(for: item).rows.last else { return nil }
+    static func heldLoad(for item: SessionItem, policy: CoachingPolicy = .shipped) -> Double? {
+        guard let last = countedSets(for: item, policy: policy).rows.last else { return nil }
         return item.actualLoads[last]
     }
 
@@ -174,9 +211,9 @@ struct CoachingEngine {
 
     /// The recommendation with the lifter's own step and unit, as carry-forward uses them. The recap reads this so the
     /// "next" it shows is the load carry-forward writes (it used to omit the increment and fall back to a base-scaled step).
-    static func recommend(for item: SessionItem, profile: UserProfile?) -> CoachingRecommendation? {
+    static func recommend(for item: SessionItem, profile: UserProfile?, policy: CoachingPolicy = .shipped) -> CoachingRecommendation? {
         let unit = profile?.loadUnit ?? .lb
-        return recommend(for: item,
+        return recommend(for: item, policy: policy,
                          minLoadIncrement: UserProfile.loadStep(for: item.exerciseId, profile: profile, unit: unit),
                          unit: unit)
     }
@@ -191,14 +228,14 @@ struct CoachingEngine {
     /// RIR-adjusted reps: `reps - max(0, targetRIR - recordedRIR)`. A set logged harder than planned loses the reps it cost; one logged
     /// easier gets no credit. `recordedRIR` nil (unset, effort tracking Off, or an isolation lift, which `RIREntry.decisionRIR` never reads)
     /// means NO adjustment, and a recorded 0 is a real 0. One formula for progression and for PlaceholderRefresh's hold-from-high-rep rule.
-    static func adjustedReps(_ reps: Int, targetRIR: Int, recordedRIR: Int?) -> Int {
+    static func adjustedReps(_ reps: Int, targetRIR: Int, recordedRIR: Int?, policy: CoachingPolicy = .shipped) -> Int {
         guard let recordedRIR else { return reps }
-        return reps - max(0, targetRIR - recordedRIR)
+        return reps - policy.shortfall(targetRIR: targetRIR, recordedRIR: recordedRIR)
     }
 
     /// True when the previous exposure of this lift (same block, day type and wave letter, the latest completed one before `session`)
     /// was an RIR-adjustment hold: its reps alone would have earned an increase, its effort-adjusted reps did not. Feeds the repeat-performance valve.
-    static func priorExposureWasRIRHold(for item: SessionItem, in session: Session?, allSessions: [Session]) -> Bool {
+    static func priorExposureWasRIRHold(for item: SessionItem, in session: Session?, allSessions: [Session], policy: CoachingPolicy = .shipped) -> Bool {
         guard let session, RIREntry.isCompound(item.exerciseId), EffortTracking.mode != .off else { return false }
         let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
         let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
@@ -211,11 +248,11 @@ struct CoachingEngine {
                 && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == letter } }
             .first
         guard let previous, previous.waveRaw?.lowercased() != "deload" else { return false }
-        return isRIRAdjustmentHold(previous)
+        return isRIRAdjustmentHold(previous, policy: policy)
     }
 
     /// Reps alone (effort ignored) would increase the load; with effort counted it does not.
-    static func isRIRAdjustmentHold(_ item: SessionItem) -> Bool {
+    static func isRIRAdjustmentHold(_ item: SessionItem, policy: CoachingPolicy = .shipped) -> Bool {
         guard RIREntry.isCompound(item.exerciseId) else { return false }
         let working = workingSetIndices(for: item)
         guard let base = working.map({ item.actualLoads[$0] }).last, base > 0 else { return false }
@@ -223,7 +260,7 @@ struct CoachingEngine {
             guard let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad else { return false }
             return next > base + 0.001
         }
-        return increases(recommend(for: item, ignoreEffort: true)) && !increases(recommend(for: item))
+        return increases(recommend(for: item, policy: policy, ignoreEffort: true)) && !increases(recommend(for: item, policy: policy))
     }
 
     /// "set 3 was 1 rep harder than planned (RIR 1 vs 2)" / "sets 2–3 were 1 rep harder than planned (RIR 1 vs 2)" (Detailed) or
@@ -310,10 +347,11 @@ struct CoachingEngine {
         let extras: [Int]
     }
 
-    static func countedSets(for item: SessionItem, minLoadIncrement: Double? = nil, unit: LoadUnit = .lb) -> CountedSets {
+    static func countedSets(for item: SessionItem, minLoadIncrement: Double? = nil, unit: LoadUnit = .lb, policy: CoachingPolicy = .shipped) -> CountedSets {
         let working = workingSetIndices(for: item)
         let warmupRows = loggedRowIndices(for: item).count - working.count
-        let window = max(1, min(item.effectivePrescribedSets, max(1, item.targetSets)))
+        let prescribedWindow = max(1, min(item.effectivePrescribedSets, max(1, item.targetSets)))
+        let window = policy.countCap == .firstThree ? min(prescribedWindow, 3) : prescribedWindow
         let limit = window + warmupRows
         let inWindow = working.filter { $0 < limit }
         let extras = working.filter { $0 >= limit }
@@ -333,14 +371,14 @@ struct CoachingEngine {
     }
 
     /// Primary working sets the progression decision needs (see `countedSets`).
-    static func requiredPrimarySets(for item: SessionItem) -> Int {
-        countedSets(for: item).required
+    static func requiredPrimarySets(for item: SessionItem, policy: CoachingPolicy = .shipped) -> Int {
+        countedSets(for: item, policy: policy).required
     }
 
     /// True when enough primary working sets were logged for a load to be written onto a
     /// future plan. A 4-set item with 3 logged qualifies.
-    static func hasSufficientPrimaryEvidence(_ item: SessionItem) -> Bool {
-        let c = countedSets(for: item)
+    static func hasSufficientPrimaryEvidence(_ item: SessionItem, policy: CoachingPolicy = .shipped) -> Bool {
+        let c = countedSets(for: item, policy: policy)
         return c.rows.count >= c.required
     }
 
@@ -353,6 +391,7 @@ struct CoachingEngine {
     /// decision uses back-off rows only.
     static func recommend(
         for item: SessionItem,
+        policy: CoachingPolicy = .shipped,
         minLoadIncrement: Double? = nil,
         unit: LoadUnit = .lb,
         mesoPhase: MesoPhase = .early,
@@ -367,7 +406,7 @@ struct CoachingEngine {
         ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
         let rec = recommendRoles(
-            for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
+            for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
@@ -383,6 +422,7 @@ struct CoachingEngine {
 
     private static func recommendRoles(
         for item: SessionItem,
+        policy: CoachingPolicy,
         minLoadIncrement: Double?,
         unit: LoadUnit,
         mesoPhase: MesoPhase,
@@ -397,7 +437,7 @@ struct CoachingEngine {
         ignoreEffort: Bool
     ) -> CoachingRecommendation? {
         let back = recommendBackOffs(
-            for: item, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
+            for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
@@ -408,7 +448,7 @@ struct CoachingEngine {
         if item.waveRaw?.lowercased() == "deload" { return back }
         let painFlagged = item.setFeedbackBySet.contains { $0 == SetFeedback.pain.rawValue }
         if painFlagged { return back }
-        guard let top = topRead(for: item, minLoadIncrement: minLoadIncrement, unit: unit, isProgressionExempt: isProgressionExempt,
+        guard let top = topRead(for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, isProgressionExempt: isProgressionExempt,
                                 loadCap: loadCap, ignoreEffort: ignoreEffort) else {
             return back
         }
@@ -420,7 +460,7 @@ struct CoachingEngine {
 
     /// Judges the logged top rows: reps against topRepMin/Max, RIR against topRIR. Hold, or a
     /// one-increment bump when every top row is at the top of its range at the target difficulty.
-    private static func topRead(for item: SessionItem, minLoadIncrement: Double?, unit: LoadUnit, isProgressionExempt: Bool,
+    private static func topRead(for item: SessionItem, policy: CoachingPolicy, minLoadIncrement: Double?, unit: LoadUnit, isProgressionExempt: Bool,
                                 loadCap: LoadCap? = nil, ignoreEffort: Bool = false) -> TopRead? {
         let rows = topWorkingIndices(for: item)
         guard let lastRow = rows.last else { return nil }
@@ -429,10 +469,10 @@ struct CoachingEngine {
         let lo = item.topRepMin ?? item.repMin ?? item.targetReps
         let hi = max(lo, item.topRepMax ?? item.repMax ?? item.targetReps)
         let targetRIR = item.topRIR ?? item.targetRIR
-        let adjusted = rows.map { adjustedReps(item.actualReps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
+        let adjusted = rows.map { adjustedReps(item.actualReps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0), policy: policy) }
         // Top rows the RIR adjustment took reps from, numbered among the top rows.
         let adjustedTops: [(number: Int, rir: Int)] = rows.enumerated().compactMap { n, idx in
-            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), targetRIR - r > 0 else { return nil }
+            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), policy.shortfall(targetRIR: targetRIR, recordedRIR: r) > 0 else { return nil }
             return (n + 1, r)
         }
         let neededText = rows.count == 1 ? "\(hi)" : "\(hi) on each"
@@ -475,6 +515,7 @@ struct CoachingEngine {
 
     private static func recommendBackOffs(
         for item: SessionItem,
+        policy: CoachingPolicy = .shipped,
         minLoadIncrement: Double? = nil,
         unit: LoadUnit = .lb,
         mesoPhase: MesoPhase = .early,
@@ -545,7 +586,7 @@ struct CoachingEngine {
         guard !workingIndices.isEmpty else { return nil }
 
         let plannedWorkingSetCount = max(1, item.targetSets)
-        let counted = countedSets(for: item, minLoadIncrement: minLoadIncrement, unit: unit)
+        let counted = countedSets(for: item, minLoadIncrement: minLoadIncrement, unit: unit, policy: policy)
         let growthSetTarget = counted.required
 
         // Only rows inside the planned set count are evidence for the prescription. An extra
@@ -606,11 +647,11 @@ struct CoachingEngine {
         let minRIR: Int? = primaryRIRs.min()
         // The primary sets the RIR adjustment took reps from (1-based set numbers), for the coach line.
         let adjustedSets: [(number: Int, rir: Int)] = primaryIndices.compactMap { idx in
-            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), targetRIR - r > 0 else { return nil }
+            guard !ignoreEffort, let r = RIREntry.decisionRIR(item, at: idx), policy.shortfall(targetRIR: targetRIR, recordedRIR: r) > 0 else { return nil }
             return (idx + 1, r)
         }
         // RIR-adjusted reps of the primary sets (no adjustment where RIR is unset, Off, or an isolation lift).
-        let primaryAdjusted = primaryIndices.map { adjustedReps(reps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0)) }
+        let primaryAdjusted = primaryIndices.map { adjustedReps(reps[$0], targetRIR: targetRIR, recordedRIR: ignoreEffort ? nil : RIREntry.decisionRIR(item, at: $0), policy: policy) }
 
         // Rest-pause is intentionally NOT computed as a gate here (Cut 3 decision):
         // a rest-pause session is legitimate technique and is eligible to bump.
@@ -797,7 +838,8 @@ struct CoachingEngine {
         // this one again has EVERY set at the top of the range with no recorded set more than 1 RIR below target: the same reps at about the
         // planned effort twice running earn the increase. Never on a first exposure (the caller says whether the previous one was such a hold).
         let repeatPerformance = priorExposureWasRIRHold && isCompoundLift && !earnedByAdjustedReps
-            && primaryReps.count >= growthSetTarget && primaryReps.allSatisfy { $0 >= repMax }
+            && primaryReps.count >= growthSetTarget
+            && (policy.valveRule == .allSetsAtTop ? primaryReps.allSatisfy { $0 >= repMax } : totalReps >= totalGoal - 1)
             && primaryRIRs.allSatisfy { $0 >= targetRIR - 1 }
         let earnedByReps = earnedByAdjustedReps || repeatPerformance
         // Over-performed: every primary set two or more reps beyond the top.

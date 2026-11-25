@@ -16,6 +16,8 @@ import SwiftData
 struct PlanMemoryEngine {
 
     let context: ModelContext
+    /// The progression rules this engine reads. Always `.shipped` in the app; the lifter simulation injects the variants.
+    var policy: CoachingPolicy = .shipped
 
     /// The profile / user settings every load decision reads. Shared by carry-forward and the
     /// one-time catch-up so both resolve exactly the same inputs.
@@ -253,6 +255,7 @@ struct PlanMemoryEngine {
             )
             if let recommendation = CoachingEngine.recommend(
                 for: sourceItem,
+                policy: policy,
                 minLoadIncrement: loadIncrement,
                 unit: unit,
                 mesoPhase: session.mesoPhase,
@@ -267,7 +270,7 @@ struct PlanMemoryEngine {
                 // message may name it. Only nextSuggestedLoad is consumed below —
                 // this keeps the message correct for any future caller of it.
                 carryForwardTarget: .exists,
-                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
+                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let recommendedLoad = recommendation.nextSuggestedLoad {
@@ -279,6 +282,7 @@ struct PlanMemoryEngine {
                 )
             } else if targetItem.hasTopSet, let recommendation = CoachingEngine.recommend(
                 for: sourceItem,
+                policy: policy,
                 minLoadIncrement: loadIncrement,
                 unit: unit,
                 mesoPhase: session.mesoPhase,
@@ -287,7 +291,7 @@ struct PlanMemoryEngine {
                 peakE1RM: projection?.peakE1RM,
                 lastKnownLoad: projection?.lastLoad,
                 carryForwardTarget: .exists,
-                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
+                priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
                 isProgressionExempt: isProgressionExempt,
                 loadCap: loadCap
             ), let topLoad = recommendation.nextTopLoad {
@@ -299,7 +303,7 @@ struct PlanMemoryEngine {
             // Incomplete evidence (fewer working sets than planned, capped at three): the seed is the last load lifted,
             // never a bump. The floor projection and the coach can each step above it from a partial session (60 x 20 on one
             // of three sets seeded 65), so whatever they wrote is held at that load. A hold or a reduce stands.
-            if !CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) {
+            if !CoachingEngine.hasSufficientPrimaryEvidence(sourceItem, policy: policy) {
                 let logged = CoachingEngine.workingSetIndices(for: sourceItem).map { sourceItem.actualLoads[$0] }.max() ?? 0
                 let lastLifted = logged > 0 ? logged : sourceItem.suggestedLoad
                 if lastLifted > 0, targetItem.suggestedLoad > lastLifted {
@@ -586,6 +590,7 @@ struct PlanMemoryEngine {
         )
         guard let recommendation = CoachingEngine.recommend(
             for: sourceItem,
+            policy: policy,
             minLoadIncrement: loadIncrement,
             unit: currentProfile()?.loadUnit ?? .lb,
             mesoPhase: session.mesoPhase,
@@ -594,7 +599,7 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,
-            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
+            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises
@@ -632,8 +637,8 @@ struct PlanMemoryEngine {
         guard !targetItem.planEdited else { return .skip("target plan edited by the user") }
         // Incomplete evidence: fewer than min(sets, 3) primary working sets were logged, so
         // there is nothing reliable to write (a 4-set item with 3 logged still qualifies).
-        guard CoachingEngine.hasSufficientPrimaryEvidence(sourceItem) else {
-            return .skip("incomplete evidence (\(CoachingEngine.countedSets(for: sourceItem).rows.count) of \(CoachingEngine.requiredPrimarySets(for: sourceItem)) primary sets logged)")
+        guard CoachingEngine.hasSufficientPrimaryEvidence(sourceItem, policy: policy) else {
+            return .skip("incomplete evidence (\(CoachingEngine.countedSets(for: sourceItem, policy: policy).rows.count) of \(CoachingEngine.requiredPrimarySets(for: sourceItem, policy: policy)) primary sets logged)")
         }
         // Flagged source: a temporarily/deliberately reduced load never earns a
         // write-back. CoachingEngine RULE 4b already returns a nil load here, so
@@ -671,6 +676,7 @@ struct PlanMemoryEngine {
 
         guard let recommendation = CoachingEngine.recommend(
             for: sourceItem,
+            policy: policy,
             minLoadIncrement: loadIncrement,
             unit: currentProfile()?.loadUnit ?? .lb,
             mesoPhase: session.mesoPhase,
@@ -679,7 +685,7 @@ struct PlanMemoryEngine {
             peakE1RM: projection?.peakE1RM,
             lastKnownLoad: projection?.lastLoad,
             carryForwardTarget: .exists,  // targetItem is non-nil by construction
-            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions),
+            priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: sourceItem, in: session, allSessions: allSessions, policy: policy),
             isProgressionExempt: isProgressionExempt,
             loadCap: CoachingEngine.LoadCap.resolve(
                 for: sourceItem, in: session, allSessions: allSessions, profile: currentProfile(), customExercises: customExercises

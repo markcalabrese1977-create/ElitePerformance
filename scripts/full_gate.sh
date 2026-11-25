@@ -17,6 +17,10 @@ A130="${GATE_ANGELA_130:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_1
 LIVE="${GATE_LIVE_BACKUP:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_17-18-55.json}"
 [ -f "$LIVE" ] && export TEST_RUNNER_EP_LIVE_BACKUP="$LIVE"
 
+# CoachingPolicyTests: `.shipped` reproduces every compound decision on Mark's and Angela's backups (golden dumps from the commit that introduced the policy).
+PB1="${GATE_POLICY_MARK:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-22_09-28-39.json}"; PB2="${GATE_POLICY_ANGELA:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_19-37-34.json}"
+PG1="$HOME/Downloads/EP_policy_golden_mark.json"; PG2="$HOME/Downloads/EP_policy_golden_angela.json"
+if [ -f "$PB1" ] && [ -f "$PB2" ] && [ -f "$PG1" ] && [ -f "$PG2" ]; then export TEST_RUNNER_EP_POLICY_BACKUPS="$PB1,$PB2" TEST_RUNNER_EP_POLICY_GOLDEN="$PG1,$PG2"; fi
 scripts/run_bounded.sh > "$OUT_DIR/full.out" 2>&1
 grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"
 
