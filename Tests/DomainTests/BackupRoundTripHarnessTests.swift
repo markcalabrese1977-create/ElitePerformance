@@ -2343,7 +2343,9 @@ final class LifterSimulationTests: XCTestCase {
                 }
                 // the decision this exposure produces (classified before carry-forward writes it)
                 if compound, !isDeload {
-                    let rec = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep)
+                    // The valve precondition is what the carry-forward passes (PlanMemoryEngine): without it the sim would never see a release.
+                    let prior = CoachingEngine.priorExposureWasRIRHold(for: item, in: session, allSessions: (try? ctx.fetch(FetchDescriptor<Session>())) ?? [], policy: variant.policy)
+                    let rec = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep, priorExposureWasRIRHold: prior)
                     let base = CoachingEngine.heldLoad(for: item, policy: variant.policy) ?? 0
                     var kind = "none"
                     if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad, base > 0 {
