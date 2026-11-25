@@ -2354,7 +2354,7 @@ final class LifterSimulationTests: XCTestCase {
                         switch kind {
                         case "inc":
                             acc.increases += 1
-                            if rec?.message.contains("Same reps again at about planned effort") == true { acc.valve += 1 }
+                            if (rec?.message.contains("Same reps again at about planned effort") == true || rec?.message.contains("Top of the range three sessions running") == true) { acc.valve += 1 }
                         case "low": acc.lowers += 1
                         default:
                             acc.holds += 1
