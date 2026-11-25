@@ -3,7 +3,7 @@
 import json, sys, collections, glob
 
 PROFILES = ["accurate", "typical", "all-zero", "effort-off"]
-VARIANTS = ["shipped", "valve-total", "count-first3", "rir-tol1"]
+VARIANTS = ["shipped", "valve-total", "repeat-top2", "count-first3", "rir-tol1"]
 TEMPLATES = [("dup12", "12-Week DUP"), ("ul5", "5-Day Upper/Lower")]
 NUM = ("track_n track_sum track_sumsq fp_n decisions increases lowers holds hold_rirAdj hold_repsShort hold_other valve h2i_n h2i_sum "
        "h2i_censored final_n final_ratio final_vs_ideal start_n start_vs_ideal start_fp start_e1_ratio start_ideal_ratio").split()

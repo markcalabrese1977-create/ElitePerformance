@@ -2080,6 +2080,36 @@ final class CoachingPolicyTests: XCTestCase {
         XCTAssertEqual(next(near, CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne), prior: false), 100)
     }
 
+    /// `.repeatTop2`: the previous two same-letter exposures were RIR holds and this one has every counted set at the top, whatever RIR was rated.
+    func test_repeatTop2_needsTwoPriorHoldsAndEverySetAtTop() throws {
+        EffortTracking.mode = .detailed
+        func bench(_ reps: [Int], _ rirs: [Int]) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100, repMin: 8, repMax: 10)
+            i.actualReps = reps; i.actualLoads = Array(repeating: 100, count: reps.count); i.actualRIRs = rirs
+            i.plannedRepsBySet = Array(repeating: 10, count: reps.count)
+            return i
+        }
+        let p = CoachingPolicy(valveRule: .repeatTop2)
+        let hardTop = bench([10, 10, 10], [0, 0, 0])      // every set at the top, rated RIR 0 (2 below target): strict holds
+        let rec = CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true)
+        XCTAssertEqual(rec?.nextSuggestedLoad, 105)
+        XCTAssertTrue(rec?.message.contains("Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off.") == true, rec?.message ?? "")
+        XCTAssertEqual(CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: false)?.nextSuggestedLoad, 100)
+        XCTAssertEqual(CoachingEngine.recommend(for: hardTop, policy: .shipped, minLoadIncrement: 5, priorExposureWasRIRHold: true)?.nextSuggestedLoad, 100, "shipped: rated RIR 2 below target blocks the valve")
+        let oneShort = bench([10, 10, 9], [0, 0, 0])
+        XCTAssertEqual(CoachingEngine.recommend(for: oneShort, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true)?.nextSuggestedLoad, 100, "every counted set must be at the top")
+        // The predicate: two previous same-letter exposures must both be holds.
+        func hold() -> SessionItem { bench([10, 10, 10], [2, 1, 1]) }
+        let day: (Int) -> Date = { Date(timeIntervalSince1970: 1_700_000_000 + Double($0) * 86_400) }
+        func session(_ d: Int, _ item: SessionItem, status: SessionStatus = .completed) -> Session { Session(date: day(d), status: status, weekIndex: d, dayLabel: "Push", items: [item]) }
+        let a = session(1, hold()), b = session(8, hold()), now = session(15, bench([10, 10, 10], [0, 0, 0]), status: .planned)
+        XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [a, b, now], policy: p))
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [b, now], policy: p), "only one earlier exposure")
+        let earned = session(1, bench([10, 10, 10], [2, 2, 2]))
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [earned, b, now], policy: p), "the older of the two earned")
+        XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [earned, b, now], policy: .shipped), "shipped reads only the latest")
+    }
+
     /// App code only ever uses `.shipped`: no variant is named, constructed, or passed anywhere outside the two engines.
     func test_appSourceOnlyEverUsesShipped() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -2091,7 +2121,7 @@ final class CoachingPolicyTests: XCTestCase {
                 let name = url.lastPathComponent
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let engines = ["CoachingEngine.swift", "PlanMemoryEngine.swift"]
-                for token in [".firstThree", ".oneRIRPerSet", ".totalAtThresholdNoSetBelowOne", "CoachingPolicy(", "valveRule:", "countCap:", "rirTolerance:"] where text.contains(token) {
+                for token in [".firstThree", ".oneRIRPerSet", ".totalAtThresholdNoSetBelowOne", ".repeatTop2", "CoachingPolicy(", "valveRule:", "countCap:", "rirTolerance:"] where text.contains(token) {
                     if name != "CoachingEngine.swift" { offenders.append("\(name): \(token)") }
                 }
                 if !engines.contains(name), text.contains("CoachingPolicy") { offenders.append("\(name): CoachingPolicy") }
@@ -2143,6 +2173,7 @@ struct SimVariant {
     static let all: [SimVariant] = [
         SimVariant(name: "shipped", policy: .shipped),
         SimVariant(name: "valve-total", policy: CoachingPolicy(valveRule: .totalAtThresholdNoSetBelowOne)),
+        SimVariant(name: "repeat-top2", policy: CoachingPolicy(valveRule: .repeatTop2)),
         SimVariant(name: "count-first3", policy: CoachingPolicy(countCap: .firstThree)),
         SimVariant(name: "rir-tol1", policy: CoachingPolicy(rirTolerance: .oneRIRPerSet)),
     ]
@@ -2161,8 +2192,9 @@ struct SimTemplate {
 
 /// The fitted lifter constants (see the report): session noise and the within-session drop per set at the same load.
 enum SimModel {
-    static let sessionNoiseSD = 0.0395      // log e1RM, per exercise-session (median of per-exercise residual SD on the backup)
-    static let setDropPerSet = 0.003        // fraction of e1RM lost per set at the same load (reps lost vs set 1: 0.09, 0.38 at sets 2, 3)
+    /// Defaults are the fitted values; the sensitivity sweep overrides them with TEST_RUNNER_EP_SIM_NOISE / EP_SIM_DROP.
+    static let sessionNoiseSD = Double(ProcessInfo.processInfo.environment["EP_SIM_NOISE"] ?? "") ?? 0.0395   // log e1RM, per exercise-session (median of per-exercise residual SD on the backup)
+    static let setDropPerSet = Double(ProcessInfo.processInfo.environment["EP_SIM_DROP"] ?? "") ?? 0.003     // fraction of e1RM lost per set at the same load (reps lost vs set 1: 0.09, 0.38 at sets 2, 3)
     static let gainRange = (0.0025, 0.01)   // weekly gain, uniform
     static let minLoadStep = 5.0
 }
@@ -2175,6 +2207,8 @@ final class LifterSimulationTests: XCTestCase {
     struct Acc: Codable {
         var track_n = 0, track_sum = 0.0, track_sumsq = 0.0, fp_n = 0
         var q_n = [0, 0, 0, 0], q_sum = [0.0, 0.0, 0.0, 0.0], q_fp = [0, 0, 0, 0]
+        /// By week of the block (index = floor(days / 7), clamped to 0...12): count and sum of (planned / ideal - 1).
+        var w_n = Array(repeating: 0, count: 13), w_sum = Array(repeating: 0.0, count: 13)
         var decisions = 0, increases = 0, lowers = 0
         var holds = 0, hold_rirAdj = 0, hold_repsShort = 0, hold_other = 0
         var valve = 0
@@ -2288,6 +2322,7 @@ final class LifterSimulationTests: XCTestCase {
                     if fp { acc.fp_n += 1 }
                     let q = min(3, Int((d / 7) / (12.0 / 4.0)))
                     acc.q_n[q] += 1; acc.q_sum[q] += err; if fp { acc.q_fp[q] += 1 }
+                    let w = max(0, min(12, Int(d / 7))); acc.w_n[w] += 1; acc.w_sum[w] += err
                 }
                 for k in 0..<rows {
                     var load = planned(k)

@@ -39,6 +39,9 @@ struct CoachingPolicy: Equatable {
         case allSetsAtTop
         /// Raw total at the threshold (sets x top - 1), no set more than 1 RIR below target.
         case totalAtThresholdNoSetBelowOne
+        /// The previous TWO same-letter exposures were RIR-adjustment holds and this one again has every counted set at the top of the range,
+        /// whatever RIR was rated. (`priorExposureWasRIRHold` then means "both previous were holds".)
+        case repeatTop2
     }
     /// How many prescribed sets the progression decision reads.
     enum CountCap: Equatable {
@@ -240,15 +243,16 @@ struct CoachingEngine {
         let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
         let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         let mesoID = session.meso?.persistentModelID
-        let previous = allSessions
+        let previousItems = allSessions
             .filter { $0 !== session && $0.status == .completed && $0.date < session.date && $0.meso?.persistentModelID == mesoID
                 && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
             .sorted { $0.date > $1.date }
             .lazy.compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical
                 && ($0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "") == letter } }
-            .first
-        guard let previous, previous.waveRaw?.lowercased() != "deload" else { return false }
-        return isRIRAdjustmentHold(previous, policy: policy)
+        let needed = policy.valveRule == .repeatTop2 ? 2 : 1
+        let previous = Array(previousItems.prefix(needed))
+        guard previous.count == needed, previous.allSatisfy({ $0.waveRaw?.lowercased() != "deload" }) else { return false }
+        return previous.allSatisfy { isRIRAdjustmentHold($0, policy: policy) }
     }
 
     /// Reps alone (effort ignored) would increase the load; with effort counted it does not.
@@ -839,8 +843,8 @@ struct CoachingEngine {
         // planned effort twice running earn the increase. Never on a first exposure (the caller says whether the previous one was such a hold).
         let repeatPerformance = priorExposureWasRIRHold && isCompoundLift && !earnedByAdjustedReps
             && primaryReps.count >= growthSetTarget
-            && (policy.valveRule == .allSetsAtTop ? primaryReps.allSatisfy { $0 >= repMax } : totalReps >= totalGoal - 1)
-            && primaryRIRs.allSatisfy { $0 >= targetRIR - 1 }
+            && (policy.valveRule == .totalAtThresholdNoSetBelowOne ? totalReps >= totalGoal - 1 : primaryReps.allSatisfy { $0 >= repMax })
+            && (policy.valveRule == .repeatTop2 || primaryRIRs.allSatisfy { $0 >= targetRIR - 1 })
         let earnedByReps = earnedByAdjustedReps || repeatPerformance
         // Over-performed: every primary set two or more reps beyond the top.
         let overPerformed = primaryReps.count >= growthSetTarget && primaryAdjusted.allSatisfy { $0 >= repMax + 2 }
@@ -980,7 +984,9 @@ struct CoachingEngine {
             if let cap = loadCap, target > cap.max {
                 return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
-            let lead = repeatPerformance
+            let lead = repeatPerformance && policy.valveRule == .repeatTop2
+                ? "Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off."
+                : repeatPerformance
                 ? "Same reps again at about planned effort — increase earned."
                 : isCompoundLift
                 ? totalsLine("increase earned")

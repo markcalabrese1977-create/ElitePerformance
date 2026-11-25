@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.." || exit 3
 SHARDS="${1:-6}"; LIFTERS="${2:-200}"
 OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/ep_sim}"; mkdir -p "$OUT_DIR"
 DD="$OUT_DIR/DD"
-xcodebuild build-for-testing -project ElitePerformance.xcodeproj -scheme ElitePerformance -destination "platform=iOS Simulator,name=iPhone 17 Pro" \
+xcodebuild build-for-testing -project ElitePerformance.xcodeproj -scheme ElitePerformance -destination "id=${BUILD_DEVICE:-D6774E79-3948-415D-8D08-F84E585BEFDA}" \
   -derivedDataPath "$DD" > "$OUT_DIR/build.log" 2>&1 || { echo "build failed: $OUT_DIR/build.log"; exit 3; }
 PIDS=()
 for ((k=0; k<SHARDS; k++)); do
