@@ -2093,7 +2093,7 @@ final class CoachingPolicyTests: XCTestCase {
         let hardTop = bench([10, 10, 10], [0, 0, 0])      // every set at the top, rated RIR 0 (2 below target): strict holds
         let rec = CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true, releaseHintDue: true)
         XCTAssertEqual(rec?.nextSuggestedLoad, 105)
-        XCTAssertTrue(rec?.message.contains("Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off.") == true, rec?.message ?? "")
+        XCTAssertTrue(rec?.message.contains("Top of the range three sessions running — increase earned. If you had reps left, log 1–3 RIR, or set effort to Off.") == true, rec?.message ?? "")
         XCTAssertEqual(CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: false)?.nextSuggestedLoad, 100)
         XCTAssertEqual(CoachingEngine.recommend(for: hardTop, policy: .shipped, minLoadIncrement: 5, priorExposureWasRIRHold: true)?.nextSuggestedLoad, 100, "shipped: rated RIR 2 below target blocks the valve")
         let oneShort = bench([10, 10, 9], [0, 0, 0])
@@ -2130,7 +2130,7 @@ final class CoachingPolicyTests: XCTestCase {
         XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: s3.items[0], in: s3, allSessions: [s1, s2, s3], policy: p))
         XCTAssertTrue(CoachingEngine.releaseHintDue(for: s3.items[0], in: s3, allSessions: [s1, s2, s3], policy: p))
         let r3 = CoachingEngine.recommend(for: s3.items[0], policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true, releaseHintDue: true)
-        XCTAssertTrue(r3?.message.contains("If you had reps left, try Hard or Solid, or set effort to Off.") == true)
+        XCTAssertTrue(r3?.message.contains("If you had reps left, log 1–3 RIR, or set effort to Off.") == true)
         // s4 after the release: the mark is set, all-top with zeros releases again, WITHOUT the hint.
         s3.status = .completed
         let s4 = session(22, zeros(), status: .planned)
@@ -2177,8 +2177,12 @@ final class CoachingPolicyTests: XCTestCase {
         XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5)?.nextSuggestedLoad, 100)
         XCTAssertEqual(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.nextSuggestedLoad, 105)
         // The one-time note is per LIFTER and session-level: due at the first session where the mark holds, never on a lift's line.
-        XCTAssertEqual(CoachingEngine.lifterNoteDue(asOf: s1, allSessions: [s1], policy: p), CoachingEngine.lifterNote)
-        XCTAssertTrue(CoachingEngine.lifterNote.contains("If you had reps left, try Hard or Solid, or set effort to Off."))
+        XCTAssertEqual(CoachingEngine.lifterNoteDue(asOf: s1, allSessions: [s1], policy: p), CoachingEngine.lifterNote(mode: .detailed))
+        XCTAssertTrue(CoachingEngine.lifterNote(mode: .detailed) == "Every set was rated 0 RIR, so progression is judged on your reps for now. If you had reps left, log 1–3 RIR, or set effort to Off in Settings.")
+        XCTAssertTrue(CoachingEngine.lifterNote(mode: .simple) == "Every set was tapped All out, so progression is judged on your reps for now. If you had reps left, try Hard or Solid, or set effort to Off in Settings.")
+        EffortTracking.mode = .simple
+        XCTAssertEqual(CoachingEngine.lifterNoteDue(asOf: s1, allSessions: [s1], policy: p), CoachingEngine.lifterNote(mode: .simple), "follows the effort mode")
+        EffortTracking.mode = .detailed
         XCTAssertFalse(CoachingEngine.recommend(for: x, policy: p, minLoadIncrement: 5, ratingsUninformative: true)?.message.contains("Hard or Solid") == true, "not on a lift's coach line")
         let s2 = session(8, [bench([10, 10, 10], [0, 0, 0]), bench([10, 10, 10], [0, 0, 0], "incline_dumbbell_press")])
         XCTAssertTrue(CoachingEngine.lifterRatingsUninformative(asOf: s2, allSessions: [s1, s2], policy: p))

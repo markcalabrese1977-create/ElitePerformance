@@ -291,15 +291,31 @@ struct CoachingEngine {
         return rated >= 6
     }
 
-    /// The one-time effort note for `.lifterLevel`, once per LIFTER and shown at session level (recap / Today banner), never on a lift's coach
-    /// line: non-nil only for the session at which the mark first holds (no earlier completed session had it).
-    static let lifterNote = "Your ratings have all read 0, so progression is judged on reps. If you had reps left, try Hard or Solid, or set effort to Off."
-    static func lifterNoteDue(asOf session: Session?, allSessions: [Session], policy: CoachingPolicy) -> String? {
-        guard let session, lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy) else { return nil }
+    /// The closing line of both effort notes, in the lifter's effort vocabulary (Simple words / Detailed RIR). Empty when effort is Off.
+    static func effortHint(mode: EffortMode = EffortTracking.mode) -> String {
+        switch mode {
+        case .simple: return "If you had reps left, try Hard or Solid, or set effort to Off."
+        case .detailed: return "If you had reps left, log 1–3 RIR, or set effort to Off."
+        case .off: return ""
+        }
+    }
+
+    /// The one-time effort note for `.lifterLevel`, once per LIFTER and shown at session level (the recap), never on a lift's coach line.
+    static func lifterNote(mode: EffortMode = EffortTracking.mode) -> String {
+        switch mode {
+        case .simple: return "Every set was tapped All out, so progression is judged on your reps for now. If you had reps left, try Hard or Solid, or set effort to Off in Settings."
+        case .detailed: return "Every set was rated 0 RIR, so progression is judged on your reps for now. If you had reps left, log 1–3 RIR, or set effort to Off in Settings."
+        case .off: return ""
+        }
+    }
+
+    /// Non-nil only for the session at which the lifter-level mark first holds (no earlier completed session had it).
+    static func lifterNoteDue(asOf session: Session?, allSessions: [Session], policy: CoachingPolicy, mode: EffortMode = EffortTracking.mode) -> String? {
+        guard mode != .off, let session, lifterRatingsUninformative(asOf: session, allSessions: allSessions, policy: policy) else { return nil }
         for s in allSessions where s !== session && s.status == .completed && s.date < session.date {
             if lifterRatingsUninformative(asOf: s, allSessions: allSessions, policy: policy) { return nil }
         }
-        return lifterNote
+        return lifterNote(mode: mode)
     }
 
     // MARK: - `.repeatTop2`: "ratings not informative"
@@ -1085,7 +1101,7 @@ struct CoachingEngine {
             }
             let lead = repeatPerformance && policy.valveRule == .repeatTop2
                 ? (releaseHintDue
-                    ? "Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off."
+                    ? "Top of the range three sessions running — increase earned. \(effortHint())"
                     : "Top of the range again — increase earned.")
                 : repeatPerformance
                 ? "Same reps again at about planned effort — increase earned."

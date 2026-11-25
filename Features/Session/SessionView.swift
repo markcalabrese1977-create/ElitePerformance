@@ -351,6 +351,7 @@ struct SessionView: View {
         case .recap(let recap):
             SessionRecapSheet(
                 recap: recap,
+                effortNote: viewModel.lifterEffortNote(using: modelContext),
                 onDone: {
                     do {
                         try viewModel.persistCompletion(using: modelContext, recap: recap)
@@ -2531,6 +2532,11 @@ final class SessionScreenViewModel: ObservableObject {
         )
     }
 
+    /// The recap's one-time effort note: only under the lifter-level rule, which the app does not use yet (shipped is off), so nil.
+    func lifterEffortNote(using context: ModelContext) -> String? {
+        CoachingEngine.lifterNoteDue(asOf: session, allSessions: (try? context.fetch(FetchDescriptor<Session>())) ?? [], policy: .shipped)
+    }
+
     func persistCompletion(using context: ModelContext, recap: SessionRecap) throws {
         print("🔁 persistCompletion called – exercises: \(recap.exerciseCount), sets: \(recap.setCount), volume: \(recap.totalVolume)")
 
@@ -3249,6 +3255,8 @@ struct UISessionSet: Identifiable {
         let title: String
         let subtitle: String
         let exercises: [SessionRecapExercise]
+        /// The one-time lifter-level effort note (nil unless that rule is on, which the app never does yet).
+        var effortNote: String? = nil
         
         var exerciseCount: Int {
             exercises.count
@@ -3323,6 +3331,7 @@ struct UISessionSet: Identifiable {
     private struct SessionRecapSheet: View {
         @Environment(\.loadUnit) private var unit
         let recap: SessionRecap
+        let effortNote: String?
         let onDone: () -> Void
         
         private var dateFormatter: DateFormatter {
@@ -3342,6 +3351,16 @@ struct UISessionSet: Identifiable {
                 ScrollView {
                     VStack(spacing: 16) {
                         headerCard
+
+                        if let effortNote {
+                            Text(effortNote)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding()
+                                .recapCardFrame()
+                                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.systemBackground)))
+                                .accessibilityIdentifier("lifterEffortNote")
+                        }
 
                         // By exercise
                         VStack(alignment: .leading, spacing: 8) {
