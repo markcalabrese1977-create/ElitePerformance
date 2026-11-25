@@ -2254,6 +2254,9 @@ final class LifterSimulationTests: XCTestCase {
         var w_n = Array(repeating: 0, count: 13), w_sum = Array(repeating: 0.0, count: 13)
         var decisions = 0, increases = 0, lowers = 0
         var holds = 0, hold_rirAdj = 0, hold_repsShort = 0, hold_other = 0
+        /// RIR-adjustment holds, by why the valve did not release them: not every counted set at the top; or all at the top but the valve's history
+        /// condition (previous two same-letter exposures were RIR holds, or the lift's mark is set) was not met.
+        var hold_rir_notTop = 0, hold_rir_noHistory = 0
         var valve = 0
         var h2i_n = 0, h2i_sum = 0, h2i_censored = 0
         var final_n = 0, final_ratio = 0.0, final_vs_ideal = 0.0
@@ -2403,7 +2406,10 @@ final class LifterSimulationTests: XCTestCase {
                         case "low": acc.lowers += 1
                         default:
                             acc.holds += 1
-                            if CoachingEngine.isRIRAdjustmentHold(item, policy: variant.policy) { acc.hold_rirAdj += 1 }
+                            if CoachingEngine.isRIRAdjustmentHold(item, policy: variant.policy) {
+                                acc.hold_rirAdj += 1
+                                if CoachingEngine.everyCountedSetAtTop(item, policy: variant.policy) { acc.hold_rir_noHistory += 1 } else { acc.hold_rir_notTop += 1 }
+                            }
                             else {
                                 let repsOnly = CoachingEngine.recommend(for: item, policy: variant.policy, minLoadIncrement: SimModel.minLoadStep, ignoreEffort: true)
                                 let up = (repsOnly?.nextSuggestedLoad ?? repsOnly?.nextTopLoad ?? 0) > base + 0.001
