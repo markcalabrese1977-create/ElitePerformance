@@ -210,6 +210,9 @@ struct SessionView: View {
                         onNoteTapped: { [exerciseId = exercise.exerciseId, exerciseName = exercise.name] in
                             activeSheet = .note(exerciseId: exerciseId, exerciseName: exerciseName)
                         },
+                        onSessionNoteChanged: { text in
+                            viewModel.setSessionNote(exerciseID: exercise.id, text: text, context: modelContext)
+                        },
                         onAddSetTapped: { [exerciseId = exercise.id] in
                             viewModel.addSet(toExerciseID: exerciseId, context: modelContext)
                         },
@@ -571,6 +574,7 @@ private struct SessionExerciseCardView: View {
     let onSwapTapped: () -> Void
     let onHistoryTapped: () -> Void
     let onNoteTapped: () -> Void
+    let onSessionNoteChanged: (_ text: String) -> Void
     let onAddSetTapped: () -> Void
     let onBodyweightSettingsTapped: () -> Void
 
@@ -844,6 +848,8 @@ private struct SessionExerciseCardView: View {
                     }
                 }
             }
+
+            SessionNoteField(text: exercise.sessionNote, onCommit: onSessionNoteChanged)
 
             if !exercise.coachMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(exercise.coachMessage)
@@ -1806,6 +1812,13 @@ final class SessionScreenViewModel: ObservableObject {
         persist(using: context)
     }
     
+    /// The exercise's note for this session: kept on the row and saved with the rest of the item.
+    func setSessionNote(exerciseID: UUID, text: String, context: ModelContext) {
+        guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        exercises[exerciseIdx].sessionNote = text
+        persist(using: context)
+    }
+
     func setPumpRating(exerciseID: UUID, setIndex: Int, rating: PumpRating, context: ModelContext) {
         guard let exerciseIdx = exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         guard let setIdx = exercises[exerciseIdx].sets.firstIndex(where: { $0.index == setIndex }) else { return }
@@ -2307,6 +2320,8 @@ final class SessionScreenViewModel: ObservableObject {
 
             item.isCompleted = uiExercise.isComplete
             item.coachNote = uiExercise.coachMessage.isEmpty ? nil : uiExercise.coachMessage
+            let trimmedNote = uiExercise.sessionNote.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.sessionNote = trimmedNote.isEmpty ? nil : trimmedNote
         }
 
         // Update overall session status
@@ -2818,7 +2833,8 @@ extension SessionScreenViewModel {
                 coachMessage: CoachNoteHygiene.visibleNote(of: item, unit: unit) ?? "",
                 itemID: item.id,
                 topRepMin: item.topRepMin,
-                topRepMax: item.topRepMax
+                topRepMax: item.topRepMax,
+                sessionNote: item.sessionNote ?? ""
             )
         }
 
@@ -2915,6 +2931,8 @@ struct UISessionExercise: Identifiable {
     var targetSets: Int
     var sets: [UISessionSet]
     var coachMessage: String
+    /// The optional note for this exercise in this session (`SessionItem.sessionNote`).
+    var sessionNote: String = ""
 
     /// Identity of the SwiftData item this row shows (`SessionItem.id`). Survives swaps, which change `exerciseId`.
     var itemID: UUID?
@@ -2995,7 +3013,8 @@ struct UISessionExercise: Identifiable {
         coachMessage: String = "",
         itemID: UUID? = nil,
         topRepMin: Int? = nil,
-        topRepMax: Int? = nil
+        topRepMax: Int? = nil,
+        sessionNote: String = ""
     ) {
         self.topRepMin = topRepMin
         self.topRepMax = topRepMax
@@ -3037,6 +3056,7 @@ struct UISessionExercise: Identifiable {
         self.targetSets = max(1, min(targetSets, 6))
         self.sets = sets.sorted { $0.index < $1.index }
         self.coachMessage = coachMessage
+        self.sessionNote = sessionNote
         self.itemID = itemID
     }
 }
@@ -3610,3 +3630,38 @@ struct UISessionSet: Identifiable {
         }
     }
 
+
+
+/// The per-exercise, per-session note: a collapsed "Add a note for this session" row that opens a text field. Saved when focus leaves it.
+/// Not carried to later sessions (that is the exercise note's job).
+private struct SessionNoteField: View {
+    let text: String
+    let onCommit: (String) -> Void
+    @State private var draft: String = ""
+    @State private var open = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if open || !text.isEmpty {
+                TextField("Note for this session (not carried forward)", text: $draft, axis: .vertical)
+                    .font(.caption)
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .onAppear { if open && text.isEmpty { focused = true } }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                    .onChange(of: focused) { _, isFocused in
+                        if !isFocused { onCommit(draft); if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { open = false } }
+                    }
+            } else {
+                Button { open = true } label: {
+                    Label("Add a note for this session", systemImage: "square.and.pencil").font(.caption)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 6)
+        .onAppear { draft = text }
+    }
+}

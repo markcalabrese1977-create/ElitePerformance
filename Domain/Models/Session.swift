@@ -280,6 +280,11 @@ final class SessionItem {
     /// Optional, so it is additive (lightweight migration) and absent in old backups.
     var loadEverWritten: Bool?
 
+    /// An optional free-text note for THIS exercise in THIS session (1.4). Not carried forward: no copy path (carry-forward, next meso,
+    /// plan propagation, re-add) reads it. Shown in the session's history and the exercise history sheet. Optional: additive, lightweight
+    /// migration, and absent in old backups.
+    var sessionNote: String?
+
     // Simple inline logging (what you’re using now)
     var actualReps: [Int] = []
     var actualLoads: [Double] = []

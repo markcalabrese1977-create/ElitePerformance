@@ -122,14 +122,18 @@ struct CustomMuscleMappingSheet: View {
                     }
                 }
                 if let primary {
-                    Section("Also trains") {
+                    Section {
                         ForEach(FineMuscle.allCases.filter { $0 != primary }, id: \.self) { m in
                             Picker(m.displayName, selection: Binding(get: { secondary[m] ?? 0 }, set: { secondary[m] = $0 == 0 ? nil : $0 })) {
-                                Text("No").tag(0.0)
-                                Text("A little").tag(0.25)
-                                Text("Half a set").tag(0.5)
+                                Text("None").tag(0.0)
+                                Text("25%").tag(0.25)
+                                Text("50%").tag(0.5)
                             }
                         }
+                    } header: {
+                        Text("Also trains")
+                    } footer: {
+                        Text("How much one set of this lift counts toward that muscle.")
                     }
                 }
                 Section {
@@ -183,7 +187,7 @@ struct CustomExerciseMusclesSheet: View {
     private func summary(_ c: CustomExercise) -> String {
         guard let shares = c.fineShares, let primary = c.fineMuscleRaw.flatMap(FineMuscle.init(rawValue:)) else { return "Unmapped" }
         let others = shares.filter { $0.key != primary }.sorted { ($1.value, $0.key.rawValue) < ($0.value, $1.key.rawValue) }
-            .map { "\($0.key.displayName) \($0.value == 0.5 ? "½" : "¼")" }
+            .map { "\($0.key.displayName) \($0.value == 0.5 ? "50%" : "25%")" }
         return ([primary.displayName] + others).joined(separator: " · ")
     }
 

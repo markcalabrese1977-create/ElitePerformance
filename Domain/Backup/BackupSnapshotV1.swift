@@ -270,6 +270,9 @@ struct SessionItemBackupDTO: Codable {
 
     // Added (1.4): a planned load has been written since block setup. Optional so OLD backups decode with nil.
     var loadEverWritten: Bool? = nil
+
+    // Added (1.4): the per-exercise session note. Optional so OLD backups decode with nil.
+    var sessionNote: String? = nil
 }
 
 // MARK: - SetLog

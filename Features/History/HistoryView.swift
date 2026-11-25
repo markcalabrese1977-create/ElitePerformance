@@ -213,6 +213,8 @@ private struct HistoryExerciseDetail: Identifiable {
     let waveLabel: String?
     let prescriptionLabel: String?
     let executionNote: String?
+    /// The lifter's note for this exercise in this session (`SessionItem.sessionNote`).
+    let sessionNote: String?
 
     let totalSets: Int
     let totalReps: Int
@@ -383,6 +385,7 @@ private struct HistoryDayDetailView: View {
                     waveLabel: waveLabel,
                     prescriptionLabel: prescription,
                     executionNote: note,
+                    sessionNote: session.items.first(where: { $0.id == uiEx.itemID })?.sessionNote,
                     totalSets: setDetails.filter { !$0.isSkipped }.count,
                     totalReps: totalReps,
                     totalVolume: totalVol,
@@ -399,6 +402,7 @@ private struct HistoryDayDetailView: View {
                 waveLabel: nil,
                 prescriptionLabel: nil,
                 executionNote: nil,
+                sessionNote: nil,
                 totalSets: ex.sets,
                 totalReps: ex.reps,
                 totalVolume: ex.volume,
@@ -627,6 +631,13 @@ private struct HistoryDayDetailView: View {
                             Text(prescription)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let sn = ex.sessionNote, !sn.isEmpty {
+                            Label(sn, systemImage: "square.and.pencil")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
                         if let note = ex.executionNote {

@@ -62,8 +62,23 @@ struct ExerciseNoteSheet: View {
                     Divider().padding(.top, 8)
                 }
 
+                Text("Exercise note — shows every time you do this lift.")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+
                 TextEditor(text: $text)
                     .padding(12)
+                    .overlay(alignment: .topLeading) {
+                        if text.isEmpty {
+                            Text("Exercise note — shows every time you do this lift.")
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 17).padding(.top, 20)
+                                .allowsHitTesting(false)
+                        }
+                    }
 
                 Divider()
             }

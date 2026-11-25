@@ -26,6 +26,8 @@ struct ExerciseHistorySheet: View {
         /// fallback, `BestSetRule`), shown as a LOAD, never as an e1RM.
         let topLoadSet: BestSet?
         let session: Session
+        /// The lifter's notes for this lift in that session (`SessionItem.sessionNote`), joined when it was done more than once.
+        let sessionNote: String?
     }
 
     private static let df: DateFormatter = {
@@ -383,6 +385,13 @@ struct ExerciseHistorySheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                if let sn = entry.sessionNote {
+                    Label(sn, systemImage: "square.and.pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if !entry.detail.isEmpty {
                     Text(entry.detail)
                         .font(.caption)
@@ -603,7 +612,14 @@ struct ExerciseHistorySheet: View {
                         detail: executedTokens.joined(separator: ", "),
                         bestE1RM: bestE1RM,
                         topLoadSet: topLoadSet,
-                        session: session
+                        session: session,
+                        sessionNote: {
+                            let notes = session.items
+                                .filter { ExerciseCatalog.resolvedExerciseId(rawId: $0.exerciseId, snapshotName: $0.exerciseNameSnapshot, fallbackName: nil) == targetExerciseId }
+                                .compactMap { $0.sessionNote?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .filter { !$0.isEmpty }
+                            return notes.isEmpty ? nil : notes.joined(separator: "\n")
+                        }()
                     )
                 )
             }

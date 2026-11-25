@@ -221,6 +221,7 @@ enum PopulatedStoreBuilder {
         )
         item.planEdited = true
         item.loadEverWritten = true
+        item.sessionNote = "felt the left shoulder here"
         item.setRolesBySet = ["", "", "top"]
         item.topRepMin = 3
         item.topRepMax = 5
