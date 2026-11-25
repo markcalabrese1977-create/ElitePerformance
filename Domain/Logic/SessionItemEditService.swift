@@ -2316,12 +2316,30 @@ extension SessionItemEditService {
     /// The card on Today covers the last two days; older ones go to the Program tab's collapsed Missed row.
     static let overdueCardDays = 2
 
-    /// Planned (not started), not skipped, nothing logged, in an active block, dated before today. Oldest first.
+    /// Planned (not started), not skipped, nothing logged, in an active block, dated before today, and NOT superseded. Oldest first.
+    ///
+    /// Superseded: a session with the same day label in the same block was completed on or after this one's date (the lifter trained that day's
+    /// session on another day, or a later week's one). The program already moved on; offering it again would be noise. Read-only: nothing is written,
+    /// and the session stays planned in the store.
     static func overdueSessions(in sessions: [Session], now: Date = Date(), calendar: Calendar = .current) -> [Session] {
         let today = calendar.startOfDay(for: now)
+        func label(_ s: Session) -> String? {
+            guard let l = s.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !l.isEmpty else { return nil }
+            return l
+        }
+        var completedDays: [PersistentIdentifier: [String: [Date]]] = [:]       // block -> label -> day of each completion
+        for c in sessions where c.status == .completed {
+            guard let block = c.meso?.persistentModelID, let l = label(c) else { continue }
+            completedDays[block, default: [:]][l, default: []].append(calendar.startOfDay(for: c.completedAt ?? c.date))
+        }
+        func superseded(_ s: Session) -> Bool {
+            guard let block = s.meso?.persistentModelID, let l = label(s) else { return false }
+            let due = calendar.startOfDay(for: s.date)
+            return completedDays[block]?[l]?.contains { $0 >= due } ?? false
+        }
         return sessions.filter { s in
             s.status == .planned && s.skippedAt == nil && s.meso?.status == .active && s.meso?.isMaintenance != true
-                && calendar.startOfDay(for: s.date) < today && SessionEditSafety.isSafeToModify(s)
+                && calendar.startOfDay(for: s.date) < today && SessionEditSafety.isSafeToModify(s) && !superseded(s)
         }.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
     }
 

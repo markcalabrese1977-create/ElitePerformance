@@ -349,6 +349,29 @@ final class OverdueSessionTests: XCTestCase {
         XCTAssertEqual(Service.recentlyMissed(in: all, now: plus(start, 12)).compactMap(\.programIndex), [10, 11], "the window slides with the day")
     }
 
+    func test_superseded_aLaterCompletionOfTheSameDayLabelInTheSameBlock_filtersItWithoutWriting() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let other = block(ctx, start: plus(start, -200), status: .active)         // another block's "Push A" never counts
+        for x in sorted(other) where x.dayLabel == "Push A" { complete(x) }
+        let now = plus(start, 9)                                                  // Nov 11; pi 7 (Push A, Nov 9) and pi 8 (Legs A, Nov 10) are overdue
+        XCTAssertEqual(Service.overdueSessions(in: sorted(b) + sorted(other), now: now).filter { $0.meso === b }.compactMap(\.programIndex), [1, 2, 3, 4, 5, 6, 7, 8])
+        // Push A of week 3 (Nov 16) is done early: every earlier Push A (pi 1 and 7) is superseded; Legs A and the rest are not.
+        complete(s(b, 13))
+        let before = sorted(b).map { ($0.status, $0.date, $0.skippedAt) }
+        let after = Service.overdueSessions(in: sorted(b) + sorted(other), now: now).filter { $0.meso === b }.compactMap(\.programIndex)
+        XCTAssertEqual(after, [2, 3, 4, 5, 6, 8])
+        XCTAssertEqual(sorted(b).map { ($0.status, $0.date, $0.skippedAt) }.count, before.count)
+        XCTAssertTrue(zip(before, sorted(b).map { ($0.status, $0.date, $0.skippedAt) }).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 }, "no writes")
+        // A completion BEFORE its date does not supersede it: Push A week 1 was done Nov 2, so Nov 9's is still genuinely missed.
+        let ctx2 = try makeContext()
+        let b2 = block(ctx2, start: start)
+        complete(s(b2, 1))
+        XCTAssertTrue(Service.overdueSessions(in: sorted(b2), now: now).compactMap(\.programIndex).contains(7))
+        XCTAssertFalse(Service.overdueSessions(in: sorted(b2), now: now).compactMap(\.programIndex).contains(1), "done is done")
+    }
+
     func test_doToday_withASessionToday_pushesTodayAndEveryLaterOne_andTheLabelsStay() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
