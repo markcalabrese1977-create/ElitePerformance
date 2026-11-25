@@ -1586,6 +1586,7 @@ final class ScheduledDeloadDryRunTests: XCTestCase {
         for path in list.split(separator: ",").map(String.init) {
             let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
             _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            FixtureClock.pin(path, in: self)
             let ctx = ModelContext(container)
             let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
             let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
@@ -1765,6 +1766,7 @@ final class RefreshChangesDryRunTests: XCTestCase {
         for (n, path) in list.split(separator: ",").map(String.init).enumerated() {
             let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
             _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            FixtureClock.pin(path, in: self)
             let ctx = ModelContext(container)
             var saved: [String: Any] = [:]
             for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v; UserDefaults.standard.removeObject(forKey: k) }

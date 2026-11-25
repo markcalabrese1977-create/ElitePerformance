@@ -4489,6 +4489,7 @@ final class StartupBackfillsDryRunTests: XCTestCase {
         }
         let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        FixtureClock.pin(path, in: self)
         let ctx = ModelContext(container)
         ctx.autosaveEnabled = false
         // The device-local completion flags decide whether a one-shot runs: a real device that took this backup has them set for the
@@ -4550,6 +4551,7 @@ final class PlaceholderRefreshAngelaFixtureTests: XCTestCase {
     private func importStore(_ path: String) throws -> ModelContext {
         let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        FixtureClock.pin(path, in: self)
         let ctx = ModelContext(container)
         ctx.autosaveEnabled = false
         keep.append(container)

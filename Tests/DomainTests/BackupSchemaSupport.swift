@@ -247,3 +247,22 @@ enum PinnedFixture {
         return path
     }
 }
+
+
+/// Replays a backup fixture at the moment it was exported: the refresh and scheduled-deload paths read "today", so a fixture test pins the
+/// clock to the file's `exportedAt` and the result stays the same as the fixture ages. Call `FixtureClock.pin(path)` after an import.
+enum FixtureClock {
+    static func exportedAt(_ path: String) -> Date? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = obj["exportedAt"] as? String else { return nil }
+        let f = ISO8601DateFormatter()
+        return f.date(from: text) ?? { f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f.date(from: text) }()
+    }
+    /// Pins the refresh clock to the fixture's export time and restores the real clock when the test ends.
+    static func pin(_ path: String, in test: XCTestCase) {
+        guard let date = exportedAt(path) else { return }
+        PlaceholderRefresh.clock = { date }
+        test.addTeardownBlock { PlaceholderRefresh.clock = { Date() } }
+    }
+}

@@ -70,6 +70,10 @@ enum PlaceholderRefresh {
     /// The gate for the two automatic entry points. `plan` / `apply` / `run` are not gated.
     static var isEnabled = true
 
+    /// What "now" is for the refresh and the scheduled-deload fill. The app always uses the real clock; a test that replays a fixture sets it to the
+    /// fixture's own date (`exportedAt`), so the result does not move as the fixture ages.
+    nonisolated(unsafe) static var clock: () -> Date = { Date() }
+
     static let estimateFactor = 0.95
     static let maxSourceReps = 12
     static let sourceWindowWeeks = 12
@@ -156,7 +160,7 @@ enum PlaceholderRefresh {
 
     // MARK: - Plan (no writes)
 
-    static func plan(in context: ModelContext, now: Date = Date()) -> [Change] {
+    static func plan(in context: ModelContext, now: Date = PlaceholderRefresh.clock()) -> [Change] {
         guard let all = try? context.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)])) else { return [] }
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
@@ -165,7 +169,7 @@ enum PlaceholderRefresh {
 
     /// `only`: restrict the pass to one item (the same rules, nothing else): an exercise just added to a planned or in-progress session.
     /// Without it every planned session from today on is covered, as at startup.
-    static func plan(sessions all: [Session], ctx: Context, now: Date = Date(), only: SessionItem? = nil) -> [Change] {
+    static func plan(sessions all: [Session], ctx: Context, now: Date = PlaceholderRefresh.clock(), only: SessionItem? = nil) -> [Change] {
         let today = Calendar.current.startOfDay(for: now)
         let completed = all.filter { $0.status == .completed }
         var changes: [Change] = []
@@ -285,7 +289,7 @@ enum PlaceholderRefresh {
     }
 
     @discardableResult
-    static func run(in context: ModelContext, now: Date = Date()) -> [Change] {
+    static func run(in context: ModelContext, now: Date = PlaceholderRefresh.clock()) -> [Change] {
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
         let ctx = Context(profile: profile, customExercises: custom)
@@ -298,7 +302,7 @@ enum PlaceholderRefresh {
     /// A just-added item of a planned or in-progress session gets its load now, by the same rules as the startup pass (held load,
     /// cross-letter estimate, hold from a high-rep set, cross-day), instead of waiting for the next launch. The caller saves.
     @discardableResult
-    static func refreshNewItem(_ item: SessionItem, in context: ModelContext, now: Date = Date()) -> [Change] {
+    static func refreshNewItem(_ item: SessionItem, in context: ModelContext, now: Date = PlaceholderRefresh.clock()) -> [Change] {
         guard isEnabled else { return [] }
         let profile = try? context.fetch(FetchDescriptor<UserProfile>()).first
         let custom = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
@@ -310,7 +314,7 @@ enum PlaceholderRefresh {
     }
 
     /// After a session is completed and carry-forward has written. The caller saves.
-    static func afterCompletion(in context: ModelContext, now: Date = Date()) {
+    static func afterCompletion(in context: ModelContext, now: Date = PlaceholderRefresh.clock()) {
         guard isEnabled else { return }
         run(in: context, now: now)
     }
