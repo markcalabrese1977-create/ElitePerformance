@@ -240,6 +240,11 @@ struct CoachingEngine {
     /// was an RIR-adjustment hold: its reps alone would have earned an increase, its effort-adjusted reps did not. Feeds the repeat-performance valve.
     static func priorExposureWasRIRHold(for item: SessionItem, in session: Session?, allSessions: [Session], policy: CoachingPolicy = .shipped) -> Bool {
         guard let session, RIREntry.isCompound(item.exerciseId), EffortTracking.mode != .off else { return false }
+        // `.repeatTop2`: once a lift's ratings are marked not informative, it is judged on reps (guarded by every counted set at the top)
+        // until a non-zero rating is logged; this exposure then is the first normal one (the mark clears).
+        if policy.valveRule == .repeatTop2, ratingsState(for: item, in: session, allSessions: allSessions, policy: policy).flagged {
+            return !hasNonZeroRating(item)
+        }
         let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
         let letter = item.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         let mesoID = session.meso?.persistentModelID
@@ -253,6 +258,54 @@ struct CoachingEngine {
         let previous = Array(previousItems.prefix(needed))
         guard previous.count == needed, previous.allSatisfy({ $0.waveRaw?.lowercased() != "deload" }) else { return false }
         return previous.allSatisfy { isRIRAdjustmentHold($0, policy: policy) }
+    }
+
+    // MARK: - `.repeatTop2`: "ratings not informative"
+
+    /// A counted set was rated above 0 (an unset rating is no information either way).
+    static func hasNonZeroRating(_ item: SessionItem) -> Bool {
+        countedSets(for: item).rows.contains { (RIREntry.decisionRIR(item, at: $0) ?? 0) > 0 }
+    }
+
+    /// Every counted set (all required rows present) is at or above the top of the range.
+    static func everyCountedSetAtTop(_ item: SessionItem, policy: CoachingPolicy = .shipped) -> Bool {
+        let c = countedSets(for: item, policy: policy)
+        let top = item.repMax ?? item.targetReps
+        return c.rows.count >= c.required && c.rows.allSatisfy { item.actualReps[$0] >= top }
+    }
+
+    /// The lift's "ratings not informative" mark, DERIVED from its completed history in this block (no stored field, so nothing to migrate or
+    /// restore). Set by a release (the previous two same-letter exposures were RIR-adjustment holds and this one has every counted set at the
+    /// top); while set, an exposure with every counted set at the top and no non-zero rating is another release; cleared by an exposure that
+    /// misses the top or logs a non-zero rating. `released` = the lift has had a release before (the effort hint is shown once per lift).
+    static func ratingsState(for item: SessionItem, in session: Session, allSessions: [Session], policy: CoachingPolicy) -> (flagged: Bool, released: Bool) {
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+        let mesoID = session.meso?.persistentModelID
+        func letter(_ i: SessionItem) -> String { i.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() ?? "" }
+        let history: [SessionItem] = allSessions
+            .filter { $0 !== session && $0.status == .completed && $0.date < session.date && $0.meso?.persistentModelID == mesoID }
+            .sorted { $0.date < $1.date }
+            .compactMap { s in s.items.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letter($0) != "deload" } }
+        var flagged = false, released = false
+        var holdsByLetter: [String: [Bool]] = [:]       // oldest first
+        for e in history {
+            let top = everyCountedSetAtTop(e, policy: policy)
+            let isHold = isRIRAdjustmentHold(e, policy: policy)
+            let prior = holdsByLetter[letter(e), default: []].suffix(2)
+            if flagged {
+                if !(top && !hasNonZeroRating(e)) { flagged = false }
+            } else if top && isHold && prior.count == 2 && prior.allSatisfy({ $0 }) {
+                flagged = true; released = true
+            }
+            holdsByLetter[letter(e), default: []].append(isHold)
+        }
+        return (flagged, released)
+    }
+
+    /// True when a `.repeatTop2` release is the lift's first: the coach line then carries the effort hint (once per lift).
+    static func releaseHintDue(for item: SessionItem, in session: Session?, allSessions: [Session], policy: CoachingPolicy = .shipped) -> Bool {
+        guard policy.valveRule == .repeatTop2, let session else { return false }
+        return !ratingsState(for: item, in: session, allSessions: allSessions, policy: policy).released
     }
 
     /// Reps alone (effort ignored) would increase the load; with effort counted it does not.
@@ -405,6 +458,7 @@ struct CoachingEngine {
         lastKnownLoad: Double? = nil,
         carryForwardTarget: CarryForwardTarget = .unresolved,
         priorExposureWasRIRHold: Bool = false,
+        releaseHintDue: Bool = false,
         isProgressionExempt: Bool = false,
         loadCap: LoadCap? = nil,
         ignoreEffort: Bool = false
@@ -414,7 +468,7 @@ struct CoachingEngine {
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
-            priorExposureWasRIRHold: priorExposureWasRIRHold, ignoreEffort: ignoreEffort
+            priorExposureWasRIRHold: priorExposureWasRIRHold, releaseHintDue: releaseHintDue, ignoreEffort: ignoreEffort
         )
         // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
         // is already turned into a hold at the cap, with its message, further down).
@@ -438,6 +492,7 @@ struct CoachingEngine {
         isProgressionExempt: Bool,
         loadCap: LoadCap?,
         priorExposureWasRIRHold: Bool,
+        releaseHintDue: Bool,
         ignoreEffort: Bool
     ) -> CoachingRecommendation? {
         let back = recommendBackOffs(
@@ -445,7 +500,7 @@ struct CoachingEngine {
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
-            priorExposureWasRIRHold: priorExposureWasRIRHold, ignoreEffort: ignoreEffort
+            priorExposureWasRIRHold: priorExposureWasRIRHold, releaseHintDue: releaseHintDue, ignoreEffort: ignoreEffort
         )
         guard item.hasTopSet else { return back }
         // Deload keeps its maintenance message; a pain flag stops every call, top set included.
@@ -531,6 +586,7 @@ struct CoachingEngine {
         isProgressionExempt: Bool = false,
         loadCap: LoadCap? = nil,
         priorExposureWasRIRHold: Bool = false,
+        releaseHintDue: Bool = false,
         ignoreEffort: Bool = false
     ) -> CoachingRecommendation? {
         let reps = item.actualReps
@@ -985,7 +1041,9 @@ struct CoachingEngine {
                 return CoachingRecommendation(message: cap.message(streakHint: true, unit: unit), nextSuggestedLoad: cap.max)
             }
             let lead = repeatPerformance && policy.valveRule == .repeatTop2
-                ? "Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off."
+                ? (releaseHintDue
+                    ? "Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off."
+                    : "Top of the range again — increase earned.")
                 : repeatPerformance
                 ? "Same reps again at about planned effort — increase earned."
                 : isCompoundLift

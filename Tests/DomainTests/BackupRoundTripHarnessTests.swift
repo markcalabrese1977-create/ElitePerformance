@@ -2091,7 +2091,7 @@ final class CoachingPolicyTests: XCTestCase {
         }
         let p = CoachingPolicy(valveRule: .repeatTop2)
         let hardTop = bench([10, 10, 10], [0, 0, 0])      // every set at the top, rated RIR 0 (2 below target): strict holds
-        let rec = CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true)
+        let rec = CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true, releaseHintDue: true)
         XCTAssertEqual(rec?.nextSuggestedLoad, 105)
         XCTAssertTrue(rec?.message.contains("Top of the range three sessions running — increase earned. If you had reps left, try Hard or Solid, or set effort to Off.") == true, rec?.message ?? "")
         XCTAssertEqual(CoachingEngine.recommend(for: hardTop, policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: false)?.nextSuggestedLoad, 100)
@@ -2108,6 +2108,49 @@ final class CoachingPolicyTests: XCTestCase {
         let earned = session(1, bench([10, 10, 10], [2, 2, 2]))
         XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [earned, b, now], policy: p), "the older of the two earned")
         XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: now.items[0], in: now, allSessions: [earned, b, now], policy: .shipped), "shipped reads only the latest")
+    }
+
+    /// `.repeatTop2` chaining is an explicit per-lift mark ("ratings not informative"): set by a release, kept while every counted set is at the
+    /// top with no non-zero rating, cleared by a miss or a non-zero rating; the effort hint is shown once per lift.
+    func test_repeatTop2_ratingsNotInformativeMark_setKeptAndCleared() throws {
+        EffortTracking.mode = .detailed
+        func bench(_ reps: [Int], _ rirs: [Int]) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 10, targetSets: reps.count, targetRIR: 2, suggestedLoad: 100, repMin: 8, repMax: 10)
+            i.actualReps = reps; i.actualLoads = Array(repeating: 100, count: reps.count); i.actualRIRs = rirs
+            i.plannedRepsBySet = Array(repeating: 10, count: reps.count)
+            return i
+        }
+        let p = CoachingPolicy(valveRule: .repeatTop2)
+        let day: (Int) -> Date = { Date(timeIntervalSince1970: 1_700_000_000 + Double($0) * 86_400) }
+        func session(_ d: Int, _ item: SessionItem, status: SessionStatus = .completed) -> Session { Session(date: day(d), status: status, weekIndex: d, dayLabel: "Push", items: [item]) }
+        let hold = { bench([10, 10, 10], [2, 1, 1]) }, zeros = { bench([10, 10, 10], [0, 0, 0]) }
+        let s1 = session(1, hold()), s2 = session(8, hold())
+        // s3: the release. Its coach line carries the hint (first release of the lift).
+        let s3 = session(15, zeros(), status: .planned)
+        XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: s3.items[0], in: s3, allSessions: [s1, s2, s3], policy: p))
+        XCTAssertTrue(CoachingEngine.releaseHintDue(for: s3.items[0], in: s3, allSessions: [s1, s2, s3], policy: p))
+        let r3 = CoachingEngine.recommend(for: s3.items[0], policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true, releaseHintDue: true)
+        XCTAssertTrue(r3?.message.contains("If you had reps left, try Hard or Solid, or set effort to Off.") == true)
+        // s4 after the release: the mark is set, all-top with zeros releases again, WITHOUT the hint.
+        s3.status = .completed
+        let s4 = session(22, zeros(), status: .planned)
+        let all = [s1, s2, s3, s4]
+        XCTAssertTrue(CoachingEngine.ratingsState(for: s4.items[0], in: s4, allSessions: all, policy: p).flagged)
+        XCTAssertTrue(CoachingEngine.priorExposureWasRIRHold(for: s4.items[0], in: s4, allSessions: all, policy: p))
+        XCTAssertFalse(CoachingEngine.releaseHintDue(for: s4.items[0], in: s4, allSessions: all, policy: p))
+        let r4 = CoachingEngine.recommend(for: s4.items[0], policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: true, releaseHintDue: false)
+        XCTAssertEqual(r4?.nextSuggestedLoad, 105)
+        XCTAssertFalse(r4?.message.contains("Hard or Solid") == true); XCTAssertTrue(r4?.message.contains("Top of the range again") == true)
+        // A non-zero rating this time: informative, so the mark clears for this exposure (no release).
+        let s4b = session(22, bench([10, 10, 10], [1, 0, 0]), status: .planned)
+        XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s4b.items[0], in: s4b, allSessions: [s1, s2, s3, s4b], policy: p))
+        // A set short of the top: the guard holds it (the mark is still on, the decision needs every counted set at the top).
+        let s4c = session(22, bench([10, 10, 9], [0, 0, 0]), status: .planned)
+        XCTAssertEqual(CoachingEngine.recommend(for: s4c.items[0], policy: p, minLoadIncrement: 5, priorExposureWasRIRHold: CoachingEngine.priorExposureWasRIRHold(for: s4c.items[0], in: s4c, allSessions: [s1, s2, s3, s4c], policy: p))?.nextSuggestedLoad, 100)
+        // After a miss in history the mark is cleared: s5 needs two fresh holds again.
+        s4.items[0].actualReps = [10, 10, 9]; s4.status = .completed
+        let s5 = session(29, zeros(), status: .planned)
+        XCTAssertFalse(CoachingEngine.ratingsState(for: s5.items[0], in: s5, allSessions: [s1, s2, s3, s4, s5], policy: p).flagged)
     }
 
     /// App code only ever uses `.shipped`: no variant is named, constructed, or passed anywhere outside the two engines.
@@ -2356,7 +2399,7 @@ final class LifterSimulationTests: XCTestCase {
                         switch kind {
                         case "inc":
                             acc.increases += 1
-                            if (rec?.message.contains("Same reps again at about planned effort") == true || rec?.message.contains("Top of the range three sessions running") == true) { acc.valve += 1 }
+                            if (rec?.message.contains("Same reps again at about planned effort") == true || rec?.message.contains("Top of the range ") == true) { acc.valve += 1 }
                         case "low": acc.lowers += 1
                         default:
                             acc.holds += 1
