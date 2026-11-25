@@ -1476,7 +1476,7 @@ final class TotalRepProgressionTests: XCTestCase {
     func test_aFourSetCompound_sumsThePrimaryThreeSets_aFourthRowIsNotEvidence() throws {
         let four = try XCTUnwrap(CoachingEngine.recommend(for: bench([8, 8, 7, 4], rirs: [2, 2, 2, 1]), minLoadIncrement: 2.5))
         XCTAssertEqual(four.nextSuggestedLoad, 187.5)
-        XCTAssertTrue(four.message.hasPrefix("23 reps, needed 23 — increase earned"), four.message)
+        XCTAssertTrue(four.message.hasPrefix("23 reps on the first 3 sets (+1 more set: 4), needed 23 — increase earned"), four.message)
     }
 
     func test_isolationKeepsTheEverySetAtTheTopRule() throws {
