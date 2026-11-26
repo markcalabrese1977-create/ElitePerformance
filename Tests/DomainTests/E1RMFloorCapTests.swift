@@ -737,6 +737,9 @@ final class FixedLoadExemptTests: XCTestCase {
     /// Non-exempt wording is unchanged on every path whose exempt text was reworded, apart from
     /// the landing suffix a hold now carries when a target exists (these items are wave A).
     func test_nonExempt_reworkedPaths_textByteIdentical() throws {
+        // The pinned wording is Simple's; the mode is a process-wide setting, so pin it here instead of inheriting whatever an earlier test left.
+        EffortTracking.mode = .simple
+        defer { EffortTracking.clearMirror() }
         func msg(_ i: SessionItem) throws -> String {
             try XCTUnwrap(CoachingEngine.recommend(for: i, minLoadIncrement: 5, carryForwardTarget: .exists)).message
         }
