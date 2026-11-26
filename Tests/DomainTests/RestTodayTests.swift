@@ -602,11 +602,12 @@ final class SameEveryWeekDryRunTests: XCTestCase {
             let before = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) } })
             let plan = SessionItemEditService.planSameEveryWeek(meso: meso, keep: keep, context: ctx)
             if let r = plan.refusal { out("refused: \(r)"); continue }
-            out("plan: \(plan.sessionsChanged) sessions, \(plan.itemsChanged) items; \(plan.editedLoadsKept) edited loads kept; \(plan.unmatchedSlots) slots with no \(keep.uppercased())-week match")
+            out("plan: \(plan.sessionsChanged) sessions, \(plan.itemsChanged) items converted; \(plan.editedKept) kept as you edited; \(plan.unmatchedSlots) slots with no \(keep.uppercased())-week match")
             let after = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) } })
             XCTAssertTrue(before.allSatisfy { after[$0.key]?.0 == $0.value.0 && after[$0.key]?.1 == $0.value.1 }, "the preview wrote nothing")
             var lastSession: Session?
-            for c in plan.changes.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
+            if !plan.keptAsEdited.isEmpty { out("Kept as you edited (\(plan.keptAsEdited.count)):"); for c in plan.keptAsEdited.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) { out("   " + SameWeekText.keptLine(c)) } }
+            for c in plan.converted.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
                 if lastSession !== c.session {
                     lastSession = c.session
                     out("\(f.string(from: c.session.date))  \(c.session.dayLabel ?? "?")  W\(c.session.weekIndex)  (week \((c.before.waveRaw ?? "-").uppercased()) → same every week)")
@@ -743,10 +744,17 @@ final class SameEveryWeekTests: XCTestCase {
         let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
         XCTAssertThrowsError(try Service.applySameEveryWeek(plan, backupTaken: false, in: c, undoDirectory: undoDir), "a backup comes first")
         let result = try Service.applySameEveryWeek(plan, backupTaken: true, backupName: "pre.json", in: c, undoDirectory: undoDir)
-        XCTAssertEqual(result.sessionsChanged, 6)
+        XCTAssertEqual(plan.editedKept, 1); XCTAssertEqual(plan.keptAsEdited.count, 1)
+        XCTAssertEqual(plan.itemsChanged, 5, "the edited one is not counted as converted")
+        XCTAssertEqual(result.itemsChanged, 6, "the edited one still loses its week letter")
+        let edited = s["3Push"]!.items[0]
+        XCTAssertEqual([edited.targetSets, edited.repMin, edited.repMax, edited.targetRIR], [4, 6, 10, 1], "an edited item keeps its prescription entirely")
+        XCTAssertEqual(edited.prescriptionNotes, "note c"); XCTAssertEqual(edited.suggestedLoad, 95); XCTAssertEqual(edited.plannedLoadsBySet, [95, 95, 95, 95])
+        XCTAssertNil(edited.waveRaw, "only the week label goes, so the day still chains")
         for w in [2, 3, 4] {
             let p = s["\(w)Push"]!.items[0], l = s["\(w)Legs"]!.items[0]
             XCTAssertNil(p.waveRaw, "the letter is cleared"); XCTAssertNil(l.waveRaw)
+            if w == 3 { XCTAssertEqual([l.targetSets, l.repMin, l.repMax, l.targetRIR], [4, 12, 15, 1]); XCTAssertEqual(l.suggestedLoad, 202.5); continue }
             XCTAssertEqual([p.targetSets, p.repMin, p.repMax, p.targetRIR], [3, 12, 15, 0], "week \(w) Push takes the A prescription")
             XCTAssertEqual([l.targetSets, l.repMin, l.repMax, l.targetRIR], [4, 12, 15, 1], "week \(w) Legs takes the A prescription")
             XCTAssertEqual(p.prescriptionNotes, "note a")
@@ -754,7 +762,6 @@ final class SameEveryWeekTests: XCTestCase {
             XCTAssertEqual(l.suggestedLoad, 202.5, "the coach decision of the finished Legs session (top of range at 200, one 2.5 step)")
         }
         XCTAssertEqual(s["2Push"]!.items[0].suggestedLoad, 102.5); XCTAssertEqual(s["4Push"]!.items[0].suggestedLoad, 102.5)
-        XCTAssertEqual(s["3Push"]!.items[0].suggestedLoad, 95, "an edited load is kept")
         XCTAssertEqual([s["1Push"]!, s["1Legs"]!].map { $0.items[0].writeFingerprint() }, done, "finished sessions are not touched")
         XCTAssertEqual([s["5Push"]!, s["5Legs"]!].map { $0.items[0].writeFingerprint() }, deloadBefore, "the deload week stays as it was")
         XCTAssertEqual(s["5Push"]!.items[0].waveRaw, "deload")

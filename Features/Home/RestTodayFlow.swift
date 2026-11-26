@@ -156,7 +156,7 @@ enum SameWeekText {
     static let title = "Make every week the same"
     static let menuTitle = "Make every week the same"
     static let undoTitle = "Undo \"Make every week the same\""
-    static let footer = "Every unstarted session takes the chosen week's sets, reps, effort target and notes, and the A/B/C week labels go. Each load becomes your last coach decision for that exercise on that day. From then on each day carries forward to the same day. Deload weeks stay deloads. Finished and started sessions don't change."
+    static let footer = "Every unstarted session takes the chosen week's sets, reps, effort target and notes, and the A/B/C week labels go. Each load becomes your last coach decision for that exercise on that day. Exercises whose plan you edited yourself keep their prescription and load. From then on each day carries forward to the same day. Deload weeks stay deloads. Finished and started sessions don't change."
 
     static func day(_ d: Date) -> String { d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
 
@@ -190,10 +190,16 @@ enum SameWeekText {
         return "\(name): \(rangeText); \(loadText)" + (c.notes.isEmpty ? "" : " (\(c.notes.joined(separator: "; ")))")
     }
 
+    /// "Fri Nov 27 · Lower A · Single Leg Press: 4×12–15 · 1 RIR, load 145 (as you edited it)"
+    static func keptLine(_ c: Service.SameWeekChange, unit: LoadUnit = .lb) -> String {
+        let name = c.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: c.item.exerciseId)
+        return "\(day(c.session.date)) · \(c.session.dayLabel ?? "Session") · \(name): \(range(c.after)), load \(LoadFormatter(unit: unit).number(c.after.suggestedLoad))"
+    }
+
     static func sessionHeader(_ s: Session) -> String { "\(day(s.date)) · \(s.dayLabel ?? "Session") · \(s.weekDayLabel)" }
 
     static func confirmMessage(_ plan: Service.SameWeekPlan) -> String {
-        "Change \(plan.sessionsChanged) session\(plan.sessionsChanged == 1 ? "" : "s") (\(plan.itemsChanged) exercises) to the \(plan.keep.uppercased()) week's prescription? A backup is made first, finished sessions don't change, and you can undo."
+        "Change \(plan.sessionsChanged) session\(plan.sessionsChanged == 1 ? "" : "s") (\(plan.itemsChanged) exercises) to the \(plan.keep.uppercased()) week's prescription? \(plan.editedKept > 0 ? "\(plan.editedKept) you edited yourself are kept. " : "")A backup is made first, finished sessions don't change, and you can undo."
     }
 
     static func refusalText(_ r: Service.SameWeekRefusal) -> String {
@@ -258,13 +264,22 @@ struct SameEveryWeekFlow: View {
                     } else {
                         Section {
                             Text("\(plan.sessionsChanged) sessions · \(plan.itemsChanged) exercises")
-                            if plan.editedLoadsKept > 0 { Text("\(plan.editedLoadsKept) loads you edited are kept").font(.callout).foregroundStyle(.secondary) }
+                            if plan.editedKept > 0 { Text("\(plan.editedKept) exercises you edited yourself are kept as they are").font(.callout).foregroundStyle(.secondary) }
                             if plan.unmatchedSlots > 0 { Text("\(plan.unmatchedSlots) exercises have no \(plan.keep.uppercased())-week version and keep their own prescription").font(.callout).foregroundStyle(.secondary) }
                         } footer: { Text(SameWeekText.footer) }
 
-                        let grouped = Dictionary(grouping: plan.changes, by: { $0.session.persistentModelID })
-                        let sessions = plan.changes.map(\.session).reduce(into: [Session]()) { acc, s in if !acc.contains(where: { $0 === s }) { acc.append(s) } }
+                        let grouped = Dictionary(grouping: plan.converted, by: { $0.session.persistentModelID })
+                        let sessions = plan.converted.map(\.session).reduce(into: [Session]()) { acc, s in if !acc.contains(where: { $0 === s }) { acc.append(s) } }
                             .sorted { $0.date < $1.date }
+                        if !plan.keptAsEdited.isEmpty {
+                            Section {
+                                DisclosureGroup("Kept as you edited (\(plan.keptAsEdited.count))") {
+                                    ForEach(plan.keptAsEdited.sorted { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }, id: \.itemID) { c in
+                                        Text(SameWeekText.keptLine(c, unit: unit)).font(.caption)
+                                    }
+                                }
+                            } footer: { Text("Prescription and load stay as you set them. Only the week label is removed.") }
+                        }
                         Section("Every changed session") {
                             ForEach(sessions, id: \.persistentModelID) { s in
                                 DisclosureGroup(SameWeekText.sessionHeader(s)) {

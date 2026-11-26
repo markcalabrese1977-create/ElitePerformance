@@ -2600,6 +2600,8 @@ extension SessionItemEditService {
         let after: SameWeekSnapshot
         /// Why a part was kept (planEdited load, no matching slot in the kept week type, top-set shape differs).
         let notes: [String]
+        /// A plan the lifter edited by hand: its prescription and load are kept exactly; only the week letter goes (so its day still chains).
+        var keptAsEdited: Bool = false
         var itemID: String { item.id?.uuidString ?? "\(item.persistentModelID)" }
     }
 
@@ -2617,11 +2619,15 @@ extension SessionItemEditService {
         let keep: String
         let changes: [SameWeekChange]
         let sessionsChanged: Int
+        /// Exercises converted (not counting the ones kept as the lifter edited them).
         let itemsChanged: Int
-        let editedLoadsKept: Int
+        /// Exercises the lifter edited by hand: kept entirely (prescription and load).
+        let editedKept: Int
         let unmatchedSlots: Int
         let refusal: SameWeekRefusal?
         var isApplicable: Bool { refusal == nil && !changes.isEmpty }
+        var converted: [SameWeekChange] { changes.filter { !$0.keptAsEdited } }
+        var keptAsEdited: [SameWeekChange] { changes.filter { $0.keptAsEdited } }
     }
 
     struct SameWeekResult {
@@ -2670,7 +2676,7 @@ extension SessionItemEditService {
 
     static func planSameEveryWeek(meso: MesoBlock, keep: String, context: ModelContext, now: Date = Date()) -> SameWeekPlan {
         func refused(_ r: SameWeekRefusal) -> SameWeekPlan {
-            SameWeekPlan(meso: meso, keep: keep, changes: [], sessionsChanged: 0, itemsChanged: 0, editedLoadsKept: 0, unmatchedSlots: 0, refusal: r)
+            SameWeekPlan(meso: meso, keep: keep, changes: [], sessionsChanged: 0, itemsChanged: 0, editedKept: 0, unmatchedSlots: 0, refusal: r)
         }
         let types = sameWeekTypes(in: meso)
         guard !types.isEmpty else { return refused(.notAWaveBlock) }
@@ -2690,8 +2696,9 @@ extension SessionItemEditService {
         if touched { return refused(.wouldTouchHistory) }
         let changes = outcome.changes
         return SameWeekPlan(meso: meso, keep: keep.lowercased(), changes: changes,
-                            sessionsChanged: Set(changes.map { $0.session.persistentModelID }).count, itemsChanged: changes.count,
-                            editedLoadsKept: outcome.editedLoadsKept, unmatchedSlots: outcome.unmatched, refusal: nil)
+                            sessionsChanged: Set(changes.filter { !$0.keptAsEdited }.map { $0.session.persistentModelID }).count,
+                            itemsChanged: changes.filter { !$0.keptAsEdited }.count,
+                            editedKept: changes.filter { $0.keptAsEdited }.count, unmatchedSlots: outcome.unmatched, refusal: nil)
     }
 
     /// Everything that must NOT change: every item of every session that is not an unstarted planned one.
@@ -2705,7 +2712,7 @@ extension SessionItemEditService {
 
     // MARK: The conversion itself (shared by plan and apply)
 
-    private struct SameWeekOutcome { var changes: [SameWeekChange]; var editedLoadsKept: Int; var unmatched: Int }
+    private struct SameWeekOutcome { var changes: [SameWeekChange]; var unmatched: Int }
 
     /// Mutates the model (the caller rolls back for a preview, or saves for an apply).
     private static func performSameWeek(meso: MesoBlock, keep: String, context: ModelContext) -> SameWeekOutcome {
@@ -2714,7 +2721,7 @@ extension SessionItemEditService {
         var notes: [PersistentIdentifier: [String]] = [:]
         var order: [(Session, SessionItem)] = []
         for s in targets { for i in s.items where letter(i) != nil { before[i.persistentModelID] = SameWeekSnapshot(i); order.append((s, i)) } }
-        var unmatched = 0, editedKept = 0
+        var unmatched = 0
 
         // The reference prescription of a slot: the kept week type's item for the same day and exercise. The most recent completed one, else
         // the earliest planned one (it still carries that week type's prescription).
@@ -2732,6 +2739,11 @@ extension SessionItemEditService {
         // 1. Prescription from the kept week type; the wave letter goes.
         for (session, item) in order {
             let key = item.persistentModelID
+            if item.planEdited {
+                // The lifter's own plan: prescription and load stay exactly as they are. Only the week letter goes, so the day still chains.
+                item.waveRaw = nil
+                continue
+            }
             if let ref = reference(for: item, in: session) {
                 if ref.hasTopSet != item.hasTopSet {
                     notes[key, default: []].append("top-set shape differs from the kept week type: kept as it was")
@@ -2786,7 +2798,7 @@ extension SessionItemEditService {
                 for later in firstRemaining.dropFirst() {
                     guard let dst = later.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }),
                           dst.waveRaw == nil, !isDeloadItem(dst) else { continue }
-                    if dst.planEdited { editedKept += 1; notes[dst.persistentModelID, default: []].append("your edited load kept"); continue }
+                    if dst.planEdited { continue }
                     let top = firstItem.hasTopSet ? firstItem.topValues(firstItem.plannedLoadsBySet, fallback: 0).first : nil
                     PlanMemoryEngine.applyPropagatedLoad(firstItem.suggestedLoad, top: top, to: dst)
                 }
@@ -2795,9 +2807,10 @@ extension SessionItemEditService {
         let changes: [SameWeekChange] = order.compactMap { (session, item) in
             guard let b = before[item.persistentModelID] else { return nil }
             let after = SameWeekSnapshot(item)
-            return SameWeekChange(session: session, item: item, before: b, after: after, notes: notes[item.persistentModelID] ?? [])
+            return SameWeekChange(session: session, item: item, before: b, after: after, notes: notes[item.persistentModelID] ?? [],
+                                  keptAsEdited: item.planEdited)
         }
-        return SameWeekOutcome(changes: changes, editedLoadsKept: editedKept, unmatched: unmatched)
+        return SameWeekOutcome(changes: changes, unmatched: unmatched)
     }
 
     // MARK: Apply
