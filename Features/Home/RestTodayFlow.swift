@@ -153,8 +153,10 @@ struct RestTodayFlow: View {
 enum SameWeekText {
     typealias Service = SessionItemEditService
 
+    /// The menu item and the confirmation say it in full; the sheet's title is short so it never truncates (iPhone 17e at XXXL did).
     static let title = "Make every week the same"
     static let menuTitle = "Make every week the same"
+    static let sheetTitle = "Same every week"
     static let undoTitle = "Undo \"Make every week the same\""
     static let footer = "Every unstarted session takes the chosen week's sets, reps, effort target and notes, and the A/B/C week labels go. Each load becomes your last coach decision for that exercise on that day. Exercises whose plan you edited yourself keep their prescription and load. From then on each day carries forward to the same day. Deload weeks stay deloads. Finished and started sessions don't change."
 
@@ -297,7 +299,7 @@ struct SameEveryWeekFlow: View {
             }
             .task(id: keep) { plan = SessionItemEditService.planSameEveryWeek(meso: meso, keep: keep, context: modelContext) }
             .seedBackupGuard(seedGuard)
-            .navigationTitle(SameWeekText.title)
+            .navigationTitle(SameWeekText.sheetTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onFinish) } }
             .safeAreaInset(edge: .bottom) {

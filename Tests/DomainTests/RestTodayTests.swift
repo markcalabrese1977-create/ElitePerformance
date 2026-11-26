@@ -805,6 +805,12 @@ final class SameEveryWeekTests: XCTestCase {
         XCTAssertEqual(fingerprints(b2), before2, "every field is back")
     }
 
+    func test_sheetTitle_isShortEnoughToNeverTruncate() {
+        XCTAssertEqual(SameWeekText.sheetTitle, "Same every week")
+        XCTAssertLessThanOrEqual(SameWeekText.sheetTitle.count, 15, "the 17e at XXXL truncated a 25-character title")
+        XCTAssertEqual(SameWeekText.menuTitle, "Make every week the same", "the menu and the confirmation keep the full wording")
+    }
+
     func test_failures_leaveTheStoreAsItWas() throws {
         for hooks in [Service.ApplyHooks(forceVerificationFailure: true), Service.ApplyHooks(forceSaveFailure: true)] {
             let c = try ctx(); let (b, _) = try block(c)
