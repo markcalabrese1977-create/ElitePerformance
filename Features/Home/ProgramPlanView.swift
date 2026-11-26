@@ -25,6 +25,8 @@ struct ProgramPlanView: View {
     @State private var showInsertDeload = false
     @State private var showRemoveDeload = false
     @State private var showStartNextMeso = false
+    @State private var showSameEveryWeek = false
+    @State private var showUndoSameWeek = false
     @State private var removeDeloadWeek: Int?
 
     // Add session (date-targeted)
@@ -94,6 +96,12 @@ struct ProgramPlanView: View {
                             if activeMesoBlock != nil {
                                 Button { showStartNextMeso = true } label: { Label("Start next meso from this one", systemImage: "arrow.triangle.branch") }
                                 Button { showInsertDeload = true } label: { Label("Insert deload week", systemImage: "arrow.down.to.line") }
+                                if let block = activeMesoBlock, SessionItemEditService.sameWeekTypes(in: block).contains(where: { $0.remaining > 0 }) {
+                                    Button { showSameEveryWeek = true } label: { Label(SameWeekText.menuTitle, systemImage: "equal.circle") }
+                                }
+                                if let block = activeMesoBlock, SessionItemEditService.sameWeekUndoRecord(for: block) != nil {
+                                    Button { showUndoSameWeek = true } label: { Label(SameWeekText.undoTitle, systemImage: "arrow.uturn.backward") }
+                                }
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
@@ -216,6 +224,15 @@ struct ProgramPlanView: View {
             Button("Cancel", role: .cancel) { skippingMissed = nil }
         } message: {
             Text("It stays in your history as missed, and still counts toward the missed-session check.")
+        }
+        .sheet(isPresented: $showSameEveryWeek) {
+            if let block = activeMesoBlock { SameEveryWeekFlow(meso: block, onFinish: { showSameEveryWeek = false }) }
+        }
+        .alert(SameWeekText.undoTitle, isPresented: $showUndoSameWeek) {
+            Button("Undo", role: .destructive) { if let block = activeMesoBlock { _ = try? SessionItemEditService.undoSameEveryWeek(meso: block, in: modelContext) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(activeMesoBlock.flatMap { SessionItemEditService.sameWeekUndoRecord(for: $0) }.map { SameWeekText.undoMessage($0) } ?? "")
         }
         .sheet(isPresented: $showRemoveDeload) {
             if let block = activeMesoBlock {

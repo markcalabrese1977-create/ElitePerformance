@@ -564,3 +564,271 @@ final class OverdueDryRunTests: XCTestCase {
 }
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+
+
+// MARK: - Dry run: "Make every week the same" on a real backup (report only)
+
+@MainActor
+final class SameEveryWeekDryRunTests: XCTestCase {
+    private var retained: [ModelContainer] = []
+
+    func test_report_makeEveryWeekTheSame() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_SW_BACKUPS"], !list.isEmpty else {
+            throw XCTSkip("set TEST_RUNNER_EP_SW_BACKUPS (comma-separated); optional TEST_RUNNER_EP_SW_KEEP (a week letter) and TEST_RUNNER_EP_SW_REPORT")
+        }
+        var lines: [String] = []
+        func out(_ s: String = "") { lines.append(s); print("SW| \(s)") }
+        defer { if let p = ProcessInfo.processInfo.environment["EP_SW_REPORT"], !p.isEmpty { try? lines.joined(separator: "\n").write(toFile: p, atomically: true, encoding: .utf8) } }
+        func n(_ x: Double) -> String { LoadFormatter.number(x) }
+        func range(_ s: SessionItemEditService.SameWeekSnapshot) -> String {
+            let reps = s.repMin != nil && s.repMax != nil ? (s.repMin == s.repMax ? "\(s.repMin!)" : "\(s.repMin!)–\(s.repMax!)") : "\(s.targetReps)"
+            let rir = s.targetRIRMin != nil && s.targetRIRMax != nil && s.targetRIRMin != s.targetRIRMax ? "\(s.targetRIRMin!)–\(s.targetRIRMax!)" : "\(s.targetRIR)"
+            return "\(s.targetSets)×\(reps) @ \(rir) RIR"
+        }
+        let f = DateFormatter(); f.dateFormat = "EEE MMM d"
+        EffortTracking.mode = .detailed
+        defer { EffortTracking.clearMirror() }
+        for path in list.split(separator: ",").map(String.init) {
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            retained.append(container)
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            guard let meso = try ctx.fetch(FetchDescriptor<MesoBlock>()).first(where: { $0.status == .active }) else { out("no active block"); continue }
+            out("================ \(URL(fileURLWithPath: path).lastPathComponent): \(meso.name)")
+            let types = SessionItemEditService.sameWeekTypes(in: meso)
+            out("week types: " + types.map { "\($0.letter.uppercased()) (last trained \($0.lastTrained.map { f.string(from: $0) } ?? "never"), \($0.remaining) unstarted)" }.joined(separator: "; "))
+            let keep = ProcessInfo.processInfo.environment["EP_SW_KEEP"] ?? SessionItemEditService.defaultKeptWeekType(in: meso) ?? "a"
+            out("keeping the \(keep.uppercased()) week's ranges")
+            let before = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) } })
+            let plan = SessionItemEditService.planSameEveryWeek(meso: meso, keep: keep, context: ctx)
+            if let r = plan.refusal { out("refused: \(r)"); continue }
+            out("plan: \(plan.sessionsChanged) sessions, \(plan.itemsChanged) items; \(plan.editedLoadsKept) edited loads kept; \(plan.unmatchedSlots) slots with no \(keep.uppercased())-week match")
+            let after = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) } })
+            XCTAssertTrue(before.allSatisfy { after[$0.key]?.0 == $0.value.0 && after[$0.key]?.1 == $0.value.1 }, "the preview wrote nothing")
+            var lastSession: Session?
+            for c in plan.changes.sorted(by: { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }) {
+                if lastSession !== c.session {
+                    lastSession = c.session
+                    out("\(f.string(from: c.session.date))  \(c.session.dayLabel ?? "?")  W\(c.session.weekIndex)  (week \((c.before.waveRaw ?? "-").uppercased()) → same every week)")
+                }
+                let name = c.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: c.item.exerciseId)
+                let loadText = c.before.suggestedLoad == c.after.suggestedLoad ? "\(n(c.after.suggestedLoad))" : "\(n(c.before.suggestedLoad)) → \(n(c.after.suggestedLoad))"
+                let rangeText = range(c.before) == range(c.after) ? range(c.after) : "\(range(c.before)) → \(range(c.after))"
+                out("   \(name): \(rangeText); load \(loadText)" + (c.notes.isEmpty ? "" : "   [\(c.notes.joined(separator: "; "))]"))
+            }
+            // The scheduled deload: untouched by the conversion; what the refresh would then write.
+            let deloads = meso.sessions.filter { $0.items.contains { $0.waveRaw?.lowercased() == "deload" } }.sorted { $0.date < $1.date }
+            out("deload week (not changed by the conversion; DeloadRule still sizes it from the working loads):")
+            for d in deloads { out("   \(f.string(from: d.date))  \(d.dayLabel ?? "?")  W\(d.weekIndex): " + d.items.sorted { $0.order < $1.order }.map { "\($0.exerciseNameSnapshot ?? $0.exerciseId) \(n($0.suggestedLoad))" }.joined(separator: ", ")) }
+            let undoDir = FileManager.default.temporaryDirectory.appendingPathComponent("sw_dryrun_undo")
+            let result = try SessionItemEditService.applySameEveryWeek(plan, backupTaken: true, in: ctx, undoDirectory: undoDir)
+            out("applied in memory: \(result.sessionsChanged) sessions, \(result.itemsChanged) items")
+            let refresh = PlaceholderRefresh.plan(in: ctx)
+            for ch in refresh where ch.item.waveRaw?.lowercased() == "deload" {
+                out("   deload \(f.string(from: ch.session.date)) \(ch.session.dayLabel ?? "?") \(ch.item.exerciseNameSnapshot ?? ch.item.exerciseId): \(n(ch.oldLoad)) → \(n(ch.newLoad))  (\(ch.reason.text))")
+            }
+            let undone = try SessionItemEditService.undoSameEveryWeek(meso: meso, in: ctx, undoDirectory: undoDir)
+            out("undo: restored \(undone.restored), left \(undone.left)")
+            let restored = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) } })
+            XCTAssertTrue(before.allSatisfy { restored[$0.key]?.0 == $0.value.0 && restored[$0.key]?.1 == $0.value.1 }, "undo put every load back")
+        }
+    }
+}
+
+// MARK: - "Make every week the same"
+
+final class SameEveryWeekTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private var container: ModelContainer!
+    private var undoDir: URL!
+    private let cal = Calendar.current
+
+    override func setUp() {
+        super.setUp()
+        undoDir = FileManager.default.temporaryDirectory.appendingPathComponent("sw_undo_\(UUID().uuidString)")
+        EffortTracking.mode = .detailed
+    }
+    override func tearDown() { try? FileManager.default.removeItem(at: undoDir); EffortTracking.clearMirror(); super.tearDown() }
+
+    private func ctx() throws -> ModelContext {
+        let schema = AppSchema.makeSchema()
+        container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let c = ModelContext(container)
+        c.insert(User(units: .lb, progressionEnabled: true))
+        return c
+    }
+    private func date(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 5))!)! }
+
+    private struct Rx { let sets: Int; let lo: Int; let hi: Int; let rir: Int }
+    private let push: [String: Rx] = ["a": Rx(sets: 3, lo: 12, hi: 15, rir: 0), "b": Rx(sets: 3, lo: 8, hi: 12, rir: 2), "c": Rx(sets: 4, lo: 6, hi: 10, rir: 1)]
+    private let legs: [String: Rx] = ["a": Rx(sets: 4, lo: 12, hi: 15, rir: 1), "b": Rx(sets: 3, lo: 8, hi: 12, rir: 2), "c": Rx(sets: 3, lo: 6, hi: 10, rir: 1)]
+
+    private func item(_ id: String, _ rx: Rx, wave: String, load: Double) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: id, targetReps: rx.lo, targetSets: rx.sets, targetRIR: rx.rir, suggestedLoad: load, waveRaw: wave,
+                            setMin: rx.sets, setMax: rx.sets, repMin: rx.lo, repMax: rx.hi, targetRIRMin: rx.rir, targetRIRMax: rx.rir,
+                            prescriptionNotes: "note \(wave)",
+                            plannedRepsBySet: Array(repeating: rx.lo, count: rx.sets), plannedLoadsBySet: Array(repeating: load, count: rx.sets),
+                            plannedRIRsBySet: Array(repeating: rx.rir, count: rx.sets),
+                            actualReps: Array(repeating: 0, count: rx.sets), actualLoads: Array(repeating: 0, count: rx.sets),
+                            actualRIRs: RIREntry.unsetArray(count: rx.sets))
+        return i
+    }
+
+    /// Weeks 1-4 letters a, b, c, a, then a deload week 5; days Push and Legs. Week 1 is completed with every set at the top of the A range
+    /// (a bump is earned). Returns the block and the sessions by (week, day).
+    private func block(_ c: ModelContext) throws -> (MesoBlock, [String: Session]) {
+        let b = MesoBlock(name: "Wave", startDate: date(0), status: .active, totalWeeks: 5)
+        c.insert(b)
+        var out: [String: Session] = [:]
+        var pi = 1
+        for (w, letter) in ["a", "b", "c", "a", "deload"].enumerated() {
+            for (k, (label, id, table)) in [("Push", "bench_press", push), ("Legs", "incline_dumbbell_press", legs)].enumerated() {
+                let rx = table[letter == "deload" ? "b" : letter]!
+                let it = item(id, rx, wave: letter, load: label == "Push" ? 100 : 200)
+                let s = Session(date: date(7 * w + k * 2), status: .planned, weekIndex: w + 1, dayLabel: label, items: [it], programIndex: pi)
+                s.meso = b; c.insert(s); out["\(w + 1)\(label)"] = s; pi += 1
+            }
+        }
+        try c.save()
+        for label in ["Push", "Legs"] {
+            let s = out["1\(label)"]!
+            s.status = .completed; s.completedAt = s.date
+            let i = s.items[0]
+            i.isCompleted = true
+            i.actualReps = Array(repeating: i.repMax ?? 15, count: i.targetSets)
+            i.actualLoads = Array(repeating: label == "Push" ? 100 : 200, count: i.targetSets)
+            i.actualRIRs = Array(repeating: i.targetRIR, count: i.targetSets)
+        }
+        try c.save()
+        return (b, out)
+    }
+
+    private func fingerprints(_ b: MesoBlock) -> [String: SessionItem.WriteFingerprint] {
+        Dictionary(uniqueKeysWithValues: b.sessions.flatMap { s in s.items.map { ("\(s.weekIndex)\(s.dayLabel ?? "")", $0.writeFingerprint()) } })
+    }
+
+    func test_weekTypes_andTheDefaultIsTheMostRecentlyTrained() throws {
+        let c = try ctx(); let (b, _) = try block(c)
+        let types = Service.sameWeekTypes(in: b)
+        XCTAssertEqual(types.map(\.letter), ["a", "b", "c"])
+        XCTAssertEqual(types.map(\.remaining), [2, 2, 2], "unstarted sessions of each week type (the deload is not one)")
+        XCTAssertEqual(Service.defaultKeptWeekType(in: b), "a")
+        XCTAssertNotNil(types[0].lastTrained); XCTAssertNil(types[1].lastTrained)
+    }
+
+    func test_plan_isReadOnly_andRefuses() throws {
+        let c = try ctx(); let (b, s) = try block(c)
+        let before = fingerprints(b)
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.sessionsChanged, 6, "weeks 2, 3, 4 x 2 days")
+        XCTAssertEqual(plan.itemsChanged, 6)
+        XCTAssertEqual(fingerprints(b), before, "the preview wrote nothing")
+        XCTAssertEqual(Service.planSameEveryWeek(meso: b, keep: "z", context: c).refusal, .unknownWeekType)
+        s["2Push"]!.status = .inProgress
+        XCTAssertEqual(Service.planSameEveryWeek(meso: b, keep: "a", context: c).refusal, .sessionInProgress)
+        s["2Push"]!.status = .planned
+        // a block with no letters
+        let c2 = try ctx(); let (b2, _) = try block(c2)
+        for x in b2.sessions { for i in x.items where i.waveRaw?.lowercased() != "deload" { i.waveRaw = nil } }
+        XCTAssertEqual(Service.planSameEveryWeek(meso: b2, keep: "a", context: c2).refusal, .notAWaveBlock)
+    }
+
+    func test_apply_everyRemainingSessionTakesTheKeptPrescription_andTheCoachDecision_andNothingFinishedChanges() throws {
+        let c = try ctx(); let (b, s) = try block(c)
+        let done = [s["1Push"]!, s["1Legs"]!].map { $0.items[0].writeFingerprint() }
+        let deloadBefore = [s["5Push"]!, s["5Legs"]!].map { $0.items[0].writeFingerprint() }
+        s["3Push"]!.items[0].planEdited = true; s["3Push"]!.items[0].suggestedLoad = 95; s["3Push"]!.items[0].plannedLoadsBySet = [95, 95, 95, 95]
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertThrowsError(try Service.applySameEveryWeek(plan, backupTaken: false, in: c, undoDirectory: undoDir), "a backup comes first")
+        let result = try Service.applySameEveryWeek(plan, backupTaken: true, backupName: "pre.json", in: c, undoDirectory: undoDir)
+        XCTAssertEqual(result.sessionsChanged, 6)
+        for w in [2, 3, 4] {
+            let p = s["\(w)Push"]!.items[0], l = s["\(w)Legs"]!.items[0]
+            XCTAssertNil(p.waveRaw, "the letter is cleared"); XCTAssertNil(l.waveRaw)
+            XCTAssertEqual([p.targetSets, p.repMin, p.repMax, p.targetRIR], [3, 12, 15, 0], "week \(w) Push takes the A prescription")
+            XCTAssertEqual([l.targetSets, l.repMin, l.repMax, l.targetRIR], [4, 12, 15, 1], "week \(w) Legs takes the A prescription")
+            XCTAssertEqual(p.prescriptionNotes, "note a")
+            XCTAssertEqual(p.plannedRepsBySet.count, 3); XCTAssertEqual(l.plannedLoadsBySet.count, 4)
+            XCTAssertEqual(l.suggestedLoad, 202.5, "the coach decision of the finished Legs session (top of range at 200, one 2.5 step)")
+        }
+        XCTAssertEqual(s["2Push"]!.items[0].suggestedLoad, 102.5); XCTAssertEqual(s["4Push"]!.items[0].suggestedLoad, 102.5)
+        XCTAssertEqual(s["3Push"]!.items[0].suggestedLoad, 95, "an edited load is kept")
+        XCTAssertEqual([s["1Push"]!, s["1Legs"]!].map { $0.items[0].writeFingerprint() }, done, "finished sessions are not touched")
+        XCTAssertEqual([s["5Push"]!, s["5Legs"]!].map { $0.items[0].writeFingerprint() }, deloadBefore, "the deload week stays as it was")
+        XCTAssertEqual(s["5Push"]!.items[0].waveRaw, "deload")
+        XCTAssertEqual(s["1Push"]!.items[0].waveRaw, "a", "history keeps its letter")
+        XCTAssertNotNil(Service.sameWeekUndoRecord(for: b, in: undoDir))
+    }
+
+    func test_afterTheConversion_carryForwardChainsByDayLabel() throws {
+        let c = try ctx(); let (b, s) = try block(c)
+        try Service.applySameEveryWeek(Service.planSameEveryWeek(meso: b, keep: "a", context: c), backupTaken: true, in: c, undoDirectory: undoDir)
+        let w2 = s["2Push"]!
+        w2.status = .completed; w2.completedAt = w2.date
+        let i = w2.items[0]
+        i.isCompleted = true
+        i.actualReps = [15, 15, 15]; i.actualLoads = [102.5, 102.5, 102.5]; i.actualRIRs = [0, 0, 0]
+        s["3Push"]!.items[0].planEdited = false
+        PlanMemoryEngine(context: c).carryForwardPlans(from: w2)
+        XCTAssertEqual(s["3Push"]!.items[0].suggestedLoad, 105, "week 2's wave-less result lands in week 3 of the same day: no letters in the way")
+        XCTAssertEqual(s["3Legs"]!.items[0].suggestedLoad, 202.5, "another day is another chain (still its own decision)")
+    }
+
+    func test_undo_putsEverythingBack_andLeavesStartedSessionsAlone() throws {
+        let c = try ctx(); let (b, s) = try block(c)
+        let before = fingerprints(b)
+        try Service.applySameEveryWeek(Service.planSameEveryWeek(meso: b, keep: "a", context: c), backupTaken: true, in: c, undoDirectory: undoDir)
+        XCTAssertNotEqual(fingerprints(b), before)
+        // week 2 Push is trained after the conversion: undo must not touch it
+        let w2 = s["2Push"]!
+        w2.status = .completed; w2.items[0].actualReps = [15, 15, 15]; w2.items[0].actualLoads = [105, 105, 105]; w2.items[0].isCompleted = true
+        let started = w2.items[0].writeFingerprint()
+        let r = try Service.undoSameEveryWeek(meso: b, in: c, undoDirectory: undoDir)
+        XCTAssertEqual(r.left, 1); XCTAssertEqual(r.restored, 5)
+        XCTAssertEqual(w2.items[0].writeFingerprint(), started)
+        XCTAssertEqual(s["3Push"]!.items[0].waveRaw, "c"); XCTAssertEqual(s["3Push"]!.items[0].repMax, 10)
+        XCTAssertNil(Service.sameWeekUndoRecord(for: b, in: undoDir), "the record is spent")
+        // a clean undo
+        let c2 = try ctx(); let (b2, _) = try block(c2)
+        let before2 = fingerprints(b2)
+        try Service.applySameEveryWeek(Service.planSameEveryWeek(meso: b2, keep: "a", context: c2), backupTaken: true, in: c2, undoDirectory: undoDir)
+        try Service.undoSameEveryWeek(meso: b2, in: c2, undoDirectory: undoDir)
+        XCTAssertEqual(fingerprints(b2), before2, "every field is back")
+    }
+
+    func test_failures_leaveTheStoreAsItWas() throws {
+        for hooks in [Service.ApplyHooks(forceVerificationFailure: true), Service.ApplyHooks(forceSaveFailure: true)] {
+            let c = try ctx(); let (b, _) = try block(c)
+            let before = fingerprints(b)
+            let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+            XCTAssertThrowsError(try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir, hooks: hooks))
+            XCTAssertEqual(fingerprints(b), before)
+            XCTAssertNil(Service.sameWeekUndoRecord(for: b, in: undoDir))
+        }
+    }
+
+    func test_startNextMeso_keepWeeksTheSame_hasNoWeekTypes_andTheKeptPrescriptionEverywhere() throws {
+        let c = try ctx(); let (b, _) = try block(c)
+        let start = cal.date(byAdding: .day, value: 60, to: date(0))!
+        let same = Service.planNextMeso(meso: b, name: "Next", startDate: start, endOldMesoNow: true, keepWeeksTheSame: true, context: c, now: date(8))
+        XCTAssertTrue(same.refusals.isEmpty, "\(same.refusals)")
+        let working = same.sessions.filter { $0.letter != "deload" }
+        XCTAssertFalse(working.isEmpty)
+        XCTAssertTrue(working.allSatisfy { $0.letter.isEmpty && $0.items.allSatisfy { $0.waveRaw == nil } }, "no A/B/C weeks")
+        var bench: [Service.NextMesoItem] = []
+        for w in working { for it in w.items where it.exerciseId == "bench_press" { bench.append(it) } }
+        XCTAssertFalse(bench.isEmpty)
+        for it in bench {
+            XCTAssertEqual(it.targetSets, 3, "the A week's set count in every week")
+            XCTAssertEqual(it.repMin, 12); XCTAssertEqual(it.repMax, 15)
+        }
+        for d in same.sessions where d.letter == "deload" {
+            for it in d.items { XCTAssertEqual(it.waveRaw?.lowercased(), "deload", "the deload stays a deload") }
+        }
+        let waved = Service.planNextMeso(meso: b, name: "Next", startDate: start, endOldMesoNow: true, context: c, now: date(8))
+        XCTAssertTrue(waved.sessions.contains { $0.letter == "b" }, "unchanged without the option")
+        XCTAssertTrue(same.keepWeeksTheSame); XCTAssertFalse(waved.keepWeeksTheSame)
+    }
+}

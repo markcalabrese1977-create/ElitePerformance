@@ -26,15 +26,23 @@ struct StartNextMesoModel {
     var startDate: Date
     /// The toggle as the lifter set it; it only counts while the meso has sessions left to remove (`needsEndNow`).
     var endOldMesoNow: Bool = false
+    /// "Keep weeks the same": no A/B/C weeks in the next meso (offered only when this one has them).
+    var keepWeeksTheSame: Bool = false
 
-    init(meso: MesoBlock, context: ModelContext, now: Date = Date(), name: String? = nil, startDate: Date? = nil, endOldMesoNow: Bool = false) {
+    init(meso: MesoBlock, context: ModelContext, now: Date = Date(), name: String? = nil, startDate: Date? = nil, endOldMesoNow: Bool = false,
+         keepWeeksTheSame: Bool = false) {
         self.meso = meso
         self.context = context
         self.now = now
         self.name = name ?? Self.defaultName(for: meso)
         self.startDate = startDate ?? Self.defaultStart(for: meso, now: now)
         self.endOldMesoNow = endOldMesoNow
+        self.keepWeeksTheSame = keepWeeksTheSame
     }
+
+    /// True when this meso has week types (A/B/C), so "Keep weeks the same" means something.
+    var offersKeepWeeksTheSame: Bool { !Service.sameWeekTypes(in: meso).isEmpty }
+    var keptWeekType: String? { Service.defaultKeptWeekType(in: meso) }
 
     static func defaultName(for meso: MesoBlock) -> String { "\(meso.name) (next)" }
 
@@ -53,7 +61,8 @@ struct StartNextMesoModel {
 
     func plan() -> Service.NextMesoPlan {
         Service.planNextMeso(meso: meso, name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                             startDate: startDate, endOldMesoNow: effectiveEndNow, context: context, now: now)
+                             startDate: startDate, endOldMesoNow: effectiveEndNow,
+                             keepWeeksTheSame: keepWeeksTheSame && offersKeepWeeksTheSame, context: context, now: now)
     }
 
     var canCreate: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -178,6 +187,7 @@ struct StartNextMesoFlow: View {
     @State private var name: String
     @State private var startDate: Date
     @State private var endOldMesoNow = false
+    @State private var keepWeeksTheSame = false
     @State private var errorMessage: String?
     @State private var refreshToken = 0
 
@@ -189,7 +199,8 @@ struct StartNextMesoFlow: View {
     }
 
     var body: some View {
-        let model = StartNextMesoModel(meso: meso, context: modelContext, name: name, startDate: startDate, endOldMesoNow: endOldMesoNow)
+        let model = StartNextMesoModel(meso: meso, context: modelContext, name: name, startDate: startDate, endOldMesoNow: endOldMesoNow,
+                                       keepWeeksTheSame: keepWeeksTheSame)
         let plan = model.plan()
         let remaining = model.remainingSessions
         NavigationStack {
@@ -200,6 +211,14 @@ struct StartNextMesoFlow: View {
                                in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
                 } footer: {
                     Text("Each day type keeps its usual weekday, and weeks start on your first day.")
+                }
+
+                if model.offersKeepWeeksTheSame {
+                    Section {
+                        Toggle("Keep weeks the same", isOn: $keepWeeksTheSame)
+                    } footer: {
+                        Text("Every week uses one prescription per exercise, the \(model.keptWeekType?.uppercased() ?? "latest") week's, with no A/B/C weeks. The next meso after this one stays that way.")
+                    }
                 }
 
                 if model.needsEndNow {

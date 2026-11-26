@@ -138,6 +138,8 @@ extension SessionItemEditService {
         let peakFactor: Double
         /// 4.4: seed each lift at a share of its peak chosen by its verdict (`peakFactor` is then only the fallback). False = one factor for every lift.
         var verdictGated: Bool = true
+        /// "Keep weeks the same": a wave block's next meso has one prescription per slot (the week type trained most recently), no A/B/C weeks.
+        var keepWeeksTheSame: Bool = false
         let now: Date
         let sessions: [NextMesoSession]
         let weeks: Int
@@ -242,6 +244,7 @@ extension SessionItemEditService {
         endOldMesoNow: Bool,
         peakFactor: Double = nextMesoPeakFactor,
         verdictGated: Bool = true,
+        keepWeeksTheSame: Bool = false,
         context: ModelContext,
         now: Date = Date(),
         calendar cal: Calendar = .current,
@@ -261,6 +264,7 @@ extension SessionItemEditService {
                                      sessionsToDelete: toDelete, remainingOldSessions: remaining, collisions: collisions,
                                      refusals: refusals)
             built.verdictGated = verdictGated
+            built.keepWeeksTheSame = keepWeeksTheSame
             built.unit = (try? context.fetch(FetchDescriptor<UserProfile>()).first)?.loadUnit ?? .lb
             return built
         }
@@ -288,6 +292,8 @@ extension SessionItemEditService {
         let waveBased = !meso.isMaintenance && sources.contains { $0.items.contains { WavePrescriptionGuard.isWaveLetter($0.waveRaw) } }
         // A block the lifter wrote has no letters, but its deload week is still a different kind of week: it must supply the deload
         // week, and the working weeks the working ones (a letter-less block with a deload otherwise copies the deload everywhere).
+        let sameEveryWeek = keepWeeksTheSame && waveBased
+        let keptLetter: String? = sameEveryWeek ? defaultKeptWeekType(in: meso) : nil
         let deloadOnly = !meso.isMaintenance && !waveBased
             && sources.contains { $0.items.contains { $0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == "deload" } }
         func weekLetter(_ week: Int) -> String {
@@ -299,13 +305,17 @@ extension SessionItemEditService {
                     if !l.isEmpty { counts[l, default: 0] += 1 }
                 }
             }
-            return counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key ?? ""
+            let best = counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key ?? ""
+            return sameEveryWeek && best != "deload" ? "" : best        // every working week is the same week
         }
         let letters = Dictionary(uniqueKeysWithValues: weekOrder.map { ($0, weekLetter($0)) })
 
         /// Latest session of this day type and letter; any letter when that letter never occurred for the day.
         func template(_ dayLabel: String, _ letter: String) -> Session? {
             let ofDay = ordered(sources.filter { label($0) == dayLabel })
+            // Same every week: the latest session of this day of the kept week type supplies the one prescription.
+            if sameEveryWeek, letter.isEmpty, let kept = keptLetter,
+               let t = ofDay.last(where: { s in s.items.contains { $0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() == kept } }) { return t }
             return ofDay.last { letters[$0.weekIndex] == letter } ?? ofDay.last
         }
 
@@ -419,8 +429,10 @@ extension SessionItemEditService {
                 let slot = oldItems.first { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }
                     ?? oldItems.first { $0.order == t.order }
                 // The PRESCRIBED set count of that week, never the count an in-session Add Set left on it.
-                let sets = max(0, slot.map { prescribedSetCount(of: $0, in: row.old, among: all) } ?? t.targetSets)
+                let sets = sameEveryWeek && row.letter != "deload" ? max(0, t.effectivePrescribedSets)
+                    : max(0, slot.map { prescribedSetCount(of: $0, in: row.old, among: all) } ?? t.targetSets)
                 let wave: String? = {
+                    if sameEveryWeek, row.letter != "deload" { return nil }
                     if let raw = t.waveRaw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty { return t.waveRaw }
                     return waveBased && !row.letter.isEmpty ? row.letter : nil
                 }()
@@ -535,7 +547,7 @@ extension SessionItemEditService {
 
         // The plan is a preview; trust only live state.
         let live = planNextMeso(meso: old, name: plan.name, startDate: plan.startDate, endOldMesoNow: plan.endOldMesoNow,
-                                peakFactor: plan.peakFactor, verdictGated: plan.verdictGated, context: context, now: plan.now)
+                                peakFactor: plan.peakFactor, verdictGated: plan.verdictGated, keepWeeksTheSame: plan.keepWeeksTheSame, context: context, now: plan.now)
         guard live.refusals.isEmpty, live.isApplicable else { throw NextMesoError.refused(live.refusals.isEmpty ? [.nothingToCopy] : live.refusals) }
         guard signature(live) == signature(plan) else { throw NextMesoError.planStale }
 

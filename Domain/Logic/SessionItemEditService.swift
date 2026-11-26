@@ -2533,3 +2533,361 @@ extension SessionItemEditService {
         return PlaceOverdueResult(sessionsMoved: live.moves.count + 1, summary: summary)
     }
 }
+
+// MARK: - "Make every week the same" (wave block -> wave-less)
+
+/// A lifter whose program does not change its rep ranges week to week can turn an active wave block into a wave-less one. Every remaining
+/// UNSTARTED session takes ONE prescription per slot (sets, reps, RIR target, notes) from the week type the lifter keeps (default: the one trained
+/// most recently), its wave letter is cleared, and its planned load becomes the coach decision from the most recent completed session of that
+/// day for that exercise. From then on carry-forward chains by day label, as in "Use my own program". Scheduled deload items are left alone
+/// (DeloadRule / the refresh still fill them). No completed or started session is touched. The plan is a dry apply that is rolled back, so the
+/// preview lists exactly what apply writes; apply needs the backup the caller took first, and an undo record is kept.
+extension SessionItemEditService {
+
+    struct WeekType: Equatable {
+        let letter: String
+        /// The last day a session of this week type was completed (nil: never trained).
+        let lastTrained: Date?
+        /// Unstarted sessions of this week type that would change.
+        let remaining: Int
+    }
+
+    /// Everything a conversion can change on an item, as it was or will be.
+    struct SameWeekSnapshot: Codable, Equatable {
+        var waveRaw: String?
+        var priorityRaw: String?
+        var targetSets: Int, targetReps: Int, targetRIR: Int
+        var prescribedSets: Int?
+        var suggestedLoad: Double
+        var setMin: Int?, setMax: Int?, repMin: Int?, repMax: Int?, targetRIRMin: Int?, targetRIRMax: Int?
+        var intensifierRaw: String?, intensifierNotes: String?, prescriptionNotes: String?
+        var plannedRepsBySet: [Int], plannedLoadsBySet: [Double], plannedRIRsBySet: [Int]
+        var setRolesBySet: [String]?
+        var topRepMin: Int?, topRepMax: Int?, topRIR: Int?
+        var coachNote: String?
+        var loadEverWritten: Bool?
+        var updatedAt: Date?
+
+        init(_ i: SessionItem) {
+            waveRaw = i.waveRaw; priorityRaw = i.priorityRaw
+            targetSets = i.targetSets; targetReps = i.targetReps; targetRIR = i.targetRIR; prescribedSets = i.prescribedSets
+            suggestedLoad = i.suggestedLoad
+            setMin = i.setMin; setMax = i.setMax; repMin = i.repMin; repMax = i.repMax
+            targetRIRMin = i.targetRIRMin; targetRIRMax = i.targetRIRMax
+            intensifierRaw = i.intensifierRaw; intensifierNotes = i.intensifierNotes; prescriptionNotes = i.prescriptionNotes
+            plannedRepsBySet = i.plannedRepsBySet; plannedLoadsBySet = i.plannedLoadsBySet; plannedRIRsBySet = i.plannedRIRsBySet
+            setRolesBySet = i.setRolesBySet; topRepMin = i.topRepMin; topRepMax = i.topRepMax; topRIR = i.topRIR
+            coachNote = i.coachNote; loadEverWritten = i.loadEverWritten; updatedAt = i.updatedAt
+        }
+
+        func restore(_ i: SessionItem) {
+            i.waveRaw = waveRaw; i.priorityRaw = priorityRaw
+            i.targetSets = targetSets; i.targetReps = targetReps; i.targetRIR = targetRIR; i.prescribedSets = prescribedSets
+            i.suggestedLoad = suggestedLoad
+            i.setMin = setMin; i.setMax = setMax; i.repMin = repMin; i.repMax = repMax
+            i.targetRIRMin = targetRIRMin; i.targetRIRMax = targetRIRMax
+            i.intensifierRaw = intensifierRaw; i.intensifierNotes = intensifierNotes; i.prescriptionNotes = prescriptionNotes
+            i.plannedRepsBySet = plannedRepsBySet; i.plannedLoadsBySet = plannedLoadsBySet; i.plannedRIRsBySet = plannedRIRsBySet
+            i.setRolesBySet = setRolesBySet; i.topRepMin = topRepMin; i.topRepMax = topRepMax; i.topRIR = topRIR
+            i.coachNote = coachNote; i.loadEverWritten = loadEverWritten; i.updatedAt = updatedAt
+        }
+    }
+
+    struct SameWeekChange {
+        let session: Session
+        let item: SessionItem
+        let before: SameWeekSnapshot
+        let after: SameWeekSnapshot
+        /// Why a part was kept (planEdited load, no matching slot in the kept week type, top-set shape differs).
+        let notes: [String]
+        var itemID: String { item.id?.uuidString ?? "\(item.persistentModelID)" }
+    }
+
+    enum SameWeekRefusal: Equatable {
+        case notAWaveBlock
+        case sessionInProgress
+        case noUnstartedSessions
+        case unknownWeekType
+        /// The dry run would have changed a completed or started session (never expected: nothing is written).
+        case wouldTouchHistory
+    }
+
+    struct SameWeekPlan {
+        let meso: MesoBlock
+        let keep: String
+        let changes: [SameWeekChange]
+        let sessionsChanged: Int
+        let itemsChanged: Int
+        let editedLoadsKept: Int
+        let unmatchedSlots: Int
+        let refusal: SameWeekRefusal?
+        var isApplicable: Bool { refusal == nil && !changes.isEmpty }
+    }
+
+    struct SameWeekResult {
+        let sessionsChanged: Int
+        let itemsChanged: Int
+        let undoURL: URL?
+    }
+
+    enum SameWeekError: Error, Equatable {
+        case refused(SameWeekRefusal)
+        case planStale
+        case verificationFailed([String])
+        case saveFailed(String)
+    }
+
+    private static func letter(_ i: SessionItem) -> String? {
+        guard let l = i.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased(), !l.isEmpty, l != "deload" else { return nil }
+        return l
+    }
+    private static func isDeloadItem(_ i: SessionItem) -> Bool { i.waveRaw?.lowercased() == "deload" }
+
+    // MARK: Week types
+
+    static func sameWeekTypes(in meso: MesoBlock) -> [WeekType] {
+        var letters: [String: (last: Date?, remaining: Int)] = [:]
+        for s in meso.sessions {
+            let ls = Set(s.items.compactMap(letter))
+            for l in ls {
+                var e = letters[l] ?? (nil, 0)
+                if s.status == .completed { e.last = max(e.last ?? .distantPast, s.completedAt ?? s.date) }
+                if SessionEditSafety.isSafeToModify(s) { e.remaining += 1 }
+                letters[l] = e
+            }
+        }
+        return letters.map { WeekType(letter: $0.key, lastTrained: $0.value.last, remaining: $0.value.remaining) }
+            .sorted { $0.letter < $1.letter }
+    }
+
+    /// The week type trained most recently; the first letter when nothing is done yet.
+    static func defaultKeptWeekType(in meso: MesoBlock) -> String? {
+        let types = sameWeekTypes(in: meso)
+        return types.filter { $0.lastTrained != nil }.max { ($0.lastTrained ?? .distantPast) < ($1.lastTrained ?? .distantPast) }?.letter ?? types.first?.letter
+    }
+
+    // MARK: Plan (dry apply, rolled back)
+
+    static func planSameEveryWeek(meso: MesoBlock, keep: String, context: ModelContext, now: Date = Date()) -> SameWeekPlan {
+        func refused(_ r: SameWeekRefusal) -> SameWeekPlan {
+            SameWeekPlan(meso: meso, keep: keep, changes: [], sessionsChanged: 0, itemsChanged: 0, editedLoadsKept: 0, unmatchedSlots: 0, refusal: r)
+        }
+        let types = sameWeekTypes(in: meso)
+        guard !types.isEmpty else { return refused(.notAWaveBlock) }
+        guard types.contains(where: { $0.letter == keep.lowercased() }) else { return refused(.unknownWeekType) }
+        if meso.sessions.contains(where: { $0.status == .inProgress }) { return refused(.sessionInProgress) }
+        guard types.contains(where: { $0.remaining > 0 }) else { return refused(.noUnstartedSessions) }
+
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+        if context.hasChanges { try? context.save() }          // so the rollback below puts back exactly what was there
+
+        let history = historyFingerprints(meso)
+        let outcome = performSameWeek(meso: meso, keep: keep.lowercased(), context: context)
+        let touched = history != historyFingerprints(meso)
+        context.rollback()
+        if touched { return refused(.wouldTouchHistory) }
+        let changes = outcome.changes
+        return SameWeekPlan(meso: meso, keep: keep.lowercased(), changes: changes,
+                            sessionsChanged: Set(changes.map { $0.session.persistentModelID }).count, itemsChanged: changes.count,
+                            editedLoadsKept: outcome.editedLoadsKept, unmatchedSlots: outcome.unmatched, refusal: nil)
+    }
+
+    /// Everything that must NOT change: every item of every session that is not an unstarted planned one.
+    private static func historyFingerprints(_ meso: MesoBlock) -> [PersistentIdentifier: SessionItem.WriteFingerprint] {
+        var out: [PersistentIdentifier: SessionItem.WriteFingerprint] = [:]
+        for s in meso.sessions where !SessionEditSafety.isSafeToModify(s) {
+            for i in s.items { out[i.persistentModelID] = i.writeFingerprint() }
+        }
+        return out
+    }
+
+    // MARK: The conversion itself (shared by plan and apply)
+
+    private struct SameWeekOutcome { var changes: [SameWeekChange]; var editedLoadsKept: Int; var unmatched: Int }
+
+    /// Mutates the model (the caller rolls back for a preview, or saves for an apply).
+    private static func performSameWeek(meso: MesoBlock, keep: String, context: ModelContext) -> SameWeekOutcome {
+        let targets = meso.sessions.filter { SessionEditSafety.isSafeToModify($0) }.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
+        var before: [PersistentIdentifier: SameWeekSnapshot] = [:]
+        var notes: [PersistentIdentifier: [String]] = [:]
+        var order: [(Session, SessionItem)] = []
+        for s in targets { for i in s.items where letter(i) != nil { before[i.persistentModelID] = SameWeekSnapshot(i); order.append((s, i)) } }
+        var unmatched = 0, editedKept = 0
+
+        // The reference prescription of a slot: the kept week type's item for the same day and exercise. The most recent completed one, else
+        // the earliest planned one (it still carries that week type's prescription).
+        func reference(for item: SessionItem, in session: Session) -> SessionItem? {
+            let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            let sameDay = meso.sessions.filter { $0 !== session && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
+            let matches: [(Session, SessionItem)] = sameDay.compactMap { s in
+                guard let i = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letter($0) == keep }) else { return nil }
+                return (s, i)
+            }
+            if let done = matches.filter({ $0.0.status == .completed }).max(by: { $0.0.date < $1.0.date }) { return done.1 }
+            return matches.filter { $0.0.status == .planned }.min(by: { $0.0.date < $1.0.date })?.1
+        }
+
+        // 1. Prescription from the kept week type; the wave letter goes.
+        for (session, item) in order {
+            let key = item.persistentModelID
+            if let ref = reference(for: item, in: session) {
+                if ref.hasTopSet != item.hasTopSet {
+                    notes[key, default: []].append("top-set shape differs from the kept week type: kept as it was")
+                } else {
+                    let n = max(0, ref.effectivePrescribedSets)
+                    item.setPrescribedSets(n)
+                    item.setMin = ref.setMin; item.setMax = ref.setMax
+                    item.repMin = ref.repMin; item.repMax = ref.repMax; item.targetReps = ref.targetReps
+                    item.targetRIR = ref.targetRIR; item.targetRIRMin = ref.targetRIRMin; item.targetRIRMax = ref.targetRIRMax
+                    item.intensifierRaw = ref.intensifierRaw; item.intensifierNotes = ref.intensifierNotes
+                    item.prescriptionNotes = ref.prescriptionNotes; item.priorityRaw = ref.priorityRaw ?? item.priorityRaw
+                    if ref.hasTopSet {
+                        item.plannedRepsBySet = ref.plannedRepsBySet; item.plannedRIRsBySet = ref.plannedRIRsBySet
+                        item.setRolesBySet = ref.setRolesBySet
+                        item.topRepMin = ref.topRepMin; item.topRepMax = ref.topRepMax; item.topRIR = ref.topRIR
+                        item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: ref.plannedRepsBySet.count, fallback: item.suggestedLoad)
+                    } else {
+                        let sets = max(n, 0)
+                        item.plannedRepsBySet = Array(repeating: ref.targetReps, count: sets)
+                        item.plannedRIRsBySet = Array(repeating: ref.targetRIR, count: sets)
+                        item.plannedLoadsBySet = resized(Array(item.plannedLoadsBySet.prefix(max(item.plannedLoadsBySet.count, 1))), to: sets, fallback: item.suggestedLoad)
+                    }
+                }
+            } else {
+                unmatched += 1
+                notes[key, default: []].append("no \(keep.uppercased())-week slot for this exercise on this day: prescription kept")
+            }
+            item.waveRaw = nil
+        }
+
+        // 2. Loads: the coach decision of the most recent completed session of each day, written by the same carry-forward that runs after every
+        // session. The completed session keeps its letter (it is history), so it is read as wave-less for the replay and restored right after.
+        let engine = PlanMemoryEngine(context: context)
+        let days = Dictionary(grouping: order.map { $0.0 }, by: { ($0.dayLabel ?? "").trimmingCharacters(in: .whitespaces).lowercased() })
+        for (_, remaining) in days {
+            guard let sample = remaining.first,
+                  let source = meso.sessions.filter({ $0.status == .completed && SessionDayLabelMatcher.matches($0.dayLabel, sample.dayLabel) })
+                    .max(by: { $0.date < $1.date }) else { continue }
+            let firstRemaining = remaining.sorted { $0.date < $1.date }
+            let waveBackup = source.items.map { ($0, $0.waveRaw) }
+            for item in source.items where item.waveRaw?.lowercased() != "deload" { item.waveRaw = nil }
+            // Plan loads on the first remaining session before the replay, to see what it wrote.
+            let first = firstRemaining[0]
+            let loadsBefore = Dictionary(uniqueKeysWithValues: first.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) })
+            engine.carryForwardPlans(from: source)
+            for (item, wave) in waveBackup { item.waveRaw = wave }
+            // Every later remaining session of that day takes the load the first one was given (planEdited ones keep theirs).
+            for firstItem in first.items {
+                guard let was = loadsBefore[firstItem.persistentModelID],
+                      was.0 != firstItem.suggestedLoad || was.1 != firstItem.plannedLoadsBySet else { continue }
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: firstItem.exerciseId)
+                for later in firstRemaining.dropFirst() {
+                    guard let dst = later.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }),
+                          dst.waveRaw == nil, !isDeloadItem(dst) else { continue }
+                    if dst.planEdited { editedKept += 1; notes[dst.persistentModelID, default: []].append("your edited load kept"); continue }
+                    let top = firstItem.hasTopSet ? firstItem.topValues(firstItem.plannedLoadsBySet, fallback: 0).first : nil
+                    PlanMemoryEngine.applyPropagatedLoad(firstItem.suggestedLoad, top: top, to: dst)
+                }
+            }
+        }
+        let changes: [SameWeekChange] = order.compactMap { (session, item) in
+            guard let b = before[item.persistentModelID] else { return nil }
+            let after = SameWeekSnapshot(item)
+            return SameWeekChange(session: session, item: item, before: b, after: after, notes: notes[item.persistentModelID] ?? [])
+        }
+        return SameWeekOutcome(changes: changes, editedLoadsKept: editedKept, unmatched: unmatched)
+    }
+
+    // MARK: Apply
+
+    /// Applies the conversion. `backupTaken` says the caller made a verified backup FIRST (the screen goes through `SeedBackupGuard`); nothing is written
+    /// without one. Writes an undo record.
+    @discardableResult
+    static func applySameEveryWeek(_ plan: SameWeekPlan, backupTaken: Bool, backupName: String? = nil, in context: ModelContext,
+                                   undoDirectory: URL = sameWeekUndoDirectory(), hooks: ApplyHooks = ApplyHooks()) throws -> SameWeekResult {
+        guard backupTaken else { throw SameWeekError.verificationFailed(["no backup was taken first"]) }
+        guard plan.isApplicable else { throw SameWeekError.refused(plan.refusal ?? .noUnstartedSessions) }
+        let meso = plan.meso
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+        if context.hasChanges { try context.save() }
+
+        let history = historyFingerprints(meso)
+        let outcome = performSameWeek(meso: meso, keep: plan.keep, context: context)
+        var problems: [String] = []
+        if history != historyFingerprints(meso) { problems.append("a completed or started session would change") }
+        if outcome.changes.map(\.itemID) != plan.changes.map(\.itemID) { throw { context.rollback(); return SameWeekError.planStale }() }
+        for c in outcome.changes {
+            if c.item.waveRaw != nil { problems.append("\(c.session.dayLabel ?? "?") \(c.item.exerciseId): wave letter not cleared") }
+        }
+        if hooks.forceVerificationFailure { problems.append("forced verification failure (test hook)") }
+        guard problems.isEmpty else { context.rollback(); throw SameWeekError.verificationFailed(problems) }
+
+        // The undo record first (a failed write leaves nothing changed).
+        let record = SameWeekUndoRecord(mesoID: meso.id?.uuidString ?? "", createdAt: Date(), backupFile: backupName ?? "",
+                                        items: outcome.changes.map { .init(itemID: $0.itemID, before: $0.before) })
+        var undoURL: URL?
+        do {
+            if hooks.forceSaveFailure { throw ForcedSameWeekSaveFailure() }
+            undoURL = try writeUndoRecord(record, to: undoDirectory)
+            try context.save()
+        } catch {
+            context.rollback()
+            if let undoURL { try? FileManager.default.removeItem(at: undoURL) }
+            throw SameWeekError.saveFailed("\(error)")
+        }
+        return SameWeekResult(sessionsChanged: Set(outcome.changes.map { $0.session.persistentModelID }).count, itemsChanged: outcome.changes.count, undoURL: undoURL)
+    }
+
+    private struct ForcedSameWeekSaveFailure: Error {}
+
+    // MARK: Undo
+
+    struct SameWeekUndoRecord: Codable {
+        struct Entry: Codable { let itemID: String; let before: SameWeekSnapshot }
+        let mesoID: String
+        let createdAt: Date
+        let backupFile: String
+        let items: [Entry]
+    }
+
+    static func sameWeekUndoDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("SameEveryWeekUndo", isDirectory: true)
+    }
+
+    private static func undoURL(forMeso id: String, in dir: URL) -> URL { dir.appendingPathComponent("undo-\(id).json") }
+
+    private static func writeUndoRecord(_ record: SameWeekUndoRecord, to dir: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = undoURL(forMeso: record.mesoID, in: dir)
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        try enc.encode(record).write(to: url, options: .atomic)
+        return url
+    }
+
+    static func sameWeekUndoRecord(for meso: MesoBlock, in dir: URL = sameWeekUndoDirectory()) -> SameWeekUndoRecord? {
+        guard let id = meso.id?.uuidString, let data = try? Data(contentsOf: undoURL(forMeso: id, in: dir)) else { return nil }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try? dec.decode(SameWeekUndoRecord.self, from: data)
+    }
+
+    /// Puts every converted item back as it was, unless its session has been started or finished since (those are left exactly as they are).
+    @discardableResult
+    static func undoSameEveryWeek(meso: MesoBlock, in context: ModelContext, undoDirectory: URL = sameWeekUndoDirectory()) throws -> (restored: Int, left: Int) {
+        guard let record = sameWeekUndoRecord(for: meso, in: undoDirectory) else { return (0, 0) }
+        let byID = Dictionary(uniqueKeysWithValues: meso.sessions.flatMap { s in s.items.map { (($0.id?.uuidString ?? "\($0.persistentModelID)"), (s, $0)) } })
+        var restored = 0, left = 0
+        for entry in record.items {
+            guard let (session, item) = byID[entry.itemID], SessionEditSafety.isSafeToModify(session) else { left += 1; continue }
+            entry.before.restore(item)
+            restored += 1
+        }
+        try context.save()
+        try? FileManager.default.removeItem(at: undoURL(forMeso: record.mesoID, in: undoDirectory))
+        return (restored, left)
+    }
+}
