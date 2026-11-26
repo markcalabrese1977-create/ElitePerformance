@@ -437,6 +437,26 @@ struct PlanMemoryEngine {
     /// message shows are identical to the ones the write-back applies (message ==
     /// stored value in all cases). Returns nil when no eligible future session is
     /// materialized for this exercise — in which case the write-back no-ops too.
+    /// Where `sourceItem`'s load lands, for the coach line: the target session's date, and the week type of the very next session of the same
+    /// day when it differs from the target's ("Next week is a B week with its own target."). nil for a wave-less item or when the target
+    /// session cannot be found.
+    static func landing(for sourceItem: SessionItem, in session: Session, target targetItem: SessionItem, allSessions: [Session]) -> CoachingEngine.CarryForwardLanding? {
+        guard let wave = targetItem.waveRaw?.lowercased(), !wave.isEmpty,
+              let targetSession = allSessions.first(where: { s in s.items.contains(where: { $0 === targetItem }) }) else { return nil }
+        let canonical = ExerciseCatalog.canonicalExerciseId(for: sourceItem.exerciseId)
+        let mesoID = session.meso?.persistentModelID
+        let nextSameDay = allSessions
+            .filter { $0 !== session && $0.date > session.date && $0.meso?.persistentModelID == mesoID && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
+            .sorted { $0.date < $1.date }.first
+        var nextLetter: String?
+        if let next = nextSameDay, next !== targetSession,
+           let item = next.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical }),
+           let letter = item.waveRaw?.lowercased(), !letter.isEmpty, letter != wave, letter != "deload" {
+            nextLetter = letter
+        }
+        return CoachingEngine.CarryForwardLanding(date: targetSession.date, nextWeekLetter: nextLetter)
+    }
+
     static func nextTargetItem(
         for sourceItem: SessionItem,
         after session: Session,

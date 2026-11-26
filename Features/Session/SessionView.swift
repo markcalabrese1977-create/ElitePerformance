@@ -1678,7 +1678,10 @@ final class SessionScreenViewModel: ObservableObject {
                         loadCap: CoachingEngine.LoadCap.resolve(
                             for: matchingItem, in: session, allSessions: allSessionsForRec,
                             profile: recProfile, customExercises: recCustomExercises
-                        )
+                        ),
+                        landing: recResolvedTarget.flatMap {
+                            PlanMemoryEngine.landing(for: matchingItem, in: session, target: $0, allSessions: allSessionsForRec)
+                        }
                     ) {
                         exercise.coachMessage = recommendation.message
                     } else {

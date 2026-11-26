@@ -122,6 +122,32 @@ struct CoachingEngine {
         case unresolved
     }
 
+    /// Where a promised load lands: the target session's date, and (wave blocks) the letter of the very next session of the same day when
+    /// that is a DIFFERENT week type than the target ("Next Week A (Dec 11): 105. Next week is a B week with its own target.").
+    struct CarryForwardLanding: Equatable {
+        let date: Date
+        let nextWeekLetter: String?
+        init(date: Date, nextWeekLetter: String? = nil) { self.date = date; self.nextWeekLetter = nextWeekLetter }
+
+        static func dayText(_ d: Date) -> String {
+            let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM d"
+            return f.string(from: d)
+        }
+    }
+
+    /// Adds the date to the "Next Week A" phrase and the different-week-type sentence. Only wave items whose message names the landing.
+    private static func decorate(_ rec: CoachingRecommendation?, item: SessionItem, landing: CarryForwardLanding?) -> CoachingRecommendation? {
+        guard let rec, let landing, let wave = item.waveRaw?.lowercased(), !wave.isEmpty else { return rec }
+        let phrase = "Next Week \(wave.uppercased())"
+        guard let r = rec.message.range(of: phrase) else { return rec }
+        var message = rec.message
+        message.replaceSubrange(r, with: "\(phrase) (\(CarryForwardLanding.dayText(landing.date)))")
+        if let letter = landing.nextWeekLetter, letter.lowercased() != wave {
+            message += " Next week is a \(letter.uppercased()) week with its own target."
+        }
+        return CoachingRecommendation(message: message, nextSuggestedLoad: rec.nextSuggestedLoad, nextTopLoad: rec.nextTopLoad)
+    }
+
     /// The phrase naming the session a promised load lands in, or nil when no number
     /// may be promised at all.
     ///
@@ -452,15 +478,16 @@ struct CoachingEngine {
         ratingsUninformative: Bool = false,
         isProgressionExempt: Bool = false,
         loadCap: LoadCap? = nil,
-        ignoreEffort: Bool = false
+        ignoreEffort: Bool = false,
+        landing: CarryForwardLanding? = nil
     ) -> CoachingRecommendation? {
-        let rec = recommendRoles(
+        let rec = decorate(recommendRoles(
             for: item, policy: policy, minLoadIncrement: minLoadIncrement, unit: unit, mesoPhase: mesoPhase,
             consecutiveCleanCount: consecutiveCleanCount, e1rmFloorLoad: e1rmFloorLoad,
             peakE1RM: peakE1RM, lastKnownLoad: lastKnownLoad,
             carryForwardTarget: carryForwardTarget, isProgressionExempt: isProgressionExempt, loadCap: loadCap,
             priorExposureWasRIRHold: ratingsUninformative ? false : priorExposureWasRIRHold, ignoreEffort: ignoreEffort || ratingsUninformative
-        )
+        ), item: item, landing: landing)
         // Whatever path produced a load, a plan-written load never exceeds the cap (an earned bump that would
         // is already turned into a hold at the cap, with its message, further down).
         guard let rec, let cap = loadCap, !isProgressionExempt else { return rec }

@@ -268,4 +268,56 @@ final class CoachMessageLandingTests: XCTestCase {
             "message must name the wave the write actually lands in: \(rec.message)"
         )
     }
+
+    // MARK: - The landing date and the different-week-type sentence
+
+    func test_landingDate_isAddedToTheNextWeekPhrase_andTheDifferentWeekSentenceFollows() throws {
+        let cal = Calendar.current
+        let dec11 = cal.date(from: DateComponents(year: 2026, month: 12, day: 11))!
+        let item = bumpEarningItem(waveRaw: "a")
+        let withB = try XCTUnwrap(CoachingEngine.recommend(for: item, minLoadIncrement: 5, carryForwardTarget: .exists,
+            landing: .init(date: dec11, nextWeekLetter: "b")))
+        XCTAssertTrue(withB.message.contains("Next Week A (Dec 11): 105."), withB.message)
+        XCTAssertTrue(withB.message.hasSuffix("Next week is a B week with its own target."), withB.message)
+        XCTAssertEqual(withB.nextSuggestedLoad, 105, "wording only")
+        // The very next session of the day is the target's own week type: date, no sentence.
+        let same = try XCTUnwrap(CoachingEngine.recommend(for: item, minLoadIncrement: 5, carryForwardTarget: .exists,
+            landing: .init(date: dec11, nextWeekLetter: "a")))
+        XCTAssertTrue(same.message.contains("Next Week A (Dec 11): 105."), same.message)
+        XCTAssertFalse(same.message.contains("its own target"), same.message)
+        // No landing given (every other caller): the text is exactly as before.
+        let none = try XCTUnwrap(CoachingEngine.recommend(for: item, minLoadIncrement: 5, carryForwardTarget: .exists))
+        XCTAssertTrue(none.message.contains("Next Week A: 105"), none.message)
+        // A wave-less item is not in a rotation: never decorated.
+        let waveless = try XCTUnwrap(CoachingEngine.recommend(for: bumpEarningItem(waveRaw: nil), minLoadIncrement: 5, carryForwardTarget: .exists,
+            landing: .init(date: dec11, nextWeekLetter: "b")))
+        XCTAssertTrue(waveless.message.contains("Next session: 105"), waveless.message)
+        XCTAssertFalse(waveless.message.contains("Dec 11"), waveless.message)
+    }
+
+    func test_landingHelper_findsTheTargetDate_andTheDifferentWeekTypeOfTheNextSameDaySession() throws {
+        let schema = Schema([Session.self, SessionItem.self, SetLog.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
+        let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let ctx = ModelContext(container)
+        let block = MesoBlock(name: "B", startDate: Date(), status: .active, totalWeeks: 4)
+        ctx.insert(block)
+        let cal = Calendar.current
+        let d0 = cal.date(from: DateComponents(year: 2026, month: 11, day: 20))!
+        var sessions: [Session] = []
+        for (w, letter) in ["a", "b", "c", "a"].enumerated() {
+            let item = bumpEarningItem(waveRaw: letter)
+            let s = Session(date: cal.date(byAdding: .day, value: 7 * w, to: d0)!, status: w == 0 ? .completed : .planned,
+                            weekIndex: w + 1, dayLabel: "Legs", items: [item], programIndex: w + 1)
+            s.meso = block; ctx.insert(s); sessions.append(s)
+        }
+        try ctx.save()
+        let target = try XCTUnwrap(PlanMemoryEngine.nextTargetItem(for: sessions[0].items[0], after: sessions[0], in: sessions))
+        XCTAssertTrue(target === sessions[3].items[0], "per-letter chain: week 1's A lands in week 4's A")
+        let landing = try XCTUnwrap(PlanMemoryEngine.landing(for: sessions[0].items[0], in: sessions[0], target: target, allSessions: sessions))
+        XCTAssertEqual(landing.date, sessions[3].date)
+        XCTAssertEqual(landing.nextWeekLetter, "b", "next week's Legs is a B week")
+        // A target that IS the very next same-day session has nothing to add.
+        let next = try XCTUnwrap(PlanMemoryEngine.landing(for: sessions[0].items[0], in: sessions[0], target: sessions[1].items[0], allSessions: sessions))
+        XCTAssertNil(next.nextWeekLetter)
+    }
 }
