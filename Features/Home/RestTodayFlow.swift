@@ -8,53 +8,67 @@ struct RestTodayModel {
     typealias Service = SessionItemEditService
 
     static let title = "Rest today"
-    static let footer = "Only dates change: loads, weeks, exercises and logged work stay as they are. The rest of the block is untouched."
+    static let headline = "Today becomes a rest day."
+    static let footer = "Only dates change: loads, weeks, exercises and logged work stay as they are. Sessions after the first free day are untouched."
 
     let meso: MesoBlock
     let context: ModelContext
     var now: Date = Date()
 
-    func plan() -> Service.RestTodayPlan {
+    func plan() -> Service.SlidePlan {
         Service.planRestToday(meso: meso, context: context, now: now)
     }
 
-    private static func day(_ d: Date) -> String {
+    static func day(_ d: Date) -> String {
         d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 
-    /// "Legs B  Tue Oct 20 -> Wed Oct 21"
-    static func moveLines(_ plan: Service.RestTodayPlan) -> [String] {
+    /// "N session(s) move to the next free day:"
+    static func moveHeading(_ plan: Service.SlidePlan) -> String {
+        plan.moves.count == 1 ? "1 session moves to the next free day:" : "\(plan.moves.count) sessions move to the next free day:"
+    }
+
+    /// "Legs B  Tue Oct 20 -> Wed Oct 21", the placed session first, then each one it pushes.
+    static func moveLines(_ plan: Service.SlidePlan) -> [String] {
         plan.moves.map { "\($0.session.dayLabel ?? "Session")  \(day($0.oldDate)) -> \(day($0.newDate))" }
     }
 
-    static func warningLines(_ plan: Service.RestTodayPlan) -> [String] {
+    /// Only when the last session of the block moves: "The block now ends Fri, Jan 29 (was Thu, Jan 28)."
+    static func blockEndLine(_ plan: Service.SlidePlan) -> String? {
+        guard plan.blockEndMoves, let before = plan.blockEndBefore, let after = plan.blockEndAfter else { return nil }
+        return "The block now ends \(day(after)) (was \(day(before)))."
+    }
+
+    static func warningLines(_ plan: Service.SlidePlan) -> [String] {
         plan.warnings.map {
             switch $0 {
-            case .reachesNextWeek(let date, let label):
-                return "\(label ?? "A session") lands on \(day(date)), when next week's training starts."
             case .pastNextMesoStart(let date, let next):
                 return "A session lands on \(day(date)), on or after the next block's scheduled start (\(day(next)))."
             }
         }
     }
 
-    static func collisionLines(_ plan: Service.RestTodayPlan) -> [String] {
-        plan.collisions.map {
-            "\($0.moved.dayLabel ?? "Session") would land on \(day($0.date)), already taken by \($0.occupant.dayLabel ?? "another session")."
-        }
-    }
-
-    static func refusalText(_ refusal: Service.RestTodayRefusal) -> String {
+    /// Names the day and the session in the way (every refusal reads the same on both entry points).
+    static func refusalText(_ refusal: Service.SlideRefusal) -> String {
         switch refusal {
-        case .sessionInProgress: return "A session in this block is in progress. Finish it, then try again."
+        case .notPlaceable: return "This session is no longer waiting to be done."
         case .nothingToMove: return "There's no planned session today to move."
+        case .sessionInProgress: return "A session in this block is in progress. Finish it, then try again."
+        case .targetInPast: return "Pick today or a later day."
         case .unsafeSession: return "A session that would move already has logged work."
-        case .dateCollision: return "Moving the week's sessions a day later would double up a day that's already taken."
+        case .blocked(let d, let occupant, let kind):
+            switch kind {
+            case .completed: return "\(day(d)) has \(occupant), which is already done and can't move."
+            case .inProgress: return "\(day(d)) has \(occupant), which is in progress."
+            case .loggedData: return "\(day(d)) has \(occupant), which already has logged work and can't move."
+            case .otherBlock: return "\(day(d)) has \(occupant), which belongs to another block and can't move."
+            case .sharedDay: return "Two sessions already share \(day(d)): \(occupant)."
+            }
         }
     }
 
     struct ApplyFailure: Error, Equatable {
-        let error: Service.RestTodayError
+        let error: Service.SlideError
         var needsRefresh: Bool { error == .planStale }
         var message: String {
             switch error {
@@ -66,10 +80,10 @@ struct RestTodayModel {
         }
     }
 
-    func apply(_ plan: Service.RestTodayPlan) -> Result<Service.RestTodayResult, ApplyFailure> {
+    func apply(_ plan: Service.SlidePlan) -> Result<Service.SlideResult, ApplyFailure> {
         do {
-            return .success(try Service.restToday(plan, in: context))
-        } catch let error as Service.RestTodayError {
+            return .success(try Service.applySlide(plan, in: context))
+        } catch let error as Service.SlideError {
             return .failure(.init(error: error))
         } catch {
             return .failure(.init(error: .saveFailed("\(error)")))
@@ -95,17 +109,13 @@ struct RestTodayFlow: View {
             Form {
                 if let refusal = plan.refusal {
                     Section { Text(RestTodayModel.refusalText(refusal)).foregroundStyle(.secondary) }
-                    let lines = RestTodayModel.collisionLines(plan)
-                    if !lines.isEmpty {
-                        Section("Days already taken") {
-                            ForEach(Array(lines.enumerated()), id: \.offset) { _, l in Text(l).font(.callout) }
-                        }
-                    }
                 } else {
                     Section {
+                        Text(RestTodayModel.moveHeading(plan)).font(.callout).foregroundStyle(.secondary)
                         ForEach(Array(RestTodayModel.moveLines(plan).enumerated()), id: \.offset) { _, l in Text(l) }
+                        if let end = RestTodayModel.blockEndLine(plan) { Text(end).font(.callout) }
                     } header: {
-                        Text("Today becomes a rest day")
+                        Text(RestTodayModel.headline)
                     } footer: {
                         Text(RestTodayModel.footer)
                     }

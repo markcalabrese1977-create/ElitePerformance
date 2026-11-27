@@ -75,7 +75,7 @@ final class RestTodayTests: XCTestCase {
 
     // MARK: - Shapes
 
-    func test_twelveWeekFixture_movesTheRestOfTheWeekOneDay_andOnlyDates() throws {
+    func test_twelveWeekFixture_slidesTheRunUpToTheRestDay_andOnlyDates() throws {
         let (ctx, block) = try makeDUPBlock()
         let w5 = week(block, 5)                      // Fri ... Wed
         let now = cal().startOfDay(for: w5[1].date)  // Sat
@@ -85,11 +85,11 @@ final class RestTodayTests: XCTestCase {
 
         let plan = Service.planRestToday(meso: block, context: ctx, now: now)
         XCTAssertNil(plan.refusal)
-        XCTAssertEqual(plan.weekIndex, 5)
-        XCTAssertEqual(plan.moves.map { $0.session.persistentModelID }, w5.dropFirst().map(\.persistentModelID))
-        XCTAssertTrue(plan.warnings.isEmpty, "Wed -> Thu stays inside the week")
+        XCTAssertEqual(plan.moves.map { $0.session.persistentModelID }, w5.dropFirst().map(\.persistentModelID),
+                       "Sat..Wed is one unbroken run: the Thursday rest day absorbs the slide")
+        XCTAssertTrue(plan.warnings.isEmpty)
 
-        let result = try Service.restToday(plan, in: ctx)
+        let result = try Service.applySlide(plan, in: ctx)
         XCTAssertEqual(result.sessionsMoved, 5)
         XCTAssertEqual(week(block, 5)[0].date, w5Dates[0], "the session before today stays")
         for (old, s) in zip(w5Dates.dropFirst(), plan.moves) { XCTAssertEqual(s.session.date, plus(old, 1)) }
@@ -98,17 +98,18 @@ final class RestTodayTests: XCTestCase {
         XCTAssertEqual(week(block, 5).map(\.dayNumberInWeek), Array(1...6))
     }
 
-    func test_threeAndFourDayBlocks() throws {
-        for offsets in [[0, 2, 4], [0, 1, 3, 4]] {
+    func test_threeAndFourDayBlocks_onlyTheRunMoves() throws {
+        // offsets -> (sessions that move, week 2 dates after)
+        for (offsets, moved, week2) in [([0, 2, 4], 1, [8, 9, 11]), ([0, 1, 3, 4], 2, [8, 9, 10, 11])] {
             let ctx = try makeContext()
             let start = date(2026, 11, 2)
             let block = addBlock(ctx, name: "B", start: start, weeks: 3, offsets: offsets)
             let now = plus(start, 7)                               // first day of week 2
             let plan = Service.planRestToday(meso: block, context: ctx, now: now)
             XCTAssertNil(plan.refusal, "\(offsets)")
-            XCTAssertEqual(plan.moves.count, offsets.count)
-            try Service.restToday(plan, in: ctx)
-            XCTAssertEqual(week(block, 2).map(\.date), offsets.map { plus(start, 7 + $0 + 1) }, "\(offsets)")
+            XCTAssertEqual(plan.moves.count, moved, "\(offsets)")
+            try Service.applySlide(plan, in: ctx)
+            XCTAssertEqual(week(block, 2).map(\.date), week2.map { plus(start, $0) }, "\(offsets)")
             XCTAssertEqual(week(block, 1).map(\.date), offsets.map { plus(start, $0) })
             XCTAssertEqual(week(block, 3).map(\.date), offsets.map { plus(start, 14 + $0) })
         }
@@ -121,33 +122,16 @@ final class RestTodayTests: XCTestCase {
         let w1 = week(block, 1)
         w1[0].status = .completed                                   // already trained
         let plan = Service.planRestToday(meso: block, context: ctx, now: plus(start, 2))
-        XCTAssertEqual(plan.moves.map { $0.session.persistentModelID }, [w1[1].persistentModelID, w1[2].persistentModelID])
+        XCTAssertEqual(plan.moves.map { $0.session.persistentModelID }, [w1[1].persistentModelID], "day 3 is free: only today's session moves")
     }
 
     // MARK: - Warnings
-
-    func test_warns_whenAMovedSessionReachesNextWeek() throws {
-        let ctx = try makeContext()
-        let start = date(2026, 11, 2)
-        let block = MesoBlock(name: "Odd", startDate: start, status: .active, totalWeeks: 2)
-        ctx.insert(block)
-        // Week 2 has a session on day 7 and one on day 14; week 3 begins on day 13 (overlapping weeks).
-        for (w, off) in [(2, 7), (2, 14), (3, 13)] {
-            let s = Session(date: plus(start, off), status: .planned, weekIndex: w, dayLabel: "D\(off)", items: [item()], programIndex: off)
-            s.meso = block; ctx.insert(s)
-        }
-        try ctx.save()
-        let plan = Service.planRestToday(meso: block, context: ctx, now: plus(start, 7))
-        XCTAssertNil(plan.refusal)
-        XCTAssertEqual(plan.warnings, [.reachesNextWeek(date: plus(start, 15), dayLabel: "D14")])
-        XCTAssertTrue(RestTodayModel.warningLines(plan)[0].contains("next week"))
-    }
 
     func test_warns_whenAMovedSessionPassesTheNextMesoStart() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let block = addBlock(ctx, name: "B", start: start, weeks: 1, offsets: [0, 2, 4])
-        MesoLifecycle.scheduleNextMeso(on: plus(start, 5))
+        MesoLifecycle.scheduleNextMeso(on: plus(start, 1))
         let plan = Service.planRestToday(meso: block, context: ctx, now: start)
         XCTAssertNil(plan.refusal)
         XCTAssertEqual(plan.warnings.count, 1)
@@ -168,43 +152,43 @@ final class RestTodayTests: XCTestCase {
         XCTAssertNil(plan.refusal)
         XCTAssertEqual(plan.moves.count, 2)
         XCTAssertTrue(plan.moves.allSatisfy { $0.session.meso === archived })
-        try Service.restToday(plan, in: ctx)
+        try Service.applySlide(plan, in: ctx)
         XCTAssertEqual(sorted(active).map(\.date), before, "the other block's week 1 is untouched")
         XCTAssertEqual(sorted(archived).map(\.date), [plus(start, 1), plus(start, 2)])
     }
 
     // MARK: - Refusals
 
-    func test_collisionWithAnyOtherSession_refuses_andWritesNothing() throws {
+    func test_anotherBlocksSessionInTheChain_refuses_namesTheDayAndTheOccupant_andWritesNothing() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let block = addBlock(ctx, name: "B", start: start, weeks: 1, offsets: [0, 2, 4])
         let other = MesoBlock(name: "Other", startDate: start, status: .archived, totalWeeks: 1)
         ctx.insert(other)
-        let blocker = Session(date: plus(start, 3), status: .completed, weekIndex: 1, dayLabel: "Old")   // day 2 -> 3
+        let blocker = Session(date: plus(start, 1), status: .completed, weekIndex: 1, dayLabel: "Old")   // tomorrow
         blocker.meso = other; ctx.insert(blocker)
         try ctx.save()
         let before = try snapshot(ctx)
 
         let plan = Service.planRestToday(meso: block, context: ctx, now: start)
-        XCTAssertEqual(plan.refusal, .dateCollision)
-        XCTAssertEqual(plan.collisions.count, 1)
-        XCTAssertTrue(plan.collisions[0].occupant === blocker)
-        XCTAssertFalse(RestTodayModel.collisionLines(plan).isEmpty)
-        XCTAssertThrowsError(try Service.restToday(plan, in: ctx)) {
-            XCTAssertEqual($0 as? Service.RestTodayError, .refused(.dateCollision))
+        XCTAssertEqual(plan.refusal, .blocked(day: plus(start, 1), occupant: "Old", kind: .otherBlock))
+        let text = RestTodayModel.refusalText(try XCTUnwrap(plan.refusal))
+        XCTAssertTrue(text.contains("Old") && text.contains(RestTodayModel.day(plus(start, 1))), text)
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx)) {
+            XCTAssertEqual($0 as? Service.SlideError, .refused(plan.refusal!))
         }
         XCTAssertEqual(try snapshot(ctx), before)
     }
 
-    func test_sameBlockNonMovingSessionOnTheDestinationDay_refuses() throws {
+    func test_aCompletedSessionOfTheSameBlockInTheChain_refuses() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let block = addBlock(ctx, name: "B", start: start, weeks: 1, offsets: [0, 2])
         let done = Session(date: plus(start, 1), status: .completed, weekIndex: 1, dayLabel: "Done", items: [item()], programIndex: 9)
         done.meso = block; ctx.insert(done)
         try ctx.save()
-        XCTAssertEqual(Service.planRestToday(meso: block, context: ctx, now: start).refusal, .dateCollision)
+        XCTAssertEqual(Service.planRestToday(meso: block, context: ctx, now: start).refusal,
+                       .blocked(day: plus(start, 1), occupant: "Done", kind: .completed))
     }
 
     func test_refuses_inProgress_noPlannedToday_andLoggedWork() throws {
@@ -220,7 +204,7 @@ final class RestTodayTests: XCTestCase {
 
         let ctx3 = try makeContext()
         let b3 = addBlock(ctx3, name: "B", start: start, weeks: 1, offsets: [0, 2, 4])
-        week(b3, 1)[1].items[0].actualLoads = [60]
+        week(b3, 1)[0].items[0].actualLoads = [60]
         XCTAssertEqual(Service.planRestToday(meso: b3, context: ctx3, now: start).refusal, .unsafeSession)
     }
 
@@ -231,17 +215,17 @@ final class RestTodayTests: XCTestCase {
         let now = cal().startOfDay(for: week(block, 5)[0].date)
         let before = try snapshot(ctx)
         let plan = Service.planRestToday(meso: block, context: ctx, now: now)
-        XCTAssertThrowsError(try Service.restToday(plan, in: ctx, hooks: .init(forceVerificationFailure: true))) {
-            guard case .verificationFailed(let problems)? = $0 as? Service.RestTodayError else { return XCTFail("\($0)") }
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx, hooks: .init(forceVerificationFailure: true))) {
+            guard case .verificationFailed(let problems)? = $0 as? Service.SlideError else { return XCTFail("\($0)") }
             XCTAssertEqual(problems.count, 1, "only the forced failure: \(problems)")
         }
         XCTAssertEqual(try snapshot(ctx), before)
         XCTAssertFalse(ctx.hasChanges)
-        XCTAssertThrowsError(try Service.restToday(plan, in: ctx, hooks: .init(forceSaveFailure: true))) {
-            guard case .saveFailed? = $0 as? Service.RestTodayError else { return XCTFail("\($0)") }
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx, hooks: .init(forceSaveFailure: true))) {
+            guard case .saveFailed? = $0 as? Service.SlideError else { return XCTFail("\($0)") }
         }
         XCTAssertEqual(try snapshot(ctx), before)
-        XCTAssertNoThrow(try Service.restToday(Service.planRestToday(meso: block, context: ctx, now: now), in: ctx))
+        XCTAssertNoThrow(try Service.applySlide(Service.planRestToday(meso: block, context: ctx, now: now), in: ctx))
     }
 
     func test_stalePlan_isRefusedWithoutWriting() throws {
@@ -249,11 +233,12 @@ final class RestTodayTests: XCTestCase {
         let start = date(2026, 11, 2)
         let block = addBlock(ctx, name: "B", start: start, weeks: 1, offsets: [0, 2, 4])
         let plan = Service.planRestToday(meso: block, context: ctx, now: start)
-        week(block, 1)[2].status = .completed            // the schedule changed after the preview
+        let late = Session(date: plus(start, 1), status: .planned, weekIndex: 1, dayLabel: "Late", items: [item()], programIndex: 99)
+        late.meso = block; ctx.insert(late)              // the schedule changed after the preview: tomorrow is now taken
         try ctx.save()
         let before = try snapshot(ctx)
-        XCTAssertThrowsError(try Service.restToday(plan, in: ctx)) {
-            XCTAssertEqual($0 as? Service.RestTodayError, .planStale)
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx)) {
+            XCTAssertEqual($0 as? Service.SlideError, .planStale)
         }
         XCTAssertEqual(try snapshot(ctx), before)
     }
@@ -267,7 +252,7 @@ final class RestTodayTests: XCTestCase {
         let now = cal().startOfDay(for: week(block, 5)[0].date)
         let all = sorted(block)
         let before = w4.flatMap { s in s.items.map { PlanMemoryEngine.nextTargetItem(for: $0, after: s, in: all)?.persistentModelID } }
-        try Service.restToday(Service.planRestToday(meso: block, context: ctx, now: now), in: ctx)
+        try Service.applySlide(Service.planRestToday(meso: block, context: ctx, now: now), in: ctx)
         let after = w4.flatMap { s in s.items.map { PlanMemoryEngine.nextTargetItem(for: $0, after: s, in: sorted(block))?.persistentModelID } }
         XCTAssertEqual(before, after)
     }
@@ -278,10 +263,13 @@ final class RestTodayTests: XCTestCase {
         let block = addBlock(ctx, name: "B", start: start, weeks: 1, offsets: [0, 2], labels: ["Legs B", "Pull B"])
         let plan = RestTodayModel(meso: block, context: ctx, now: start).plan()
         let lines = RestTodayModel.moveLines(plan)
-        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines.count, 1, "tomorrow is free: only today's session moves")
         XCTAssertTrue(lines[0].hasPrefix("Legs B  "), lines[0])
         XCTAssertTrue(lines[0].contains(" -> "), lines[0])
-        XCTAssertEqual(RestTodayModel.refusalText(.dateCollision).isEmpty, false)
+        XCTAssertEqual(RestTodayModel.headline, "Today becomes a rest day.")
+        XCTAssertEqual(RestTodayModel.moveHeading(plan), "1 session moves to the next free day:")
+        XCTAssertNil(RestTodayModel.blockEndLine(plan), "the last session of the block did not move")
+        XCTAssertFalse(RestTodayModel.refusalText(.nothingToMove).isEmpty)
     }
 }
 
@@ -372,7 +360,7 @@ final class OverdueSessionTests: XCTestCase {
         XCTAssertFalse(Service.overdueSessions(in: sorted(b2), now: now).compactMap(\.programIndex).contains(1), "done is done")
     }
 
-    func test_doToday_withASessionToday_pushesTodayAndEveryLaterOne_andTheLabelsStay() throws {
+    func test_doToday_withASessionToday_slidesTheRunToTheNextFreeDay_andTheLabelsStay() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let b = block(ctx, start: start)
@@ -384,12 +372,14 @@ final class OverdueSessionTests: XCTestCase {
 
         let plan = Service.planPlaceOverdue(missed, on: now, context: ctx, now: now)
         XCTAssertNil(plan.refusal)
-        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, Array(9...18), "today's session and every later one")
-        let result = try Service.placeOverdue(plan, in: ctx)
-        XCTAssertEqual(result.sessionsMoved, 11)
+        // Week 2 runs Nov 9-14 with Sunday Nov 15 free: today's session and the three after it slide, then the free Sunday absorbs it.
+        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, [7, 9, 10, 11, 12], "the session, then the unbroken run after today")
+        let result = try Service.applySlide(plan, in: ctx)
+        XCTAssertEqual(result.sessionsMoved, 5)
 
         XCTAssertEqual(cal.startOfDay(for: missed.date), cal.startOfDay(for: now))
-        for (pi, old) in zip(9...18, oldDates.dropFirst(8)) { XCTAssertEqual(s(b, pi).date, plus(old, 1), "programIndex \(pi)") }
+        for pi in 9...12 { XCTAssertEqual(s(b, pi).date, plus(oldDates[pi - 1], 1), "programIndex \(pi)") }
+        for pi in 13...18 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1], "nothing after the free day changes") }
         for pi in 1...8 where pi != 7 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1], "earlier sessions stay") }
         let after = sorted(b).map { ($0.programIndex, $0.weekIndex, $0.dayLabel, $0.weekDayLabel) }
         XCTAssertTrue(zip(before, after).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 && $0.3 == $1.3 }, "program order, weeks, names and W#D# labels all stay")
@@ -398,33 +388,46 @@ final class OverdueSessionTests: XCTestCase {
         XCTAssertEqual(missed.plannedDate, missed.date, "the schedule moved with it")
     }
 
-    func test_doToday_whenTodayIsFree_movesOnlyThatSession() throws {
+    func test_move_toAFreeDay_movesOnlyThatSession_neverMore() throws {
+        let ctx = try makeContext()
+        let start = date(2026, 11, 2)
+        let b = block(ctx, start: start)
+        let now = plus(start, 9)
+        let oldDates = sorted(b).map(\.date)
+        let plan = Service.planPlaceOverdue(s(b, 7), on: plus(start, 13), context: ctx, now: now)   // the free Sunday, Nov 15
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.count, 1, "nothing on the day: nothing to slide")
+        try Service.applySlide(plan, in: ctx)
+        XCTAssertEqual(cal.startOfDay(for: s(b, 7).date), cal.startOfDay(for: plus(start, 13)))
+        for pi in 1...18 where pi != 7 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1]) }
+    }
+
+    func test_doToday_whenTodayHoldsACompletedSession_refusesAndNamesIt() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let b = block(ctx, start: start)
         let now = plus(start, 9)
         complete(s(b, 9))                                   // today's slot was used for a different session
-        let oldDates = sorted(b).map(\.date)
+        let before = sorted(b).map(\.date)
         let plan = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
-        XCTAssertNil(plan.refusal)
-        XCTAssertTrue(plan.moves.isEmpty, "nothing planned on today: nothing to push")
-        try Service.placeOverdue(plan, in: ctx)
-        XCTAssertEqual(cal.startOfDay(for: s(b, 7).date), cal.startOfDay(for: now))
-        for pi in 1...18 where pi != 7 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1]) }
+        XCTAssertEqual(plan.refusal, .blocked(day: cal.startOfDay(for: now), occupant: "Pull A", kind: .completed))
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx))
+        XCTAssertEqual(sorted(b).map(\.date), before)
     }
 
-    func test_move_toAnOccupiedDay_pushesFromThatDay_andToAFarDayThatWouldReorderTheLift_isRefusedAndRestored() throws {
+    func test_move_toAnOccupiedDay_slidesToTheNextFreeDay_andToAFarDayThatWouldReorderTheLift_isRefusedAndRestored() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let b = block(ctx, start: start)
         let now = plus(start, 9)
         let oldDates = sorted(b).map(\.date)
-        // Legs A (week 2, Nov 10) to Fri Nov 13, a day with Legs B on it: Legs B and everything after moves a day.
+        // Legs A (week 2, Nov 10) to Fri Nov 13, a day with a session on it: that one and the next slide a day, Sunday Nov 15 absorbs it.
         let legsA = s(b, 8)
         let plan = Service.planPlaceOverdue(legsA, on: plus(start, 11), context: ctx, now: now)
         XCTAssertNil(plan.refusal)
-        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, Array(11...18))
-        try Service.placeOverdue(plan, in: ctx)
+        XCTAssertEqual(plan.moves.compactMap { $0.session.programIndex }, [8, 11, 12], "never more than the run")
+        try Service.applySlide(plan, in: ctx)
+        for pi in 13...18 { XCTAssertEqual(s(b, pi).date, oldDates[pi - 1], "after the free day nothing changes") }
         XCTAssertEqual(cal.startOfDay(for: legsA.date), cal.startOfDay(for: plus(start, 11)))
         XCTAssertEqual(s(b, 9).date, oldDates[8], "the days before the chosen one are untouched")
         XCTAssertEqual(legsA.weekDayLabel, "W2D2")
@@ -436,24 +439,24 @@ final class OverdueSessionTests: XCTestCase {
         let far = Service.planPlaceOverdue(push, on: plus(start, 40), context: ctx2, now: now)
         XCTAssertNil(far.refusal)
         let dates = sorted(b2).map(\.date)
-        XCTAssertThrowsError(try Service.placeOverdue(far, in: ctx2)) { error in
-            guard case Service.PlaceError.verificationFailed = error else { return XCTFail("\(error)") }
+        XCTAssertThrowsError(try Service.applySlide(far, in: ctx2)) { error in
+            guard case Service.SlideError.verificationFailed = error else { return XCTFail("\(error)") }
         }
         XCTAssertEqual(sorted(b2).map(\.date), dates, "nothing written")
     }
 
-    func test_previewText_summarisesALongPush_andNamesEveryLineOfAShortOne() throws {
+    func test_previewText_listsEveryMove_andTheBlockEndOnlyWhenItMoves() throws {
         let ctx = try makeContext()
         let start = date(2026, 11, 2)
         let b = block(ctx, start: start)
         let now = plus(start, 9)
         let long = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
         let lines = OverdueText.moveLines(long)
-        XCTAssertEqual(lines.count, 4, "the session, two pushes, and one summary line")
-        XCTAssertTrue(lines[3].hasPrefix("and 8 more, each one day later"), lines[3])
-        complete(s(b, 9))
-        let short = Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now)
-        XCTAssertEqual(OverdueText.moveLines(short).count, 1, "today is free: just the session")
+        XCTAssertEqual(lines.count, 5, "the session and the four it slides, every one named")
+        XCTAssertEqual(RestTodayModel.moveHeading(long), "5 sessions move to the next free day:")
+        XCTAssertNil(RestTodayModel.blockEndLine(long))
+        let short = Service.planPlaceOverdue(s(b, 7), on: plus(start, 13), context: ctx, now: now)
+        XCTAssertEqual(OverdueText.moveLines(short).count, 1, "the day is free: just the session")
         XCTAssertEqual(OverdueText.title(s(b, 7)), "Missed " + OverdueText.weekday(s(b, 7).date))
         XCTAssertEqual(OverdueText.subtitle(s(b, 7)), "Push A · W2D1")
         XCTAssertEqual(OverdueText.missedRow(6), "Missed (6)")
@@ -465,12 +468,15 @@ final class OverdueSessionTests: XCTestCase {
         let b = block(ctx, start: start)
         let now = plus(start, 9)
         XCTAssertEqual(Service.planPlaceOverdue(s(b, 7), on: plus(now, -1), context: ctx, now: now).refusal, .targetInPast)
-        XCTAssertEqual(Service.planPlaceOverdue(s(b, 12), on: now, context: ctx, now: now).refusal, .notOverdue, "a future session is not overdue")
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 12), on: now, context: ctx, now: now).refusal, .notPlaceable, "a future session is not overdue")
         s(b, 7).skippedAt = now
-        XCTAssertEqual(Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now).refusal, .notOverdue, "a skipped one is closed")
-        s(b, 14).items[0].actualReps = [8]; s(b, 14).items[0].actualLoads = [100]    // a later session with logged work would have to move
-        XCTAssertEqual(Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal, .unsafeSession)
-        s(b, 14).items[0].actualReps = []; s(b, 14).items[0].actualLoads = []
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 7), on: now, context: ctx, now: now).refusal, .notPlaceable, "a skipped one is closed")
+        s(b, 10).items[0].actualReps = [8]; s(b, 10).items[0].actualLoads = [100]    // a session in the chain with logged work cannot move
+        guard case .blocked(_, _, .loggedData)? = Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal else { return XCTFail("expected a loggedData block") }
+        s(b, 10).items[0].actualReps = []; s(b, 10).items[0].actualLoads = []
+        s(b, 8).items[0].actualReps = [8]; s(b, 8).items[0].actualLoads = [100]
+        XCTAssertEqual(Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal, .unsafeSession, "the missed session itself has logged work")
+        s(b, 8).items[0].actualReps = []; s(b, 8).items[0].actualLoads = []
         s(b, 10).status = .inProgress
         XCTAssertEqual(Service.planPlaceOverdue(s(b, 8), on: now, context: ctx, now: now).refusal, .sessionInProgress)
     }
@@ -551,9 +557,9 @@ final class OverdueDryRunTests: XCTestCase {
                 if let refusal = plan.refusal { out("   Do today \(s.dayLabel ?? "?") (\(OverdueText.day(s.date))): refused - \(OverdueText.refusalText(refusal))"); continue }
                 let weekBefore = fresh.filter { $0.meso === s.meso && $0.weekIndex == s.weekIndex }.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }.map { "\($0.dayLabel ?? "?") \($0.weekDayLabel)" }
                 do {
-                    try Service.placeOverdue(plan, in: ctx)
+                    try Service.applySlide(plan, in: ctx)
                     let weekAfter = fresh.filter { $0.meso === s.meso && $0.weekIndex == s.weekIndex }.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) }.map { "\($0.dayLabel ?? "?") \($0.weekDayLabel)" }
-                    out("   Do today \(s.dayLabel ?? "?") (\(OverdueText.day(plan.oldDate)) -> \(OverdueText.day(plan.newDate))): pushes \(plan.moves.count) session(s) one day" + (plan.moves.first.map { " (\($0.session.dayLabel ?? "?") \(OverdueText.day($0.oldDate)) -> \(OverdueText.day($0.newDate)) ... last \(OverdueText.day(plan.moves.last!.newDate)))" } ?? ""))
+                    out("   Do today \(s.dayLabel ?? "?") (\(OverdueText.day(plan.moves[0].oldDate)) -> \(OverdueText.day(plan.moves[0].newDate))): slides \(plan.pushed.count) session(s) one day" + (plan.pushed.last.map { " (last \($0.session.dayLabel ?? "?") \(OverdueText.day($0.oldDate)) -> \(OverdueText.day($0.newDate)))" } ?? ""))
                     out("      label \(labelBefore) -> \(s.weekDayLabel); week \(s.weekIndex) labels before: \(weekBefore.joined(separator: ", "))")
                     out("                                  after:  \(weekAfter.joined(separator: ", "))")
                 } catch { out("   Do today \(s.dayLabel ?? "?"): \(error)") }
@@ -843,5 +849,278 @@ final class SameEveryWeekTests: XCTestCase {
         let waved = Service.planNextMeso(meso: b, name: "Next", startDate: start, endOldMesoNow: true, context: c, now: date(8))
         XCTAssertTrue(waved.sessions.contains { $0.letter == "b" }, "unchanged without the option")
         XCTAssertTrue(same.keepWeeksTheSame); XCTAssertFalse(waved.keepWeeksTheSame)
+    }
+}
+
+// MARK: - The one slide rule (Rest today and the overdue Move): pure cases, safety nets, and the real backups
+
+@MainActor
+final class SlideRuleTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private var retained: [ModelContainer] = []
+    private let scheduledKey = "meso.scheduledStartDateEpoch"
+    override func setUp() { super.setUp(); UserDefaults.standard.removeObject(forKey: scheduledKey) }
+    override func tearDown() { UserDefaults.standard.removeObject(forKey: scheduledKey); super.tearDown() }
+
+    private let cal = Calendar.current
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: 5))! }
+    private func plus(_ d: Date, _ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: d)! }
+    private func day(_ d: Date) -> Date { cal.startOfDay(for: d) }
+
+    private func makeContext() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        retained.append(c)
+        return ModelContext(c)
+    }
+
+    private func item(wave: String? = nil) -> SessionItem {
+        SessionItem(order: 1, exerciseId: "leg_extension", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 100, waveRaw: wave,
+                    setMin: 3, setMax: 3, repMin: 8, repMax: 10, targetRIRMin: 1, targetRIRMax: 2,
+                    plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [100, 100, 100], plannedRIRsBySet: [2, 2, 2])
+    }
+
+    /// One planned session per entry of `offsets` (days from `start`), week = `weeks[i]`, programIndex 1...N, labels "S1"...
+    @discardableResult
+    private func block(_ ctx: ModelContext, start: Date, offsets: [Int], weeks: [Int]? = nil, wave: String? = nil) -> MesoBlock {
+        let b = MesoBlock(name: "B", startDate: start, status: .active, totalWeeks: (weeks?.max() ?? 1))
+        ctx.insert(b)
+        for (i, off) in offsets.enumerated() {
+            let s = Session(date: plus(start, off), status: .planned, weekIndex: weeks?[i] ?? 1, dayLabel: "S\(i + 1)", items: [item(wave: wave)], programIndex: i + 1)
+            s.meso = b; ctx.insert(s)
+        }
+        try? ctx.save()
+        return b
+    }
+
+    private func sessions(_ b: MesoBlock) -> [Session] { b.sessions.sorted { ($0.programIndex ?? 0) < ($1.programIndex ?? 0) } }
+    private func s(_ b: MesoBlock, _ pi: Int) -> Session { sessions(b)[pi - 1] }
+
+    /// What may never change under a slide, and the invariants that must hold after one.
+    private func fingerprint(_ ctx: ModelContext) throws -> [String] {
+        try ctx.fetch(FetchDescriptor<Session>()).sorted { ($0.id?.uuidString ?? "") < ($1.id?.uuidString ?? "") }.map { s in
+            "\(s.id?.uuidString ?? "")|\(s.status.rawValue)|\(s.weekInMeso ?? -1)|\(s.programIndex ?? -1)|\(s.dayLabel ?? "")|\(s.skippedAt != nil)|\(s.completedAt?.timeIntervalSince1970 ?? 0)|"
+                + s.items.map { "\($0.exerciseId)/\($0.planEdited)/\($0.suggestedLoad)/\($0.waveRaw ?? "-")/\($0.actualLoads)" }.joined(separator: ";")
+        }
+    }
+    private func dates(_ ctx: ModelContext) throws -> [PersistentIdentifier: Date] {
+        Dictionary(uniqueKeysWithValues: try ctx.fetch(FetchDescriptor<Session>()).map { ($0.persistentModelID, $0.date) })
+    }
+
+    private func assertSlideInvariants(_ plan: Service.SlidePlan, _ ctx: ModelContext, file: StaticString = #filePath, line: UInt = #line) throws {
+        let fpBefore = try fingerprint(ctx), datesBefore = try dates(ctx)
+        let occupiedBefore = Set(datesBefore.values.map { day($0) })
+        let moving = Set(plan.moves.map { $0.session.persistentModelID })
+        let lastNew = try XCTUnwrap(plan.moves.last).newDate
+        XCTAssertFalse(occupiedBefore.contains(day(lastNew)) && !plan.moves.contains { day($0.oldDate) == day(lastNew) },
+                       "the absorbing day held no session before", file: file, line: line)
+        try Service.applySlide(plan, in: ctx)
+        XCTAssertEqual(try fingerprint(ctx), fpBefore, "only dates change: status, weekInMeso, programIndex, label, skippedAt, items, planEdited", file: file, line: line)
+        let after = try dates(ctx)
+        let days = after.values.map { day($0) }
+        XCTAssertEqual(Set(days).count, days.count, "never two sessions on one day (any block, any status)", file: file, line: line)
+        for (id, old) in datesBefore where !moving.contains(id) { XCTAssertEqual(after[id], old, "a session outside the slide moved", file: file, line: line) }
+        for m in plan.moves { XCTAssertEqual(after[m.session.persistentModelID], m.newDate, file: file, line: line) }
+        for m in plan.pushed { XCTAssertEqual(day(m.newDate), day(plus(m.oldDate, 1)), "each pushed session moves exactly one day", file: file, line: line) }
+    }
+
+    // MARK: Pure cases
+
+    func test_tomorrowFree_onlyTodaysSessionMoves() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 2, 4])
+        let plan = Service.planRestToday(meso: b, context: ctx, now: start)
+        XCTAssertEqual(plan.moves.count, 1)
+        try assertSlideInvariants(plan, ctx)
+        XCTAssertEqual(day(s(b, 1).date), day(plus(start, 1)))
+    }
+
+    func test_theSlideStopsAtTheFirstFreeDay_andNothingAfterItChanges() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 2, 4, 5])          // day 3 is free
+        let plan = Service.planRestToday(meso: b, context: ctx, now: start)
+        XCTAssertEqual(plan.moves.map { $0.session.dayLabel }, ["S1", "S2", "S3"])
+        try assertSlideInvariants(plan, ctx)
+        XCTAssertEqual([s(b, 1), s(b, 2), s(b, 3), s(b, 4), s(b, 5)].map { day($0.date) }, [1, 2, 3, 4, 5].map { day(plus(start, $0)) })
+    }
+
+    func test_aSlideCrossesTheWeekBoundary_andEveryWeekAndIndexStays() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: Array(0...13), weeks: Array(repeating: 1, count: 7) + Array(repeating: 2, count: 7))
+        let labels = sessions(b).map(\.weekDayLabel)
+        let plan = Service.planRestToday(meso: b, context: ctx, now: plus(start, 5))
+        XCTAssertEqual(plan.moves.count, 9, "day 5 through day 13")
+        XCTAssertEqual(Set(plan.moves.map { $0.session.weekIndex }), [1, 2], "crosses into the next block week")
+        XCTAssertTrue(plan.blockEndMoves)
+        XCTAssertNotNil(RestTodayModel.blockEndLine(plan))
+        try assertSlideInvariants(plan, ctx)
+        XCTAssertEqual(sessions(b).map(\.weekDayLabel), labels, "W#D# labels follow the sessions")
+    }
+
+    func test_theLastSessionOfTheBlockMoves_theBlockEndsADayLater() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1])
+        let plan = Service.planRestToday(meso: b, context: ctx, now: plus(start, 1))
+        XCTAssertEqual(plan.moves.count, 1)
+        XCTAssertEqual(plan.blockEndBefore.map(day), day(plus(start, 1)))
+        XCTAssertEqual(plan.blockEndAfter.map(day), day(plus(start, 2)))
+        XCTAssertNotNil(RestTodayModel.blockEndLine(plan))
+        try assertSlideInvariants(plan, ctx)
+        XCTAssertEqual(b.totalWeeks, 1, "no stored end to update")
+    }
+
+    func test_aNilPlannedDateStaysNil_andASetOneMoves() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 3])
+        s(b, 1).plannedDate = s(b, 1).date
+        s(b, 2).plannedDate = nil
+        try Service.applySlide(Service.planRestToday(meso: b, context: ctx, now: start), in: ctx)
+        XCTAssertEqual(s(b, 1).plannedDate, s(b, 1).date)
+        XCTAssertNil(s(b, 2).plannedDate)
+    }
+
+    func test_aDeloadWeekSessionKeepsItsWeek_whenItSlidesAcrossTheBoundary() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 2, 3], weeks: [1, 1, 2, 2], wave: "deload")
+        let phases = sessions(b).map { "\($0.weekIndex)|\($0.mesoPhase)|\($0.items.map { $0.waveRaw ?? "" })" }
+        try Service.applySlide(Service.planRestToday(meso: b, context: ctx, now: start), in: ctx)
+        XCTAssertEqual(sessions(b).map { "\($0.weekIndex)|\($0.mesoPhase)|\($0.items.map { $0.waveRaw ?? "" })" }, phases)
+    }
+
+    func test_planEditedItemsAreNotTouched() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 3])
+        s(b, 2).items[0].planEdited = true
+        s(b, 2).items[0].suggestedLoad = 135
+        try assertSlideInvariants(Service.planRestToday(meso: b, context: ctx, now: start), ctx)
+        XCTAssertTrue(s(b, 2).items[0].planEdited)
+        XCTAssertEqual(s(b, 2).items[0].suggestedLoad, 135)
+    }
+
+    // MARK: Refusals (each writes nothing and names the day and the occupant)
+
+    private func assertRefusal(_ b: MesoBlock, _ ctx: ModelContext, now: Date, _ expected: Service.SlideRefusal, file: StaticString = #filePath, line: UInt = #line) throws {
+        let before = try dates(ctx), fp = try fingerprint(ctx)
+        let plan = Service.planRestToday(meso: b, context: ctx, now: now)
+        XCTAssertEqual(plan.refusal, expected, file: file, line: line)
+        XCTAssertFalse(plan.isApplicable, file: file, line: line)
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx), file: file, line: line)
+        XCTAssertEqual(try dates(ctx), before, "nothing written", file: file, line: line)
+        XCTAssertEqual(try fingerprint(ctx), fp, file: file, line: line)
+    }
+
+    func test_refuses_aCompletedSessionInTheChain() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 2])
+        s(b, 3).status = .completed
+        try assertRefusal(b, ctx, now: start, .blocked(day: day(plus(start, 2)), occupant: "S3", kind: .completed))
+        XCTAssertTrue(RestTodayModel.refusalText(.blocked(day: day(plus(start, 2)), occupant: "S3", kind: .completed)).contains("S3"))
+    }
+
+    func test_refuses_aSessionWithLoggedDataInTheChain() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 2])
+        s(b, 2).items[0].actualLoads = [100]
+        try assertRefusal(b, ctx, now: start, .blocked(day: day(plus(start, 1)), occupant: "S2", kind: .loggedData))
+    }
+
+    func test_refuses_anInProgressSession() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 5])
+        s(b, 3).status = .inProgress
+        try assertRefusal(b, ctx, now: start, .sessionInProgress)
+    }
+
+    func test_refuses_anotherBlocksSessionInTheChain() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1])
+        let other = MesoBlock(name: "Other", startDate: start, status: .active, totalWeeks: 1)
+        ctx.insert(other)
+        let o = Session(date: plus(start, 2), status: .planned, weekIndex: 1, dayLabel: "Theirs", items: [item()], programIndex: 1)
+        o.meso = other; ctx.insert(o); try ctx.save()
+        try assertRefusal(b, ctx, now: start, .blocked(day: day(plus(start, 2)), occupant: "Theirs", kind: .otherBlock))
+    }
+
+    func test_refuses_twoSessionsAlreadySharingAChainDay() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 1])
+        let r = Service.planRestToday(meso: b, context: ctx, now: start).refusal
+        guard case .blocked(_, _, .sharedDay)? = r else { return XCTFail("\(String(describing: r))") }
+        try assertRefusal(b, ctx, now: start, r!)
+    }
+
+    func test_refuses_whenTodaysSessionHasLoggedData_andWhenThereIsNone() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 3])
+        try assertRefusal(b, ctx, now: plus(start, 1), .nothingToMove)
+        s(b, 1).items[0].actualLoads = [60]
+        try assertRefusal(b, ctx, now: start, .unsafeSession)
+    }
+
+    func test_warnsWhenASessionReachesTheNextBlockStart_andForcedFailuresRestoreEveryDate() throws {
+        let ctx = try makeContext(); let start = date(2026, 11, 2)
+        let b = block(ctx, start: start, offsets: [0, 1, 3])
+        MesoLifecycle.scheduleNextMeso(on: plus(start, 2))
+        let plan = Service.planRestToday(meso: b, context: ctx, now: start)
+        XCTAssertEqual(plan.warnings.count, 1)
+        XCTAssertTrue(RestTodayModel.warningLines(plan)[0].contains("next block"))
+        let before = try dates(ctx)
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx, hooks: .init(forceVerificationFailure: true)))
+        XCTAssertEqual(try dates(ctx), before)
+        XCTAssertThrowsError(try Service.applySlide(plan, in: ctx, hooks: .init(forceSaveFailure: true)))
+        XCTAssertEqual(try dates(ctx), before)
+        XCTAssertNoThrow(try Service.applySlide(plan, in: ctx))
+    }
+
+    // MARK: The real backups
+
+    private func load(_ name: String) throws -> (ModelContext, MesoBlock) {
+        let path = NSHomeDirectory().components(separatedBy: "/Library").first! + "/Downloads/" + name
+        guard FileManager.default.fileExists(atPath: path) else { throw XCTSkip("backup not found: \(path)") }
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        retained.append(container)
+        let ctx = ModelContext(container)
+        let blocks = try ctx.fetch(FetchDescriptor<MesoBlock>()).filter { $0.status == .active && !$0.isMaintenance }
+        return (ctx, try XCTUnwrap(blocks.first))
+    }
+
+    private let angelaFile = "ElitePerformance_Backup_v1_2026-11-25_19-04-35.json"
+    private let markFile = "ElitePerformance_Backup_v1_2026-11-25_18-57-55.json"
+
+    func test_angela_nov27_oneMove_whereTheOldRuleRefused() throws {
+        let (ctx, b) = try load(angelaFile)
+        let plan = Service.planRestToday(meso: b, context: ctx, now: date(2026, 11, 27))
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.count, 1, "Saturday is free: the rest of the week stays")
+        XCTAssertEqual(plan.moves[0].session.dayLabel, "Lower A")
+        try assertSlideInvariants(plan, ctx)
+    }
+
+    func test_angela_nov30_fiveMoves_acrossTheWeek() throws {
+        let (ctx, b) = try load(angelaFile)
+        let plan = Service.planRestToday(meso: b, context: ctx, now: date(2026, 11, 30))
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.count, 5)
+        XCTAssertEqual(Set(plan.moves.map { $0.session.weekIndex }), [2, 3], "the slide crosses into week 3 and keeps each session's week")
+        try assertSlideInvariants(plan, ctx)
+    }
+
+    func test_mark_nov25Morning_eightMoves_endingOnTheThursdayRestDay() throws {
+        let (ctx, b) = try load(markFile)
+        // The backup was taken after the day's session: put Pull B (programIndex 54) back to how it stood that morning.
+        let pull = try XCTUnwrap(b.sessions.first { $0.programIndex == 54 })
+        pull.status = .planned; pull.completedAt = nil
+        for i in pull.items {
+            i.actualLoads = []; i.actualReps = []; i.actualRIRs = []; i.isCompleted = false
+            i.setFeedbackBySet = []; i.pumpRatingsBySet = []; i.restPausePatternsBySet = []
+            for l in i.logs { ctx.delete(l) }
+        }
+        try ctx.save()
+        let plan = Service.planRestToday(meso: b, context: ctx, now: date(2026, 11, 25))
+        XCTAssertNil(plan.refusal)
+        XCTAssertEqual(plan.moves.count, 8)
+        XCTAssertEqual(day(try XCTUnwrap(plan.moves.last).newDate), day(date(2026, 12, 3)), "ends on Thursday Dec 3, his rest day")
+        try assertSlideInvariants(plan, ctx)
     }
 }

@@ -88,7 +88,7 @@ final class PlannedDateTests: XCTestCase {
         XCTAssertNil(plan.refusal)
         let movedIDs = Set(plan.moves.map { $0.session.persistentModelID })
         XCTAssertFalse(movedIDs.isEmpty)
-        try Service.restToday(plan, in: ctx)
+        try Service.applySlide(plan, in: ctx)
         for (id, oldDate) in before {
             let s = try XCTUnwrap(b.sessions.first { $0.persistentModelID == id })
             if movedIDs.contains(id) {

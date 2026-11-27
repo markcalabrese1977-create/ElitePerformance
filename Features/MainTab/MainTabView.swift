@@ -497,29 +497,12 @@ enum OverdueText {
     static func missedRow(_ n: Int) -> String { "Missed (\(n))" }
     static let footer = "Only dates change: loads, weeks, exercises and logged work stay as they are, and the W#D# label stays with the session. A skipped session still counts as missed."
 
-    static func moveLines(_ plan: SessionItemEditService.PlaceOverduePlan) -> [String] {
-        var lines = ["\(plan.session.dayLabel ?? "Session")  \(day(plan.oldDate)) -> \(day(plan.newDate))"]
-        func line(_ m: SessionItemEditService.ShiftedSession) -> String { "\(m.session.dayLabel ?? "Session")  \(day(m.oldDate)) -> \(day(m.newDate))" }
-        // A long push (every later session moves a day) is summarised: the first two, then a count and where the last one lands.
-        if plan.moves.count <= 3 { return lines + plan.moves.map(line) }
-        lines += plan.moves.prefix(2).map(line)
-        if let last = plan.moves.last {
-            lines.append("and \(plan.moves.count - 2) more, each one day later (the last, \(last.session.dayLabel ?? "Session"), lands \(day(last.newDate)))")
-        }
-        return lines
-    }
+    /// The same move list as Rest today: the placed session, then every session it pushes to the next free day.
+    static func moveLines(_ plan: SessionItemEditService.SlidePlan) -> [String] { RestTodayModel.moveLines(plan) }
 
-    static func refusalText(_ refusal: SessionItemEditService.PlaceRefusal) -> String {
-        switch refusal {
-        case .notOverdue: return "This session is no longer waiting to be done."
-        case .sessionInProgress: return "A session in this block is in progress. Finish it, then try again."
-        case .targetInPast: return "Pick today or a later day."
-        case .unsafeSession: return "A session that would move already has logged work."
-        case .dateCollision: return "That day is already taken by another session."
-        }
-    }
+    static func refusalText(_ refusal: SessionItemEditService.SlideRefusal) -> String { RestTodayModel.refusalText(refusal) }
 
-    static func errorText(_ error: SessionItemEditService.PlaceError) -> String {
+    static func errorText(_ error: SessionItemEditService.SlideError) -> String {
         switch error {
         case .refused(let r): return refusalText(r) + " Nothing was changed."
         case .planStale: return "The schedule changed since the preview. Nothing was changed - review the updated preview."
@@ -598,7 +581,9 @@ struct OverdueMoveFlow: View {
                     Section { Text(OverdueText.refusalText(refusal)).foregroundStyle(.secondary) }
                 } else {
                     Section {
+                        if !plan.pushed.isEmpty { Text(RestTodayModel.moveHeading(plan)).font(.callout).foregroundStyle(.secondary) }
                         ForEach(Array(OverdueText.moveLines(plan).enumerated()), id: \.offset) { _, l in Text(l) }
+                        if let end = RestTodayModel.blockEndLine(plan) { Text(end).font(.callout) }
                     } header: {
                         Text(request.toToday ? "Do it today" : "Move it")
                     } footer: {
@@ -606,11 +591,8 @@ struct OverdueMoveFlow: View {
                     }
                     if !plan.warnings.isEmpty {
                         Section("Heads up") {
-                            ForEach(Array(plan.warnings.enumerated()), id: \.offset) { _, w in
-                                if case .pastNextMesoStart(let d, let next) = w {
-                                    Text("A session lands on \(OverdueText.day(d)), on or after the next block's scheduled start (\(OverdueText.day(next))).")
-                                        .font(.callout).foregroundStyle(.orange)
-                                }
+                            ForEach(Array(RestTodayModel.warningLines(plan).enumerated()), id: \.offset) { _, w in
+                                Text(w).font(.callout).foregroundStyle(.orange)
                             }
                         }
                     }
@@ -624,9 +606,9 @@ struct OverdueMoveFlow: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(request.toToday ? "Do today" : "Move") {
                         do {
-                            try SessionItemEditService.placeOverdue(plan, in: modelContext)
+                            try SessionItemEditService.applySlide(plan, in: modelContext)
                             onFinish()
-                        } catch let e as SessionItemEditService.PlaceError {
+                        } catch let e as SessionItemEditService.SlideError {
                             errorMessage = OverdueText.errorText(e)
                         } catch {
                             errorMessage = "The change couldn't be saved, so nothing was written."
