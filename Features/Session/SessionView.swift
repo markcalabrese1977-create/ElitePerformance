@@ -3480,7 +3480,29 @@ private struct ChipFlowLayout: Layout {
         /// "You flagged poor sleep — the plan didn't change for it." (nil when nothing was flagged)
         let readinessLine: String?
         let onDone: () -> Void
-        
+        /// Accessibility text sizes: the stat grid and the exercise rows become label/value lines instead of columns.
+        @Environment(\.dynamicTypeSize) private var typeSize
+        private var isAccessibilitySize: Bool { typeSize.isAccessibilitySize }
+
+        /// One label/value pair. Default sizes: label left, value right (as before). Accessibility sizes: stacked, the value
+        /// on one line (scaled down a little rather than wrapped), the label free to wrap but never hyphenated.
+        @ViewBuilder
+        private func statLine(_ label: String, _ value: String, valueFont: Font = .caption, labelFont: Font = .caption) -> some View {
+            if isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).font(labelFont).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(value).font(valueFont).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack {
+                    Text(label).font(labelFont).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(value).font(valueFont)
+                }
+            }
+        }
+
         private var dateFormatter: DateFormatter {
             let df = DateFormatter()
             df.dateStyle = .medium
@@ -3530,16 +3552,27 @@ private struct ChipFlowLayout: Layout {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(ex.name)
                                             .font(.body)
-                                        HStack(spacing: 12) {
-                                            Text("Sets: \(ex.sets)")
-                                            Text("Reps: \(ex.reps)")
-                                            Text("Vol: \(Int(ex.volume))")
-                                            if let top = ex.topE1RM {
-                                                Text("e1RM: \(e1RMString(top))")
+                                        if isAccessibilitySize {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                statLine("Sets", "\(ex.sets)", valueFont: .body, labelFont: .subheadline)
+                                                statLine("Reps", "\(ex.reps)", valueFont: .body, labelFont: .subheadline)
+                                                statLine("Volume", Int(ex.volume).formatted(), valueFont: .body, labelFont: .subheadline)
+                                                if let top = ex.topE1RM {
+                                                    statLine("e1RM", e1RMString(top), valueFont: .body, labelFont: .subheadline)
+                                                }
                                             }
+                                        } else {
+                                            HStack(spacing: 12) {
+                                                Text("Sets: \(ex.sets)")
+                                                Text("Reps: \(ex.reps)")
+                                                Text("Vol: \(Int(ex.volume))")
+                                                if let top = ex.topE1RM {
+                                                    Text("e1RM: \(e1RMString(top))")
+                                                }
+                                            }
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                         }
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
                                     }
                                     .padding(.vertical, 8)
 
@@ -3604,99 +3637,65 @@ private struct ChipFlowLayout: Layout {
                 Divider()
                 
                 // Top row
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("Exercises")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(recap.exerciseCount)")
-                            .font(.headline)
+                if isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        statLine("Exercises", "\(recap.exerciseCount)", valueFont: .headline)
+                        statLine("Sets completed", "\(recap.setCount)", valueFont: .headline)
+                        statLine("Total volume", Int(recap.totalVolume).formatted(), valueFont: .headline)
                     }
+                } else {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Exercises")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(recap.exerciseCount)")
+                                .font(.headline)
+                        }
                     
-                    Spacer()
+                        Spacer()
                     
-                    VStack(alignment: .leading) {
-                        Text("Sets completed")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(recap.setCount)")
-                            .font(.headline)
-                    }
+                        VStack(alignment: .leading) {
+                            Text("Sets completed")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(recap.setCount)")
+                                .font(.headline)
+                        }
                     
-                    Spacer()
+                        Spacer()
                     
-                    VStack(alignment: .leading) {
-                        Text("Total volume")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(Int(recap.totalVolume))")
-                            .font(.headline)
+                        VStack(alignment: .leading) {
+                            Text("Total volume")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(Int(recap.totalVolume))")
+                                .font(.headline)
+                        }
                     }
                 }
 
                 if recap.mechanicalLoad > 0 {
-                    HStack {
-                        Text("Mechanical load")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(LoadFormatter(unit: unit).whole(recap.mechanicalLoad))
-                            .font(.caption)
-                    }
+                    statLine("Mechanical load", LoadFormatter(unit: unit).whole(recap.mechanicalLoad))
                 }
                 
                 if let best = recap.bestE1RM {
-                    HStack {
-                        Text("Best est. 1RM")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(e1RMString(best))
-                            .font(.caption)
-                    }
+                    statLine("Best est. 1RM", e1RMString(best))
                 }
                 
                 if recap.totalReps > 0 {
-                    HStack {
-                        Text("Total reps")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(recap.totalReps)")
-                            .font(.caption)
-                    }
+                    statLine("Total reps", "\(recap.totalReps)")
                 }
                 
                 if EffortTracking.mode == .simple, let avg = recap.averageLastSetRIR,
                    let word = EffortTracking.simpleLabel(for: Int(avg.rounded())) {
-                    HStack {
-                        Text("Last-set effort")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(word)
-                            .font(.caption)
-                    }
+                    statLine("Last-set effort", word)
                 } else if EffortTracking.mode == .detailed, let avg = recap.averageLastSetRIR {
-                    HStack {
-                        Text("Avg last-set RIR")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.1f", avg))
-                            .font(.caption)
-                    }
+                    statLine("Avg last-set RIR", String(format: "%.1f", avg))
                 }
                 
                 if EffortTracking.mode == .detailed, let minR = recap.minLastSetRIR, let maxR = recap.maxLastSetRIR {
-                    HStack {
-                        Text("Last-set RIR range")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(minR)–\(maxR)")
-                            .font(.caption)
-                    }
+                    statLine("Last-set RIR range", "\(minR)–\(maxR)")
                 }
             }
             .recapCardFrame()
