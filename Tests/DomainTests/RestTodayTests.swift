@@ -265,7 +265,7 @@ final class RestTodayTests: XCTestCase {
         let lines = RestTodayModel.moveLines(plan)
         XCTAssertEqual(lines.count, 1, "tomorrow is free: only today's session moves")
         XCTAssertTrue(lines[0].hasPrefix("Legs B  "), lines[0])
-        XCTAssertTrue(lines[0].contains(" -> "), lines[0])
+        XCTAssertTrue(lines[0].contains(" → "), lines[0])
         XCTAssertEqual(RestTodayModel.headline, "Today becomes a rest day.")
         XCTAssertEqual(RestTodayModel.moveHeading(plan), "1 session moves to the next free day:")
         XCTAssertNil(RestTodayModel.blockEndLine(plan), "the last session of the block did not move")

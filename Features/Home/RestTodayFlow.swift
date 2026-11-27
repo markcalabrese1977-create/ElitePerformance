@@ -28,9 +28,9 @@ struct RestTodayModel {
         plan.moves.count == 1 ? "1 session moves to the next free day:" : "\(plan.moves.count) sessions move to the next free day:"
     }
 
-    /// "Legs B  Tue Oct 20 -> Wed Oct 21", the placed session first, then each one it pushes.
+    /// "Legs B  Tue Oct 20 → Wed Oct 21", the placed session first, then each one it pushes.
     static func moveLines(_ plan: Service.SlidePlan) -> [String] {
-        plan.moves.map { "\($0.session.dayLabel ?? "Session")  \(day($0.oldDate)) -> \(day($0.newDate))" }
+        plan.moves.map { "\($0.session.dayLabel ?? "Session")  \(day($0.oldDate)) → \(day($0.newDate))" }
     }
 
     /// Only when the last session of the block moves: "The block now ends Fri, Jan 29 (was Thu, Jan 28)."
