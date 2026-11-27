@@ -98,7 +98,17 @@ struct HistoryView: View {
 
 private struct HistoryRow: View {
     @Environment(\.loadUnit) private var unit
+    @Environment(\.modelContext) private var context
     let history: SessionHistory
+
+    /// "· Poor sleep" when the lifter flagged something before the first set; nil otherwise.
+    private var readinessSuffix: String? {
+        guard let id = history.sessionId else { return nil }
+        var d = FetchDescriptor<Session>(predicate: #Predicate<Session> { $0.id == id })
+        d.fetchLimit = 1
+        guard let s = (try? context.fetch(d))?.first else { return nil }
+        return ReadinessText.historySuffix(reasons: s.readinessReasons, shortOnTime: s.shortOnTime ?? false)
+    }
 
     private var shortDate: String {
         history.date.formatted(date: .abbreviated, time: .omitted)
@@ -118,7 +128,7 @@ private struct HistoryRow: View {
 
                 Spacer()
 
-                Text(shortDate)
+                Text(readinessSuffix.map { "\(shortDate) \($0)" } ?? shortDate)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

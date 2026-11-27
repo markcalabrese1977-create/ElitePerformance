@@ -18,6 +18,50 @@ enum SessionReadiness: String, Codable {
     case compromised  // joint/injury issue — reduce load, shift reps up
 }
 
+/// Why the lifter said today may be off, from the one-tap prompt before a session. Only these two: the plan does not change for them.
+/// "Normal" is not a reason (it is the empty answer) and "short on time" is a constraint (`Session.shortOnTime`), not a readiness state.
+enum ReadinessReason: String, Codable, CaseIterable {
+    case stressed
+    case poorSleep
+
+    var label: String {
+        switch self {
+        case .stressed: return "Stressed"
+        case .poorSleep: return "Poor sleep"
+        }
+    }
+}
+
+/// The wording for what the lifter flagged. Pure, so the recap, History and the tests read the same strings. It never implies a load change.
+enum ReadinessText {
+    /// "stress", "poor sleep", "short on time" in the order flagged.
+    private static func phrases(_ reasons: [ReadinessReason], shortOnTime: Bool) -> [String] {
+        reasons.map { $0 == .stressed ? "stress" : "poor sleep" } + (shortOnTime ? ["short on time"] : [])
+    }
+
+    private static func list(_ items: [String]) -> String {
+        switch items.count {
+        case 0, 1: return items.first ?? ""
+        case 2: return "\(items[0]) and \(items[1])"
+        default: return items.dropLast().joined(separator: ", ") + " and " + items.last!
+        }
+    }
+
+    /// "You flagged poor sleep — the plan didn't change for it." nil when nothing was flagged.
+    static func recapLine(reasons: [ReadinessReason], shortOnTime: Bool) -> String? {
+        let items = phrases(reasons, shortOnTime: shortOnTime)
+        guard !items.isEmpty else { return nil }
+        let them = items.count == 1 ? "it" : "them"
+        return "You flagged \(list(items)) — the plan didn't change for \(them)."
+    }
+
+    /// The History suffix: "· Poor sleep · Short on time" (nil when nothing was flagged).
+    static func historySuffix(reasons: [ReadinessReason], shortOnTime: Bool) -> String? {
+        let items = reasons.map(\.label) + (shortOnTime ? ["Short on time"] : [])
+        return items.isEmpty ? nil : items.map { "· \($0)" }.joined(separator: " ")
+    }
+}
+
 // MARK: - Session
 
 @Model
@@ -77,6 +121,16 @@ final class Session {
     /// and dated where it was, so the missed-session and fatigue signals still count it; this only takes it off the overdue surfaces.
     /// nil = not skipped. Additive optional Date: lightweight migration, no schema version bump.
     var skippedAt: Date?
+
+    /// The one-tap prompt before a session ("Ask how I'm feeling"). nil = never answered; [] = answered Normal; else the `ReadinessReason` raw values.
+    /// Informational only: nothing reads it to change a load, a set count or a decision. Additive optional: lightweight migration.
+    var readinessReasonsRaw: [String]?
+
+    /// "Short on time" from the same prompt: a constraint on today, stored apart from the readiness reasons. Informational only.
+    var shortOnTime: Bool?
+
+    /// The reasons as the enum, in stored order; unknown raw values are dropped.
+    var readinessReasons: [ReadinessReason] { (readinessReasonsRaw ?? []).compactMap(ReadinessReason.init(rawValue:)) }
 
     /// When the first working set of this session was logged. Stamped once (`stampStartIfNeeded`) and never overwritten,
     /// not by later sets, edits or a reopened session. nil for sessions logged before this existed. The app's own

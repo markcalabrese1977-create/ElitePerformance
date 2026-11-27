@@ -104,6 +104,8 @@ struct UserProfileBackupDTO: Codable {
     var savedIncrementLb: Double? = nil
     var savedIncrementKg: Double? = nil
     var roundOfferPending: Bool? = nil
+    // Added (the readiness prompt): "Ask how I'm feeling". Optional so OLD backups decode with nil = on.
+    var asksReadiness: Bool? = nil
 }
 
 // MARK: - AppState
@@ -176,6 +178,9 @@ struct SessionBackupDTO: Codable {
     var plannedDateExact: Bool? = nil
     // Added with the overdue-session Skip action. Optional so OLD backups decode with nil (not skipped).
     var skippedAt: Date? = nil
+    // Added with the readiness prompt. Optional so OLD backups decode with nil (never answered / no constraint).
+    var readinessReasonsRaw: [String]? = nil
+    var shortOnTime: Bool? = nil
     // Added with the recap duration. Optional so OLD backups decode with nil.
     var startedAt: Date? = nil
 

@@ -260,6 +260,16 @@ struct SettingsView: View {
                 } footer: {
                     Text(EffortTracking.resolved(profile: profile, in: context).oneLine)
                 }
+
+                Section {
+                    Toggle("Ask how I'm feeling", isOn: Binding(
+                        get: { profile.asksReadinessOn },
+                        set: { profile.asksReadiness = $0; try? context.save() }
+                    ))
+                    .accessibilityIdentifier("asksReadinessToggle")
+                } footer: {
+                    Text("Before your first set: Stressed, Poor sleep or Short on time. It is only a note; the plan never changes for it.")
+                }
             }
 
             // MARK: - Exercises

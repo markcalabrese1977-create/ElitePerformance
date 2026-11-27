@@ -277,6 +277,11 @@ final class UserProfile {
     /// lifter has recorded RIR on compound lifts, else Simple). Stored OPTIONAL so the additive migration and old backups need no backfill.
     var effortModeRaw: String? = nil
 
+    /// Settings > "Ask how I'm feeling": show the one-tap readiness row before a session. nil is treated as true (on).
+    /// Stored OPTIONAL so the additive migration and old backups need no backfill.
+    var asksReadiness: Bool? = nil
+    var asksReadinessOn: Bool { asksReadiness ?? true }
+
     /// Equipment preset the fitter works from. Stored OPTIONAL so the additive SwiftData migration (existing
     /// rows get nil) and old backups both read as "derive from the legacy `equipmentProfileRaw`". Use
     /// `equipmentPreset`, never this raw column.

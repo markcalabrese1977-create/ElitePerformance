@@ -29,6 +29,8 @@ struct SessionView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var pendingAddedExerciseForPropagation: (exerciseId: String, exerciseName: String)?
     @State private var showAddExercisePropagationDialog = false
+    /// Settings > "Ask how I'm feeling" (nil = on).
+    private var asksReadiness: Bool { (try? modelContext.fetch(FetchDescriptor<UserProfile>()).first)?.asksReadinessOn ?? true }
     /// "Last A: 315 x 5, 6, 5, 5" per exerciseId — computed once when the screen loads.
     @State private var lastLetterCaptions: [String: String] = [:]
 
@@ -38,8 +40,11 @@ struct SessionView: View {
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
+    /// Opening a session by itself (History): never asks how the lifter feels.
     init(session: Session) {
-        _viewModel = StateObject(wrappedValue: SessionScreenViewModel(session: session))
+        let vm = SessionScreenViewModel(session: session)
+        vm.allowsReadinessPrompt = false
+        _viewModel = StateObject(wrappedValue: vm)
     }
 
     init() {
@@ -52,6 +57,10 @@ struct SessionView: View {
         ScrollView {
             VStack(spacing: 16) {
                 header
+
+                if viewModel.shouldShowReadinessRow(asks: asksReadiness) {
+                    ReadinessRow(viewModel: viewModel, context: modelContext)
+                }
 
                 // ✅ Warm-up card (toggle hide/show)
                 if let first = viewModel.exercises.first {
@@ -352,6 +361,7 @@ struct SessionView: View {
             SessionRecapSheet(
                 recap: recap,
                 effortNote: viewModel.lifterEffortNote(using: modelContext),
+                readinessLine: viewModel.readinessRecapLine,
                 onDone: {
                     do {
                         try viewModel.persistCompletion(using: modelContext, recap: recap)
@@ -1457,6 +1467,56 @@ final class SessionScreenViewModel: ObservableObject {
     // Backing SwiftData model (what we persist to)
     let session: Session
 
+    // MARK: Readiness prompt ("How are you today?") — informational; nothing here changes a load, a set count or a decision.
+
+    /// What the row shows before anything is saved. Stressed / Poor sleep / Short on time toggle here; they are saved when the first set is logged.
+    @Published var pendingReasons: Set<ReadinessReason> = []
+    @Published var pendingShortOnTime = false
+    /// The row was dismissed (x) or answered: it stays collapsed while this screen is open.
+    @Published var readinessCollapsed = false
+    /// False when the screen was opened from History: past sessions are never asked.
+    var allowsReadinessPrompt = true
+
+    /// The row shows only on an unstarted planned session that was never answered, for a lifter who has not switched it off.
+    func shouldShowReadinessRow(asks: Bool) -> Bool {
+        allowsReadinessPrompt && asks && !readinessCollapsed
+            && session.status == .planned && session.startedAt == nil && session.skippedAt == nil && session.readinessReasonsRaw == nil
+    }
+
+    /// Normal: saved at once as the empty answer; clears Stressed / Poor sleep, leaves Short on time as it is.
+    func answerNormal(using context: ModelContext) {
+        pendingReasons = []
+        session.readinessReasonsRaw = []
+        session.shortOnTime = pendingShortOnTime ? true : nil
+        readinessCollapsed = true
+        try? context.save()
+    }
+
+    func toggle(_ reason: ReadinessReason) {
+        if pendingReasons.contains(reason) { pendingReasons.remove(reason) } else { pendingReasons.insert(reason) }
+    }
+
+    /// x: collapse, answer nothing (nil stays nil).
+    func dismissReadiness() {
+        pendingReasons = []; pendingShortOnTime = false
+        readinessCollapsed = true
+    }
+
+    /// Called when the first set is logged: the toggles are saved and the row collapses. Short on time alone does not answer the readiness question.
+    func commitPendingReadiness() {
+        defer { readinessCollapsed = true }
+        guard session.readinessReasonsRaw == nil, session.startedAt == nil else { return }
+        if !pendingReasons.isEmpty {
+            session.readinessReasonsRaw = ReadinessReason.allCases.filter { pendingReasons.contains($0) }.map(\.rawValue)
+        }
+        if pendingShortOnTime { session.shortOnTime = true }
+    }
+
+    /// The recap line for what was flagged (nil when nothing was).
+    var readinessRecapLine: String? {
+        ReadinessText.recapLine(reasons: session.readinessReasons, shortOnTime: session.shortOnTime == true)
+    }
+
     // UI state
     @Published var title: String
     @Published var subtitle: String
@@ -1558,6 +1618,8 @@ final class SessionScreenViewModel: ObservableObject {
                 return set.plannedLoad
             }()
 
+            // The readiness answers are saved with the start (before the stamp: the row is only open on an unstarted session).
+            commitPendingReadiness()
             // The session starts when its first working set is logged; stamped once, never overwritten.
             session.stampStartIfNeeded()
 
@@ -3252,7 +3314,84 @@ struct UISessionSet: Identifiable {
         }
 
 
-        // MARK: - Recap Types + Sheet
+        // MARK: - Readiness row
+
+/// "How are you today?" — one tap, no sheet. Normal answers at once; the others toggle and are saved with the first set.
+private struct ReadinessRow: View {
+    @ObservedObject var viewModel: SessionScreenViewModel
+    let context: ModelContext
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("How are you today?")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { viewModel.dismissReadiness() } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            // Wraps under itself on the narrowest screens and at the largest text sizes.
+            ChipFlowLayout {
+                chip("Normal", on: false) { viewModel.answerNormal(using: context) }
+                chip(ReadinessReason.stressed.label, on: viewModel.pendingReasons.contains(.stressed)) { viewModel.toggle(.stressed) }
+                chip(ReadinessReason.poorSleep.label, on: viewModel.pendingReasons.contains(.poorSleep)) { viewModel.toggle(.poorSleep) }
+                chip("Short on time", on: viewModel.pendingShortOnTime) { viewModel.pendingShortOnTime.toggle() }
+            }
+            Text("Just a note on today: the plan doesn't change for it.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        .accessibilityIdentifier("readinessRow")
+    }
+
+    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(on ? Color.accentColor : Color(.tertiarySystemFill)))
+                .foregroundStyle(on ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A left-aligned row of chips that wraps onto more lines when it does not fit.
+private struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    private func rows(_ subviews: Subviews, width: CGFloat) -> (positions: [CGPoint], size: CGSize) {
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        var positions: [CGPoint] = []
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            positions.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            maxX = max(maxX, x - spacing)
+        }
+        return (positions, CGSize(width: maxX, height: y + rowHeight))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        rows(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let laid = rows(subviews, width: bounds.width)
+        for (sub, p) in zip(subviews, laid.positions) {
+            sub.place(at: CGPoint(x: bounds.minX + p.x, y: bounds.minY + p.y), proposal: .unspecified)
+        }
+    }
+}
+
+// MARK: - Recap Types + Sheet
     
     struct SessionRecap: Identifiable {
         let id = UUID()
@@ -3338,6 +3477,8 @@ struct UISessionSet: Identifiable {
         @Environment(\.loadUnit) private var unit
         let recap: SessionRecap
         let effortNote: String?
+        /// "You flagged poor sleep — the plan didn't change for it." (nil when nothing was flagged)
+        let readinessLine: String?
         let onDone: () -> Void
         
         private var dateFormatter: DateFormatter {
@@ -3357,6 +3498,16 @@ struct UISessionSet: Identifiable {
                 ScrollView {
                     VStack(spacing: 16) {
                         headerCard
+
+                        if let readinessLine {
+                            Text(readinessLine)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding()
+                                .recapCardFrame()
+                                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.systemBackground)))
+                                .accessibilityIdentifier("readinessRecapLine")
+                        }
 
                         if let effortNote {
                             Text(effortNote)

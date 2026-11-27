@@ -122,6 +122,7 @@ enum PopulatedStoreBuilder {
         profile.savedIncrementLb = 5.0
         profile.savedIncrementKg = 1.25
         profile.roundOfferPending = true
+        profile.asksReadiness = true           // non-default: nil is the default (false is covered by ReadinessPromptTests)
         // Set the raw columns directly: the preset setter would also rewrite equipmentProfileRaw.
         profile.equipmentPresetRaw = EquipmentPreset.machinesOnly.rawValue
         profile.equipmentChecklistRaws = [GearTag.cable.rawValue, GearTag.dumbbell.rawValue]
@@ -190,6 +191,8 @@ enum PopulatedStoreBuilder {
         s.plannedDate = date.addingTimeInterval(-86_400)
         s.plannedDateExact = true
         s.skippedAt = date.addingTimeInterval(86_400)   // non-default: the overdue Skip action
+        s.readinessReasonsRaw = [ReadinessReason.stressed.rawValue, ReadinessReason.poorSleep.rawValue]   // non-default: the readiness prompt
+        s.shortOnTime = true
         s.startedAt = date.addingTimeInterval(-2_700)   // non-default: the recap duration's start
         s.meso = meso
         meso.sessions.append(s)

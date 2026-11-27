@@ -59,6 +59,8 @@ enum BackupSnapshotImporter {
             profile.savedIncrementLb = dto.savedIncrementLb
             profile.savedIncrementKg = dto.savedIncrementKg
             profile.roundOfferPending = dto.roundOfferPending
+            // Old backups predate this key → nil (on).
+            profile.asksReadiness = dto.asksReadiness
             modelContext.insert(profile)
         }
 
@@ -154,6 +156,9 @@ enum BackupSnapshotImporter {
             session.plannedDateExact = sessionDTO.plannedDateExact
             // Old backups predate this key → nil (not skipped).
             session.skippedAt = sessionDTO.skippedAt
+            // Old backups predate these keys → nil.
+            session.readinessReasonsRaw = sessionDTO.readinessReasonsRaw
+            session.shortOnTime = sessionDTO.shortOnTime
             // Old backups predate this key → nil (no app duration).
             session.startedAt = sessionDTO.startedAt
 

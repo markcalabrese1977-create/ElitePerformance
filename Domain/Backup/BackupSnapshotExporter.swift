@@ -83,7 +83,8 @@ enum BackupSnapshotExporter {
                     unitRaw: $0.unitRaw,
                     savedIncrementLb: $0.savedIncrementLb,
                     savedIncrementKg: $0.savedIncrementKg,
-                    roundOfferPending: $0.roundOfferPending
+                    roundOfferPending: $0.roundOfferPending,
+                    asksReadiness: $0.asksReadiness
                 )
             },
             mesoBlocks: mesoBlocks.map { block in
@@ -119,6 +120,8 @@ enum BackupSnapshotExporter {
                     plannedDate: session.plannedDate,
                     plannedDateExact: session.plannedDateExact,
                     skippedAt: session.skippedAt,
+                    readinessReasonsRaw: session.readinessReasonsRaw,
+                    shortOnTime: session.shortOnTime,
                     startedAt: session.startedAt,
                     hkWorkoutUUID: session.hkWorkoutUUID,
                     hkWorkoutStart: session.hkWorkoutStart,
