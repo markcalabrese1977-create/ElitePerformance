@@ -320,4 +320,55 @@ final class CoachMessageLandingTests: XCTestCase {
         let next = try XCTUnwrap(PlanMemoryEngine.landing(for: sessions[0].items[0], in: sessions[0], target: sessions[1].items[0], allSessions: sessions))
         XCTAssertNil(next.nextWeekLetter)
     }
+
+    // MARK: - Pump never speaks on a coach line
+
+    private func withPump(_ item: SessionItem, _ rating: PumpRating) -> SessionItem {
+        item.pumpRatingsBySet = Array(repeating: rating.rawValue, count: item.actualReps.count)
+        return item
+    }
+
+    func test_noPumpSentenceOnAnyLine_forEveryRating_onIncreaseOverPerformedAndDeload() throws {
+        let bannedFragments = ["Pump was", "pump", "responding well", "stimulus"]
+        for rating in [PumpRating.poor, .moderate, .good, .excellent] {
+            // increase earned
+            let inc = try recommend(withPump(bumpEarningItem(waveRaw: "a"), rating), target: .exists)
+            // over-performed (every set two reps past the top)
+            let over = bumpEarningItem(waveRaw: "a"); over.actualReps = [12, 12, 12]
+            let overRec = try recommend(withPump(over, rating), target: .exists)
+            // deload line
+            let dl = bumpEarningItem(waveRaw: "deload"); dl.suggestedLoad = 100
+            let dlRec = try XCTUnwrap(CoachingEngine.recommend(for: withPump(dl, rating), minLoadIncrement: 5))
+            for (name, msg) in [("increase", inc.message), ("over-performed", overRec.message), ("deload", dlRec.message)] {
+                for f in bannedFragments {
+                    XCTAssertFalse(msg.contains(f), "\(name) line carries '\(f)' for \(rating): \(msg)")
+                }
+            }
+            XCTAssertTrue(overRec.message.hasPrefix("Reps came in well above the top of your range"), overRec.message)
+        }
+    }
+
+    func test_loadDecisionsAndText_areIdentical_withPumpUnratedAndExcellent() throws {
+        let a = try recommend(withPump(bumpEarningItem(waveRaw: "a"), .none), target: .exists)
+        let b = try recommend(withPump(bumpEarningItem(waveRaw: "a"), .excellent), target: .exists)
+        XCTAssertEqual(a.nextSuggestedLoad, b.nextSuggestedLoad)
+        XCTAssertEqual(a.nextTopLoad, b.nextTopLoad)
+        XCTAssertEqual(a.message, b.message, "pump 0 vs 4: the whole line, not just the load, is the same")
+        let over0 = bumpEarningItem(waveRaw: "a"); over0.actualReps = [12, 12, 12]
+        let over4 = bumpEarningItem(waveRaw: "a"); over4.actualReps = [12, 12, 12]
+        XCTAssertEqual(try recommend(withPump(over0, .none), target: .exists).message, try recommend(withPump(over4, .excellent), target: .exists).message)
+    }
+
+    func test_poorPumpVolumeNote_stillFiresOnTwoOfTheLastThree_andOnlyAsText() {
+        func item(poor: Bool) -> SessionItem {
+            let i = bumpEarningItem(waveRaw: "a")
+            i.pumpRatingsBySet = poor ? [1, 2, 3] : [3, 3, 3]
+            return i
+        }
+        let two = PlanMemoryEngine.volumeRegulationSignal(from: [item(poor: true), item(poor: false), item(poor: true)])
+        XCTAssertEqual(two.setDelta, 0, "text only: no set change")
+        XCTAssertEqual(two.reason, "ℹ️ Consistently poor pump signal across recent sessions. Holding volume before increasing.")
+        let one = PlanMemoryEngine.volumeRegulationSignal(from: [item(poor: true), item(poor: false), item(poor: false)])
+        XCTAssertNil(one.reason)
+    }
 }

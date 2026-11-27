@@ -616,20 +616,7 @@ struct CoachingEngine {
                     guard item.suggestedLoad > 0 else { return nil }
                     let hasAnyActualData = (0..<count).contains { reps[$0] > 0 || loads[$0] > 0 }
                     guard hasAnyActualData else { return nil }
-                    let pumpNote: String = {
-                        let ratings = (0..<min(count, item.pumpRatingsBySet.count)).compactMap {
-                            PumpRating(rawValue: item.pumpRatingsBySet[$0])
-                        }.filter { $0 != .none }
-                        guard !ratings.isEmpty else { return "" }
-                        let avg = ratings.map { $0.rawValue }.reduce(0, +) / ratings.count
-                        switch PumpRating(rawValue: avg) ?? .none {
-                        case .good:      return " Pump was good — the stimulus is there at reduced volume."
-                        case .excellent: return " Pump was excellent — your body is responding well to the lighter load."
-                        case .poor:      return " Pump was poor — that's fine at this volume. Focus is retention, not stimulus."
-                        default:         return ""
-                        }
-                    }()
-                    let msg = "Maintenance session. Goal is retention — hold this load, manage fatigue, and carry it into the next block.\(pumpNote)"
+                    let msg = "Maintenance session. Goal is retention — hold this load, manage fatigue, and carry it into the next block."
                     return CoachingRecommendation(message: msg, nextSuggestedLoad: item.suggestedLoad)
                 }
 
@@ -732,18 +719,6 @@ struct CoachingEngine {
         // Rest-pause is intentionally NOT computed as a gate here (Cut 3 decision):
         // a rest-pause session is legitimate technique and is eligible to bump.
         // Drop-set "quality" detection likewise removed — it gated the old 3.6 rung.
-
-        // Pump awareness — average pump rating across primary sets
-        let avgPump: PumpRating = {
-            let ratings = primaryIndices.compactMap { idx -> PumpRating? in
-                guard idx < item.pumpRatingsBySet.count else { return nil }
-                let r = PumpRating(rawValue: item.pumpRatingsBySet[idx]) ?? .none
-                return r == .none ? nil : r
-            }
-            guard !ratings.isEmpty else { return .none }
-            let avg = ratings.map { $0.rawValue }.reduce(0, +) / ratings.count
-            return PumpRating(rawValue: avg) ?? .none
-        }()
 
         func loadStep(for base: Double) -> Double {
             loadIncrement(for: item, base: base, minLoadIncrement: minLoadIncrement, unit: unit)
@@ -949,15 +924,6 @@ struct CoachingEngine {
             let bumpTarget = max(ceiling, roundedFloor ?? ceiling)                // floor can only raise
             return min(bumpTarget, ceiling, baseLoad * 2.0)                       // capped at the ceiling; RULE 6 2× cap preserved
         }
-        let pumpNote: String = {
-            switch avgPump {
-            case .good: return " Pump was good — this lift is responding well."
-            case .excellent: return " Pump was excellent — strong stimulus confirmed."
-            case .poor: return " Pump was poor — consider whether load, technique, or fatigue affected stimulus."
-            default: return ""
-            }
-        }()
-
         // RULE 4 — Under the bottom of the range: best set below repMin → hold; ≥2
         // badly-missed primary sets → reduce 5% [was path D + project fatigue cut].
         if bestReps < repMin {
@@ -1038,13 +1004,13 @@ struct CoachingEngine {
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):
-                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target)).\(pumpNote)"
+                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target))."
             case .editedKept(let kept):
-                msg = "\(lead) \(kept)\(pumpNote)"
+                msg = "\(lead) \(kept)"
             case .endOfChain:
-                msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+                msg = "\(lead) \(carriesForwardClause)"
             case .silent:
-                msg = "\(lead)\(pumpNote)"
+                msg = "\(lead)"
             }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
@@ -1064,13 +1030,13 @@ struct CoachingEngine {
             let msg: String
             switch forward(for: item, target: carryForwardTarget, writeBlocked: writeBlocked) {
             case .lands(let landing):
-                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target)).\(pumpNote)"
+                msg = "\(lead) \(landing): \(LoadFormatter(unit: unit).oneDecimal(target))."
             case .editedKept(let kept):
-                msg = "\(lead) \(kept)\(pumpNote)"
+                msg = "\(lead) \(kept)"
             case .endOfChain:
-                msg = "\(lead) \(carriesForwardClause)\(pumpNote)"
+                msg = "\(lead) \(carriesForwardClause)"
             case .silent:
-                msg = "\(lead)\(pumpNote)"
+                msg = "\(lead)"
             }
             return CoachingRecommendation(message: msg, nextSuggestedLoad: target)
         }
