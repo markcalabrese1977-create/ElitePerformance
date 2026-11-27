@@ -2316,6 +2316,34 @@ final class LegacyStoreRelocationTests: XCTestCase {
         return c
     }
 
+    /// A fixture store whose bytes are final: the container that wrote it is released, then its WAL is folded into the main
+    /// file with PRAGMA wal_checkpoint(TRUNCATE) over the sqlite3 C API. Without this the fixture's own pending WAL is
+    /// checkpointed at some later moment (when SwiftData lets go of its connections), which grows the main file by itself.
+    private func makeSettledStore(at url: URL, completed: Int, planned: Int = 0) throws {
+        do { _ = try makeStore(at: url, completed: completed, planned: planned) }   // the container is released when this scope ends
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            let why = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"; sqlite3_close(db)
+            throw NSError(domain: "LegacyStoreRelocationTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "could not open the fixture: \(why)"])
+        }
+        defer { sqlite3_close(db) }
+        // TRUNCATE needs every other connection gone; SwiftData closes its own a moment after the container is released, so wait for that
+        // (bounded) instead of settling for a weaker checkpoint.
+        var lastError = "unknown"
+        for _ in 0..<100 {
+            var message: UnsafeMutablePointer<CChar>?
+            if sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, &message) == SQLITE_OK { return }
+            lastError = message.map { String(cString: $0) } ?? "unknown"; sqlite3_free(message)
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
+        throw NSError(domain: "LegacyStoreRelocationTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "checkpoint failed after waiting: \(lastError)"])
+    }
+
+    /// The store's three files as bytes (nil = the file is absent): main, -wal, -shm.
+    private func storeFiles(_ url: URL) -> [Data?] {
+        ["", "-wal", "-shm"].map { try? Data(contentsOf: URL(fileURLWithPath: url.path + $0)) }
+    }
+
     private func find(completed: Int, pin: String? = nil, offered: Set<String> = []) -> LegacyStoreRelocation.Finding? {
         LegacyStoreRelocation.find(currentStore: currentURL, currentCompleted: completed, sandboxSupport: sandboxDir, pinLabel: pin,
                                    offered: offered, log: { _ in })
@@ -2374,8 +2402,10 @@ final class LegacyStoreRelocationTests: XCTestCase {
     func test_bringingTheOlderDataOver_goesThroughTheCoordinator_andNeverTouchesTheOriginal() throws {
         let current = try makeStore(at: currentURL, completed: 2)
         let legacy = sandboxDir.appendingPathComponent("default.store")
-        try makeStore(at: legacy, completed: 5, planned: 3)
-        let legacyBytes = try Data(contentsOf: legacy)
+        try makeSettledStore(at: legacy, completed: 5, planned: 3)
+        let legacyFiles = storeFiles(legacy)
+        XCTAssertNotNil(legacyFiles[0], "the fixture's main file exists")
+        XCTAssertTrue(legacyFiles[1] == nil || legacyFiles[1]!.isEmpty, "the fixture is settled: no pending WAL frames are left to be checkpointed later")
         let offered = LegacyStoreRelocation.OfferedStore(defaults: defaults)
         var backfills = 0
         let g = gate(finder: { c, completed in
@@ -2393,7 +2423,7 @@ final class LegacyStoreRelocationTests: XCTestCase {
         let now = try BackupContentSummary.of(store: ModelContext(current))
         XCTAssertEqual(now.completedSessions, 5); XCTAssertEqual(now.sessions, 8, "all sessions came over")
         XCTAssertFalse(PreImportSnapshots.list(in: snapDir).isEmpty, "the coordinator took a verified snapshot of what was there first")
-        XCTAssertEqual(try Data(contentsOf: legacy), legacyBytes, "the original file is byte-for-byte untouched")
+        XCTAssertEqual(storeFiles(legacy), legacyFiles, "the original store (main, -wal and -shm; an absent file stays absent) is byte-for-byte untouched")
         XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path), "and never deleted")
         XCTAssertEqual(backfills, 1, "the launch carried on")
         XCTAssertTrue(offered.paths.contains(legacy.standardizedFileURL.path), "the offered marker is set")
