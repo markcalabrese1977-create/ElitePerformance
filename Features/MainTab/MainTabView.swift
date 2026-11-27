@@ -495,7 +495,8 @@ enum OverdueText {
     static let prompt = "Do today, move, or skip"
     static func rowTitle(_ s: Session) -> String { "\(day(s.date)) · \(s.dayLabel ?? "Session") · \(s.weekDayLabel)" }
     static func missedRow(_ n: Int) -> String { "Missed (\(n))" }
-    static let footer = "Only dates change: loads, weeks, exercises and logged work stay as they are, and the W#D# label stays with the session. A skipped session still counts as missed."
+    /// The same footer as Rest today (one string, so the two sheets cannot drift).
+    static let footer = RestTodayModel.footer
 
     /// The same move list as Rest today: the placed session, then every session it pushes to the next free day.
     static func moveLines(_ plan: SessionItemEditService.SlidePlan) -> [String] { RestTodayModel.moveLines(plan) }

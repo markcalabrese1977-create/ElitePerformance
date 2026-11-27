@@ -465,6 +465,9 @@ final class OverdueSessionTests: XCTestCase {
         XCTAssertEqual(OverdueText.title(s(b, 7)), "Missed " + OverdueText.weekday(s(b, 7).date))
         XCTAssertEqual(OverdueText.subtitle(s(b, 7)), "Push A · W2D1")
         XCTAssertEqual(OverdueText.missedRow(6), "Missed (6)")
+        XCTAssertEqual(OverdueText.footer, RestTodayModel.footer, "the Move sheet and the Rest today sheet say the same thing")
+        XCTAssertEqual(OverdueText.footer, "Only dates change: loads, weeks, exercises and logged work stay as they are. Sessions after the first free day are untouched.")
+        XCTAssertFalse(OverdueText.footer.contains("W#D#"))
     }
 
     func test_refusals() throws {
