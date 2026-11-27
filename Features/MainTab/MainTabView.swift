@@ -603,7 +603,8 @@ struct OverdueMoveFlow: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onFinish) }
-                ToolbarItem(placement: .confirmationAction) {
+                // A refused plan has nothing to confirm: Cancel is the one way out (pick another day and Move comes back).
+                if plan.refusal == nil { ToolbarItem(placement: .confirmationAction) {
                     Button(request.toToday ? "Do today" : "Move") {
                         do {
                             try SessionItemEditService.applySlide(plan, in: modelContext)
@@ -615,7 +616,7 @@ struct OverdueMoveFlow: View {
                         }
                     }
                     .disabled(!plan.isApplicable)
-                }
+                } }
             }
         }
     }

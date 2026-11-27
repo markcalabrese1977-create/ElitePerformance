@@ -48,6 +48,13 @@ struct RestTodayModel {
         }
     }
 
+    static func isRefusal(_ plan: Service.SlidePlan) -> Bool { plan.refusal != nil }
+
+    /// "OK" (dismiss) when the plan refuses, otherwise "Move N session(s)".
+    static func primaryTitle(_ plan: Service.SlidePlan) -> String {
+        plan.refusal != nil ? "OK" : "Move \(plan.moves.count) session\(plan.moves.count == 1 ? "" : "s")"
+    }
+
     /// Names the day and the session in the way (every refusal reads the same on both entry points).
     static func refusalText(_ refusal: Service.SlideRefusal) -> String {
         switch refusal {
@@ -135,9 +142,13 @@ struct RestTodayFlow: View {
             .id(refreshToken)
             .navigationTitle(RestTodayModel.title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onFinish) } }
+            .toolbar {
+                // A refusal has one way out (the OK button below); the toolbar Cancel is only for a plan you can confirm.
+                if !RestTodayModel.isRefusal(plan) { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onFinish) } }
+            }
             .safeAreaInset(edge: .bottom) {
                 Button {
+                    if RestTodayModel.isRefusal(plan) { onFinish(); return }
                     switch model.apply(plan) {
                     case .success: onFinish()
                     case .failure(let failure):
@@ -145,11 +156,11 @@ struct RestTodayFlow: View {
                         if failure.needsRefresh { refreshToken += 1 }
                     }
                 } label: {
-                    Text("Move \(plan.moves.count) session\(plan.moves.count == 1 ? "" : "s")").frame(maxWidth: .infinity)
+                    Text(RestTodayModel.primaryTitle(plan)).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(!plan.isApplicable)
+                .disabled(!RestTodayModel.isRefusal(plan) && !plan.isApplicable)
                 .padding()
                 .background(.bar)
             }

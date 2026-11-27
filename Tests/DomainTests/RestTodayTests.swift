@@ -270,6 +270,11 @@ final class RestTodayTests: XCTestCase {
         XCTAssertEqual(RestTodayModel.moveHeading(plan), "1 session moves to the next free day:")
         XCTAssertNil(RestTodayModel.blockEndLine(plan), "the last session of the block did not move")
         XCTAssertFalse(RestTodayModel.refusalText(.nothingToMove).isEmpty)
+        XCTAssertEqual(RestTodayModel.primaryTitle(plan), "Move 1 session")
+        XCTAssertFalse(RestTodayModel.isRefusal(plan))
+        let refused = RestTodayModel(meso: block, context: ctx, now: plus(start, 1)).plan()      // nothing planned that day
+        XCTAssertTrue(RestTodayModel.isRefusal(refused))
+        XCTAssertEqual(RestTodayModel.primaryTitle(refused), "OK", "a refusal shows its reason and one dismiss button, never a disabled Move 0 sessions")
     }
 }
 
