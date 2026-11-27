@@ -612,16 +612,16 @@ final class UserGuideTests: XCTestCase {
 
 final class ChangeProgramWeekdaysTests: XCTestCase {
 
-    private func block(weekdays: [Int]) throws -> (ModelContext, MesoBlock) {
+    private func block(weekdays: [Int], weeks: Int = 2) throws -> (ModelContext, MesoBlock) {
         let schema = Schema([Session.self, SessionItem.self, MesoBlock.self, UserProfile.self, User.self, CustomExercise.self])
         let container = try ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let ctx = ModelContext(container)
-        let meso = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: 2)
+        let meso = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: weeks)
         ctx.insert(meso)
         let cal = Calendar.current
         // 2026-11-01 is a Sunday (weekday 1); 2026-11-01 + (w - 1) days has weekday w.
         let sunday = cal.date(from: DateComponents(year: 2026, month: 11, day: 1))!
-        for week in 0..<2 {
+        for week in 0..<weeks {
             for w in weekdays {
                 let date = cal.date(byAdding: .day, value: week * 7 + (w - 1), to: sunday)!
                 let s = Session(date: date, status: week == 0 ? .completed : .planned, weekIndex: week + 1, dayLabel: "D", items: [])
@@ -641,6 +641,18 @@ final class ChangeProgramWeekdaysTests: XCTestCase {
         XCTAssertEqual(draft.weekdays, [1, 2, 3, 4, 6, 7])
         XCTAssertEqual(draft.daysPerWeek, 6, "the day count follows the chips")
         XCTAssertTrue(OnboardingDraft.scheduleIsComplete(weekdays: draft.weekdays, daysPerWeek: draft.daysPerWeek))
+    }
+
+    func test_aFiveDayBlockWithOneSlidSession_stillPrefillsFiveWeekdays() throws {
+        let (_, meso) = try block(weekdays: [6, 2, 3, 4, 5], weeks: 3)
+        let slid = try XCTUnwrap(meso.sessions.first { $0.weekIndex == 2 && $0.dayLabel == "D" && Calendar.current.component(.weekday, from: $0.date) == 6 })
+        slid.date = Calendar.current.date(byAdding: .day, value: 1, to: slid.date)!          // Fri -> Sat, as Rest today does
+        XCTAssertEqual(Set(meso.sessions.map { Calendar.current.component(.weekday, from: $0.date) }).count, 6, "the union would now say six days")
+        let days = OnboardingDraft.weekdays(of: meso)
+        XCTAssertEqual(days, [2, 3, 4, 5, 6])
+        let draft = OnboardingDraft(profile: UserProfile(), activeWeekdays: days)
+        XCTAssertEqual(draft.weekdays, [2, 3, 4, 5, 6])
+        XCTAssertEqual(draft.daysPerWeek, 5)
     }
 
     func test_noActiveBlock_isUnchanged() {

@@ -207,10 +207,27 @@ struct OnboardingDraft: Equatable {
         }
     }
 
-    /// The distinct weekdays of every session (planned and completed) in a block.
+    /// The training weekdays of a block (planned and completed sessions both count): the MODE weekday of each day slot across the
+    /// block's weeks (ties: the earlier weekday), so one session slid to another day (Rest today, a missed session moved) does not
+    /// add a training day. A slot is a day label plus its place among that week's sessions of the same label, so a block that
+    /// reuses one label for several days still reads as several days. A session with no label counts by its own weekday.
     static func weekdays(of meso: MesoBlock?, calendar: Calendar = .current) -> Set<Int> {
         guard let meso else { return [] }
-        return Set(meso.sessions.map { calendar.component(.weekday, from: $0.date) })
+        var counts: [String: [Int: Int]] = [:]
+        for week in Dictionary(grouping: meso.sessions, by: { $0.weekIndex }).values {
+            var seen: [String: Int] = [:]
+            for s in week.sorted(by: { ($0.programIndex ?? 0, $0.date) < ($1.programIndex ?? 0, $1.date) }) {
+                let weekday = calendar.component(.weekday, from: s.date)
+                let label = (s.dayLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let slot: String
+                if label.isEmpty { slot = "weekday \(weekday)" } else {
+                    seen[label, default: 0] += 1
+                    slot = "\(label)#\(seen[label] ?? 1)"
+                }
+                counts[slot, default: [:]][weekday, default: 0] += 1
+            }
+        }
+        return Set(counts.values.compactMap { $0.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }?.key })
     }
 
     init(profile: UserProfile?) {
