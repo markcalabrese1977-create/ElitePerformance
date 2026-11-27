@@ -13,35 +13,28 @@ struct ProgramPlanPropagationService {
         var sessionsWithSkippedItems: Int
     }
 
-    private static func normalizedLabel(_ label: String?) -> String {
-        (label ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
     private static func waveLetters(_ session: Session) -> Set<String> {
         Set(session.items.compactMap { $0.waveRaw?.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
     }
 
-    /// The sessions a propagation from `source` may change: future, planned, same weekday, SAME dayLabel, SAME wave letter(s),
-    /// and the SAME meso. Never the source itself.
+    /// The sessions a propagation from `source` may change: future, planned, in a LATER week of the same meso, SAME day slot
+    /// (`DaySlot`: dayLabel plus its place among that week's sessions of the label, by programIndex), SAME wave letter(s). Never the
+    /// source itself. The weekday is not part of it, so a session slid to another day still receives the edit; a later week with
+    /// no session at that place is skipped (no fallback to another occurrence).
     static func targets(from source: Session, in context: ModelContext) -> [Session] {
-        guard !WavePrescriptionGuard.isWaveBasedBlock(source) else { return [] }
+        guard !WavePrescriptionGuard.isWaveBasedBlock(source), let slot = source.daySlot else { return [] }
         let today = Calendar.current.startOfDay(for: Date())
-        let descriptor = FetchDescriptor<Session>(
-            predicate: #Predicate { s in s.date > today },
-            sortBy: [SortDescriptor(\.date, order: .forward)]
-        )
-        guard let future = try? context.fetch(descriptor) else { return [] }
-        let weekday = Calendar.current.component(.weekday, from: source.date)
-        let label = normalizedLabel(source.dayLabel)
+        let pool: [Session]
+        if let meso = source.meso { pool = meso.sessions } else { return [] }
         let waves = waveLetters(source)
-        return future.filter {
-            $0.id != source.id &&
-            $0.status == .planned &&
-            Calendar.current.component(.weekday, from: $0.date) == weekday &&
-            normalizedLabel($0.dayLabel) == label &&
-            $0.meso?.id == source.meso?.id &&
-            waveLetters($0) == waves
+        var out: [Session] = []
+        for (week, sessions) in Dictionary(grouping: pool, by: { $0.weekIndex }) where week > source.weekIndex {
+            let slots = DaySlot.slots(ofWeek: sessions)
+            out += sessions.filter {
+                $0.status == .planned && $0.date > today && slots[$0.persistentModelID] == slot && waveLetters($0) == waves
+            }
         }
+        return out.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
     }
 
     static func preview(from source: Session, in context: ModelContext) -> Preview {
@@ -57,7 +50,7 @@ struct ProgramPlanPropagationService {
 
     /// Pushes the plan (exercise list + plan fields) from a Program session into future sessions that are still planned.
     ///
-    /// Scope (see `targets`): planned, future, same weekday AND same dayLabel AND same wave letter AND same meso.
+    /// Scope (see `targets`): planned, future, a later week of the same meso, same day slot AND same wave letter.
     /// Items the lifter edited by hand (`planEdited`) on a target are skipped, never overwritten or deleted; the returned
     /// preview says how many.
     ///

@@ -661,6 +661,44 @@ extension SessionStatus {
         }
     }
 }
+/// One definition of "day slot": a day name plus its place among that week's sessions of the same name. Rest today, moved sessions and
+/// date edits change a session's weekday but never its slot, so anything that must tell "which Extra Session" or "which Upper A of the
+/// week" apart (Apply to future, the Change Program weekday prefill) reads it from here and never from the calendar weekday.
+/// Order within the week is `programIndex`, never the date; only a session with no programIndex (old data) falls back to its date,
+/// and sorts after those that have one.
+struct DaySlot: Hashable {
+    /// The trimmed, lowercased dayLabel.
+    let label: String
+    /// 1-based position among the week's sessions with this label.
+    let occurrence: Int
+
+    static func normalized(_ label: String?) -> String { (label ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+    /// The slot of every session of ONE week (same block, same weekIndex), keyed by persistent id.
+    static func slots(ofWeek sessions: [Session]) -> [PersistentIdentifier: DaySlot] {
+        var seen: [String: Int] = [:]
+        var out: [PersistentIdentifier: DaySlot] = [:]
+        let ordered = sessions.sorted {
+            ($0.programIndex ?? Int.max, $0.date, $0.id?.uuidString ?? "") < ($1.programIndex ?? Int.max, $1.date, $1.id?.uuidString ?? "")
+        }
+        for s in ordered {
+            let label = normalized(s.dayLabel)
+            seen[label, default: 0] += 1
+            out[s.persistentModelID] = DaySlot(label: label, occurrence: seen[label] ?? 1)
+        }
+        return out
+    }
+}
+
+extension Session {
+    /// This session's day slot within its block's week (nil without a block).
+    var daySlot: DaySlot? {
+        guard let meso else { return nil }
+        let week = weekIndex
+        return DaySlot.slots(ofWeek: meso.sessions.filter { $0.weekIndex == week })[persistentModelID]
+    }
+}
+
 extension Session {
     /// Day number within the training week (1...N), derived from this session's position
     /// among the sessions of the same meso and `weekInMeso`, in program order (date order for old data). Works for any

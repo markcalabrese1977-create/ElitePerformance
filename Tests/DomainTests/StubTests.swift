@@ -1828,13 +1828,13 @@ final class ProgramPlanPropagationTests: XCTestCase {
         XCTAssertEqual(targetSession.items.count, 3, "old(deleted) leaves A + B + C(appended) = 3")
     }
 
-    // PP: scope = same weekday AND same dayLabel AND same wave letter AND same meso; edited targets are skipped and counted.
+    // PP: scope = a later week of the same meso AND same day slot AND same wave letter; edited targets are skipped and counted.
     private func plannedSession(_ context: ModelContext, daysAhead: Int, label: String?, meso: MesoBlock?, wave: String? = nil, load: Double = 100, edited: Bool = false) -> (Session, SessionItem) {
         let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: load)
         item.waveRaw = wave
         item.planEdited = edited
         let date = Calendar.current.date(byAdding: .day, value: daysAhead, to: Date())!
-        let s = Session(date: date, status: .planned, weekIndex: 1, items: [item])
+        let s = Session(date: date, status: .planned, weekIndex: 1 + Int((Double(daysAhead) / 7).rounded(.down)), items: [item])   // a week per 7 days: propagation reaches LATER weeks
         s.dayLabel = label
         s.meso = meso
         context.insert(s)
@@ -3950,5 +3950,119 @@ final class ExerciseWaveOverrideTests: XCTestCase {
         XCTAssertEqual(overrides.addedByDay[dayId]?.count, 1,
             "addExercise must be idempotent: 3 calls with the same instance id must produce exactly 1 entry")
         XCTAssertEqual(overrides.addedByDay[dayId]?.first?.id, instanceId)
+    }
+}
+
+
+// MARK: - Apply to future matches the day slot (label + place in the week), never the weekday
+
+final class PropagationBySlotTests: XCTestCase {
+
+    private var retained: [ModelContainer] = []
+    private let cal = Calendar.current
+
+    private func makeContext() throws -> ModelContext {
+        let c = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        retained.append(c)
+        return ModelContext(c)
+    }
+
+    private func item(load: Double = 100, edited: Bool = false) -> SessionItem {
+        let i = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: load)
+        i.planEdited = edited
+        return i
+    }
+
+    /// Week 1 starts tomorrow; each entry is (week, label, dayOffsetWithinWeek, programIndex). Returns the sessions in input order.
+    @discardableResult
+    private func block(_ ctx: ModelContext, _ plan: [(Int, String, Int, Int)], edited: Set<Int> = []) -> (MesoBlock, [Session]) {
+        let b = MesoBlock(name: "Mine", startDate: Date(), status: .active, totalWeeks: 4)
+        ctx.insert(b)
+        let start = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
+        var out: [Session] = []
+        for (n, p) in plan.enumerated() {
+            let s = Session(date: cal.date(byAdding: .day, value: 7 * (p.0 - 1) + p.2, to: start)!, status: .planned, weekIndex: p.0,
+                            dayLabel: p.1, items: [item(edited: edited.contains(n))], programIndex: p.3)
+            s.meso = b; ctx.insert(s); out.append(s)
+        }
+        try? ctx.save()
+        return (b, out)
+    }
+
+    private func load(of s: Session) -> Double { s.items[0].suggestedLoad }
+
+    func test_aSessionSlidToAnotherWeekday_stillReceivesApplyToFuture() throws {
+        let ctx = try makeContext()
+        let (_, s) = block(ctx, [(1, "Upper A", 0, 1), (2, "Upper A", 0, 2), (3, "Upper A", 0, 3)])
+        s[1].date = cal.date(byAdding: .day, value: 1, to: s[1].date)!               // Rest today: Mon -> Tue
+        s[0].items[0].suggestedLoad = 200
+        let preview = ProgramPlanPropagationService.applyPlanEditsForward(from: s[0], in: ctx)
+        XCTAssertEqual(preview.sessionsToChange, 2)
+        XCTAssertEqual(load(of: s[1]), 200, "the slid session is still the next Upper A")
+        XCTAssertEqual(load(of: s[2]), 200)
+    }
+
+    func test_twoExtraSessionsInOneWeek_eachPropagatesOnlyToItsOwnOccurrence() throws {
+        let ctx = try makeContext()
+        let (_, s) = block(ctx, [(1, "Extra Session", 0, 1), (1, "Extra Session", 2, 2),
+                                 (2, "Extra Session", 0, 3), (2, "Extra Session", 2, 4),
+                                 (3, "Extra Session", 0, 5), (3, "Extra Session", 2, 6)])
+        s[1].items[0].suggestedLoad = 300                                            // the SECOND Extra Session of week 1
+        XCTAssertEqual(Set(ProgramPlanPropagationService.targets(from: s[1], in: ctx).map(\.persistentModelID)), [s[3].persistentModelID, s[5].persistentModelID])
+        ProgramPlanPropagationService.applyPlanEditsForward(from: s[1], in: ctx)
+        XCTAssertEqual([s[3], s[5]].map(load), [300, 300])
+        XCTAssertEqual([s[2], s[4]].map(load), [100, 100], "the first occurrence is untouched")
+        s[0].items[0].suggestedLoad = 150                                            // and the FIRST reaches only the first ones
+        XCTAssertEqual(Set(ProgramPlanPropagationService.targets(from: s[0], in: ctx).map(\.persistentModelID)), [s[2].persistentModelID, s[4].persistentModelID])
+    }
+
+    func test_aLaterWeekWithFewerOccurrences_isSkipped_withNoFallback() throws {
+        let ctx = try makeContext()
+        let (_, s) = block(ctx, [(1, "Extra Session", 0, 1), (1, "Extra Session", 2, 2),
+                                 (2, "Extra Session", 0, 3),                           // week 2 has only one
+                                 (3, "Extra Session", 0, 4), (3, "Extra Session", 2, 5)])
+        let targets = ProgramPlanPropagationService.targets(from: s[1], in: ctx)
+        XCTAssertEqual(targets.map(\.persistentModelID), [s[4].persistentModelID], "week 2 has no second occurrence, so it gets nothing")
+    }
+
+    func test_editedItemsWin_andAreCounted() throws {
+        let ctx = try makeContext()
+        let (_, s) = block(ctx, [(1, "Upper A", 0, 1), (2, "Upper A", 0, 2), (3, "Upper A", 0, 3)], edited: [2])
+        s[2].items[0].suggestedLoad = 111
+        s[0].items[0].suggestedLoad = 250
+        let preview = ProgramPlanPropagationService.preview(from: s[0], in: ctx)
+        XCTAssertEqual(preview, .init(sessionsToChange: 2, editedItemsSkipped: 1, sessionsWithSkippedItems: 1))
+        ProgramPlanPropagationService.applyPlanEditsForward(from: s[0], in: ctx)
+        XCTAssertEqual(load(of: s[1]), 250)
+        XCTAssertEqual(load(of: s[2]), 111, "the hand edit stays")
+    }
+
+    func test_theSlotFollowsProgramIndex_notTheDate() throws {
+        let ctx = try makeContext()
+        // Week 2: the Extra Session with programIndex 3 is DATED after the one with programIndex 4.
+        let (_, s) = block(ctx, [(1, "Extra Session", 0, 1), (1, "Extra Session", 1, 2),
+                                 (2, "Extra Session", 3, 3), (2, "Extra Session", 1, 4)])
+        XCTAssertEqual(s[2].daySlot, DaySlot(label: "extra session", occurrence: 1))
+        XCTAssertEqual(s[3].daySlot, DaySlot(label: "extra session", occurrence: 2))
+        XCTAssertEqual(ProgramPlanPropagationService.targets(from: s[0], in: ctx).map(\.persistentModelID), [s[2].persistentModelID],
+                       "occurrence 1 is the programIndex-3 session even though it is dated later")
+    }
+
+    func test_marksSwappedSessions_resolveByProgramIndex() throws {
+        let path = NSHomeDirectory().components(separatedBy: "/Library").first! + "/Downloads/ElitePerformance_Backup_v1_2026-11-25_18-57-55.json"
+        guard FileManager.default.fileExists(atPath: path) else { throw XCTSkip("backup not found") }
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        retained.append(container)
+        let ctx = ModelContext(container)
+        let block = try XCTUnwrap(try ctx.fetch(FetchDescriptor<MesoBlock>()).first { $0.status == .active && !$0.isMaintenance })
+        let legsB = try XCTUnwrap(block.sessions.first { $0.programIndex == 53 })   // planned Nov 26
+        let pullB = try XCTUnwrap(block.sessions.first { $0.programIndex == 54 })   // completed Nov 25: dated BEFORE pi 53
+        XCTAssertLessThan(pullB.date, legsB.date, "the swap this test is about")
+        XCTAssertEqual(legsB.daySlot, DaySlot(label: "legs b", occurrence: 1))
+        XCTAssertEqual(pullB.daySlot, DaySlot(label: "pull b", occurrence: 1))
+        let week9 = block.sessions.filter { $0.weekIndex == legsB.weekIndex }
+        let slots = DaySlot.slots(ofWeek: week9)
+        XCTAssertEqual(Set(slots.values.map(\.label)).count, slots.count, "every label in the week appears once: each is occurrence 1")
     }
 }
