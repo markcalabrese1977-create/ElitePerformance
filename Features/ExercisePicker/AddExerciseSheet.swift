@@ -27,9 +27,13 @@ struct CreateCustomExerciseSheet: View {
                     }
                 }
 
-                Section("Type") {
-                    Toggle("Compound movement", isOn: $isCompound)
+                Section {
+                    Toggle(CompoundExplainer.label, isOn: $isCompound)
                     Toggle("Bodyweight exercise", isOn: $isBodyweight)
+                } header: {
+                    Text("Type")
+                } footer: {
+                    Text(CompoundExplainer.footer)
                 }
 
                 Section {
@@ -91,7 +95,8 @@ struct CustomMuscleMappingSheet: View {
     private var compoundFootnote: String {
         let suggested = custom.map { MuscleSuggester.suggestedCompound(name: $0.name, coarse: MuscleGroup(rawValue: $0.primaryMuscleRaw) ?? .chest) } ?? false
         let state = custom?.isCompound == nil ? "not decided yet" : "your choice"
-        return "Suggested: \(suggested ? "compound" : "not compound") (\(state)). \(EffortTracking.mode == .detailed ? "Compound lifts record RIR with one tap and are judged on total reps." : EffortTracking.mode == .simple ? "Compound lifts record effort with one tap and are judged on total reps." : "Compound lifts are judged on total reps.")"
+        let effort = EffortTracking.mode == .detailed ? "Compound lifts record RIR with one tap." : EffortTracking.mode == .simple ? "Compound lifts record effort with one tap." : ""
+        return ["Suggested: \(suggested ? "compound" : "not compound") (\(state)).", effort, CompoundExplainer.footer].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     var body: some View {
@@ -108,7 +113,7 @@ struct CustomMuscleMappingSheet: View {
                     }
                 }
                 Section {
-                    Toggle("Compound lift", isOn: $compound)
+                    Toggle(CompoundExplainer.label, isOn: $compound)
                 } footer: {
                     Text(compoundFootnote)
                 }

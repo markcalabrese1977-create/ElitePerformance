@@ -165,10 +165,13 @@ struct CustomExerciseEditor: View {
                     }
                 }
                 Section {
-                    Toggle("Compound lift", isOn: $compound)
+                    Toggle(CompoundExplainer.label, isOn: $compound)
                     Toggle("Bodyweight exercise", isOn: $bodyweight)
                 } footer: {
-                    if exerciseId != nil { Text("Changes apply to future sessions; stored sets keep their values.") }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(CompoundExplainer.footer)
+                        if exerciseId != nil { Text("Changes apply to future sessions; stored sets keep their values.") }
+                    }
                 }
                 if let id = exerciseId {
                     Section {
@@ -278,4 +281,11 @@ struct CustomExerciseEditor: View {
         case .saveFailed: errorText = "Couldn't delete. Nothing was changed."
         }
     }
+}
+
+
+/// What the compound switch does, in the words every place that shows it uses (no logic: the rule itself lives in CoachingEngine).
+enum CompoundExplainer {
+    static let label = "Progress as a compound lift"
+    static let footer = "On: judged on total reps across all sets, with one rep of slack. Off: every set must reach the top of the range."
 }
