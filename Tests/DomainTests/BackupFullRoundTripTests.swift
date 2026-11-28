@@ -5966,6 +5966,23 @@ final class RepeatPerformanceValveTests: XCTestCase {
         EffortTracking.mode = .off
         XCTAssertFalse(CoachingEngine.priorExposureWasRIRHold(for: s2.items[0], in: s2, allSessions: [s1, s2]), "effort Off: there is no RIR hold")
     }
+
+    /// End to end, the way the app feeds it: a compound held by the RIR adjustment, then the SAME load and reps again. The prior-exposure input is
+    /// computed from the sessions (not hand-set); the verdict differs with and without it, and only the valve explains the difference.
+    func test_aHeldCompoundRepeatedAtTheSameLoadAndReps_isEarnedOnlyThroughThePriorExposure() throws {
+        let day: (Int) -> Date = { Date(timeIntervalSince1970: 1_700_000_000 + Double($0) * 86_400) }
+        func session(_ d: Int) -> Session { Session(date: day(d), status: .completed, weekIndex: d, dayLabel: "Push", items: [bench([8, 8, 8], rirs: [2, 1, 1])]) }
+        let first = session(1), second = session(8)
+        let all = [first, second]
+        XCTAssertEqual(try next(first.items[0], prior: CoachingEngine.priorExposureWasRIRHold(for: first.items[0], in: first, allSessions: all)).nextSuggestedLoad, 100, "first exposure: held (22 of 24)")
+        let computed = CoachingEngine.priorExposureWasRIRHold(for: second.items[0], in: second, allSessions: all)
+        XCTAssertTrue(computed, "the previous exposure was an RIR-adjustment hold")
+        let withInput = try next(second.items[0], prior: computed), withoutInput = try next(second.items[0], prior: false)
+        XCTAssertEqual(withoutInput.nextSuggestedLoad, 100, "without the prior input: held again")
+        XCTAssertEqual(withInput.nextSuggestedLoad, 105, "with it: the same reps again earn the increase")
+        XCTAssertTrue(withInput.message.hasPrefix("Same reps again at about planned effort — increase earned."), withInput.message)
+        XCTAssertNotEqual(withInput.message, withoutInput.message)
+    }
 }
 
 // MARK: - Planned arrays past targetSets stay 0 when a session is saved
