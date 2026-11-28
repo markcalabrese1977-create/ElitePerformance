@@ -96,39 +96,53 @@ struct HistoryView: View {
 
 // MARK: - History Row
 
+/// What a History row says (display only): the workout's name, then "Week N · Day N" and the readiness suffix. The date is the section header's.
+enum HistoryRowText {
+    static let fallbackTitle = "Workout"
+
+    /// The session's day label (the history snapshot first, then the live session's), or "Workout" when there is none.
+    static func title(snapshot: String?, sessionLabel: String?) -> String {
+        for raw in [snapshot, sessionLabel] {
+            if let t = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+        }
+        return fallbackTitle
+    }
+
+    /// "Week 11 · Day 1", then " · Poor sleep" when something was flagged. The day is the session's own place in its week (the D of W#D#);
+    /// a history whose session is gone shows the week alone.
+    static func subtitle(week: Int, day: Int?, readinessSuffix: String?) -> String {
+        var s = day.map { "Week \(week) · Day \($0)" } ?? "Week \(week)"
+        if let readinessSuffix, !readinessSuffix.isEmpty { s += " " + readinessSuffix }
+        return s
+    }
+
+    static func make(history: SessionHistory, session: Session?) -> (title: String, subtitle: String) {
+        let suffix = session.flatMap { ReadinessText.historySuffix(reasons: $0.readinessReasons, shortOnTime: $0.shortOnTime ?? false) }
+        return (title(snapshot: history.dayLabelSnapshot, sessionLabel: session?.dayLabel),
+                subtitle(week: session?.weekIndex ?? history.weekIndex, day: session?.positionInWeek, readinessSuffix: suffix))
+    }
+}
+
 private struct HistoryRow: View {
     @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var context
     let history: SessionHistory
 
-    /// "· Poor sleep" when the lifter flagged something before the first set; nil otherwise.
-    private var readinessSuffix: String? {
+    private var sourceSession: Session? {
         guard let id = history.sessionId else { return nil }
         var d = FetchDescriptor<Session>(predicate: #Predicate<Session> { $0.id == id })
         d.fetchLimit = 1
-        guard let s = (try? context.fetch(d))?.first else { return nil }
-        return ReadinessText.historySuffix(reasons: s.readinessReasons, shortOnTime: s.shortOnTime ?? false)
-    }
-
-    private var shortDate: String {
-        history.date.formatted(date: .abbreviated, time: .omitted)
+        return (try? context.fetch(d))?.first
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(shortDate)
-                        .font(.headline)
+        let text = HistoryRowText.make(history: history, session: sourceSession)
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text.title)
+                    .font(.headline)
 
-                    Text("Week \(history.weekIndex)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text(readinessSuffix.map { "\(shortDate) \($0)" } ?? shortDate)
+                Text(text.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -447,7 +461,7 @@ private struct HistoryDayDetailView: View {
             }
             .padding()
         }
-        .navigationTitle("Session Recap")
+        .navigationTitle(HistoryRowText.title(snapshot: history.dayLabelSnapshot, sessionLabel: sourceSession?.dayLabel))
         .navigationBarTitleDisplayMode(.inline)
     }
 

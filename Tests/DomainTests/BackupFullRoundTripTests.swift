@@ -6170,3 +6170,72 @@ final class BodyweightPhantomLoadTests: XCTestCase {
         XCTAssertTrue(snap.sets.allSatisfy { $0.plannedLoad == nil }, "the analytics plan column")
     }
 }
+
+// MARK: - History rows lead with the workout name
+
+@MainActor
+final class HistoryRowTextTests: XCTestCase {
+    private var retained: [ModelContainer] = []
+
+    private func history(_ date: Date, week: Int, label: String?, sessionId: UUID? = nil) -> SessionHistory {
+        SessionHistory(date: date, weekIndex: week, title: "t", subtitle: "s", totalExercises: 4, totalSets: 12, totalVolume: 1000, sessionId: sessionId, dayLabelSnapshot: label, exercises: [])
+    }
+
+    private func block(_ labels: [String?]) throws -> (ModelContext, [Session]) {
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        retained.append(container)
+        let ctx = ModelContext(container)
+        let meso = MesoBlock(name: "B", startDate: Date(timeIntervalSince1970: 1_800_000_000), status: .active, totalWeeks: 4); ctx.insert(meso)
+        var out: [Session] = []
+        for (i, l) in labels.enumerated() {
+            let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 86_400), status: .completed, weekIndex: 3, dayLabel: l, items: [], programIndex: i + 1)
+            s.meso = meso; ctx.insert(s); out.append(s)
+        }
+        try ctx.save()
+        return (ctx, out)
+    }
+
+    func test_theRowLeadsWithTheDayLabel_andTheSubtitleIsWeekAndDay() throws {
+        let (_, s) = try block(["Upper A", "Lower C"])
+        let h = history(s[1].date, week: 3, label: "Lower C", sessionId: s[1].id)
+        let t = HistoryRowText.make(history: h, session: s[1])
+        XCTAssertEqual(t.title, "Lower C")
+        XCTAssertEqual(t.subtitle, "Week 3 · Day 2", "the session's own place in its week, not the weekday")
+    }
+
+    func test_aSessionWithNoLabel_isCalledWorkout() throws {
+        let (_, s) = try block(["Upper A", nil])
+        XCTAssertEqual(HistoryRowText.make(history: history(s[1].date, week: 3, label: nil), session: s[1]).title, "Workout")
+        XCTAssertEqual(HistoryRowText.title(snapshot: "  ", sessionLabel: ""), "Workout", "blank is no label")
+        XCTAssertEqual(HistoryRowText.title(snapshot: nil, sessionLabel: nil), "Workout")
+        XCTAssertEqual(HistoryRowText.title(snapshot: nil, sessionLabel: " Push B "), "Push B", "the live session's label when the snapshot has none, trimmed")
+        XCTAssertEqual(HistoryRowText.title(snapshot: "Old name", sessionLabel: "New"), "Old name", "the snapshot wins, as the detail screen does")
+    }
+
+    func test_theReadinessSuffix_isStillAppended() throws {
+        let (_, s) = try block(["Lower C"])
+        s[0].readinessReasonsRaw = [ReadinessReason.poorSleep.rawValue]; s[0].shortOnTime = true
+        let t = HistoryRowText.make(history: history(s[0].date, week: 3, label: "Lower C"), session: s[0])
+        XCTAssertEqual(t.subtitle, "Week 3 · Day 1 · Poor sleep · Short on time")
+        XCTAssertEqual(HistoryRowText.subtitle(week: 3, day: 1, readinessSuffix: nil), "Week 3 · Day 1")
+    }
+
+    func test_aHistoryWhoseSessionIsGone_showsTheWeekAlone() {
+        let h = history(Date(), week: 7, label: "Pull A")
+        let t = HistoryRowText.make(history: h, session: nil)
+        XCTAssertEqual(t.title, "Pull A"); XCTAssertEqual(t.subtitle, "Week 7")
+    }
+
+    func test_noDateInTheRowText() throws {
+        let (_, s) = try block(["Lower C"])
+        s[0].readinessReasonsRaw = [ReadinessReason.stressed.rawValue]
+        let h = history(s[0].date, week: 3, label: "Lower C")
+        let t = HistoryRowText.make(history: h, session: s[0])
+        let all = t.title + " " + t.subtitle
+        for style in [Date.FormatStyle(date: .abbreviated, time: .omitted), Date.FormatStyle(date: .long, time: .omitted), Date.FormatStyle(date: .numeric, time: .omitted)] {
+            XCTAssertFalse(all.contains(h.date.formatted(style)), all)
+        }
+        XCTAssertNil(all.range(of: #"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d"#, options: .regularExpression), all)
+        XCTAssertNil(all.range(of: #"\b\d{1,2}/\d{1,2}"#, options: .regularExpression), all)
+    }
+}
