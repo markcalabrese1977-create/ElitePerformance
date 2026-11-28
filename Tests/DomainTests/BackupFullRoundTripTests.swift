@@ -6105,6 +6105,60 @@ final class BodyweightPhantomLoadTests: XCTestCase {
         XCTAssertEqual(started.plannedLoadsBySet, [220, 220, 220, 220], "an in-progress session is untouched")
     }
 
+    func test_historySetRow_showsNoPhantomPlanLoad_forABodyweightItem_andStillShowsAWeightedPlan() throws {
+        let bw = pullUp(phantom: 220)          // logged 0 x 5: a bodyweight set
+        XCTAssertEqual(ExerciseSessionDetailView.displayedLoad(of: bw, at: 0), 0, "not 220")
+        let logged = pullUp(phantom: 220, actual: 25)
+        XCTAssertEqual(ExerciseSessionDetailView.displayedLoad(of: logged, at: 0), 25, "a logged added load still shows")
+        let weighted = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 135,
+                                   plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [135, 135, 135], actualReps: [0, 0, 0], actualLoads: [0, 0, 0])
+        XCTAssertEqual(ExerciseSessionDetailView.displayedLoad(of: weighted, at: 1), 135, "a weighted set with nothing logged shows its plan, as before")
+        XCTAssertEqual(ExerciseSessionDetailView.displayedLoad(of: weighted, at: 9), 0)
+    }
+
+    /// Two recent completed sessions with soreness flagged (the volume-regulation signal reduces a set), the source holding an old phantom load.
+    private func fatigueChain(exercise: String, sourceSuggested: Double, sourceActual: Double, targetSets: Int = 4) throws -> (ModelContext, SessionItem) {
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        retained.append(container)
+        let ctx = ModelContext(container)
+        ctx.insert(User(units: .lb, progressionEnabled: true))
+        let meso = MesoBlock(name: "B", startDate: Date(timeIntervalSince1970: 1_800_000_000), status: .active, totalWeeks: 6); ctx.insert(meso)
+        func item(_ suggested: Double, actual: Double, done: Bool) -> SessionItem {
+            let i = SessionItem(order: 1, exerciseId: exercise, targetReps: 8, targetSets: targetSets, targetRIR: 2, suggestedLoad: suggested,
+                                plannedRepsBySet: Array(repeating: 8, count: targetSets), plannedLoadsBySet: Array(repeating: suggested, count: targetSets),
+                                actualReps: Array(repeating: done ? 8 : 0, count: targetSets), actualLoads: Array(repeating: done ? actual : 0, count: targetSets),
+                                actualRIRs: Array(repeating: done ? 2 : -1, count: targetSets))
+            if done { i.setFeedbackBySet = Array(repeating: SetFeedback.soreness.rawValue, count: targetSets); i.isCompleted = true }
+            return i
+        }
+        var source: SessionItem!
+        for (n, done) in [(0, true), (7, true), (14, true), (21, false)] {
+            let it = item(done ? sourceSuggested : 0, actual: sourceActual, done: done)
+            if n == 14 { source = it }
+            let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(n) * 86_400), status: done ? .completed : .planned, weekIndex: n / 7 + 1, dayLabel: "Pull A", items: [it], programIndex: n / 7 + 1)
+            s.meso = meso; ctx.insert(s)
+        }
+        try ctx.save()
+        let completedLast = try XCTUnwrap(ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date)])).first { $0.weekIndex == 3 })
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: completedLast, adoptBaseline: false)
+        let target = try XCTUnwrap(ctx.fetch(FetchDescriptor<Session>()).first { $0.weekIndex == 4 }?.items.first)
+        _ = source
+        return (ctx, target)
+    }
+
+    func test_volumeRegulationFill_neverCopiesAFinishedBodyweightItemsPhantomLoad() throws {
+        let (_, target) = try fatigueChain(exercise: "pull_up", sourceSuggested: 240, sourceActual: 0)
+        XCTAssertEqual(target.targetSets, 3, "the volume signal did reduce a set (the fill ran)")
+        XCTAssertEqual(target.suggestedLoad, 0); XCTAssertTrue(target.plannedLoadsBySet.allSatisfy { $0 == 0 }, "\(target.plannedLoadsBySet)")
+    }
+
+    func test_volumeRegulationFill_stillFillsFromAWeightedSource() throws {
+        let (_, target) = try fatigueChain(exercise: "bench_press", sourceSuggested: 100, sourceActual: 100)
+        XCTAssertEqual(target.targetSets, 3, "the volume signal did reduce a set (the fill ran)")
+        XCTAssertGreaterThan(target.suggestedLoad, 0)
+        XCTAssertTrue(target.plannedLoadsBySet.prefix(3).allSatisfy { $0 > 0 }, "\(target.plannedLoadsBySet)")
+    }
+
     func test_readersOfAFinishedBodyweightItem_ignoreItsPhantomPlanLoad() throws {
         let done = pullUp(phantom: 220); done.suggestedLoad = 240
         XCTAssertNil(MesoPerformanceAnalyzer.planLoadFallback(done), "the block summary's opening/closing load")

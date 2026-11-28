@@ -70,16 +70,21 @@ struct ExerciseSessionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// The load a set row shows: what was logged, else the planned load. A bodyweight item carries no plan load (an old phantom on a
+    /// finished one is never shown).
+    static func displayedLoad(of item: SessionItem, at idx: Int) -> Double {
+        let actualLoad = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
+        let plannedLoad = (idx < item.plannedLoadsBySet.count && !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId)) ? item.plannedLoadsBySet[idx] : 0
+        return actualLoad > 0 ? actualLoad : plannedLoad
+    }
+
     @ViewBuilder
     private func setRow(item: SessionItem, idx: Int) -> some View {
         let reps = (idx < item.actualReps.count ? item.actualReps[idx] : 0) > 0
             ? item.actualReps[idx]
             : (idx < item.plannedRepsBySet.count ? item.plannedRepsBySet[idx] : 0)
 
-        let actualLoad = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
-        // A bodyweight item carries no plan load (an old phantom on a finished one is not shown).
-        let plannedLoad = (idx < item.plannedLoadsBySet.count && !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId)) ? item.plannedLoadsBySet[idx] : 0
-        let load = actualLoad > 0 ? actualLoad : plannedLoad
+        let load = Self.displayedLoad(of: item, at: idx)
 
         // Logged RIR as "RIR n" (a word in Simple); a set with none shows the plan, marked "plan RIR n". Off shows no effort line.
         let effortLine: String? = {
