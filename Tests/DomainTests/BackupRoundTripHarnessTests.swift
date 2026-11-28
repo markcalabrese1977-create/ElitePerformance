@@ -2598,3 +2598,91 @@ final class LifterSimulationTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Launch check: what a first launch of this build changes in a real backup (report; completed sessions must show 0 changes)
+
+@MainActor
+final class LaunchCheckTests: XCTestCase {
+
+    private func flat(_ v: Any, _ path: String, _ out: inout [String: String]) {
+        if let d = v as? [String: Any] { for (k, x) in d { flat(x, path + "." + k, &out) } }
+        else if let arr = v as? [Any] { for (i, x) in arr.enumerated() { flat(x, path + "[\(i)]", &out) } }
+        else { out[path] = "\(v)" }
+    }
+
+    private func export(_ ctx: ModelContext) throws -> [String: Any] {
+        let r = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: ctx)
+        defer { try? FileManager.default.removeItem(at: r.url) }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: r.url)) as? [String: Any])
+    }
+
+    /// Import, export (baseline), run every registered startup backfill with every completion flag cleared (a first launch of this build), export again, and diff.
+    /// TEST_RUNNER_EP_LAUNCH_BACKUPS (comma-separated). The refresh clock is pinned to each backup's export time.
+    func test_launch_importBackfillRefreshExport_diff() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_LAUNCH_BACKUPS"], !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_LAUNCH_BACKUPS") }
+        EffortTracking.mode = .detailed
+        var saved: [String: Any] = [:]
+        for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v }
+        defer { for (k, v) in saved { UserDefaults.standard.set(v, forKey: k) }; PlaceholderRefresh.clock = { Date() } }
+        for path in list.split(separator: ",").map(String.init) {
+            for k in saved.keys { UserDefaults.standard.removeObject(forKey: k) }
+            if let at = FixtureClock.exportedAt(path) { PlaceholderRefresh.clock = { at } }
+            let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+            let ctx = ModelContext(container)
+            let before = try export(ctx)
+            // The launch, one backfill at a time (the same list and order `StartupBackfills.run` iterates), so a change is attributed to the backfill that made it.
+            let launchCtx = ModelContext(container)
+            var previous = before
+            func completedIDsChanged(_ a: [String: Any], _ z: [String: Any]) -> (completed: Int, planned: Int) {
+                func map(_ r: [String: Any]) -> [String: [String: Any]] { Dictionary(uniqueKeysWithValues: ((r["sessions"] as? [[String: Any]]) ?? []).compactMap { s in (s["id"] as? String).map { ($0, s) } }) }
+                let ma = map(a), mz = map(z); var c = 0, p = 0
+                for (id, x) in ma { guard let y = mz[id], NSDictionary(dictionary: x) != NSDictionary(dictionary: y) else { continue }; if (x["statusRaw"] as? String) == "completed" { c += 1 } else { p += 1 } }
+                return (c, p)
+            }
+            for backfill in StartupBackfills.registered {
+                BackfillLog.collector = []
+                backfill.run(launchCtx)
+                BackfillLog.collector = nil
+                let now = try export(launchCtx)
+                let d = completedIDsChanged(previous, now)
+                if d.completed + d.planned > 0 { print("LAUNCH| \(name): \(backfill.name) changed \(d.completed) completed, \(d.planned) planned/other sessions") }
+                previous = now
+            }
+            EffortTracking.resolveOnce(in: launchCtx); EffortTracking.sync(in: launchCtx)
+            let after = try export(ModelContext(container))
+            let name = URL(fileURLWithPath: path).lastPathComponent
+
+            func sessions(_ root: [String: Any]) -> [String: [String: Any]] {
+                Dictionary(uniqueKeysWithValues: ((root["sessions"] as? [[String: Any]]) ?? []).compactMap { s in (s["id"] as? String).map { ($0, s) } })
+            }
+            let sb = sessions(before), sa = sessions(after)
+            var completedChanged = 0, completedCount = 0, plannedChanged = 0, plannedCount = 0
+            var lines: [String] = []
+            for (id, b) in sb.sorted(by: { ($0.value["date"] as? String ?? "") < ($1.value["date"] as? String ?? "") }) {
+                guard let a = sa[id] else { lines.append("   session \(id) disappeared"); continue }
+                let status = (b["statusRaw"] as? String) ?? "?"
+                var fb: [String: String] = [:], fa: [String: String] = [:]; flat(b, "", &fb); flat(a, "", &fa)
+                let diffs = Set(fb.keys).union(fa.keys).sorted().filter { fb[$0] != fa[$0] }
+                if status == "completed" { completedCount += 1; if !diffs.isEmpty { completedChanged += 1; lines.append("   COMPLETED \(b["date"] ?? "") \(b["dayLabel"] ?? ""): \(diffs.prefix(6).map { "\($0): \(fb[$0] ?? "-") -> \(fa[$0] ?? "-")" })") } }
+                else { plannedCount += 1; if !diffs.isEmpty { plannedChanged += 1
+                    let items = (b["items"] as? [[String: Any]]) ?? []
+                    for d in diffs {
+                        var label = d
+                        if let r = d.range(of: #"^\.items\[(\d+)\]"#, options: .regularExpression), let idx = Int(d[r].filter(\.isNumber)), items.indices.contains(idx) { label = "\(items[idx]["exerciseNameSnapshot"] ?? items[idx]["exerciseId"] ?? "?") " + d[r.upperBound...] }
+                        lines.append("   planned \(b["date"] ?? "") W\(b["weekInMeso"] ?? "?") \(b["dayLabel"] ?? "?") [\(status)]: \(label): \(fb[d] ?? "-") -> \(fa[d] ?? "-")")
+                    } } }
+            }
+            var otherDiffs: [String] = []
+            for key in Set(before.keys).union(after.keys).sorted() where key != "sessions" && key != "exportedAt" && key != "metadata" {
+                var fb: [String: String] = [:], fa: [String: String] = [:]
+                if let v = before[key] { flat(v, key, &fb) }; if let v = after[key] { flat(v, key, &fa) }
+                for d in Set(fb.keys).union(fa.keys).sorted() where fb[d] != fa[d] { otherDiffs.append("\(d): \(fb[d] ?? "-") -> \(fa[d] ?? "-")") }
+            }
+            print("LAUNCH| \(name): completed sessions \(completedCount), changed \(completedChanged); planned/other sessions \(plannedCount), changed \(plannedChanged); other-section field changes \(otherDiffs.count)")
+            for l in lines { print("LAUNCH|\(l)") }
+            for o in otherDiffs.prefix(40) { print("LAUNCH|   other: \(o)") }
+            // A report, not a gate: the per-backfill lines above attribute every change (a restore clears the completion flags, so this is the restore-time launch).
+        }
+    }
+}
