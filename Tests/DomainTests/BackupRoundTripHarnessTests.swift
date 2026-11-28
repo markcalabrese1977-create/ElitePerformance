@@ -2617,7 +2617,7 @@ final class LaunchCheckTests: XCTestCase {
     }
 
     /// Import, export (baseline), run every registered startup backfill with every completion flag cleared (a first launch of this build), export again, and diff.
-    /// TEST_RUNNER_EP_LAUNCH_BACKUPS (comma-separated). The refresh clock is pinned to each backup's export time.
+    /// TEST_RUNNER_EP_LAUNCH_BACKUPS (comma-separated; the gate exports Mark Nov 22, Mark Nov 25 18:57 and Angela Nov 27 19:06). The refresh clock is pinned to each backup's export time.
     func test_launch_importBackfillRefreshExport_diff() throws {
         guard let list = ProcessInfo.processInfo.environment["EP_LAUNCH_BACKUPS"], !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_LAUNCH_BACKUPS") }
         EffortTracking.mode = .detailed
@@ -2634,6 +2634,12 @@ final class LaunchCheckTests: XCTestCase {
             // The launch, one backfill at a time (the same list and order `StartupBackfills.run` iterates), so a change is attributed to the backfill that made it.
             let launchCtx = ModelContext(container)
             var previous = before
+            // A backup from before 1.4 carries no `loadEverWritten` and still holds duplicate custom exercises: the two one-time migrations that fill those in
+            // (each with its own completion flag and tests) legitimately touch completed sessions of such a backup, once. Nothing else may, and a backup taken
+            // after a 1.4 launch allows nothing at all.
+            let isPre14 = !(((before["sessions"] as? [[String: Any]]) ?? []).contains { (($0["items"] as? [[String: Any]]) ?? []).contains { $0["loadEverWritten"] != nil } })
+            let allowedOnCompleted: Set<String> = isPre14 ? ["LoadEverWrittenBackfill", "CustomExerciseDedupMigration"] : []
+            var disallowedCompletedChanges = 0
             func completedIDsChanged(_ a: [String: Any], _ z: [String: Any]) -> (completed: Int, planned: Int) {
                 func map(_ r: [String: Any]) -> [String: [String: Any]] { Dictionary(uniqueKeysWithValues: ((r["sessions"] as? [[String: Any]]) ?? []).compactMap { s in (s["id"] as? String).map { ($0, s) } }) }
                 let ma = map(a), mz = map(z); var c = 0, p = 0
@@ -2646,6 +2652,7 @@ final class LaunchCheckTests: XCTestCase {
                 BackfillLog.collector = nil
                 let now = try export(launchCtx)
                 let d = completedIDsChanged(previous, now)
+                if !allowedOnCompleted.contains(backfill.name) { disallowedCompletedChanges += d.completed }
                 if d.completed + d.planned > 0 { print("LAUNCH| \(name): \(backfill.name) changed \(d.completed) completed, \(d.planned) planned/other sessions") }
                 previous = now
             }
@@ -2682,7 +2689,9 @@ final class LaunchCheckTests: XCTestCase {
             print("LAUNCH| \(name): completed sessions \(completedCount), changed \(completedChanged); planned/other sessions \(plannedCount), changed \(plannedChanged); other-section field changes \(otherDiffs.count)")
             for l in lines { print("LAUNCH|\(l)") }
             for o in otherDiffs.prefix(40) { print("LAUNCH|   other: \(o)") }
-            // A report, not a gate: the per-backfill lines above attribute every change (a restore clears the completion flags, so this is the restore-time launch).
+            // The per-backfill lines above attribute any change. A completed session is history: a launch (a restore clears the completion flags) never changes one.
+            print("LAUNCH| \(name): \(isPre14 ? "pre-1.4 backup (LoadEverWrittenBackfill and CustomExerciseDedupMigration allowed once)" : "post-1.4 backup (no completed change allowed)"); completed-session changes outside the allowance: \(disallowedCompletedChanges)")
+            XCTAssertEqual(disallowedCompletedChanges, 0, "\(name): \(disallowedCompletedChanges) completed session(s) changed on launch by a backfill that may not")
         }
     }
 }

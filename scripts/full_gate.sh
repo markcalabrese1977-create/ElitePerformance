@@ -28,6 +28,13 @@ for f in "${PB1:-}" "${PB2:-}" "${GATE_SW_ANGELA_1120:-$HOME/Downloads/ElitePerf
   [ -f "$f" ] && SW_LIST="${SW_LIST:+$SW_LIST,}$f"
 done
 [ -n "$SW_LIST" ] && export TEST_RUNNER_EP_SW_BACKUPS="$SW_LIST"
+# LaunchCheckTests: a first launch of this build (every startup backfill, completion flags cleared, as after a restore) changes no completed session
+# on Mark's Nov 22 and Nov 25 18:57 backups and Angela's Nov 27 19:06 backup. Only files that exist are listed.
+LC_LIST=""
+for f in "${PB1:-}" "${GATE_SW_MARK_1125:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-25_18-57-55.json}" "${PB2:-}"; do
+  [ -f "$f" ] && LC_LIST="${LC_LIST:+$LC_LIST,}$f"
+done
+[ -n "$LC_LIST" ] && export TEST_RUNNER_EP_LAUNCH_BACKUPS="$LC_LIST"
 scripts/run_bounded.sh > "$OUT_DIR/full.out" 2>&1
 grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"
 
