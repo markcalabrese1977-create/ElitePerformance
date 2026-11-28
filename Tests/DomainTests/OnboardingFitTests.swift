@@ -885,7 +885,8 @@ final class ExercisePickerTests: XCTestCase {
         XCTAssertTrue(list.contains(".swipeActions(edge: .leading)"))
         XCTAssertTrue(list.contains("CustomMuscleMappingSheet(exerciseId:"))
         let editor = try text("Features/ExercisePicker/AddExerciseSheet.swift")
-        XCTAssertTrue(editor.contains("Toggle(\"Compound lift\""), "the editor edits the Compound lift setting")
+        XCTAssertTrue(editor.contains("Toggle(CompoundExplainer.label"), "the editor edits the compound setting, under its one shared label")
+        XCTAssertEqual(CompoundExplainer.label, "Progress as a compound lift")
         XCTAssertTrue(editor.contains("c.isCompound = compound"))
     }
 

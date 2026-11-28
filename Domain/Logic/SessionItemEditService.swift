@@ -2736,12 +2736,18 @@ extension SessionItemEditService {
                     .max(by: { $0.date < $1.date }) else { continue }
             let firstRemaining = remaining.sorted { $0.date < $1.date }
             let waveBackup = source.items.map { ($0, $0.waveRaw) }
+            // The replay may adopt the logged load as a baseline on a completed item that had none (it is what lets the next session be written);
+            // that is carry-forward's job after a session, not a change to this one: the completed item is put back exactly as it was.
+            let historyBackup = source.items.map { ($0, $0.suggestedLoad, $0.prescriptionNotes, $0.coachNote, $0.updatedAt, $0.loadEverWritten) }
             for item in source.items where item.waveRaw?.lowercased() != "deload" { item.waveRaw = nil }
             // Plan loads on the first remaining session before the replay, to see what it wrote.
             let first = firstRemaining[0]
             let loadsBefore = Dictionary(uniqueKeysWithValues: first.items.map { ($0.persistentModelID, ($0.suggestedLoad, $0.plannedLoadsBySet)) })
             engine.carryForwardPlans(from: source)
             for (item, wave) in waveBackup { item.waveRaw = wave }
+            for (item, suggested, notes, coach, updated, written) in historyBackup {
+                item.suggestedLoad = suggested; item.prescriptionNotes = notes; item.coachNote = coach; item.updatedAt = updated; item.loadEverWritten = written
+            }
             // Every later remaining session of that day takes the load the first one was given (planEdited ones keep theirs).
             for firstItem in first.items {
                 guard let was = loadsBefore[firstItem.persistentModelID],

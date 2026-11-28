@@ -1293,6 +1293,10 @@ final class SameEveryWeekReferenceTests: XCTestCase {
                 guard let meso = try c.fetch(FetchDescriptor<MesoBlock>()).first(where: { $0.status == .active }),
                       !Service.sameWeekTypes(in: meso).isEmpty else { print("PROP| \(path): no wave block"); continue }
                 let plan = Service.planSameEveryWeek(meso: meso, keep: keep, context: c)
+                if plan.refusal == .noUnstartedSessions || plan.refusal == .unknownWeekType {
+                    // A backup taken after the conversion (Angela's Nov 27 19:06): no unstarted session still carries a letter (so no letter to keep, nothing to convert).
+                    print("PROP| \(URL(fileURLWithPath: path).lastPathComponent) keep=\(keep): already converted (\(plan.refusal.map { "\($0)" } ?? ""))"); continue
+                }
                 XCTAssertNil(plan.refusal, "\(path) keep \(keep)")
                 let names = plan.unmatched.map { SameWeekText.unmatchedLine($0) }
                 try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
