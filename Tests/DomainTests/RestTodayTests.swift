@@ -1276,10 +1276,13 @@ final class SameEveryWeekReferenceTests: XCTestCase {
         XCTAssertEqual(divergentGroups(b, plan: plan), [])
     }
 
-    /// Both real backups, keep = A, B and C: zero divergent groups outside unmatched / planEdited / deload. Needs the backups
-    /// (TEST_RUNNER_EP_SW_BACKUPS, comma separated); the report lists what was checked.
+    /// The real backups, keep = A, B and C: zero divergent groups outside unmatched / planEdited / deload. Runs on the golden test's backups
+    /// (TEST_RUNNER_EP_POLICY_BACKUPS, which the gate exports) or on TEST_RUNNER_EP_SW_BACKUPS; the report lists what was checked.
     func test_property_onTheRealBackups_forEveryKeptLetter() throws {
-        guard let list = ProcessInfo.processInfo.environment["EP_SW_BACKUPS"], !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_SW_BACKUPS") }
+        // The same backups the golden CoachingPolicy test uses (the gate exports them), unless TEST_RUNNER_EP_SW_BACKUPS names others.
+        let env = ProcessInfo.processInfo.environment
+        let list = [env["EP_SW_BACKUPS"], env["EP_POLICY_BACKUPS"]].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+        guard !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_POLICY_BACKUPS (the gate does) or TEST_RUNNER_EP_SW_BACKUPS") }
         var checked = 0
         for path in list.split(separator: ",").map(String.init) {
             for keep in ["a", "b", "c"] {

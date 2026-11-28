@@ -2,7 +2,8 @@
 # Bounded test runner: build-for-testing (20 min cap), then test-without-building under a watchdog.
 #
 # Usage: scripts/run_bounded.sh [-- <extra xcodebuild test flags, e.g. -only-testing:... -skip-testing:...>]
-# Env:   SIM_NAME   simulator name (default "iPhone 17 Pro")
+# Env:   SIM_NAME   simulator name (default: the first of "iPhone 17 Pro", "iPhone 17", "iPhone 18 Pro" that exists here;
+#                  an explicit SIM_NAME that does not exist fails fast, listing the available simulators)
 #        OUT_DIR    logs + DerivedData (default ${TMPDIR:-/tmp}/ep_bounded; keep it outside the repo)
 #        TEST_RUNNER_*  forwarded to the test host by xcodebuild
 #
@@ -12,14 +13,23 @@
 # Exit: 0 PASS, 1 FAIL, 2 CRASH/HANG/TIMEOUT, 3 build problem.
 
 cd "$(dirname "$0")/.." || exit 3
-SIM_NAME="${SIM_NAME:-iPhone 17 Pro}"
 OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/ep_bounded}"
 BUILD_CAP=1200; TEST_CAP=480; SAMPLE_SILENCE=120; KILL_SILENCE=240
 EXTRA=(); [ "${1:-}" = "--" ] && { shift; EXTRA=("$@"); }
 mkdir -p "$OUT_DIR"; DD="$OUT_DIR/DD"; BLOG="$OUT_DIR/build.log"; TLOG="$OUT_DIR/test.log"
 DIAG="$HOME/Library/Logs/DiagnosticReports"
-SIM_ID="$(xcrun simctl list devices available | grep -F "$SIM_NAME (" | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | tail -1)"
-[ -n "$SIM_ID" ] || { echo "no simulator named '$SIM_NAME'"; echo "VERDICT: BUILD_FAILED"; exit 3; }
+sim_id_for() { xcrun simctl list devices available | grep -F "$1 (" | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | tail -1; }
+if [ -n "${SIM_NAME:-}" ]; then
+  SIM_ID="$(sim_id_for "$SIM_NAME")"
+else
+  for cand in "iPhone 17 Pro" "iPhone 17" "iPhone 18 Pro"; do SIM_ID="$(sim_id_for "$cand")"; [ -n "$SIM_ID" ] && { SIM_NAME="$cand"; break; }; done
+fi
+if [ -z "$SIM_ID" ]; then
+  echo "no simulator named '${SIM_NAME:-iPhone 17 Pro / iPhone 17 / iPhone 18 Pro}'. Available simulators (set SIM_NAME to one of these):"
+  xcrun simctl list devices available | grep -E "^ +iPhone|^ +iPad" | sed -E 's/ \([0-9A-F-]{36}\)//; s/^ +/  /'
+  echo "VERDICT: BUILD_FAILED"; exit 3
+fi
+echo "[sim] $SIM_NAME ($SIM_ID)"
 DEST="platform=iOS Simulator,id=$SIM_ID"
 COMMON=(-project ElitePerformance.xcodeproj -scheme ElitePerformance -destination "$DEST" -derivedDataPath "$DD")
 
