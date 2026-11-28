@@ -47,7 +47,12 @@ struct PlanMemoryEngine {
 
     /// Carry today's plan forward into the next future session(s)
     /// where plan is still empty.
-    func carryForwardPlans(from session: Session) {
+    ///
+    /// `adoptBaseline`: whether a source item with no planned load may take the load actually lifted as its baseline
+    /// (`adoptPerformedLoadAsBaseline`, which WRITES `suggestedLoad` on the source item). True only for the save that completes the
+    /// session: the item is still the lifter's live session. A session that was already completed is history and is never written
+    /// through adoption: a re-save of it and the "Make every week the same" replay both pass false.
+    func carryForwardPlans(from session: Session, adoptBaseline: Bool = true) {
         guard session.status == .inProgress || session.status == .completed else { return }
 
         let inputs = loadPolicyInputs()
@@ -75,7 +80,7 @@ struct PlanMemoryEngine {
         for sourceItem in session.items {
             // A plan with no load at all (a block the lifter wrote, a lift swapped in mid-block) has no baseline for the coach to
             // judge against: the load actually lifted becomes it, so the next session is written from what was done.
-            let adoptedBaseline = Self.adoptPerformedLoadAsBaseline(
+            let adoptedBaseline = adoptBaseline && Self.adoptPerformedLoadAsBaseline(
                 sourceItem, isExempt: UserProfile.isProgressionExempt(exerciseId: sourceItem.exerciseId, profile: profile))
             // The step is per exercise: the lifter's own step for this lift, else the default load step.
             let loadIncrement = UserProfile.loadStep(for: sourceItem.exerciseId, profile: profile, unit: unit)

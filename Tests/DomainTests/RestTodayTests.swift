@@ -1216,6 +1216,87 @@ final class SameEveryWeekReferenceTests: XCTestCase {
         }.sorted()
     }
 
+    // MARK: Adoption never writes to a completed item (the swap that carries no planned load)
+
+    /// The hammer block whose completed week-1 Combination Curl is a swap with a zero plan: performed 20 x 10, nothing planned, edited by hand.
+    private func swapBlock(_ c: ModelContext) throws -> (MesoBlock, Session, SessionItem) {
+        let b = try hammerBlock(c)
+        let w1 = try XCTUnwrap(b.sessions.first { $0.weekIndex == 1 })
+        let swap = try XCTUnwrap(w1.items.first { $0.exerciseId == "combination_curl" })
+        swap.suggestedLoad = 0; swap.plannedLoadsBySet = Array(repeating: 0, count: swap.targetSets); swap.planEdited = true
+        try c.save()
+        return (b, w1, swap)
+    }
+
+    /// The completed session exactly as a backup would write it (every stored field), so "byte-identical" means the exported bytes.
+    private func exported(_ c: ModelContext, _ s: Session) throws -> Data {
+        let result = try BackupSnapshotExporter.exportFullBackupJSON(modelContext: c)
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: result.url)) as? [String: Any])
+        let sessions = try XCTUnwrap(root["sessions"] as? [[String: Any]])
+        let mine = try XCTUnwrap(sessions.first { ($0["id"] as? String) == s.id?.uuidString }, "the session is in the export")
+        return try JSONSerialization.data(withJSONObject: mine, options: [.sortedKeys])
+    }
+
+    func test_conversion_ofABlockWhoseCompletedWeekOneItemIsAZeroPlanSwap_convertsAndLeavesThatItemByteIdentical() throws {
+        let c = try ctx(); let (b, w1, swap) = try swapBlock(c)
+        let before = try exported(c, w1)
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertNil(plan.refusal, "the swap on a completed item must not read as touching history")
+        XCTAssertGreaterThan(plan.itemsChanged, 0)
+        try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+        XCTAssertEqual(try exported(c, w1), before, "the completed week-1 session is byte-identical")
+        XCTAssertEqual(swap.suggestedLoad, 0); XCTAssertEqual(swap.waveRaw, "a"); XCTAssertTrue(swap.planEdited)
+        XCTAssertEqual(items(b, "hammer_curl").map(\.week), [2, 3, 4, 5, 6, 7, 8, 9], "and the unstarted weeks converted")
+    }
+
+    func test_theSameCompletedItem_staysByteIdenticalThroughEveryPathThatCanReachIt() throws {
+        let c = try ctx(); let (b, w1, swap) = try swapBlock(c)
+        let initial = try exported(c, w1)
+
+        // 1. Re-saving the completed session (the SessionView save passes adoptBaseline: false for a session already completed).
+        PlanMemoryEngine(context: c).carryForwardPlans(from: w1, adoptBaseline: false); try c.save()
+        XCTAssertEqual(try exported(c, w1), initial, "byte-identical after: carry-forward on a re-save"); XCTAssertEqual(swap.suggestedLoad, 0)
+        // The view model's save also pads a fixture's short per-set arrays to the set count (it does that on every first save of any session, adoption or not),
+        // so it gets one settling save; what matters is that it writes no load: suggested and planned loads are the zero plan still, and a second save changes nothing.
+        let vm = SessionScreenViewModel(session: w1)
+        vm.persist(using: c); try c.save()
+        XCTAssertEqual(swap.suggestedLoad, 0, "the save wrote no baseline"); XCTAssertTrue(swap.plannedLoadsBySet.allSatisfy { $0 == 0 })
+        let settled = try exported(c, w1)
+        vm.persist(using: c); try c.save()
+        XCTAssertEqual(try exported(c, w1), settled, "a second save of the completed session changes nothing")
+        let before = settled
+        func unchanged(_ path: String) throws { XCTAssertEqual(try exported(c, w1), before, "byte-identical after: \(path)"); XCTAssertEqual(swap.suggestedLoad, 0, path) }
+
+        // 2. PlaceholderRefresh: the launch run and the after-completion run.
+        _ = PlaceholderRefresh.run(in: c); try c.save()
+        try unchanged("PlaceholderRefresh.run")
+        PlaceholderRefresh.afterCompletion(in: c); try c.save()
+        try unchanged("PlaceholderRefresh.afterCompletion")
+
+        // 3. Every registered startup backfill, with its completion flags cleared (a first launch).
+        var saved: [String: Any] = [:]
+        for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasSuffix(".completed") { saved[k] = v; UserDefaults.standard.removeObject(forKey: k) }
+        defer { for (k, v) in saved { UserDefaults.standard.set(v, forKey: k) } }
+        for backfill in StartupBackfills.registered { backfill.run(c); try unchanged("startup backfill \(backfill.name)") }
+
+        // 4. The conversion replay (planning replays it too; applying runs it for real).
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertNil(plan.refusal)
+        try unchanged("planSameEveryWeek")
+        try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+        try unchanged("applySameEveryWeek")
+    }
+
+    func test_theCompletingSave_stillAdoptsTheLoggedLoad_asBaseline() throws {
+        // The one place adoption is allowed: the save that completes the session (the item is still the lifter's live session).
+        let c = try ctx(); let (b, w1, swap) = try swapBlock(c)
+        w1.status = .inProgress; w1.completedAt = nil; try c.save()
+        PlanMemoryEngine(context: c).carryForwardPlans(from: w1, adoptBaseline: true)
+        XCTAssertEqual(swap.suggestedLoad, 20, "the load lifted became its baseline")
+        _ = b
+    }
+
     func test_hammerCurl_everyWeekBecomesTheAWeek_whenTheOnlyAItemsArePlanned() throws {
         let c = try ctx(); let b = try hammerBlock(c)
         let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)

@@ -2296,6 +2296,8 @@ final class SessionScreenViewModel: ObservableObject {
 
     /// Push current UI state into the underlying `Session` / `SessionItem`s.
     func persist(using context: ModelContext) {
+        // A session that was already completed when this save began is history: carry-forward may read it but never writes a baseline into it.
+        let wasAlreadyCompleted = session.status == .completed
         for uiExercise in exercises {
                     guard let item = Self.sessionItem(for: uiExercise, in: session)
                     ?? session.items.first(where: { $0.exerciseId == uiExercise.exerciseId }) else {
@@ -2417,7 +2419,7 @@ final class SessionScreenViewModel: ObservableObject {
         // ✅ Plan Memory v1 – only carry plans forward once the session is completed.
         if session.status == .completed {
             let planMemory = PlanMemoryEngine(context: context)
-            planMemory.carryForwardPlans(from: session)
+            planMemory.carryForwardPlans(from: session, adoptBaseline: !wasAlreadyCompleted)
             // Stale placeholder loads (incomplete or missing evidence in a chain): the same rule as the startup backfill.
             PlaceholderRefresh.afterCompletion(in: context)
         }
