@@ -157,21 +157,19 @@ struct ProgramPlanPropagationService {
     }
 }
 
-// MARK: - Apply to the block (by day slot)
+// MARK: - Apply to the block (by position)
 
 extension ProgramPlanPropagationService {
-    /// Future planned sessions of the SOURCE's meso in the same day slot (`DaySlot`: dayLabel plus its place among that week's sessions of
-    /// the label, by programIndex), in ANY week. Two "Extra Session"s in one week are two slots: an edit reaches only its own occurrence
-    /// in each week, and a week with no session at that place is skipped. Never another meso, never the source.
+    /// Future planned sessions of the SOURCE's meso with the same (trimmed) dayLabel. Never another meso.
     static func blockTargets(from source: Session, in context: ModelContext) -> [Session] {
-        guard !WavePrescriptionGuard.isWaveBasedBlock(source), let meso = source.meso, let slot = source.daySlot, !slot.label.isEmpty else { return [] }
+        guard !WavePrescriptionGuard.isWaveBasedBlock(source), let meso = source.meso else { return [] }
+        let label = source.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !label.isEmpty else { return [] }
         let today = Calendar.current.startOfDay(for: Date())
-        var out: [Session] = []
-        for (_, sessions) in Dictionary(grouping: meso.sessions, by: { $0.weekIndex }) {
-            let slots = DaySlot.slots(ofWeek: sessions)
-            out += sessions.filter { $0.id != source.id && $0.status == .planned && $0.date > today && slots[$0.persistentModelID] == slot }
+        return meso.sessions.filter {
+            $0.id != source.id && $0.status == .planned && $0.date > today &&
+            ($0.dayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") == label
         }
-        return out.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
     }
 
     static func blockPreview(from source: Session, in context: ModelContext) -> Preview {

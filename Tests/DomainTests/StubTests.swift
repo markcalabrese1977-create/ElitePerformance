@@ -1936,8 +1936,8 @@ final class ProgramPlanPropagationTests: XCTestCase {
         let mesoB = MesoBlock(name: "B", startDate: Date(), totalWeeks: 8)
         context.insert(mesoA); context.insert(mesoB)
         let (source, _) = plannedSession(context, daysAhead: 0, label: "Push", meso: mesoA, load: 250)
-        let (t1, i1) = plannedSession(context, daysAhead: 7, label: "Push", meso: mesoA)            // a week per 7 days: one Push per week = one slot
-        let (t2, i2) = plannedSession(context, daysAhead: 14, label: "Push", meso: mesoA, load: 111, edited: true)
+        let (t1, i1) = plannedSession(context, daysAhead: 3, label: "Push", meso: mesoA)
+        let (t2, i2) = plannedSession(context, daysAhead: 10, label: "Push", meso: mesoA, load: 111, edited: true)
         let (t3, i3) = plannedSession(context, daysAhead: 11, label: "Push", meso: mesoB)
         for s in [source, t1, t2, t3] { s.meso!.sessions.append(s) }
         try context.save()
@@ -4023,42 +4023,6 @@ final class PropagationBySlotTests: XCTestCase {
                                  (3, "Extra Session", 0, 4), (3, "Extra Session", 2, 5)])
         let targets = ProgramPlanPropagationService.targets(from: s[1], in: ctx)
         XCTAssertEqual(targets.map(\.persistentModelID), [s[4].persistentModelID], "week 2 has no second occurrence, so it gets nothing")
-    }
-
-    func test_applyToBlock_twoExtraSessionsInOneWeek_eachReachesOnlyItsOwnOccurrence() throws {
-        let ctx = try makeContext()
-        let (_, s) = block(ctx, [(1, "Extra Session", 0, 1), (1, "Extra Session", 2, 2),
-                                 (2, "Extra Session", 0, 3), (2, "Extra Session", 2, 4),
-                                 (3, "Extra Session", 0, 5), (3, "Extra Session", 2, 6)])
-        s[1].items[0].suggestedLoad = 300                                            // the SECOND Extra Session of week 1
-        XCTAssertEqual(Set(ProgramPlanPropagationService.blockTargets(from: s[1], in: ctx).map(\.persistentModelID)), [s[3].persistentModelID, s[5].persistentModelID],
-                       "not the first occurrence of ANY week, and not the other session of its own week")
-        XCTAssertEqual(ProgramPlanPropagationService.blockPreview(from: s[1], in: ctx).sessionsToChange, 2)
-        ProgramPlanPropagationService.applyToBlock(from: s[1], in: ctx)
-        XCTAssertEqual([s[3], s[5]].map(load), [300, 300])
-        XCTAssertEqual([s[0], s[2], s[4]].map(load), [100, 100, 100], "the first occurrences are untouched, including the one in the source's own week")
-        s[0].items[0].suggestedLoad = 150                                            // and the FIRST reaches only the first ones
-        XCTAssertEqual(Set(ProgramPlanPropagationService.blockTargets(from: s[0], in: ctx).map(\.persistentModelID)), [s[2].persistentModelID, s[4].persistentModelID])
-    }
-
-    func test_applyToBlock_aWeekWithFewerOccurrences_isSkipped_withNoFallback() throws {
-        let ctx = try makeContext()
-        let (_, s) = block(ctx, [(1, "Extra Session", 0, 1), (1, "Extra Session", 2, 2),
-                                 (2, "Extra Session", 0, 3),
-                                 (3, "Extra Session", 0, 4), (3, "Extra Session", 2, 5)])
-        XCTAssertEqual(ProgramPlanPropagationService.blockTargets(from: s[1], in: ctx).map(\.persistentModelID), [s[4].persistentModelID])
-    }
-
-    func test_applyToBlock_singleOccurrenceBlocksAreUnchanged_everyWeekBothWays_editedItemsWin() throws {
-        let ctx = try makeContext()
-        let (_, s) = block(ctx, [(1, "Upper A", 0, 1), (1, "Lower A", 2, 2), (2, "Upper A", 0, 3), (2, "Lower A", 2, 4), (3, "Upper A", 0, 5)], edited: [4])
-        s[2].items[0].suggestedLoad = 250                                            // from the MIDDLE week: reaches earlier and later weeks alike
-        XCTAssertEqual(Set(ProgramPlanPropagationService.blockTargets(from: s[2], in: ctx).map(\.persistentModelID)), [s[0].persistentModelID, s[4].persistentModelID])
-        XCTAssertEqual(ProgramPlanPropagationService.blockPreview(from: s[2], in: ctx), .init(sessionsToChange: 2, editedItemsSkipped: 1, sessionsWithSkippedItems: 1))
-        ProgramPlanPropagationService.applyToBlock(from: s[2], in: ctx)
-        XCTAssertEqual(load(of: s[0]), 250)
-        XCTAssertEqual(load(of: s[4]), 100, "the hand-edited item keeps its value")
-        XCTAssertEqual(load(of: s[1]), 100, "another day type is never touched")
     }
 
     func test_editedItemsWin_andAreCounted() throws {
