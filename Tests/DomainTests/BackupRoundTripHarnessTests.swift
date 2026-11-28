@@ -1675,6 +1675,14 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
         var reps: [Int], loads: [Double], rirs: [Int]
         var baseLoad: Double, kind: String, next: Double?, nextTop: Double?, message: String
         var presc: Int = 0, setMax: Int = 0, setMin: Int = 0, lastCounted: Double = 0
+        // Added with the widened generator (golden v2). Everything above is exactly what the earlier dumps carried.
+        var isCompound: Bool? = nil          // false = an isolation lift (decided on reps alone, never on RIR)
+        var priorHold: Bool? = nil           // the previous exposure of this lift was an RIR-adjustment hold (the valve's input, computed as the app computes it)
+        var valveFired: Bool? = nil          // the decision differs with that input: the repeat-performance valve is what earned it
+        var uninformative: Bool? = nil       // the lifter-level rule: every recent rating is 0, so RIR is ignored
+        var repMin: Int? = nil, repMax: Int? = nil
+        var totalReps: Int? = nil            // reps the coach line counted, as the line states them
+        var needed: Int? = nil               // reps needed for an increase, as the line states them
     }
 
     /// Writes one JSON array per backup to EP_PROG_OUT (a path prefix); the old and the new code each write theirs, and a diff lists the changes.
@@ -1694,10 +1702,20 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
             let sessions = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
             var rows: [Row] = []
             for s in sessions where s.status == .completed && (allHistory || s.meso?.status == .active) && s.meso?.isMaintenance != true {
-                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                for i in s.items where i.waveRaw?.lowercased() != "deload" {
                     let working = CoachingEngine.workingSetIndices(for: i)
                     guard !working.isEmpty else { continue }
-                    let rec = CoachingEngine.recommend(for: i, profile: profile, ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: sessions, policy: .shipped))
+                    let unit = profile?.loadUnit ?? .lb
+                    let step = UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit)
+                    let uninformative = CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: sessions, policy: .shipped)
+                    let prior = CoachingEngine.priorExposureWasRIRHold(for: i, in: s, allSessions: sessions)
+                    let rec = CoachingEngine.recommend(for: i, minLoadIncrement: step, unit: unit, priorExposureWasRIRHold: prior, ratingsUninformative: uninformative)
+                    let withoutPrior = CoachingEngine.recommend(for: i, minLoadIncrement: step, unit: unit, priorExposureWasRIRHold: false, ratingsUninformative: uninformative)
+                    let valveFired = (rec?.nextSuggestedLoad, rec?.nextTopLoad, rec?.message) != (withoutPrior?.nextSuggestedLoad, withoutPrior?.nextTopLoad, withoutPrior?.message)
+                    func firstInt(_ pattern: String) -> Int? {
+                        guard let m = rec?.message, let r = m.range(of: pattern, options: .regularExpression) else { return nil }
+                        return Int(m[r].filter(\.isNumber))
+                    }
                     let base = working.map { i.actualLoads[$0] }.last ?? 0
                     let kind: String
                     if let next = rec?.nextSuggestedLoad ?? rec?.nextTopLoad {
@@ -1707,7 +1725,9 @@ final class ProgressionDecisionDryRunTests: XCTestCase {
                                     wave: (i.waveRaw ?? "-").uppercased(), name: i.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: i.exerciseId), sets: i.targetSets,
                                     planned: "\(i.repMin ?? i.targetReps)-\(i.repMax ?? i.targetReps) @ \(i.targetRIR) RIR",
                                     reps: working.map { i.actualReps[$0] }, loads: working.map { i.actualLoads[$0] }, rirs: working.map { i.actualRIRs.indices.contains($0) ? i.actualRIRs[$0] : -1 },
-                                    baseLoad: base, kind: kind, next: rec?.nextSuggestedLoad, nextTop: rec?.nextTopLoad, message: rec?.message ?? "", presc: i.effectivePrescribedSets, setMax: i.setMax ?? 0, setMin: i.setMin ?? 0, lastCounted: CoachingEngine.countedSets(for: i, minLoadIncrement: profile.map { UserProfile.loadStep(for: i.exerciseId, profile: $0, unit: $0.loadUnit) } ?? nil, unit: profile?.loadUnit ?? .lb).rows.last.map { i.actualLoads[$0] } ?? 0))
+                                    baseLoad: base, kind: kind, next: rec?.nextSuggestedLoad, nextTop: rec?.nextTopLoad, message: rec?.message ?? "", presc: i.effectivePrescribedSets, setMax: i.setMax ?? 0, setMin: i.setMin ?? 0, lastCounted: CoachingEngine.countedSets(for: i, minLoadIncrement: profile.map { UserProfile.loadStep(for: i.exerciseId, profile: $0, unit: $0.loadUnit) } ?? nil, unit: profile?.loadUnit ?? .lb).rows.last.map { i.actualLoads[$0] } ?? 0,
+                                    isCompound: RIREntry.isCompound(i.exerciseId), priorHold: prior, valveFired: valveFired, uninformative: uninformative,
+                                    repMin: i.repMin, repMax: i.repMax, totalReps: firstInt("^[0-9]+ reps"), needed: firstInt("[Nn]eeded [0-9]+")))
                 }
             }
             let data = try JSONEncoder().encode(rows)
