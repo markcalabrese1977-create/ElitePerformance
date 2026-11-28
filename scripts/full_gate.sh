@@ -19,7 +19,7 @@ LIVE="${GATE_LIVE_BACKUP:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_
 
 # CoachingPolicyTests: `.shipped` reproduces every compound decision on Mark's and Angela's backups (golden dumps from the commit that introduced the policy).
 PB1="${GATE_POLICY_MARK:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-22_09-28-39.json}"; PB2="${GATE_POLICY_ANGELA:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-27_19-06-39.json}"
-PG1="$HOME/Downloads/EP_policy_golden_mark.json"; PG2="$HOME/Downloads/EP_policy_golden_angela_1127.json"
+PG1="$HOME/Downloads/EP_policy_golden_mark_v2.json"; PG2="$HOME/Downloads/EP_policy_golden_angela_1127_v2.json"
 if [ -f "$PB1" ] && [ -f "$PB2" ] && [ -f "$PG1" ] && [ -f "$PG2" ]; then export TEST_RUNNER_EP_POLICY_BACKUPS="$PB1,$PB2" TEST_RUNNER_EP_POLICY_GOLDEN="$PG1,$PG2"; fi
 # SameEveryWeekReferenceTests.test_property_onTheRealBackups_forEveryKeptLetter: the golden test's backups PLUS Angela's Nov 20 19:37 and Nov 25 19:04 backups (the
 # Hammer Curl reproducer: before her conversion) and Mark's Nov 25 18:57 backup. Only files that exist are listed.

@@ -2105,7 +2105,7 @@ final class PostMigrationRoundTripTests: XCTestCase {
 @MainActor
 final class CoachingPolicyTests: XCTestCase {
 
-    /// `.shipped` reproduces every compound decision on the backups with zero differences from the golden dump taken at the commit that
+    /// `.shipped` reproduces every decision (compound and isolation) on the backups with zero differences from the golden dump taken at the commit that
     /// introduced the policy (TEST_RUNNER_EP_POLICY_BACKUPS and _GOLDEN, comma-separated and in the same order; skipped when unset).
     /// Regenerate the golden (ProgressionDecisionDryRunTests with EP_PROG_ALL=1) when a rule is changed ON PURPOSE.
     func test_shipped_reproducesEveryDecisionOnTheBackups() throws {
@@ -2115,7 +2115,7 @@ final class CoachingPolicyTests: XCTestCase {
         }
         EffortTracking.mode = .detailed
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-        struct Row: Codable { var key: String, kind: String, message: String; var next: Double?, nextTop: Double? }
+        struct Row: Codable { var key: String, kind: String, message: String; var next: Double?, nextTop: Double?; var isCompound: Bool? = nil }
         let paths = backups.split(separator: ",").map(String.init), goldens = golden.split(separator: ",").map(String.init)
         XCTAssertEqual(paths.count, goldens.count)
         for (path, goldenPath) in zip(paths, goldens) {
@@ -2124,21 +2124,29 @@ final class CoachingPolicyTests: XCTestCase {
             let ctx = ModelContext(container)
             let profile = try ctx.fetch(FetchDescriptor<UserProfile>()).first
             let expected = Dictionary(uniqueKeysWithValues: try JSONDecoder().decode([Row].self, from: Data(contentsOf: URL(fileURLWithPath: goldenPath))).map { ($0.key, $0) })
-            var checked = 0, diffs: [String] = []
+            var checked = 0, compoundChecked = 0, isolationChecked = 0, valveRows = 0, diffs: [String] = []
             let all = try ctx.fetch(FetchDescriptor<Session>(sortBy: [SortDescriptor(\Session.date, order: .forward)]))
             for s in all where s.status == .completed && s.meso?.isMaintenance != true {
-                for i in s.items where RIREntry.isCompound(i.exerciseId) && i.waveRaw?.lowercased() != "deload" {
+                for i in s.items where i.waveRaw?.lowercased() != "deload" {
                     guard !CoachingEngine.workingSetIndices(for: i).isEmpty else { continue }
                     let key = "\(f.string(from: s.date))|\(s.dayLabel ?? "?")|\(i.exerciseId)|\(i.waveRaw ?? "-")"
                     guard let want = expected[key] else { continue }
-                    let rec = CoachingEngine.recommend(for: i, profile: profile, policy: .shipped, ratingsUninformative: CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: all, policy: .shipped))
+                    // Exactly the inputs the app passes: the lifter-level mark and the repeat valve's prior-exposure flag.
+                    let unit = profile?.loadUnit ?? .lb
+                    let uninformative = CoachingEngine.lifterRatingsUninformative(asOf: s, allSessions: all, policy: .shipped)
+                    let prior = CoachingEngine.priorExposureWasRIRHold(for: i, in: s, allSessions: all, policy: .shipped)
+                    let rec = CoachingEngine.recommend(for: i, policy: .shipped, minLoadIncrement: UserProfile.loadStep(for: i.exerciseId, profile: profile, unit: unit), unit: unit,
+                                                       priorExposureWasRIRHold: prior, ratingsUninformative: uninformative)
                     checked += 1
+                    if RIREntry.isCompound(i.exerciseId) { compoundChecked += 1 } else { isolationChecked += 1 }
+                    if want.isCompound != nil { XCTAssertEqual(want.isCompound, RIREntry.isCompound(i.exerciseId), "\(key): compound flag") }
+                    if prior { valveRows += 1 }
                     if (rec?.nextSuggestedLoad, rec?.nextTopLoad, rec?.message ?? "") != (want.next, want.nextTop, want.message) {
                         diffs.append("\(key): \(want.next.map { String($0) } ?? "-") -> \(rec?.nextSuggestedLoad.map { String($0) } ?? "-") | was: \(want.message) | now: \(rec?.message ?? "-")")
                     }
                 }
             }
-            print("GOLDEN| \((path as NSString).lastPathComponent) vs \((goldenPath as NSString).lastPathComponent): checked \(checked) decisions, \(diffs.count) differ")
+            print("GOLDEN| \((path as NSString).lastPathComponent) vs \((goldenPath as NSString).lastPathComponent): checked \(checked) decisions (\(compoundChecked) compound, \(isolationChecked) isolation; prior-exposure input true on \(valveRows)), \(diffs.count) differ")
             XCTAssertGreaterThan(checked, 0)
             XCTAssertEqual(diffs, [], "\((path as NSString).lastPathComponent): \(diffs.count) of \(checked) decisions differ under .shipped")
         }
