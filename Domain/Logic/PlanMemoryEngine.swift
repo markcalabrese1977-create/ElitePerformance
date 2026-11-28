@@ -381,13 +381,15 @@ struct PlanMemoryEngine {
     }
 
     /// An item whose plan carries no load (suggested and every planned slot 0) but whose sets were performed takes the held
-    /// load (the last performed primary back-off set) as its baseline. Never for: a deload item, a bodyweight item, an item the
-    /// lifter edited by hand (`planEdited`), a fixed-load exercise, or an item with a pain flag (pain makes no call), nor for
-    /// one that already has a planned load.
+    /// load (the last performed primary back-off set) as its baseline. Never for: a deload item, a bodyweight item, a fixed-load
+    /// exercise, or an item with a pain flag (pain makes no call), nor for one that already has a planned load.
+    /// `planEdited` does not stop it: a hand-edited item (a lift swapped in, a prescription typed over) whose every load is still 0 has
+    /// nothing hand-entered to overwrite, so the load actually lifted becomes its baseline. The moment any planned load is non-zero
+    /// (typed by the lifter or written by anything else) the first guard refuses, edited or not.
     @discardableResult
     static func adoptPerformedLoadAsBaseline(_ item: SessionItem, isExempt: Bool = false) -> Bool {
         guard item.suggestedLoad <= 0, item.plannedLoadsBySet.allSatisfy({ $0 <= 0 }),
-              !item.planEdited, !isExempt,
+              !isExempt,
               item.waveRaw?.lowercased() != "deload",
               !item.setFeedbackBySet.contains(SetFeedback.pain.rawValue),
               !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId),

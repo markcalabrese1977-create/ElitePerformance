@@ -4057,12 +4057,50 @@ final class WavelessBlockTests: XCTestCase {
         XCTAssertEqual(target.suggestedLoad, 0, "the fill-at-0 path leaves it too")
     }
 
-    func test_neverForAPlanEditedItem() throws {
-        // The source's plan was edited by hand (even to nothing): its baseline is the lifter's, not the coach's.
-        let (ctx, source, target, week1A) = try baselineCase { source, _ in source.planEdited = true }
-        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+    func test_aSwappedItemWithAZeroPlan_adoptsTheLoggedLoad() throws {
+        // planEdited (a lift swapped in, a prescription typed over) but every planned load is still 0: nothing hand-entered to overwrite.
+        let (ctx, source, _, week1A) = try baselineCase { source, _ in source.planEdited = true }
         XCTAssertEqual(source.suggestedLoad, 0)
-        // A hand-edited TARGET is left exactly as it is by both paths.
+        XCTAssertTrue(source.plannedLoadsBySet.allSatisfy { $0 == 0 })
+        PlanMemoryEngine(context: ctx).carryForwardPlans(from: week1A)
+        XCTAssertEqual(source.suggestedLoad, 100, "the load lifted became its baseline")
+        XCTAssertTrue(source.planEdited, "still marked as edited by hand")
+    }
+
+    func test_aPlanEditedItemWithATypedLoad_isNeverOverwritten() throws {
+        for typed in [[50.0, 50, 50], [0, 60, 0]] {
+            let item = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 0,
+                                   plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: typed,
+                                   actualReps: [10, 10, 10], actualLoads: [100, 100, 100], actualRIRs: [2, 2, 2])
+            item.planEdited = true
+            XCTAssertFalse(PlanMemoryEngine.adoptPerformedLoadAsBaseline(item), "\(typed)")
+            XCTAssertEqual(item.suggestedLoad, 0); XCTAssertEqual(item.plannedLoadsBySet, typed)
+        }
+        let typedSuggested = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 55,
+                                         plannedRepsBySet: [8, 8, 8], plannedLoadsBySet: [0, 0, 0],
+                                         actualReps: [10, 10, 10], actualLoads: [100, 100, 100], actualRIRs: [2, 2, 2])
+        typedSuggested.planEdited = true
+        XCTAssertFalse(PlanMemoryEngine.adoptPerformedLoadAsBaseline(typedSuggested))
+        XCTAssertEqual(typedSuggested.suggestedLoad, 55)
+    }
+
+    func test_angelasCombinationCurl_nov24_adoptsTwenty() throws {
+        let path = NSHomeDirectory().components(separatedBy: "/Library").first! + "/Downloads/ElitePerformance_Backup_v1_2026-11-27_19-06-39.json"
+        guard FileManager.default.fileExists(atPath: path) else { throw XCTSkip("backup not found") }
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+        parked.append(container)
+        let ctx = ModelContext(container)
+        let curl = try XCTUnwrap(try ctx.fetch(FetchDescriptor<SessionItem>()).first {
+            $0.exerciseNameSnapshot == "Combination Curl" && $0.isCompleted && $0.suggestedLoad == 0 })
+        XCTAssertTrue(curl.planEdited); XCTAssertTrue(curl.plannedLoadsBySet.allSatisfy { $0 == 0 })
+        XCTAssertEqual(curl.actualLoads.prefix(3).map { $0 }, [20, 20, 20])
+        XCTAssertTrue(PlanMemoryEngine.adoptPerformedLoadAsBaseline(curl))
+        XCTAssertEqual(curl.suggestedLoad, 20, "the load she lifted is the baseline")
+    }
+
+    func test_neverForAPlanEditedItem() throws {
+        // A hand-edited TARGET (nothing to adopt for it) is left exactly as it is by both paths.
         let (ctx2, _, target2, week1B) = try baselineCase { _, target in
             target.planEdited = true; target.plannedLoadsBySet = [0, 0, 0]; target.suggestedLoad = 0
         }
@@ -4070,7 +4108,6 @@ final class WavelessBlockTests: XCTestCase {
         XCTAssertEqual(target2.suggestedLoad, 0); XCTAssertEqual(target2.plannedLoadsBySet, [0, 0, 0])
         XCTAssertFalse(PlaceholderRefresh.run(in: ctx2, now: now).contains { $0.item === target2 }, "not even a note")
         XCTAssertEqual(target2.suggestedLoad, 0); XCTAssertEqual(target2.plannedLoadsBySet, [0, 0, 0]); XCTAssertTrue(target2.planEdited)
-        _ = target
     }
 
     func test_neverForAFixedLoadExercise() throws {
