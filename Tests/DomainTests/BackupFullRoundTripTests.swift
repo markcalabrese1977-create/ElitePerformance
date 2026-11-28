@@ -6220,6 +6220,24 @@ final class HistoryRowTextTests: XCTestCase {
         XCTAssertEqual(HistoryRowText.subtitle(week: 3, day: 1, readinessSuffix: nil), "Week 3 · Day 1")
     }
 
+    func test_aSessionOutsideTheProgram_hasNoDayNumber_whileAProgramSessionInTheSameWeekKeepsIt() throws {
+        let (ctx, _) = try block([])
+        let meso = try XCTUnwrap(ctx.fetch(FetchDescriptor<MesoBlock>()).first)
+        func add(_ day: Int, label: String?, programIndex: Int?) throws -> Session {
+            let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(day) * 86_400), status: .completed, weekIndex: 2, dayLabel: label, items: [], programIndex: programIndex)
+            s.meso = meso; ctx.insert(s); return s
+        }
+        let program = try add(1, label: "Lower C", programIndex: 6)
+        let adHoc = try add(2, label: nil, programIndex: nil)
+        try ctx.save()
+        let p = HistoryRowText.make(history: history(program.date, week: 2, label: "Lower C"), session: program)
+        let a = HistoryRowText.make(history: history(adHoc.date, week: 2, label: nil), session: adHoc)
+        XCTAssertEqual(a.title, "Workout"); XCTAssertEqual(a.subtitle, "Week 2", "no Day N for a session outside the program")
+        XCTAssertEqual(p.subtitle, "Week 2 · Day 1", "a program session in the same week is unchanged")
+        adHoc.readinessReasonsRaw = [ReadinessReason.poorSleep.rawValue]
+        XCTAssertEqual(HistoryRowText.make(history: history(adHoc.date, week: 2, label: nil), session: adHoc).subtitle, "Week 2 · Poor sleep", "then the readiness suffix")
+    }
+
     func test_aHistoryWhoseSessionIsGone_showsTheWeekAlone() {
         let h = history(Date(), week: 7, label: "Pull A")
         let t = HistoryRowText.make(history: h, session: nil)

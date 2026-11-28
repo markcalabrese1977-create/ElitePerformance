@@ -109,7 +109,7 @@ enum HistoryRowText {
     }
 
     /// "Week 11 · Day 1", then " · Poor sleep" when something was flagged. The day is the session's own place in its week (the D of W#D#);
-    /// a history whose session is gone shows the week alone.
+    /// a session outside the program (no programIndex: added or ad-hoc) and a history whose session is gone show the week alone.
     static func subtitle(week: Int, day: Int?, readinessSuffix: String?) -> String {
         var s = day.map { "Week \(week) · Day \($0)" } ?? "Week \(week)"
         if let readinessSuffix, !readinessSuffix.isEmpty { s += " " + readinessSuffix }
@@ -119,7 +119,7 @@ enum HistoryRowText {
     static func make(history: SessionHistory, session: Session?) -> (title: String, subtitle: String) {
         let suffix = session.flatMap { ReadinessText.historySuffix(reasons: $0.readinessReasons, shortOnTime: $0.shortOnTime ?? false) }
         return (title(snapshot: history.dayLabelSnapshot, sessionLabel: session?.dayLabel),
-                subtitle(week: session?.weekIndex ?? history.weekIndex, day: session?.positionInWeek, readinessSuffix: suffix))
+                subtitle(week: session?.weekIndex ?? history.weekIndex, day: session?.programIndex == nil ? nil : session?.positionInWeek, readinessSuffix: suffix))
     }
 }
 
