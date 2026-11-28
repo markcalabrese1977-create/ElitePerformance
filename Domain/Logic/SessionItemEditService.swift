@@ -2514,6 +2514,23 @@ extension SessionItemEditService {
         case unknownWeekType
         /// The dry run would have changed a completed or started session (never expected: nothing is written).
         case wouldTouchHistory
+        /// The converted plan failed its own check (an item neither matches its reference nor is listed as having none). Nothing is written.
+        case verificationFailed([String])
+    }
+
+    /// An unstarted item the conversion cannot convert: nothing of the kept week type exists for its day and exercise, or the kept week's version has a
+    /// different top-set shape. The conversion leaves it exactly as it is, week letter included, and the preview names it.
+    struct SameWeekUnmatched {
+        enum Reason: Equatable {
+            /// No item of the kept week type exists for this day and exercise.
+            case noKeptWeekVersion
+            /// The kept week's version has a top set and this one doesn't (or the other way round): its prescription can't be copied.
+            case topSetShapeDiffers
+        }
+        let session: Session
+        let item: SessionItem
+        let reason: Reason
+        var itemID: String { item.id?.uuidString ?? "\(item.persistentModelID)" }
     }
 
     struct SameWeekPlan {
@@ -2525,7 +2542,9 @@ extension SessionItemEditService {
         let itemsChanged: Int
         /// Exercises the lifter edited by hand: kept entirely (prescription and load).
         let editedKept: Int
-        let unmatchedSlots: Int
+        /// Items with no kept-week version for their day and exercise: left untouched (prescription, load and week letter).
+        let unmatched: [SameWeekUnmatched]
+        var unmatchedSlots: Int { unmatched.count }
         let refusal: SameWeekRefusal?
         var isApplicable: Bool { refusal == nil && !changes.isEmpty }
         var converted: [SameWeekChange] { changes.filter { !$0.keptAsEdited } }
@@ -2578,7 +2597,7 @@ extension SessionItemEditService {
 
     static func planSameEveryWeek(meso: MesoBlock, keep: String, context: ModelContext, now: Date = Date()) -> SameWeekPlan {
         func refused(_ r: SameWeekRefusal) -> SameWeekPlan {
-            SameWeekPlan(meso: meso, keep: keep, changes: [], sessionsChanged: 0, itemsChanged: 0, editedKept: 0, unmatchedSlots: 0, refusal: r)
+            SameWeekPlan(meso: meso, keep: keep, changes: [], sessionsChanged: 0, itemsChanged: 0, editedKept: 0, unmatched: [], refusal: r)
         }
         let types = sameWeekTypes(in: meso)
         guard !types.isEmpty else { return refused(.notAWaveBlock) }
@@ -2596,11 +2615,12 @@ extension SessionItemEditService {
         let touched = history != historyFingerprints(meso)
         context.rollback()
         if touched { return refused(.wouldTouchHistory) }
+        if !outcome.problems.isEmpty { return refused(.verificationFailed(outcome.problems)) }
         let changes = outcome.changes
         return SameWeekPlan(meso: meso, keep: keep.lowercased(), changes: changes,
                             sessionsChanged: Set(changes.filter { !$0.keptAsEdited }.map { $0.session.persistentModelID }).count,
                             itemsChanged: changes.filter { !$0.keptAsEdited }.count,
-                            editedKept: changes.filter { $0.keptAsEdited }.count, unmatchedSlots: outcome.unmatched, refusal: nil)
+                            editedKept: changes.filter { $0.keptAsEdited }.count, unmatched: outcome.unmatched, refusal: nil)
     }
 
     /// Everything that must NOT change: every item of every session that is not an unstarted planned one.
@@ -2614,31 +2634,55 @@ extension SessionItemEditService {
 
     // MARK: The conversion itself (shared by plan and apply)
 
-    private struct SameWeekOutcome { var changes: [SameWeekChange]; var unmatched: Int }
+    /// The part of a prescription the conversion makes equal to the kept week's.
+    private struct PrescriptionSig: Equatable {
+        let sets: Int, repMin: Int?, repMax: Int?, reps: Int, rir: Int, rirMin: Int?, rirMax: Int?, setMin: Int?, setMax: Int?, intensifier: String?
+        init(_ i: SessionItem) {
+            sets = i.effectivePrescribedSets; repMin = i.repMin; repMax = i.repMax; reps = i.targetReps
+            rir = i.targetRIR; rirMin = i.targetRIRMin; rirMax = i.targetRIRMax; setMin = i.setMin; setMax = i.setMax; intensifier = i.intensifierRaw
+        }
+    }
+
+    private struct SameWeekOutcome { var changes: [SameWeekChange]; var unmatched: [SameWeekUnmatched]; var problems: [String] }
 
     /// Mutates the model (the caller rolls back for a preview, or saves for an apply).
     private static func performSameWeek(meso: MesoBlock, keep: String, context: ModelContext) -> SameWeekOutcome {
         let targets = meso.sessions.filter { SessionEditSafety.isSafeToModify($0) }.sorted { ($0.date, $0.programIndex ?? 0) < ($1.date, $1.programIndex ?? 0) }
         var before: [PersistentIdentifier: SameWeekSnapshot] = [:]
-        var notes: [PersistentIdentifier: [String]] = [:]
+        let notes: [PersistentIdentifier: [String]] = [:]
         var order: [(Session, SessionItem)] = []
         for s in targets { for i in s.items where letter(i) != nil { before[i.persistentModelID] = SameWeekSnapshot(i); order.append((s, i)) } }
-        var unmatched = 0
+        var unmatched: [SameWeekUnmatched] = []
 
-        // The reference prescription of a slot: the kept week type's item for the same day and exercise. The most recent completed one, else
-        // the earliest planned one (it still carries that week type's prescription).
-        func reference(for item: SessionItem, in session: Session) -> SessionItem? {
-            let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
-            let sameDay = meso.sessions.filter { $0 !== session && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
-            let matches: [(Session, SessionItem)] = sameDay.compactMap { s in
-                guard let i = s.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letter($0) == keep }) else { return nil }
-                return (s, i)
+        // The reference table, built from the block exactly as it is BEFORE the first write: for each (day, exercise) the kept week type's item,
+        // the most recent completed one, else the earliest planned one. Step 1 reads only this table (the lifter's items lose their week letter
+        // as it goes, so a live lookup would stop finding references part-way through). An item of the kept week type is its own candidate.
+        struct Reference { let dayLabel: String?; let canonical: String; let item: SessionItem; let sig: PrescriptionSig }
+        var references: [Reference] = []
+        var seenKeys: [(String?, String)] = []
+        for s in meso.sessions {
+            for i in s.items where letter(i) == keep {
+                let canonical = ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)
+                if seenKeys.contains(where: { SessionDayLabelMatcher.matches($0.0, s.dayLabel) && $0.1 == canonical }) { continue }
+                seenKeys.append((s.dayLabel, canonical))
+                let cands: [(Session, SessionItem)] = meso.sessions.compactMap { o in
+                    guard SessionDayLabelMatcher.matches(o.dayLabel, s.dayLabel),
+                          let m = o.items.first(where: { ExerciseCatalog.canonicalExerciseId(for: $0.exerciseId) == canonical && letter($0) == keep }) else { return nil }
+                    return (o, m)
+                }
+                let pick = cands.filter { $0.0.status == .completed }.max(by: { $0.0.date < $1.0.date })
+                    ?? cands.filter { $0.0.status == .planned }.min(by: { $0.0.date < $1.0.date })
+                if let pick { references.append(Reference(dayLabel: s.dayLabel, canonical: canonical, item: pick.1, sig: PrescriptionSig(pick.1))) }
             }
-            if let done = matches.filter({ $0.0.status == .completed }).max(by: { $0.0.date < $1.0.date }) { return done.1 }
-            return matches.filter { $0.0.status == .planned }.min(by: { $0.0.date < $1.0.date })?.1
+        }
+        func reference(for item: SessionItem, in session: Session) -> Reference? {
+            let canonical = ExerciseCatalog.canonicalExerciseId(for: item.exerciseId)
+            return references.first { $0.canonical == canonical && SessionDayLabelMatcher.matches($0.dayLabel, session.dayLabel) }
         }
 
-        // 1. Prescription from the kept week type; the wave letter goes.
+        // 1. Prescription from the kept week type; the wave letter goes (except on an item that has no kept-week version at all).
+        var expected: [PersistentIdentifier: PrescriptionSig] = [:]
+        var unmatchedIDs: Set<PersistentIdentifier> = []
         for (session, item) in order {
             let key = item.persistentModelID
             if item.planEdited {
@@ -2646,32 +2690,38 @@ extension SessionItemEditService {
                 item.waveRaw = nil
                 continue
             }
-            if let ref = reference(for: item, in: session) {
-                if ref.hasTopSet != item.hasTopSet {
-                    notes[key, default: []].append("top-set shape differs from the kept week type: kept as it was")
+            guard let found = reference(for: item, in: session) else {
+                // No item of the kept week type exists for this day and exercise: nothing to convert it to. Untouched, letter included.
+                unmatched.append(SameWeekUnmatched(session: session, item: item, reason: .noKeptWeekVersion))
+                unmatchedIDs.insert(key)
+                continue
+            }
+            let ref = found.item
+            if ref.hasTopSet != item.hasTopSet {
+                unmatched.append(SameWeekUnmatched(session: session, item: item, reason: .topSetShapeDiffers))
+                unmatchedIDs.insert(key)
+                continue
+            }
+            expected[key] = found.sig
+            if ref !== item {
+                let n = max(0, ref.effectivePrescribedSets)
+                item.setPrescribedSets(n)
+                item.setMin = ref.setMin; item.setMax = ref.setMax
+                item.repMin = ref.repMin; item.repMax = ref.repMax; item.targetReps = ref.targetReps
+                item.targetRIR = ref.targetRIR; item.targetRIRMin = ref.targetRIRMin; item.targetRIRMax = ref.targetRIRMax
+                item.intensifierRaw = ref.intensifierRaw; item.intensifierNotes = ref.intensifierNotes
+                item.prescriptionNotes = ref.prescriptionNotes; item.priorityRaw = ref.priorityRaw ?? item.priorityRaw
+                if ref.hasTopSet {
+                    item.plannedRepsBySet = ref.plannedRepsBySet; item.plannedRIRsBySet = ref.plannedRIRsBySet
+                    item.setRolesBySet = ref.setRolesBySet
+                    item.topRepMin = ref.topRepMin; item.topRepMax = ref.topRepMax; item.topRIR = ref.topRIR
+                    item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: ref.plannedRepsBySet.count, fallback: item.suggestedLoad)
                 } else {
-                    let n = max(0, ref.effectivePrescribedSets)
-                    item.setPrescribedSets(n)
-                    item.setMin = ref.setMin; item.setMax = ref.setMax
-                    item.repMin = ref.repMin; item.repMax = ref.repMax; item.targetReps = ref.targetReps
-                    item.targetRIR = ref.targetRIR; item.targetRIRMin = ref.targetRIRMin; item.targetRIRMax = ref.targetRIRMax
-                    item.intensifierRaw = ref.intensifierRaw; item.intensifierNotes = ref.intensifierNotes
-                    item.prescriptionNotes = ref.prescriptionNotes; item.priorityRaw = ref.priorityRaw ?? item.priorityRaw
-                    if ref.hasTopSet {
-                        item.plannedRepsBySet = ref.plannedRepsBySet; item.plannedRIRsBySet = ref.plannedRIRsBySet
-                        item.setRolesBySet = ref.setRolesBySet
-                        item.topRepMin = ref.topRepMin; item.topRepMax = ref.topRepMax; item.topRIR = ref.topRIR
-                        item.plannedLoadsBySet = resized(item.plannedLoadsBySet, to: ref.plannedRepsBySet.count, fallback: item.suggestedLoad)
-                    } else {
-                        let sets = max(n, 0)
-                        item.plannedRepsBySet = Array(repeating: ref.targetReps, count: sets)
-                        item.plannedRIRsBySet = Array(repeating: ref.targetRIR, count: sets)
-                        item.plannedLoadsBySet = resized(Array(item.plannedLoadsBySet.prefix(max(item.plannedLoadsBySet.count, 1))), to: sets, fallback: item.suggestedLoad)
-                    }
+                    let sets = max(n, 0)
+                    item.plannedRepsBySet = Array(repeating: ref.targetReps, count: sets)
+                    item.plannedRIRsBySet = Array(repeating: ref.targetRIR, count: sets)
+                    item.plannedLoadsBySet = resized(Array(item.plannedLoadsBySet.prefix(max(item.plannedLoadsBySet.count, 1))), to: sets, fallback: item.suggestedLoad)
                 }
-            } else {
-                unmatched += 1
-                notes[key, default: []].append("no \(keep.uppercased())-week slot for this exercise on this day: prescription kept")
             }
             item.waveRaw = nil
         }
@@ -2679,7 +2729,7 @@ extension SessionItemEditService {
         // 2. Loads: the coach decision of the most recent completed session of each day, written by the same carry-forward that runs after every
         // session. The completed session keeps its letter (it is history), so it is read as wave-less for the replay and restored right after.
         let engine = PlanMemoryEngine(context: context)
-        let days = Dictionary(grouping: order.map { $0.0 }, by: { ($0.dayLabel ?? "").trimmingCharacters(in: .whitespaces).lowercased() })
+        let days = Dictionary(grouping: order.filter { !unmatchedIDs.contains($0.1.persistentModelID) }.map { $0.0 }, by: { ($0.dayLabel ?? "").trimmingCharacters(in: .whitespaces).lowercased() })
         for (_, remaining) in days {
             guard let sample = remaining.first,
                   let source = meso.sessions.filter({ $0.status == .completed && SessionDayLabelMatcher.matches($0.dayLabel, sample.dayLabel) })
@@ -2706,13 +2756,25 @@ extension SessionItemEditService {
                 }
             }
         }
+        // The check before anything is saved: every converted, non-edited, non-deload item carries its reference's prescription (or says why not),
+        // and an item with no reference is exactly as it was.
+        var problems: [String] = []
+        for (session, item) in order {
+            let key = item.persistentModelID
+            let what = "\(session.dayLabel ?? "?") W\(session.weekIndex) \(item.exerciseNameSnapshot ?? item.exerciseId)"
+            if unmatchedIDs.contains(key) {
+                if let b = before[key], SameWeekSnapshot(item) != b { problems.append("\(what): left as it is, but changed") }
+            } else if !item.planEdited, let e = expected[key], PrescriptionSig(item) != e {
+                problems.append("\(what): prescription does not match its \(keep.uppercased())-week reference")
+            }
+        }
         let changes: [SameWeekChange] = order.compactMap { (session, item) in
-            guard let b = before[item.persistentModelID] else { return nil }
+            guard !unmatchedIDs.contains(item.persistentModelID), let b = before[item.persistentModelID] else { return nil }
             let after = SameWeekSnapshot(item)
             return SameWeekChange(session: session, item: item, before: b, after: after, notes: notes[item.persistentModelID] ?? [],
                                   keptAsEdited: item.planEdited)
         }
-        return SameWeekOutcome(changes: changes, unmatched: unmatched)
+        return SameWeekOutcome(changes: changes, unmatched: unmatched, problems: problems)
     }
 
     // MARK: Apply
@@ -2732,7 +2794,7 @@ extension SessionItemEditService {
 
         let history = historyFingerprints(meso)
         let outcome = performSameWeek(meso: meso, keep: plan.keep, context: context)
-        var problems: [String] = []
+        var problems: [String] = outcome.problems
         if history != historyFingerprints(meso) { problems.append("a completed or started session would change") }
         if outcome.changes.map(\.itemID) != plan.changes.map(\.itemID) { throw { context.rollback(); return SameWeekError.planStale }() }
         for c in outcome.changes {

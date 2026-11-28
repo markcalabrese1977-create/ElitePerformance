@@ -1132,3 +1132,175 @@ final class SlideRuleTests: XCTestCase {
         try assertSlideInvariants(plan, ctx)
     }
 }
+
+// MARK: - "Make every week the same": stable references (Commit G)
+
+@MainActor
+final class SameEveryWeekReferenceTests: XCTestCase {
+
+    private typealias Service = SessionItemEditService
+    private var container: ModelContainer!
+    private var retained: [ModelContainer] = []
+    private var undoDir: URL!
+    private let cal = Calendar.current
+
+    override func setUp() {
+        super.setUp()
+        undoDir = FileManager.default.temporaryDirectory.appendingPathComponent("sw_ref_undo_\(UUID().uuidString)")
+        EffortTracking.mode = .detailed
+    }
+    override func tearDown() { try? FileManager.default.removeItem(at: undoDir); EffortTracking.clearMirror(); super.tearDown() }
+
+    private func ctx() throws -> ModelContext {
+        container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let c = ModelContext(container)
+        c.insert(User(units: .lb, progressionEnabled: true))
+        return c
+    }
+    private func date(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 5))!)! }
+
+    private struct Rx { let sets: Int; let lo: Int; let hi: Int; let rir: Int }
+    private let table: [String: Rx] = ["a": Rx(sets: 3, lo: 8, hi: 12, rir: 3), "b": Rx(sets: 3, lo: 8, hi: 12, rir: 2), "c": Rx(sets: 3, lo: 6, hi: 10, rir: 1)]
+
+    private func item(_ id: String, _ letter: String, order: Int = 1) -> SessionItem {
+        let rx = table[letter == "deload" ? "b" : letter]!
+        return SessionItem(order: order, exerciseId: id, targetReps: rx.lo, targetSets: rx.sets, targetRIR: rx.rir, suggestedLoad: 0, waveRaw: letter,
+                           setMin: rx.sets, setMax: rx.sets, repMin: rx.lo, repMax: rx.hi, targetRIRMin: rx.rir, targetRIRMax: rx.rir,
+                           plannedRepsBySet: Array(repeating: rx.lo, count: rx.sets), plannedLoadsBySet: Array(repeating: 0, count: rx.sets),
+                           plannedRIRsBySet: Array(repeating: rx.rir, count: rx.sets),
+                           actualReps: Array(repeating: 0, count: rx.sets), actualLoads: Array(repeating: 0, count: rx.sets),
+                           actualRIRs: RIREntry.unsetArray(count: rx.sets))
+    }
+
+    /// Angela's shape: Upper B weeks 1-9 letters a b c a b c a b c, week 1 completed. Hammer Curl is NOT in week 1 (a swap put another exercise there), so
+    /// its only A-week items are planned, in weeks 4 and 7. "lat_pulldown" exists only in B weeks (2, 5, 8): it has no A-week version anywhere.
+    private func hammerBlock(_ c: ModelContext) throws -> MesoBlock {
+        let b = MesoBlock(name: "Wave", startDate: date(0), status: .active, totalWeeks: 9)
+        c.insert(b)
+        let letters = ["a", "b", "c", "a", "b", "c", "a", "b", "c"]
+        for (w, l) in letters.enumerated() {
+            var items: [SessionItem] = []
+            items.append(item(w == 0 ? "combination_curl" : "hammer_curl", l, order: 1))
+            items.append(item("bench_press", l, order: 2))
+            if l == "b" { items.append(item("lat_pulldown", l, order: 3)) }
+            let s = Session(date: date(7 * w), status: .planned, weekIndex: w + 1, dayLabel: "Upper B", items: items, programIndex: w + 1)
+            s.meso = b; c.insert(s)
+        }
+        try c.save()
+        let w1 = b.sessions.first { $0.weekIndex == 1 }!
+        w1.status = .completed; w1.completedAt = w1.date
+        for i in w1.items { i.isCompleted = true; i.suggestedLoad = 20; i.plannedLoadsBySet = Array(repeating: 20, count: i.targetSets); i.actualReps = Array(repeating: i.repMax ?? 12, count: i.targetSets); i.actualLoads = Array(repeating: 20, count: i.targetSets); i.actualRIRs = Array(repeating: i.targetRIR, count: i.targetSets) }
+        try c.save()
+        return b
+    }
+
+    private func items(_ b: MesoBlock, _ exercise: String) -> [(week: Int, item: SessionItem)] {
+        b.sessions.sorted { $0.weekIndex < $1.weekIndex }.compactMap { s in s.items.first { $0.exerciseId == exercise }.map { (s.weekIndex, $0) } }
+    }
+
+    /// The property: after a conversion, no group (day, exercise) of unstarted, non-deload, non-edited items that were converted holds two prescriptions.
+    /// Items with no kept-week version and items whose top-set shape differs are reported separately. Returns the divergent groups.
+    private func divergentGroups(_ b: MesoBlock, plan: Service.SameWeekPlan) -> [String] {
+        let skip = Set(plan.unmatched.map(\.itemID))
+        struct K: Hashable { let d: String; let e: String }
+        var groups: [K: [(Int, String)]] = [:]
+        for s in b.sessions where SessionEditSafety.isSafeToModify(s) {
+            for i in s.items where i.waveRaw?.lowercased() != "deload" && !i.planEdited {
+                if skip.contains(i.id?.uuidString ?? "\(i.persistentModelID)") { continue }
+                let sig = "\(i.effectivePrescribedSets)x\(i.repMin ?? -1)-\(i.repMax ?? -1)@\(i.targetRIR)"
+                groups[K(d: (s.dayLabel ?? "").lowercased(), e: ExerciseCatalog.canonicalExerciseId(for: i.exerciseId)), default: []].append((s.weekIndex, sig))
+            }
+        }
+        return groups.compactMap { k, v in
+            Set(v.map(\.1)).count > 1 ? "\(k.d) / \(k.e): " + v.map { "W\($0.0) \($0.1)" }.joined(separator: ", ") : nil
+        }.sorted()
+    }
+
+    func test_hammerCurl_everyWeekBecomesTheAWeek_whenTheOnlyAItemsArePlanned() throws {
+        let c = try ctx(); let b = try hammerBlock(c)
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertNil(plan.refusal)
+        try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+        let hammer = items(b, "hammer_curl")
+        XCTAssertEqual(hammer.map(\.week), [2, 3, 4, 5, 6, 7, 8, 9])
+        for (w, i) in hammer {
+            XCTAssertEqual(i.repMin, 8, "W\(w)"); XCTAssertEqual(i.repMax, 12, "W\(w)")
+            XCTAssertEqual(i.targetRIR, 3, "W\(w) takes the A week's effort target, including W8 and W9")
+            XCTAssertEqual(i.effectivePrescribedSets, 3, "W\(w)")
+            XCTAssertNil(i.waveRaw, "W\(w)")
+        }
+        XCTAssertEqual(divergentGroups(b, plan: plan), [])
+        XCTAssertEqual(items(b, "combination_curl").first?.item.waveRaw, "a", "the completed week-1 item is history")
+    }
+
+    func test_anExerciseWithNoKeptWeekVersion_isNamed_andLeftExactlyAsItIs() throws {
+        let c = try ctx(); let b = try hammerBlock(c)
+        let before = Dictionary(uniqueKeysWithValues: items(b, "lat_pulldown").map { ($0.week, Service.SameWeekSnapshot($0.item)) })
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        XCTAssertEqual(plan.unmatched.map { $0.session.weekIndex }.sorted(), [2, 5, 8], "each unmatched item is listed, by week and day")
+        XCTAssertEqual(Set(plan.unmatched.map { $0.item.exerciseId }), ["lat_pulldown"])
+        let lines = plan.unmatched.sorted { $0.session.date < $1.session.date }.map { SameWeekText.unmatchedLine($0) }
+        XCTAssertTrue(lines.allSatisfy { $0.contains("Upper B") && $0.contains("(B week)") && $0.localizedCaseInsensitiveContains("pulldown") }, "\(lines)")
+        XCTAssertFalse(plan.changes.contains { $0.item.exerciseId == "lat_pulldown" }, "not a change")
+        XCTAssertTrue(SameWeekText.confirmMessage(plan).contains("3 that can't be changed to it stay exactly as they are"))
+        XCTAssertTrue(SameWeekText.footer.contains("left exactly as it is, label included"))
+        XCTAssertFalse(SameWeekText.footer.hasPrefix("Every unstarted session takes"), "the footer no longer promises every item")
+        try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+        for (w, i) in items(b, "lat_pulldown") where w != 1 {
+            XCTAssertEqual(i.waveRaw, "b", "the letter stays")
+            XCTAssertEqual(Service.SameWeekSnapshot(i), before[w], "W\(w) is exactly as it was")
+        }
+        XCTAssertEqual(divergentGroups(b, plan: plan), [])
+    }
+
+    func test_everyKeptLetter_leavesNoDivergentGroup_onTheFixture() throws {
+        for keep in ["a", "b", "c"] {
+            let c = try ctx(); let b = try hammerBlock(c)
+            let plan = Service.planSameEveryWeek(meso: b, keep: keep, context: c)
+            XCTAssertNil(plan.refusal, keep)
+            try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+            XCTAssertEqual(divergentGroups(b, plan: plan), [], "keep \(keep)")
+        }
+    }
+
+    func test_planEdited_andDeloadItemsAreNotInTheGroupsTheyDontJoin() throws {
+        let c = try ctx(); let b = try hammerBlock(c)
+        let w3 = b.sessions.first { $0.weekIndex == 3 }!
+        let edited = w3.items.first { $0.exerciseId == "hammer_curl" }!
+        edited.planEdited = true; edited.repMin = 5; edited.repMax = 7
+        try c.save()
+        let plan = Service.planSameEveryWeek(meso: b, keep: "a", context: c)
+        try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+        XCTAssertEqual(edited.repMin, 5); XCTAssertEqual(edited.repMax, 7, "the lifter's own plan keeps its prescription")
+        XCTAssertNil(edited.waveRaw)
+        XCTAssertEqual(divergentGroups(b, plan: plan), [])
+    }
+
+    /// Both real backups, keep = A, B and C: zero divergent groups outside unmatched / planEdited / deload. Needs the backups
+    /// (TEST_RUNNER_EP_SW_BACKUPS, comma separated); the report lists what was checked.
+    func test_property_onTheRealBackups_forEveryKeptLetter() throws {
+        guard let list = ProcessInfo.processInfo.environment["EP_SW_BACKUPS"], !list.isEmpty else { throw XCTSkip("set TEST_RUNNER_EP_SW_BACKUPS") }
+        var checked = 0
+        for path in list.split(separator: ",").map(String.init) {
+            for keep in ["a", "b", "c"] {
+                let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+                retained.append(container)
+                _ = try BackupSnapshotImporter.importFullBackupJSON(from: URL(fileURLWithPath: path), modelContainer: container)
+                let c = ModelContext(container)
+                guard let meso = try c.fetch(FetchDescriptor<MesoBlock>()).first(where: { $0.status == .active }),
+                      !Service.sameWeekTypes(in: meso).isEmpty else { print("PROP| \(path): no wave block"); continue }
+                let plan = Service.planSameEveryWeek(meso: meso, keep: keep, context: c)
+                XCTAssertNil(plan.refusal, "\(path) keep \(keep)")
+                let names = plan.unmatched.map { SameWeekText.unmatchedLine($0) }
+                try Service.applySameEveryWeek(plan, backupTaken: true, in: c, undoDirectory: undoDir)
+                let divergent = divergentGroups(meso, plan: plan)
+                print("PROP| \(URL(fileURLWithPath: path).lastPathComponent) keep=\(keep): converted \(plan.itemsChanged), edited \(plan.editedKept), unmatched \(names.count), divergent \(divergent.count)")
+                for n in names { print("PROP|    unmatched: \(n)") }
+                XCTAssertEqual(divergent, [], "\(path) keep \(keep)")
+                XCTAssertTrue(plan.changes.allSatisfy { $0.notes.isEmpty }, "an item that can't be converted is listed as unmatched, never as a note")
+                checked += 1
+            }
+        }
+        XCTAssertGreaterThan(checked, 0)
+    }
+}

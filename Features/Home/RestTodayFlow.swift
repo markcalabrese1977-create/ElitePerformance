@@ -179,7 +179,7 @@ enum SameWeekText {
     static let menuTitle = "Make every week the same"
     static let sheetTitle = "Same every week"
     static let undoTitle = "Undo \"Make every week the same\""
-    static let footer = "Every unstarted session takes the chosen week's sets, reps, effort target and notes, and the A/B/C week labels go. Each load becomes your last coach decision for that exercise on that day. Exercises whose plan you edited yourself keep their prescription and load. From then on each day carries forward to the same day. Deload weeks stay deloads. Finished and started sessions don't change."
+    static let footer = "Every unstarted exercise that has a version in the chosen week takes that week's sets, reps, effort target and notes, and its A/B/C week label goes. Each load becomes your last coach decision for that exercise on that day. Exercises whose plan you edited yourself keep their prescription and load. An exercise that can't be converted (no version in the chosen week, or a different top-set layout) is left exactly as it is, label included, and listed here. From then on each day carries forward to the same day. Deload weeks stay deloads. Finished and started sessions don't change."
 
     static func day(_ d: Date) -> String { d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
 
@@ -219,10 +219,22 @@ enum SameWeekText {
         return "\(day(c.session.date)) · \(c.session.dayLabel ?? "Session") · \(name): \(range(c.after)), load \(LoadFormatter(unit: unit).number(c.after.suggestedLoad))"
     }
 
+    /// "Fri Dec 11 · Upper B · W8 · Hammer Curl (B week)"
+    static func unmatchedLine(_ u: Service.SameWeekUnmatched) -> String {
+        let name = u.item.exerciseNameSnapshot ?? ExerciseCatalog.displayName(for: u.item.exerciseId)
+        let wave = u.item.waveRaw.map { " (\($0.uppercased()) week)" } ?? ""
+        let why = u.reason == .topSetShapeDiffers ? " · top-set layout differs" : ""
+        return "\(day(u.session.date)) · \(u.session.dayLabel ?? "Session") · \(u.session.weekDayLabel) · \(name)\(wave)\(why)"
+    }
+
+    static func unmatchedHeading(_ plan: Service.SameWeekPlan) -> String {
+        "Can't be changed to the \(plan.keep.uppercased()) week, left as they are (\(plan.unmatched.count))"
+    }
+
     static func sessionHeader(_ s: Session) -> String { "\(day(s.date)) · \(s.dayLabel ?? "Session") · \(s.weekDayLabel)" }
 
     static func confirmMessage(_ plan: Service.SameWeekPlan) -> String {
-        "Change \(plan.sessionsChanged) session\(plan.sessionsChanged == 1 ? "" : "s") (\(plan.itemsChanged) exercises) to the \(plan.keep.uppercased()) week's prescription? \(plan.editedKept > 0 ? "\(plan.editedKept) you edited yourself are kept. " : "")A backup is made first, finished sessions don't change, and you can undo."
+        "Change \(plan.sessionsChanged) session\(plan.sessionsChanged == 1 ? "" : "s") (\(plan.itemsChanged) exercises) to the \(plan.keep.uppercased()) week's prescription? \(plan.editedKept > 0 ? "\(plan.editedKept) you edited yourself are kept. " : "")\(plan.unmatched.isEmpty ? "" : "\(plan.unmatched.count) that can't be changed to it stay exactly as they are. ")A backup is made first, finished sessions don't change, and you can undo."
     }
 
     static func refusalText(_ r: Service.SameWeekRefusal) -> String {
@@ -232,6 +244,7 @@ enum SameWeekText {
         case .noUnstartedSessions: return "There are no unstarted sessions left to change."
         case .unknownWeekType: return "That week type isn't in this block."
         case .wouldTouchHistory: return "This change would have touched a finished session, so nothing was changed."
+        case .verificationFailed: return "The change didn't pass its own check, so nothing was changed."
         }
     }
 
@@ -288,7 +301,7 @@ struct SameEveryWeekFlow: View {
                         Section {
                             Text("\(plan.sessionsChanged) sessions · \(plan.itemsChanged) exercises")
                             if plan.editedKept > 0 { Text("\(plan.editedKept) exercises you edited yourself are kept as they are").font(.callout).foregroundStyle(.secondary) }
-                            if plan.unmatchedSlots > 0 { Text("\(plan.unmatchedSlots) exercises have no \(plan.keep.uppercased())-week version and keep their own prescription").font(.callout).foregroundStyle(.secondary) }
+                            if plan.unmatchedSlots > 0 { Text("\(plan.unmatchedSlots) exercises can't be changed to the \(plan.keep.uppercased()) week and stay exactly as they are, week label included").font(.callout).foregroundStyle(.secondary) }
                         } footer: { Text(SameWeekText.footer) }
 
                         let grouped = Dictionary(grouping: plan.converted, by: { $0.session.persistentModelID })
@@ -302,6 +315,15 @@ struct SameEveryWeekFlow: View {
                                     }
                                 }
                             } footer: { Text("Prescription and load stay as you set them. Only the week label is removed.") }
+                        }
+                        if !plan.unmatched.isEmpty {
+                            Section {
+                                DisclosureGroup(SameWeekText.unmatchedHeading(plan)) {
+                                    ForEach(plan.unmatched.sorted { ($0.session.date, $0.item.order) < ($1.session.date, $1.item.order) }, id: \.itemID) { u in
+                                        Text(SameWeekText.unmatchedLine(u)).font(.caption)
+                                    }
+                                }
+                            } footer: { Text("For these there is no \(plan.keep.uppercased())-week version with the same layout for that day, so there is nothing to change them to. Their week label stays.") }
                         }
                         Section("Every changed session") {
                             ForEach(sessions, id: \.persistentModelID) { s in
