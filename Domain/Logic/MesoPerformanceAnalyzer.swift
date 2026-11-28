@@ -154,6 +154,12 @@ struct MesoAnalysis {
 
 enum MesoPerformanceAnalyzer {
 
+    /// A finished item's own suggested load, when nothing was logged: never for a bodyweight item (its plan load, if any, is an old phantom).
+    static func planLoadFallback(_ item: SessionItem?) -> Double? {
+        guard let item, item.suggestedLoad > 0, !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId) else { return nil }
+        return item.suggestedLoad
+    }
+
     /// The load an item is represented by in an opening / closing comparison: its first logged BACK-OFF row. A top
     /// set sits at the tail and is heavier by design, so reading it as "the load" would compare a top set in one
     /// session with a back-off in another. Only an item with no logged back-off row falls back to its first logged
@@ -355,13 +361,13 @@ enum MesoPerformanceAnalyzer {
             // Opening and closing loads
             let openingLoad: Double? = {
                 let first = sessionsWithExercise.first?.item
-                return first.flatMap { representativeLoad(of: $0) } ?? (first?.suggestedLoad ?? 0 > 0 ? first?.suggestedLoad : nil)
+                return first.flatMap { representativeLoad(of: $0) } ?? (planLoadFallback(first))
                     ?? (first.map { effective(0, $0) }.flatMap { $0 > 0 ? $0 : nil })
             }()
 
             let closingLoad: Double? = {
                 let last = sessionsWithExercise.last?.item
-                return last.flatMap { representativeLoad(of: $0) } ?? (last?.suggestedLoad ?? 0 > 0 ? last?.suggestedLoad : nil)
+                return last.flatMap { representativeLoad(of: $0) } ?? (planLoadFallback(last))
                     ?? (last.map { effective(0, $0) }.flatMap { $0 > 0 ? $0 : nil })
             }()
 

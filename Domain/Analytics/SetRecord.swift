@@ -230,7 +230,7 @@ enum SetRecordBuilder {
                         waveLetter: letter, isDeloadWaveItem: isDeloadWaveItem,
                         isInsertedDeload: isInserted, isDeloadWeek: isDeloadWeek, isMaintenance: isMaintenance,
                         rowIndex: i, isTop: item.isTopRow(i), plannedReps: at(item.plannedRepsBySet, i),
-                        plannedLoad: at(item.plannedLoadsBySet, i).flatMap { $0 > 0 ? $0 : nil },
+                        plannedLoad: isBodyweight ? nil : at(item.plannedLoadsBySet, i).flatMap { $0 > 0 ? $0 : nil },
                         repMin: item.isTopRow(i) ? (item.topRepMin ?? item.repMin) : item.repMin,
                         repMax: item.isTopRow(i) ? (item.topRepMax ?? item.repMax) : item.repMax,
                         targetRIRMin: item.isTopRow(i) ? (item.topRIR ?? item.targetRIRMin) : item.targetRIRMin,

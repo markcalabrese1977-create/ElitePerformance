@@ -21,6 +21,12 @@ import SwiftData
 /// those as 0 for BW work, and a genuinely logged value is real data, not a phantom.
 /// We only ever clear the *plan* fields, and only for bodyweight exercises, so
 /// loaded-exercise data is never modified.
+///
+/// Only items of PLANNED sessions are cleared. A completed (or in-progress) session is history: a restore
+/// clears this migration's completion flag and re-runs it, and it must not rewrite what a finished session
+/// held. The readers that could show a phantom plan load on a finished bodyweight item (the History set
+/// row, the analytics plan column, the block summary's opening/closing load, the volume-regulation fill)
+/// ignore it themselves instead.
 enum BodyweightPhantomLoadMigration {
     private static let completionKey = "bodyweightPhantomLoadMigration.v1.completed"
 
@@ -30,10 +36,11 @@ enum BodyweightPhantomLoadMigration {
             return
         }
 
-        guard let items = try? context.fetch(FetchDescriptor<SessionItem>()) else {
-            BackfillLog.note("⚠️ Bodyweight phantom-load migration failed: could not fetch session items.")
+        guard let sessions = try? context.fetch(FetchDescriptor<Session>()) else {
+            BackfillLog.note("⚠️ Bodyweight phantom-load migration failed: could not fetch sessions.")
             return
         }
+        let items = sessions.filter { $0.status == .planned }.flatMap(\.items)
 
         let customExercises = (try? context.fetch(FetchDescriptor<CustomExercise>())) ?? []
 

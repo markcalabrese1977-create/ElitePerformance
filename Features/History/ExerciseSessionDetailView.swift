@@ -77,7 +77,8 @@ struct ExerciseSessionDetailView: View {
             : (idx < item.plannedRepsBySet.count ? item.plannedRepsBySet[idx] : 0)
 
         let actualLoad = (idx < item.actualLoads.count) ? item.actualLoads[idx] : 0
-        let plannedLoad = (idx < item.plannedLoadsBySet.count) ? item.plannedLoadsBySet[idx] : 0
+        // A bodyweight item carries no plan load (an old phantom on a finished one is not shown).
+        let plannedLoad = (idx < item.plannedLoadsBySet.count && !ExerciseCatalog.isBodyweight(exerciseId: item.exerciseId)) ? item.plannedLoadsBySet[idx] : 0
         let load = actualLoad > 0 ? actualLoad : plannedLoad
 
         // Logged RIR as "RIR n" (a word in Simple); a set with none shows the plan, marked "plan RIR n". Off shows no effort line.

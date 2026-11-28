@@ -6070,3 +6070,49 @@ final class PlannedPaddingPastTargetSetsTests: XCTestCase {
         XCTAssertEqual(item.plannedLoadsBySet.first, 200)
     }
 }
+
+// MARK: - Bodyweight phantom plan loads: the migration clears planned sessions only; the readers of finished items ignore them
+
+@MainActor
+final class BodyweightPhantomLoadTests: XCTestCase {
+    private var retained: [ModelContainer] = []
+
+    private func pullUp(phantom: Double, actual: Double = 0) -> SessionItem {
+        SessionItem(order: 1, exerciseId: "pull_up", targetReps: 5, targetSets: 4, targetRIR: 2, suggestedLoad: 0,
+                    plannedRepsBySet: [5, 5, 5, 5], plannedLoadsBySet: Array(repeating: phantom, count: 4),
+                    actualReps: [5, 5, 5, 5], actualLoads: Array(repeating: actual, count: 4), actualRIRs: [2, 2, 2, 2])
+    }
+
+    func test_migration_clearsPlannedSessionsOnly() throws {
+        XCTAssertTrue(ExerciseCatalog.isBodyweight(exerciseId: "pull_up"))
+        let container = try ModelContainer(for: AppSchema.makeSchema(), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        retained.append(container)
+        let ctx = ModelContext(container)
+        func session(_ d: Int, _ status: SessionStatus, _ item: SessionItem) -> Session {
+            let s = Session(date: Date(timeIntervalSince1970: 1_800_000_000 + Double(d) * 86_400), status: status, weekIndex: d, dayLabel: "Pull A", items: [item]); ctx.insert(s); return s
+        }
+        let done = pullUp(phantom: 220); done.suggestedLoad = 240
+        let planned = pullUp(phantom: 220); planned.suggestedLoad = 240
+        let started = pullUp(phantom: 220)
+        _ = session(1, .completed, done); _ = session(8, .planned, planned); _ = session(15, .inProgress, started)
+        try ctx.save()
+        let key = "bodyweightPhantomLoadMigration.v1.completed"
+        let was = UserDefaults.standard.object(forKey: key); UserDefaults.standard.removeObject(forKey: key)
+        defer { if let was { UserDefaults.standard.set(was, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        BodyweightPhantomLoadMigration.runIfNeeded(in: ctx)
+        XCTAssertEqual(planned.suggestedLoad, 0); XCTAssertEqual(planned.plannedLoadsBySet, [0, 0, 0, 0], "a planned session's phantom is cleared")
+        XCTAssertEqual(done.suggestedLoad, 240); XCTAssertEqual(done.plannedLoadsBySet, [220, 220, 220, 220], "a completed session is history: untouched")
+        XCTAssertEqual(started.plannedLoadsBySet, [220, 220, 220, 220], "an in-progress session is untouched")
+    }
+
+    func test_readersOfAFinishedBodyweightItem_ignoreItsPhantomPlanLoad() throws {
+        let done = pullUp(phantom: 220); done.suggestedLoad = 240
+        XCTAssertNil(MesoPerformanceAnalyzer.planLoadFallback(done), "the block summary's opening/closing load")
+        let loaded = SessionItem(order: 1, exerciseId: "bench_press", targetReps: 8, targetSets: 3, targetRIR: 2, suggestedLoad: 135)
+        XCTAssertEqual(MesoPerformanceAnalyzer.planLoadFallback(loaded), 135, "a loaded item is unchanged")
+        let s = Session(date: Date(), status: .completed, weekIndex: 1, dayLabel: "Pull A", items: [done])
+        let snap = SetRecordBuilder.build(sessions: [s])
+        XCTAssertFalse(snap.sets.isEmpty)
+        XCTAssertTrue(snap.sets.allSatisfy { $0.plannedLoad == nil }, "the analytics plan column")
+    }
+}

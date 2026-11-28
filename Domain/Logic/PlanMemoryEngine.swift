@@ -352,7 +352,8 @@ struct PlanMemoryEngine {
 
             if signal.setDelta != 0 {
                 let newCount = max(2, targetItem.targetSets + signal.setDelta)
-                let fill = targetItem.suggestedLoad > 0 ? targetItem.suggestedLoad : sourceItem.suggestedLoad
+                // A bodyweight item never carries a load, and a finished one may still hold an old phantom plan load: never the fill.
+                let fill = targetItem.suggestedLoad > 0 ? targetItem.suggestedLoad : (isBodyweight ? 0 : sourceItem.suggestedLoad)
                 if targetItem.hasTopSet {
                     targetItem.resizeBackOffs(to: newCount, backOffLoad: fill)   // keeps the top tail and roles
                 } else {
