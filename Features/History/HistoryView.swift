@@ -124,6 +124,7 @@ enum HistoryRowText {
 }
 
 private struct HistoryRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.loadUnit) private var unit
     @Environment(\.modelContext) private var context
     let history: SessionHistory
@@ -147,10 +148,25 @@ private struct HistoryRow: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 16) {
-                Label("\(history.totalExercises) lifts", systemImage: "dumbbell")
-                Label("\(history.totalSets) sets", systemImage: "square.grid.2x2")
-                Label("\(LoadFormatter(unit: unit).volumeIntGrouped(history.totalVolume)) \(unit.label)", systemImage: "scalemass")
+            // Default sizes: one row, as before. Accessibility text sizes: one line each, stacked, never broken letter by letter
+            // (a line scales down a little rather than wrapping).
+            let stats: [(String, String)] = [
+                ("\(history.totalExercises) lifts", "dumbbell"),
+                ("\(history.totalSets) sets", "square.grid.2x2"),
+                ("\(LoadFormatter(unit: unit).volumeIntGrouped(history.totalVolume)) \(unit.label)", "scalemass"),
+            ]
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(stats, id: \.1) { stat in
+                            Label(stat.0, systemImage: stat.1).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 16) {
+                        ForEach(stats, id: \.1) { stat in Label(stat.0, systemImage: stat.1) }
+                    }
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
