@@ -2118,6 +2118,7 @@ final class CoachingPolicyTests: XCTestCase {
                     }
                 }
             }
+            print("GOLDEN| \((path as NSString).lastPathComponent) vs \((goldenPath as NSString).lastPathComponent): checked \(checked) decisions, \(diffs.count) differ")
             XCTAssertGreaterThan(checked, 0)
             XCTAssertEqual(diffs, [], "\((path as NSString).lastPathComponent): \(diffs.count) of \(checked) decisions differ under .shipped")
         }

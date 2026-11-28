@@ -21,6 +21,17 @@ LIVE="${GATE_LIVE_BACKUP:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_
 PB1="${GATE_POLICY_MARK:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-22_09-28-39.json}"; PB2="${GATE_POLICY_ANGELA:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-20_19-37-34.json}"
 PG1="$HOME/Downloads/EP_policy_golden_mark.json"; PG2="$HOME/Downloads/EP_policy_golden_angela.json"
 if [ -f "$PB1" ] && [ -f "$PB2" ] && [ -f "$PG1" ] && [ -f "$PG2" ]; then export TEST_RUNNER_EP_POLICY_BACKUPS="$PB1,$PB2" TEST_RUNNER_EP_POLICY_GOLDEN="$PG1,$PG2"; fi
+# Angela's Nov 25 19:04 backup (before her conversion) is checked against the same Angela golden dump, as a third pair.
+PB3="${GATE_POLICY_ANGELA_1125:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-25_19-04-35.json}"
+if [ -n "${TEST_RUNNER_EP_POLICY_BACKUPS:-}" ] && [ -f "$PB3" ]; then export TEST_RUNNER_EP_POLICY_BACKUPS="$TEST_RUNNER_EP_POLICY_BACKUPS,$PB3" TEST_RUNNER_EP_POLICY_GOLDEN="$TEST_RUNNER_EP_POLICY_GOLDEN,$PG2"; fi
+
+# SameEveryWeekReferenceTests.test_property_onTheRealBackups_forEveryKeptLetter: the golden test's backups PLUS Angela's Nov 25 19:04 backup (the
+# Hammer Curl reproducer: before her conversion) and Mark's Nov 25 18:57 backup. Only files that exist are listed.
+SW_LIST=""
+for f in "${PB1:-}" "${PB2:-}" "${GATE_SW_ANGELA_1125:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-25_19-04-35.json}" "${GATE_SW_MARK_1125:-$HOME/Downloads/ElitePerformance_Backup_v1_2026-11-25_18-57-55.json}"; do
+  [ -f "$f" ] && SW_LIST="${SW_LIST:+$SW_LIST,}$f"
+done
+[ -n "$SW_LIST" ] && export TEST_RUNNER_EP_SW_BACKUPS="$SW_LIST"
 scripts/run_bounded.sh > "$OUT_DIR/full.out" 2>&1
 grep -E "^\[phase\]|^== |^VERDICT" "$OUT_DIR/full.out"
 
